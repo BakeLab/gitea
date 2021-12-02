@@ -8,16 +8,19 @@
 
 ```
    tea - command line tool to interact with Gitea
-   version 0.7.0-preview
+   version 0.8.0-preview
 
  USAGE
    tea command [subcommand] [command options] [arguments...]
 
  DESCRIPTION
-   tea is a productivity helper for Gitea.  It can be used to manage most entities on one
-   or multiple Gitea instances and provides local helpers like 'tea pull checkout'.
-   tea makes use of context provided by the repository in $PWD if available, but is still
-   usable independently of $PWD. Configuration is persisted in $XDG_CONFIG_HOME/tea.
+   tea is a productivity helper for Gitea. It can be used to manage most entities on
+   one or multiple Gitea instances & provides local helpers like 'tea pr checkout'.
+   
+   tea tries to make use of context provided by the repository in $PWD if available.
+   tea works best in a upstream/fork workflow, when the local main branch tracks the
+   upstream repo. tea assumes that local git state is published on the remote before
+   doing operations with tea.    Configuration is persisted in $XDG_CONFIG_HOME/tea.
 
  COMMANDS
    help, h  Shows a list of commands or help for one command
@@ -30,13 +33,16 @@
      times, time, t                    Operate on tracked times of a repository's issues & pulls
      organizations, organization, org  List, create, delete organizations
      repos, repo                       Show repository details
+     comment, c                        Add a comment to an issue / pr
    HELPERS:
      open, o                         Open something of the repository in web browser
      notifications, notification, n  Show notifications
+     clone, C                        Clone a repository locally
    SETUP:
      logins, login                  Log in to a Gitea server
      logout                         Log out from a Gitea server
      shellcompletion, autocomplete  Install shell completion for tea
+     whoami                         Show current logged in user
 
  OPTIONS
    --help, -h     show help (default: false)

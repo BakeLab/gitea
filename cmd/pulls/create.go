@@ -18,17 +18,17 @@ var CmdPullsCreate = cli.Command{
 	Name:        "create",
 	Aliases:     []string{"c"},
 	Usage:       "Create a pull-request",
-	Description: "Create a pull-request",
+	Description: "Create a pull-request in the current repo",
 	Action:      runPullsCreate,
 	Flags: append([]cli.Flag{
 		&cli.StringFlag{
 			Name:  "head",
-			Usage: "Set head branch (default is current one)",
+			Usage: "Branch name of the PR source (default is current one). To specify a different head repo, use <user>:<branch>",
 		},
 		&cli.StringFlag{
 			Name:    "base",
 			Aliases: []string{"b"},
-			Usage:   "Set base branch (default is default branch)",
+			Usage:   "Branch name of the PR target (default is repos default branch)",
 		},
 	}, flags.IssuePREditFlags...),
 }

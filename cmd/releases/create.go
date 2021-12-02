@@ -27,11 +27,11 @@ var CmdReleaseCreate = cli.Command{
 	Flags: append([]cli.Flag{
 		&cli.StringFlag{
 			Name:  "tag",
-			Usage: "Tag name",
+			Usage: "Tag name. If the tag does not exist yet, it will be created by Gitea",
 		},
 		&cli.StringFlag{
 			Name:  "target",
-			Usage: "Target refs, branch name or commit id",
+			Usage: "Target branch name or commit hash. Defaults to the default branch of the repo",
 		},
 		&cli.StringFlag{
 			Name:    "title",
@@ -56,7 +56,7 @@ var CmdReleaseCreate = cli.Command{
 		&cli.StringSliceFlag{
 			Name:    "asset",
 			Aliases: []string{"a"},
-			Usage:   "List of files to attach",
+			Usage:   "Path to file attachment. Can be specified multiple times",
 		},
 	}, flags.AllDefaultFlags...),
 }
