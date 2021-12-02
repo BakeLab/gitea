@@ -15,7 +15,7 @@ import (
 func Comments(comments []*gitea.Comment) {
 	var baseURL string
 	if len(comments) != 0 {
-		baseURL = comments[0].HTMLURL
+		baseURL = getRepoURL(comments[0].HTMLURL)
 	}
 
 	var out = make([]string, len(comments))
@@ -32,7 +32,7 @@ func Comments(comments []*gitea.Comment) {
 
 // Comment renders a comment to stdout
 func Comment(c *gitea.Comment) {
-	outputMarkdown(formatComment(c), c.HTMLURL)
+	outputMarkdown(formatComment(c), getRepoURL(c.HTMLURL))
 }
 
 func formatComment(c *gitea.Comment) string {

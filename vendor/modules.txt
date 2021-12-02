@@ -74,7 +74,7 @@ github.com/araddon/dateparse
 # github.com/aymerick/douceur v0.2.0
 github.com/aymerick/douceur/css
 github.com/aymerick/douceur/parser
-# github.com/charmbracelet/glamour v0.3.0 => github.com/noerw/glamour v0.3.0-patch
+# github.com/charmbracelet/glamour v0.3.0
 github.com/charmbracelet/glamour
 github.com/charmbracelet/glamour/ansi
 # github.com/cpuguy83/go-md2man/v2 v2.0.1

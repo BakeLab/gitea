@@ -28,7 +28,7 @@ func IssueDetails(issue *gitea.Issue, reactions []*gitea.Reaction) {
 		out += fmt.Sprintf("\n---\n\n%s\n", formatReactions(reactions))
 	}
 
-	outputMarkdown(out, issue.HTMLURL)
+	outputMarkdown(out, getRepoURL(issue.HTMLURL))
 }
 
 func formatReactions(reactions []*gitea.Reaction) string {

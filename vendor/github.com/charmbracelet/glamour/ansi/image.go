@@ -25,7 +25,7 @@ func (e *ImageElement) Render(w io.Writer, ctx RenderContext) error {
 	}
 	if len(e.URL) > 0 {
 		el := &BaseElement{
-			Token:  resolveURL(e.BaseURL, e.URL),
+			Token:  resolveRelativeURL(e.BaseURL, e.URL),
 			Prefix: " ",
 			Style:  ctx.options.Styles.Image,
 		}
