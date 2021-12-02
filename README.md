@@ -85,29 +85,32 @@ There are different ways to get `tea`:
       brew tap gitea/tap https://gitea.com/gitea/homebrew-gitea
       brew install tea
       ```
-    - arch linux ([gitea-tea](https://aur.archlinux.org/packages/gitea-tea), thirdparty)
+    - arch linux ([gitea-tea-git](https://aur.archlinux.org/packages/gitea-tea-git), thirdparty)
     - alpine linux ([tea](https://pkgs.alpinelinux.org/packages?name=tea&branch=edge), thirdparty)
 
 2. Use the prebuilt binaries from [dl.gitea.io](https://dl.gitea.io/tea/)
 
-3. Install from source (go 1.13 or newer is required):
-    ```sh
-    go get code.gitea.io/tea
-    go install code.gitea.io/tea
-    ```
+3. Install from source: [see *Compilation*](#compilation)
 
 4. Docker (thirdparty): [tgerczei/tea](https://hub.docker.com/r/tgerczei/tea)
 
 ## Compilation
 
-Make sure you have installed a current go version.
-To compile the sources yourself run the following:
+Make sure you have a current go version installed (1.13 or newer).
 
-```sh
-git clone https://gitea.com/gitea/tea.git
-cd tea
-make STATIC=true
-```
+- To compile the source yourself with the recommended flags & tags:
+  ```sh
+  git clone https://gitea.com/gitea/tea.git # or: tea clone gitea.com/gitea/tea ;)
+  cd tea
+  make
+  ```
+  Note that GNU Make (gmake on OpenBSD) is required.
+
+- For a quick installation without `git` & `make`:
+  ```sh
+  go get code.gitea.io/tea
+  go install code.gitea.io/tea
+  ```
 
 ## Contributing
 

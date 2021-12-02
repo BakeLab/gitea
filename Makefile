@@ -26,24 +26,20 @@ TEA_VERSION_TAG ?= $(shell sed 's/+/_/' <<< $(TEA_VERSION))
 TAGS ?=
 LDFLAGS := -X "main.Version=$(TEA_VERSION)" -X "main.Tags=$(TAGS)" -s -w
 
-ifeq ($(STATIC),true)
-	# NOTE: clean up this mess, when https://github.com/golang/go/issues/26492 is resolved
-	# static_build is a defacto standard tag used in go packages
-	TAGS := osusergo,netgo,static_build,$(TAGS)
-	LDFLAGS := $(LDFLAGS) -linkmode=external -extldflags "-static-pie" -X "main.Tags=$(TAGS)"
-	export CGO_ENABLED=1 # needed for linkmode=external
-endif
-
 # override to allow passing additional goflags via make CLI
 override GOFLAGS := $(GOFLAGS) -mod=vendor -tags '$(TAGS)' -ldflags '$(LDFLAGS)'
 
 PACKAGES ?= $(shell $(GO) list ./... | grep -v /vendor/)
 SOURCES ?= $(shell find . -name "*.go" -type f)
 
+# OS specific vars.
 ifeq ($(OS), Windows_NT)
 	EXECUTABLE := tea.exe
 else
 	EXECUTABLE := tea
+	ifneq ($(shell uname -s), OpenBSD)
+		override BUILDMODE := -buildmode=pie
+	endif
 endif
 
 .PHONY: all
@@ -124,16 +120,13 @@ check: test
 .PHONY: install
 install: $(SOURCES)
 	@echo "installing to $(GOPATH)/bin/$(EXECUTABLE)"
-	$(GO) install -v -buildmode=pie $(GOFLAGS) 
+	$(GO) install -v $(BUILDMODE) $(GOFLAGS) 
 
 .PHONY: build
 build: $(EXECUTABLE)
 
 $(EXECUTABLE): $(SOURCES)
-ifeq ($(STATIC),true)
-	@echo "enabling static build, make sure you have glibc-static (or equivalent) installed"
-endif
-	$(GO) build -buildmode=pie $(GOFLAGS) -o $@
+	$(GO) build $(BUILDMODE) $(GOFLAGS) -o $@
 
 .PHONY: build-image
 build-image:
