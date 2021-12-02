@@ -21,15 +21,19 @@ type CsvFlag struct {
 
 // NewCsvFlag creates a CsvFlag, while setting its usage string and default values
 func NewCsvFlag(name, usage string, aliases, availableValues, defaults []string) *CsvFlag {
+	var availableDesc string
+	if len(availableValues) != 0 {
+		availableDesc = " Available values:"
+	}
 	return &CsvFlag{
 		AvailableFields: availableValues,
 		StringFlag: cli.StringFlag{
 			Name:    name,
 			Aliases: aliases,
 			Value:   strings.Join(defaults, ","),
-			Usage: fmt.Sprintf(`Comma-separated list of %s. Available values:
+			Usage: fmt.Sprintf(`Comma-separated list of %s.%s
 			%s
-		`, usage, strings.Join(availableValues, ",")),
+		`, usage, availableDesc, strings.Join(availableValues, ",")),
 		},
 	}
 }
