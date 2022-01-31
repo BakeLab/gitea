@@ -30,7 +30,7 @@ var CmdPulls = cli.Command{
 	Flags: append([]cli.Flag{
 		&cli.BoolFlag{
 			Name:  "comments",
-			Usage: "Wether to display comments (will prompt if not provided & run interactively)",
+			Usage: "Whether to display comments (will prompt if not provided & run interactively)",
 		},
 	}, pulls.CmdPullsList.Flags...),
 	Subcommands: []*cli.Command{

@@ -48,7 +48,7 @@ var IssueListingFlags = append([]cli.Flag{
 	&cli.StringFlag{
 		Name:        "kind",
 		Aliases:     []string{"K"},
-		Usage:       "Wether to return `issues`, `pulls`, or `all` (you can use this to apply advanced search filters to PRs)",
+		Usage:       "Whether to return `issues`, `pulls`, or `all` (you can use this to apply advanced search filters to PRs)",
 		DefaultText: "issues",
 	},
 	&cli.StringFlag{
