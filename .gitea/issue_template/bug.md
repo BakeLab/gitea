@@ -10,7 +10,7 @@ labels:
 - tea version used (`tea -v`):
     - [ ] I also reproduced the issue [with the latest master build](https://dl.gitea.io/tea/master)
 - Gitea version used:
-    - [ ] the issue only occured after updating gitea recently
+    - [ ] the issue only occurred after updating gitea recently
 - operating system:
 - I make use of...
     - [ ] non-standard default branch names (no `main`,`master`, or `trunk`)
