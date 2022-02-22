@@ -57,8 +57,8 @@ high-level discussions.
 
 ## Testing redux
 
-Before sending code out for review, run all the test by execting: `make test`
-Since TEA is an cli tool it should be obvious to test your feature localy first.
+Before sending code out for review, run all the test by executing: `make test`
+Since TEA is an cli tool it should be obvious to test your feature locally first.
 
 ## Vendoring
 
@@ -77,7 +77,7 @@ You can find more information on how to get started with it on the [dep project 
 ## Code review
 
 Changes to TEA must be reviewed before they are accepted—no matter who
-makes the change, even if they are an owner or a maintainer. We use Giteas's
+makes the change, even if they are an owner or a maintainer. We use Gitea's
 pull request & review workflow to do that. Gitea ensure every PR is reviewed by at least 2 maintainers.
 
 Please try to make your pull request easy to review for us. And, please read
@@ -118,8 +118,8 @@ Some of the key points:
 - Always make sure that the help texts are properly set, and as concise as possible.
 
 ### Internal Module Structure
-- `cmd`: only contains comand/flag options for `urfave/cli`
-  - subcomands are in a subpackage named after its parent comand
+- `cmd`: only contains command/flag options for `urfave/cli`
+  - subcommands are in a subpackage named after its parent command
 - `modules/task`: contain func for doing something with gitea
   (e.g. create token by user/passwd)
 - `modules/print`: contain all functions that print to stdout
