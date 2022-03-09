@@ -164,6 +164,11 @@ func contextFromLocalRepo(repoPath, remoteValue string) (*git.TeaRepo, *config.L
 			remoteValue = remote
 		}
 		if len(gitConfig.Remotes) > 1 {
+			// prefer origin if there is multiple remotes
+			_, ok := gitConfig.Remotes["origin"]
+			if ok {
+				remoteValue = "origin"
+			}
 			// if master branch is present, use it as the default remote
 			mainBranches := []string{"main", "master", "trunk"}
 			for _, b := range mainBranches {
