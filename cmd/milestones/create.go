@@ -55,7 +55,7 @@ func runMilestonesCreate(cmd *cli.Context) error {
 	deadline := &time.Time{}
 	if date != "" {
 		t, err := dateparse.ParseAny(date)
-		if err == nil {
+		if err != nil {
 			return err
 		}
 		deadline = &t
