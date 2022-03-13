@@ -140,7 +140,7 @@ func outputyaml(headers []string, values [][]string) {
 
 func isMachineReadable(outputFormat string) bool {
 	switch outputFormat {
-	case "yml", "yaml", "csv":
+	case "yml", "yaml", "csv", "tsv":
 		return true
 	}
 	return false
