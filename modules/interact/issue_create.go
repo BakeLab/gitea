@@ -65,7 +65,7 @@ func promptIssueProperties(login *config.Login, owner, repo string, o *gitea.Cre
 	}
 
 	// assignees
-	if o.Assignees, err = promptMultiSelect("Assignees:", selectables.Collaborators, "[other]"); err != nil {
+	if o.Assignees, err = promptMultiSelect("Assignees:", selectables.Assignees, "[other]"); err != nil {
 		return err
 	}
 
@@ -99,7 +99,7 @@ func promptIssueProperties(login *config.Login, owner, repo string, o *gitea.Cre
 
 type issueSelectables struct {
 	Repo          *gitea.Repository
-	Collaborators []string
+	Assignees     []string
 	MilestoneList []string
 	MilestoneMap  map[string]int64
 	LabelList     []string
@@ -124,17 +124,15 @@ func fetchIssueSelectables(login *config.Login, owner, repo string, done chan is
 		return
 	}
 
-	// FIXME: this should ideally be ListAssignees(), https://github.com/go-gitea/gitea/issues/14856
-	colabs, _, err := c.ListCollaborators(owner, repo, gitea.ListCollaboratorsOptions{})
+	assignees, _, err := c.GetAssignees(owner, repo)
 	if err != nil {
 		r.Err = err
 		done <- r
 		return
 	}
-	r.Collaborators = make([]string, len(colabs)+1)
-	r.Collaborators[0] = login.User
-	for i, u := range colabs {
-		r.Collaborators[i+1] = u.UserName
+	r.Assignees = make([]string, len(assignees))
+	for i, u := range assignees {
+		r.Assignees[i] = u.UserName
 	}
 
 	milestones, _, err := c.ListRepoMilestones(owner, repo, gitea.ListMilestoneOption{})
