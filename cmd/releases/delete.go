@@ -54,10 +54,6 @@ func runReleaseDelete(cmd *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	if release == nil {
-		return nil
-	}
-
 	_, err = client.DeleteRelease(ctx.Owner, ctx.Repo, release.ID)
 	if err != nil {
 		return err

@@ -72,10 +72,6 @@ func runReleaseEdit(cmd *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	if release == nil {
-		return nil
-	}
-
 	var isDraft, isPre *bool
 	if ctx.IsSet("draft") {
 		isDraft = gitea.OptionalBool(strings.ToLower(ctx.String("draft"))[:1] == "t")
