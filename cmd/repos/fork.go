@@ -33,6 +33,7 @@ var CmdRepoFork = cli.Command{
 
 func runRepoFork(cmd *cli.Context) error {
 	ctx := context.InitCommand(cmd)
+	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()
 
 	opts := gitea.CreateForkOption{}
