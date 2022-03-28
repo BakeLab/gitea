@@ -6,3 +6,4 @@ tea
 dist/
 
 .vscode/
+vendor/

@@ -7,9 +7,17 @@ platform:
   arch: amd64
 
 steps:
+- name: vendor
+  pull: always
+  image: golang:1.18
+  environment:
+    GOPROXY: https://goproxy.io # proxy.golang.org is blocked in China, this proxy is not
+  commands:
+  - make vendor # use vendor folder as cache
+
 - name: build
   pull: always
-  image: golang:1.17
+  image: golang:1.18
   environment:
     GOPROXY: https://goproxy.io # proxy.golang.org is blocked in China, this proxy is not
   commands:
@@ -18,7 +26,6 @@ steps:
   - make lint
   - make fmt-check
   - make misspell-check
-  - make test-vendor
   - make build
   when:
     event:
@@ -27,7 +34,7 @@ steps:
     - pull_request
 
 - name: unit-test
-  image: golang:1.17
+  image: golang:1.18
   commands:
   - make unit-test-coverage
   settings:
@@ -42,7 +49,7 @@ steps:
     - pull_request
 
 - name: release-test
-  image: golang:1.17
+  image: golang:1.18
   commands:
   - make test
   settings:
@@ -58,7 +65,7 @@ steps:
 
 - name: tag-test
   pull: always
-  image: golang:1.17
+  image: golang:1.18
   commands:
   - make test
   settings:
@@ -70,7 +77,7 @@ steps:
     - tag
 
 - name: static
-  image: golang:1.17
+  image: golang:1.18
   environment:
     GOPROXY: https://goproxy.io # proxy.golang.org is blocked in China, this proxy is not
   commands:
