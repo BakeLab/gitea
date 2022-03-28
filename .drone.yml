@@ -11,7 +11,7 @@ steps:
   pull: always
   image: golang:1.17
   environment:
-      GOPROXY: https://goproxy.cn
+    GOPROXY: https://goproxy.io # proxy.golang.org is blocked in China, this proxy is not
   commands:
   - make clean
   - make vet
@@ -32,6 +32,8 @@ steps:
   - make unit-test-coverage
   settings:
     group: test
+  environment:
+    GOPROXY: https://goproxy.io # proxy.golang.org is blocked in China, this proxy is not
   when:
     branch:
     - master
@@ -45,6 +47,8 @@ steps:
   - make test
   settings:
     group: test
+  environment:
+    GOPROXY: https://goproxy.io # proxy.golang.org is blocked in China, this proxy is not
   when:
     branch:
     - "release/*"
@@ -59,6 +63,8 @@ steps:
   - make test
   settings:
     group: test
+  environment:
+    GOPROXY: https://goproxy.io # proxy.golang.org is blocked in China, this proxy is not
   when:
     event:
     - tag
@@ -66,7 +72,7 @@ steps:
 - name: static
   image: golang:1.17
   environment:
-    GOPROXY: https://goproxy.cn
+    GOPROXY: https://goproxy.io # proxy.golang.org is blocked in China, this proxy is not
   commands:
   - export PATH=$PATH:$GOPATH/bin
   - make release
