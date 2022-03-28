@@ -99,6 +99,10 @@ func InitCommand(ctx *cli.Context) *TeaContext {
 		}
 	}
 
+	if len(remoteFlag) == 0 {
+		remoteFlag = config.GetPreferences().FlagDefaults.Remote
+	}
+
 	// try to read local git repo & extract context: if repoFlag specifies a valid path, read repo in that dir,
 	// otherwise attempt PWD. if no repo is found, continue with default login
 	if c.LocalRepo, c.Login, c.RepoSlug, err = contextFromLocalRepo(repoPath, remoteFlag); err != nil {
@@ -158,28 +162,34 @@ func contextFromLocalRepo(repoPath, remoteValue string) (*git.TeaRepo, *config.L
 		return repo, nil, "", errors.New("No remote(s) found in this Git repository")
 	}
 
-	// if only one remote exists
-	if len(gitConfig.Remotes) >= 1 && len(remoteValue) == 0 {
-		for remote := range gitConfig.Remotes {
-			remoteValue = remote
-		}
-		if len(gitConfig.Remotes) > 1 {
-			// prefer origin if there is multiple remotes
-			_, ok := gitConfig.Remotes["origin"]
+	// When no preferred value is given, choose a remote to find a
+	// matching login based on its URL.
+	if len(gitConfig.Remotes) > 1 && len(remoteValue) == 0 {
+		// if master branch is present, use it as the default remote
+		mainBranches := []string{"main", "master", "trunk"}
+		for _, b := range mainBranches {
+			masterBranch, ok := gitConfig.Branches[b]
 			if ok {
+				if len(masterBranch.Remote) > 0 {
+					remoteValue = masterBranch.Remote
+				}
+				break
+			}
+		}
+		// if no branch has matched, default to origin or upstream remote.
+		if len(remoteValue) == 0 {
+			if _, ok := gitConfig.Remotes["upstream"]; ok {
+				remoteValue = "upstream"
+			} else if _, ok := gitConfig.Remotes["origin"]; ok {
 				remoteValue = "origin"
 			}
-			// if master branch is present, use it as the default remote
-			mainBranches := []string{"main", "master", "trunk"}
-			for _, b := range mainBranches {
-				masterBranch, ok := gitConfig.Branches[b]
-				if ok {
-					if len(masterBranch.Remote) > 0 {
-						remoteValue = masterBranch.Remote
-					}
-					break
-				}
-			}
+		}
+	}
+	// make sure a remote is selected
+	if len(remoteValue) == 0 {
+		for remote := range gitConfig.Remotes {
+			remoteValue = remote
+			break
 		}
 	}
 
