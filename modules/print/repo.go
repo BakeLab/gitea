@@ -124,7 +124,7 @@ func (x printableRepo) FormatField(field string, machineReadable bool) string {
 	case "ssh":
 		return x.SSHURL
 	case "updated":
-		return FormatTime(x.Updated)
+		return FormatTime(x.Updated, machineReadable)
 	case "url":
 		return x.HTMLURL
 	case "permission":

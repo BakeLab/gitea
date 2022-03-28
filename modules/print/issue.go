@@ -20,7 +20,7 @@ func IssueDetails(issue *gitea.Issue, reactions []*gitea.Reaction) {
 		issue.Title,
 		issue.State,
 		issue.Poster.UserName,
-		FormatTime(issue.Created),
+		FormatTime(issue.Created, false),
 		issue.Body,
 	)
 
@@ -119,14 +119,14 @@ func (x printableIssue) FormatField(field string, machineReadable bool) string {
 	case "body":
 		return x.Body
 	case "created":
-		return FormatTime(x.Created)
+		return FormatTime(x.Created, machineReadable)
 	case "updated":
-		return FormatTime(x.Updated)
+		return FormatTime(x.Updated, machineReadable)
 	case "deadline":
 		if x.Deadline == nil {
 			return ""
 		}
-		return FormatTime(*x.Deadline)
+		return FormatTime(*x.Deadline, machineReadable)
 	case "milestone":
 		if x.Milestone != nil {
 			return x.Milestone.Title

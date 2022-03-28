@@ -36,8 +36,18 @@ func formatSize(kb int64) string {
 	return fmt.Sprintf("%d Tb", gb/1024)
 }
 
-// FormatTime give a date-time in local timezone if available
-func FormatTime(t time.Time) string {
+// FormatTime provides a string for the given time value.
+// If machineReadable is set, a UTC RFC3339 string is returned,
+// otherwise a simplified string in local time is used.
+func FormatTime(t time.Time, machineReadable bool) string {
+	if t.IsZero() {
+		return ""
+	}
+
+	if machineReadable {
+		return t.UTC().Format(time.RFC3339)
+	}
+
 	location, err := time.LoadLocation("Local")
 	if err != nil {
 		return t.Format("2006-01-02 15:04 UTC")

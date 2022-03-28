@@ -31,7 +31,7 @@ func PullDetails(pr *gitea.PullRequest, reviews []*gitea.PullReview, ciStatus *g
 		pr.Title,
 		state,
 		pr.Poster.UserName,
-		FormatTime(*pr.Created),
+		FormatTime(*pr.Created, false),
 		base,
 		head,
 		pr.Body,
@@ -195,14 +195,14 @@ func (x printablePull) FormatField(field string, machineReadable bool) string {
 	case "body":
 		return x.Body
 	case "created":
-		return FormatTime(*x.Created)
+		return FormatTime(*x.Created, machineReadable)
 	case "updated":
-		return FormatTime(*x.Updated)
+		return FormatTime(*x.Updated, machineReadable)
 	case "deadline":
 		if x.Deadline == nil {
 			return ""
 		}
-		return FormatTime(*x.Deadline)
+		return FormatTime(*x.Deadline, machineReadable)
 	case "milestone":
 		if x.Milestone != nil {
 			return x.Milestone.Title

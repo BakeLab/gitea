@@ -38,12 +38,12 @@ func Comment(c *gitea.Comment) {
 func formatComment(c *gitea.Comment) string {
 	edited := ""
 	if c.Updated.After(c.Created) {
-		edited = fmt.Sprintf(" *(edited on %s)*", FormatTime(c.Updated))
+		edited = fmt.Sprintf(" *(edited on %s)*", FormatTime(c.Updated, false))
 	}
 	return fmt.Sprintf(
 		"---\n\n**@%s** wrote on %s%s:\n\n%s\n",
 		c.Poster.UserName,
-		FormatTime(c.Created),
+		FormatTime(c.Created, false),
 		edited,
 		c.Body,
 	)

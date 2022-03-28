@@ -28,7 +28,7 @@ func ReleasesList(releases []*gitea.Release, output string) {
 		t.addRow(
 			release.TagName,
 			release.Title,
-			FormatTime(release.PublishedAt),
+			FormatTime(release.PublishedAt, isMachineReadable(output)),
 			status,
 			release.TarURL,
 		)

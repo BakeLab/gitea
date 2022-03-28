@@ -19,7 +19,7 @@ func MilestoneDetails(milestone *gitea.Milestone) {
 		fmt.Printf("\n%s\n", milestone.Description)
 	}
 	if milestone.Deadline != nil && !milestone.Deadline.IsZero() {
-		fmt.Printf("\nDeadline: %s\n", FormatTime(*milestone.Deadline))
+		fmt.Printf("\nDeadline: %s\n", FormatTime(*milestone.Deadline, false))
 	}
 }
 
@@ -42,7 +42,7 @@ func MilestonesList(miles []*gitea.Milestone, output string, state gitea.StateTy
 		var deadline = ""
 
 		if m.Deadline != nil && !m.Deadline.IsZero() {
-			deadline = FormatTime(*m.Deadline)
+			deadline = FormatTime(*m.Deadline, isMachineReadable(output))
 		}
 
 		item := []string{

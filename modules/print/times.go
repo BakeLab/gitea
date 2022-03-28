@@ -50,7 +50,7 @@ func (t printableTrackedTime) FormatField(field string, machineReadable bool) st
 	case "id":
 		return fmt.Sprintf("%d", t.ID)
 	case "created":
-		return FormatTime(t.Created)
+		return FormatTime(t.Created, machineReadable)
 	case "repo":
 		return t.Issue.Repository.FullName
 	case "issue":
