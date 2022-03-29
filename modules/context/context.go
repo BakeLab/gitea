@@ -157,9 +157,8 @@ func contextFromLocalRepo(repoPath, remoteValue string) (*git.TeaRepo, *config.L
 		return repo, nil, "", err
 	}
 
-	// if no remote
 	if len(gitConfig.Remotes) == 0 {
-		return repo, nil, "", errors.New("No remote(s) found in this Git repository")
+		return repo, nil, "", errNotAGiteaRepo
 	}
 
 	// When no preferred value is given, choose a remote to find a
