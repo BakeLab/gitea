@@ -81,7 +81,6 @@ steps:
   environment:
     GOPROXY: https://goproxy.io # proxy.golang.org is blocked in China, this proxy is not
   commands:
-  - export PATH=$PATH:$GOPATH/bin
   - make release
   when:
     event:

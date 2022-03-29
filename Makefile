@@ -115,7 +115,7 @@ build-image:
 	docker build --build-arg VERSION=$(TEA_VERSION) -t gitea/tea:$(TEA_VERSION_TAG) .
 
 .PHONY: release
-release: release-dirs release-os release-compress release-check
+release: release-dirs install-release-tools release-os release-compress release-check
 
 .PHONY: release-dirs
 release-dirs:
