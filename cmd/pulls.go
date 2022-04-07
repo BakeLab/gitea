@@ -71,7 +71,9 @@ func runPullDetail(cmd *cli.Context, index string) error {
 		return err
 	}
 
-	reviews, _, err := client.ListPullReviews(ctx.Owner, ctx.Repo, idx, gitea.ListPullReviewsOptions{})
+	reviews, _, err := client.ListPullReviews(ctx.Owner, ctx.Repo, idx, gitea.ListPullReviewsOptions{
+		ListOptions: gitea.ListOptions{Page: -1},
+	})
 	if err != nil {
 		fmt.Printf("error while loading reviews: %v\n", err)
 	}

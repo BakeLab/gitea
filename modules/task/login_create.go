@@ -101,7 +101,9 @@ func CreateLogin(name, token, user, passwd, sshKey, giteaURL string, insecure bo
 func generateToken(login config.Login, user, pass string) (string, error) {
 	client := login.Client(gitea.SetBasicAuth(user, pass))
 
-	tl, _, err := client.ListAccessTokens(gitea.ListAccessTokensOptions{})
+	tl, _, err := client.ListAccessTokens(gitea.ListAccessTokensOptions{
+		ListOptions: gitea.ListOptions{Page: -1},
+	})
 	if err != nil {
 		return "", err
 	}

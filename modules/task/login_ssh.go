@@ -20,7 +20,9 @@ import (
 // a matching private key in ~/.ssh/. If no match is found, path is empty.
 func findSSHKey(client *gitea.Client) (string, error) {
 	// get keys registered on gitea instance
-	keys, _, err := client.ListMyPublicKeys(gitea.ListPublicKeysOptions{})
+	keys, _, err := client.ListMyPublicKeys(gitea.ListPublicKeysOptions{
+		ListOptions: gitea.ListOptions{Page: -1},
+	})
 	if err != nil || len(keys) == 0 {
 		return "", err
 	}

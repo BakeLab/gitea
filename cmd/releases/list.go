@@ -45,7 +45,9 @@ func RunReleasesList(cmd *cli.Context) error {
 }
 
 func getReleaseByTag(owner, repo, tag string, client *gitea.Client) (*gitea.Release, error) {
-	rl, _, err := client.ListReleases(owner, repo, gitea.ListReleasesOptions{})
+	rl, _, err := client.ListReleases(owner, repo, gitea.ListReleasesOptions{
+		ListOptions: gitea.ListOptions{Page: -1},
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -12,7 +12,9 @@ import (
 // ResolveLabelNames returns a list of label IDs for a given list of label names
 func ResolveLabelNames(client *gitea.Client, owner, repo string, labelNames []string) ([]int64, error) {
 	labelIDs := make([]int64, len(labelNames))
-	labels, _, err := client.ListRepoLabels(owner, repo, gitea.ListLabelsOptions{})
+	labels, _, err := client.ListRepoLabels(owner, repo, gitea.ListLabelsOptions{
+		ListOptions: gitea.ListOptions{Page: -1},
+	})
 	if err != nil {
 		return nil, err
 	}
