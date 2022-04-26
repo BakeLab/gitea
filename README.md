@@ -108,8 +108,7 @@ Make sure you have a current go version installed (1.13 or newer).
 
 - For a quick installation without `git` & `make`:
   ```sh
-  go get code.gitea.io/tea
-  go install code.gitea.io/tea
+  go install code.gitea.io/tea@latest
   ```
 
 ## Contributing
