@@ -163,7 +163,7 @@ func AddLogin(login *Login) error {
 
 // Client returns a client to operate Gitea API. You may provide additional modifiers
 // for the client like gitea.SetBasicAuth() for customization
-func (l *Login) Client(options ...func(*gitea.Client)) *gitea.Client {
+func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 	httpClient := &http.Client{}
 	if l.Insecure {
 		cookieJar, _ := cookiejar.New(nil)

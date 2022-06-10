@@ -107,10 +107,10 @@ func markNotificationAs(cmd *context.TeaContext, filterStates []string, targetSt
 		opts := gitea.MarkNotificationOptions{Status: states, ToStatus: targetState}
 
 		if allRepos {
-			_, err = client.ReadNotifications(opts)
+			_, _, err = client.ReadNotifications(opts)
 		} else {
 			cmd.Ensure(context.CtxRequirement{RemoteRepo: true})
-			_, err = client.ReadRepoNotifications(cmd.Owner, cmd.Repo, opts)
+			_, _, err = client.ReadRepoNotifications(cmd.Owner, cmd.Repo, opts)
 		}
 
 		// TODO: print all affected notification subject URLs
@@ -121,7 +121,7 @@ func markNotificationAs(cmd *context.TeaContext, filterStates []string, targetSt
 		if err != nil {
 			return err
 		}
-		_, err = client.ReadNotification(id, targetState)
+		_, _, err = client.ReadNotification(id, targetState)
 		if err != nil {
 			return err
 		}

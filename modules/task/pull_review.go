@@ -49,7 +49,7 @@ func CreatePullReview(ctx *context.TeaContext, idx int64, status gitea.ReviewSta
 // SavePullDiff fetches the diff of a pull request and stores it as a temporary file.
 // The path to the file is returned.
 func SavePullDiff(ctx *context.TeaContext, idx int64) (string, error) {
-	diff, _, err := ctx.Login.Client().GetPullRequestDiff(ctx.Owner, ctx.Repo, idx)
+	diff, _, err := ctx.Login.Client().GetPullRequestDiff(ctx.Owner, ctx.Repo, idx, gitea.PullRequestDiffOptions{})
 	if err != nil {
 		return "", err
 	}
