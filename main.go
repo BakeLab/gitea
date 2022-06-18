@@ -8,6 +8,7 @@ package main // import "code.gitea.io/tea"
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"code.gitea.io/tea/cmd"
@@ -21,6 +22,9 @@ var Version = "development"
 // Tags holds the build tags used
 var Tags = ""
 
+// SDK holds the sdk version from go.mod
+var SDK = ""
+
 func main() {
 	// make parsing tea --version easier, by printing /just/ the version string
 	cli.VersionPrinter = func(c *cli.Context) { fmt.Fprintln(c.App.Writer, c.App.Version) }
@@ -30,7 +34,7 @@ func main() {
 	app.Usage = "command line tool to interact with Gitea"
 	app.Description = appDescription
 	app.CustomAppHelpTemplate = helpTemplate
-	app.Version = Version + formatBuiltWith(Tags)
+	app.Version = formatVersion()
 	app.Commands = []*cli.Command{
 		&cmd.CmdLogin,
 		&cmd.CmdLogout,
@@ -61,12 +65,20 @@ func main() {
 	}
 }
 
-func formatBuiltWith(Tags string) string {
-	if len(Tags) == 0 {
-		return ""
+func formatVersion() string {
+	version := fmt.Sprintf("Version: %s\tgolang: %s",
+		bold(Version),
+		strings.ReplaceAll(runtime.Version(), "go", ""))
+
+	if len(Tags) != 0 {
+		version += fmt.Sprintf("\tbuilt with: %s", strings.Replace(Tags, " ", ", ", -1))
 	}
 
-	return " built with: " + strings.Replace(Tags, " ", ", ", -1)
+	if len(SDK) != 0 {
+		version += fmt.Sprintf("\tgo-sdk: %s", SDK)
+	}
+
+	return version
 }
 
 var appDescription = `tea is a productivity helper for Gitea. It can be used to manage most entities on
