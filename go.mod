@@ -5,7 +5,7 @@ go 1.18
 require (
 	code.gitea.io/gitea-vet v0.2.1
 	code.gitea.io/sdk/gitea v0.15.1-0.20220530220844-359c771ce3d2
-	gitea.com/noerw/unidiff-comments v0.0.0-20201219085024-64aec5658f2b
+	gitea.com/noerw/unidiff-comments v0.0.0-20220822113322-50f4daa0e35c
 	github.com/AlecAivazis/survey/v2 v2.3.1
 	github.com/adrg/xdg v0.3.3
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
