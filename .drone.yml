@@ -43,7 +43,7 @@ steps:
     GOPROXY: https://goproxy.io # proxy.golang.org is blocked in China, this proxy is not
   when:
     branch:
-    - master
+    - main
     event:
     - push
     - pull_request
@@ -156,7 +156,7 @@ steps:
     endpoint: https://ams3.digitaloceanspaces.com
     source: "dist/release/*"
     strip_prefix: dist/release/
-    target: /tea/master
+    target: /tea/main
   environment:
     AWS_ACCESS_KEY_ID:
       from_secret: aws_access_key_id
@@ -164,7 +164,7 @@ steps:
       from_secret: aws_secret_access_key
   when:
     branch:
-    - master
+    - main
     event:
     - push
 
