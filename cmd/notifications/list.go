@@ -15,7 +15,11 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-var notifTypeFlag = flags.NewCsvFlag("types", "subject types to filter by", []string{"t"},
+var notifyFieldsFlag = flags.FieldsFlag(print.NotificationFields, []string{
+	"id", "status", "index", "type", "state", "title",
+})
+
+var notifyTypeFlag = flags.NewCsvFlag("types", "subject types to filter by", []string{"t"},
 	[]string{"issue", "pull", "repository", "commit"}, nil)
 
 // CmdNotificationsList represents a sub command of notifications to list notifications
@@ -26,7 +30,10 @@ var CmdNotificationsList = cli.Command{
 	Description: `List notifications`,
 	ArgsUsage:   " ", // command does not accept arguments
 	Action:      RunNotificationsList,
-	Flags:       append([]cli.Flag{notifTypeFlag}, flags.NotificationFlags...),
+	Flags: append([]cli.Flag{
+		notifyFieldsFlag,
+		notifyTypeFlag,
+	}, flags.NotificationFlags...),
 }
 
 // RunNotificationsList list notifications
@@ -41,7 +48,7 @@ func RunNotificationsList(ctx *cli.Context) error {
 	}
 
 	var types []gitea.NotifySubjectType
-	typesStr, err := notifTypeFlag.GetValues(ctx)
+	typesStr, err := notifyTypeFlag.GetValues(ctx)
 	if err != nil {
 		return err
 	}
@@ -67,7 +74,17 @@ func listNotifications(cmd *cli.Context, status []gitea.NotifyStatus, subjects [
 		listOpts.Page = 1
 	}
 
+	fields, err := notifyFieldsFlag.GetValues(cmd)
+	if err != nil {
+		return err
+	}
+
 	if all {
+		// add repository to the default fields
+		if !cmd.IsSet("fields") {
+			fields = append(fields, "repository")
+		}
+
 		news, _, err = client.ListNotifications(gitea.ListNotificationOptions{
 			ListOptions:  listOpts,
 			Status:       status,
@@ -85,6 +102,6 @@ func listNotifications(cmd *cli.Context, status []gitea.NotifyStatus, subjects [
 		log.Fatal(err)
 	}
 
-	print.NotificationsList(news, ctx.Output, all)
+	print.NotificationsList(news, ctx.Output, fields)
 	return nil
 }

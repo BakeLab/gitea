@@ -24,40 +24,65 @@ func MilestoneDetails(milestone *gitea.Milestone) {
 }
 
 // MilestonesList prints a listing of milestones
-func MilestonesList(miles []*gitea.Milestone, output string, state gitea.StateType) {
-	headers := []string{
-		"Title",
+func MilestonesList(news []*gitea.Milestone, output string, fields []string) {
+	var printables = make([]printable, len(news))
+	for i, x := range news {
+		printables[i] = &printableMilestone{x}
 	}
-	if state == gitea.StateAll {
-		headers = append(headers, "State")
-	}
-	headers = append(headers,
-		"Open/Closed Issues",
-		"DueDate",
-	)
-
-	t := table{headers: headers}
-
-	for _, m := range miles {
-		var deadline = ""
-
-		if m.Deadline != nil && !m.Deadline.IsZero() {
-			deadline = FormatTime(*m.Deadline, isMachineReadable(output))
-		}
-
-		item := []string{
-			m.Title,
-		}
-		if state == gitea.StateAll {
-			item = append(item, string(m.State))
-		}
-		item = append(item,
-			fmt.Sprintf("%d/%d", m.OpenIssues, m.ClosedIssues),
-			deadline,
-		)
-		t.addRowSlice(item)
-	}
-
+	t := tableFromItems(fields, printables, isMachineReadable(output))
 	t.sort(0, true)
 	t.print(output)
+}
+
+// MilestoneFields are all available fields to print with MilestonesList
+var MilestoneFields = []string{
+	"title",
+	"state",
+	"items_open",
+	"items_closed",
+	"items",
+	"duedate",
+	"description",
+	"created",
+	"updated",
+	"closed",
+	"id",
+}
+
+type printableMilestone struct {
+	*gitea.Milestone
+}
+
+func (m printableMilestone) FormatField(field string, machineReadable bool) string {
+	switch field {
+	case "title":
+		return m.Title
+	case "state":
+		return string(m.State)
+	case "items_open":
+		return fmt.Sprintf("%d", m.OpenIssues)
+	case "items_closed":
+		return fmt.Sprintf("%d", m.ClosedIssues)
+	case "items":
+		return fmt.Sprintf("%d/%d", m.OpenIssues, m.ClosedIssues)
+	case "duedate":
+		if m.Deadline != nil && !m.Deadline.IsZero() {
+			return FormatTime(*m.Deadline, machineReadable)
+		}
+	case "id":
+		return fmt.Sprintf("%d", m.ID)
+	case "description":
+		return m.Description
+	case "created":
+		return FormatTime(m.Created, machineReadable)
+	case "updated":
+		if m.Updated != nil {
+			return FormatTime(*m.Updated, machineReadable)
+		}
+	case "closed":
+		if m.Closed != nil {
+			return FormatTime(*m.Closed, machineReadable)
+		}
+	}
+	return ""
 }

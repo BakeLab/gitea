@@ -28,7 +28,7 @@ var CmdNotificationsMarkRead = cli.Command{
 		if err != nil {
 			return err
 		}
-		if !flags.NotificationStateFlag.IsSet() {
+		if !cmd.IsSet(flags.NotificationStateFlag.Name) {
 			filter = []string{string(gitea.NotifyStatusUnread)}
 		}
 		return markNotificationAs(cmd, filter, gitea.NotifyStatusRead)
@@ -49,7 +49,7 @@ var CmdNotificationsMarkUnread = cli.Command{
 		if err != nil {
 			return err
 		}
-		if !flags.NotificationStateFlag.IsSet() {
+		if !cmd.IsSet(flags.NotificationStateFlag.Name) {
 			filter = []string{string(gitea.NotifyStatusRead)}
 		}
 		return markNotificationAs(cmd, filter, gitea.NotifyStatusUnread)
@@ -70,7 +70,7 @@ var CmdNotificationsMarkPinned = cli.Command{
 		if err != nil {
 			return err
 		}
-		if !flags.NotificationStateFlag.IsSet() {
+		if !cmd.IsSet(flags.NotificationStateFlag.Name) {
 			filter = []string{string(gitea.NotifyStatusUnread)}
 		}
 		return markNotificationAs(cmd, filter, gitea.NotifyStatusPinned)
