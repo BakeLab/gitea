@@ -8,4 +8,5 @@ var (
 	catSetup    = "SETUP"
 	catEntities = "ENTITIES"
 	catHelpers  = "HELPERS"
+	catMisc     = "MISCELLANEOUS"
 )

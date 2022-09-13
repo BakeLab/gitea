@@ -77,6 +77,9 @@ var UserFields = []string{
 	"website",
 	"description",
 	"visibility",
+	"activated",
+	"lastlogin_at",
+	"created_at",
 }
 
 type printableUser struct{ *gitea.User }
@@ -113,6 +116,8 @@ func (x printableUser) FormatField(field string, machineReadable bool) string {
 		return formatBoolean(x.Restricted, !machineReadable)
 	case "prohibit_login":
 		return formatBoolean(x.ProhibitLogin, !machineReadable)
+	case "activated":
+		return formatBoolean(x.IsActive, !machineReadable)
 	case "location":
 		return x.Location
 	case "website":
@@ -121,6 +126,10 @@ func (x printableUser) FormatField(field string, machineReadable bool) string {
 		return x.Description
 	case "visibility":
 		return string(x.Visibility)
+	case "created_at":
+		return FormatTime(x.Created, machineReadable)
+	case "lastlogin_at":
+		return FormatTime(x.LastLogin, machineReadable)
 	}
 	return ""
 }
