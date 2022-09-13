@@ -16,8 +16,15 @@ import (
 // If the input could not be parsed, it is printed unformatted, the error
 // is returned anyway.
 func outputMarkdown(markdown string, baseURL string) error {
+	var styleOption glamour.TermRendererOption
+	if IsInteractive() {
+		styleOption = glamour.WithAutoStyle()
+	} else {
+		styleOption = glamour.WithStandardStyle("notty")
+	}
+
 	renderer, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		styleOption,
 		glamour.WithBaseURL(baseURL),
 		glamour.WithPreservedNewLines(),
 		glamour.WithWordWrap(getWordWrap()),

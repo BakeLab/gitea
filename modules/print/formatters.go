@@ -6,12 +6,19 @@ package print
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"time"
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/muesli/termenv"
+	"golang.org/x/crypto/ssh/terminal"
 )
+
+// IsInteractive checks if the output is piped, but NOT if the session is run interactively..
+func IsInteractive() bool {
+	return terminal.IsTerminal(int(os.Stdout.Fd()))
+}
 
 // captures the repo URL part <host>/<owner>/<repo> of an url
 var repoURLRegex = regexp.MustCompile("^([[:alnum:]]+://[^/]+(?:/[[:alnum:]]+){2})/.*")
