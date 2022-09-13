@@ -17,6 +17,7 @@ var CmdWhoami = cli.Command{
 	Category:    catSetup,
 	Description: `For debugging purposes, show the user that is currently logged in.`,
 	Usage:       "Show current logged in user",
+	ArgsUsage:   " ", // command does not accept arguments
 	Action: func(cmd *cli.Context) error {
 		ctx := context.InitCommand(cmd)
 		client := ctx.Login.Client()

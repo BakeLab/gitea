@@ -21,6 +21,7 @@ var CmdReleaseList = cli.Command{
 	Aliases:     []string{"ls"},
 	Usage:       "List Releases",
 	Description: "List Releases",
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      RunReleasesList,
 	Flags: append([]cli.Flag{
 		&flags.PaginationPageFlag,

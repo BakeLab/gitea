@@ -22,7 +22,8 @@ var CmdReleaseCreate = cli.Command{
 	Name:        "create",
 	Aliases:     []string{"c"},
 	Usage:       "Create a release",
-	Description: `Create a release`,
+	Description: `Create a release for a new or existing git tag`,
+	ArgsUsage:   "[<tag>]",
 	Action:      runReleaseCreate,
 	Flags: append([]cli.Flag{
 		&cli.StringFlag{
@@ -65,8 +66,16 @@ func runReleaseCreate(cmd *cli.Context) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
+	tag := ctx.String("tag")
+	if cmd.Args().Present() {
+		if len(tag) != 0 {
+			return fmt.Errorf("ambiguous arguments: provide tagname via --tag or argument, but not both")
+		}
+		tag = cmd.Args().First()
+	}
+
 	release, resp, err := ctx.Login.Client().CreateRelease(ctx.Owner, ctx.Repo, gitea.CreateReleaseOption{
-		TagName:      ctx.String("tag"),
+		TagName:      tag,
 		Target:       ctx.String("target"),
 		Title:        ctx.String("title"),
 		Note:         ctx.String("note"),

@@ -21,6 +21,7 @@ var CmdRepoCreate = cli.Command{
 	Aliases:     []string{"c"},
 	Usage:       "Create a repository",
 	Description: "Create a repository",
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runRepoCreate,
 	Flags: append([]cli.Flag{
 		&cli.StringFlag{

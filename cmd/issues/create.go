@@ -19,6 +19,7 @@ var CmdIssuesCreate = cli.Command{
 	Aliases:     []string{"c"},
 	Usage:       "Create an issue on repository",
 	Description: `Create an issue on repository`,
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runIssuesCreate,
 	Flags:       flags.IssuePREditFlags,
 }

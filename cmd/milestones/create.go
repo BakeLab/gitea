@@ -23,6 +23,7 @@ var CmdMilestonesCreate = cli.Command{
 	Aliases:     []string{"c"},
 	Usage:       "Create an milestone on repository",
 	Description: `Create an milestone on repository`,
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runMilestonesCreate,
 	Flags: append([]cli.Flag{
 		&cli.StringFlag{

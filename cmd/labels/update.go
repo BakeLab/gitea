@@ -17,6 +17,7 @@ var CmdLabelUpdate = cli.Command{
 	Name:        "update",
 	Usage:       "Update a label",
 	Description: `Update a label`,
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runLabelUpdate,
 	Flags: append([]cli.Flag{
 		&cli.IntFlag{

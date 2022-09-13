@@ -19,6 +19,7 @@ var CmdReleases = cli.Command{
 	Category:    catEntities,
 	Usage:       "Manage releases",
 	Description: "Manage releases",
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      releases.RunReleasesList,
 	Subcommands: []*cli.Command{
 		&releases.CmdReleaseList,

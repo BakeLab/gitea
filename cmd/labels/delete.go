@@ -17,6 +17,7 @@ var CmdLabelDelete = cli.Command{
 	Aliases:     []string{"rm"},
 	Usage:       "Delete a label",
 	Description: `Delete a label`,
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runLabelDelete,
 	Flags: append([]cli.Flag{
 		&cli.IntFlag{

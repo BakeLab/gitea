@@ -20,6 +20,7 @@ var CmdLabelsList = cli.Command{
 	Aliases:     []string{"ls"},
 	Usage:       "List labels",
 	Description: "List labels",
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      RunLabelsList,
 	Flags: append([]cli.Flag{
 		&cli.BoolFlag{

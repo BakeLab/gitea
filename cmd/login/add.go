@@ -16,6 +16,7 @@ var CmdLoginAdd = cli.Command{
 	Name:        "add",
 	Usage:       "Add a Gitea login",
 	Description: `Add a Gitea login, without args it will create one interactively`,
+	ArgsUsage:   " ", // command does not accept arguments
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "name",

@@ -18,6 +18,7 @@ var CmdLabels = cli.Command{
 	Category:    catEntities,
 	Usage:       "Manage issue labels",
 	Description: `Manage issue labels`,
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runLabels,
 	Subcommands: []*cli.Command{
 		&labels.CmdLabelsList,

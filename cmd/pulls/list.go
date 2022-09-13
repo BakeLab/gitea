@@ -23,6 +23,7 @@ var CmdPullsList = cli.Command{
 	Aliases:     []string{"ls"},
 	Usage:       "List pull requests of the repository",
 	Description: `List pull requests of the repository`,
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      RunPullsList,
 	Flags:       append([]cli.Flag{pullFieldsFlag}, flags.PRListingFlags...),
 }

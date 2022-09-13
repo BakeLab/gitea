@@ -23,6 +23,7 @@ var CmdLabelCreate = cli.Command{
 	Aliases:     []string{"c"},
 	Usage:       "Create a label",
 	Description: `Create a label`,
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runLabelCreate,
 	Flags: append([]cli.Flag{
 		&cli.StringFlag{

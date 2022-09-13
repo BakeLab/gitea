@@ -18,6 +18,7 @@ var CmdLoginEdit = cli.Command{
 	Aliases:     []string{"e"},
 	Usage:       "Edit Gitea logins",
 	Description: `Edit Gitea logins`,
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runLoginEdit,
 	Flags:       []cli.Flag{&flags.OutputFlag},
 }

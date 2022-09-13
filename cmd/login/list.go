@@ -18,6 +18,7 @@ var CmdLoginList = cli.Command{
 	Aliases:     []string{"ls"},
 	Usage:       "List Gitea logins",
 	Description: `List Gitea logins`,
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      RunLoginList,
 	Flags:       []cli.Flag{&flags.OutputFlag},
 }

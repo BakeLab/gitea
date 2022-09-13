@@ -19,6 +19,7 @@ var CmdOrganizationList = cli.Command{
 	Aliases:     []string{"ls"},
 	Usage:       "List Organizations",
 	Description: "List users organizations",
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      RunOrganizationList,
 	Flags: append([]cli.Flag{
 		&flags.PaginationPageFlag,

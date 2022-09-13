@@ -27,6 +27,7 @@ var CmdIssuesList = cli.Command{
 	Aliases:     []string{"ls"},
 	Usage:       "List issues of the repository",
 	Description: `List issues of the repository`,
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      RunIssuesList,
 	Flags:       append([]cli.Flag{issueFieldsFlag}, flags.IssueListingFlags...),
 }

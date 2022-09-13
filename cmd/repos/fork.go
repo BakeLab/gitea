@@ -21,6 +21,7 @@ var CmdRepoFork = cli.Command{
 	Aliases:     []string{"f"},
 	Usage:       "Fork an existing repository",
 	Description: "Create a repository from an existing repo",
+	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runRepoFork,
 	Flags: append([]cli.Flag{
 		&cli.StringFlag{
