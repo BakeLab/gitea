@@ -19,6 +19,7 @@ func outputMarkdown(markdown string, baseURL string) error {
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 		glamour.WithBaseURL(baseURL),
+		glamour.WithPreservedNewLines(),
 		glamour.WithWordWrap(getWordWrap()),
 	)
 	if err != nil {
