@@ -106,9 +106,9 @@ Make sure you have a current go version installed (1.13 or newer).
   ```
   Note that GNU Make (gmake on OpenBSD) is required.
 
-- For a quick installation without `git` & `make`:
+- For a quick installation without `git` & `make`, set $version and exec:
   ```sh
-  go install code.gitea.io/tea@latest
+  go install code.gitea.io/tea@${version}
   ```
 
 ## Contributing
