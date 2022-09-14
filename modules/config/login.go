@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
+	"code.gitea.io/tea/modules/utils"
+	"github.com/AlecAivazis/survey/v2"
 )
 
 // Login represents a login to a gitea server, you even could add multiple logins for one gitea server
@@ -25,8 +27,12 @@ type Login struct {
 	Default bool   `yaml:"default"`
 	SSHHost string `yaml:"ssh_host"`
 	// optional path to the private key
-	SSHKey   string `yaml:"ssh_key"`
-	Insecure bool   `yaml:"insecure"`
+	SSHKey            string `yaml:"ssh_key"`
+	Insecure          bool   `yaml:"insecure"`
+	SSHCertPrincipal  string `yaml:"ssh_certificate_principal"`
+	SSHAgent          bool   `yaml:"ssh_agent"`
+	SSHKeyFingerprint string `yaml:"ssh_key_agent_pub"`
+	SSHPassphrase     string `yaml:"-"`
 	// User is username from gitea
 	User string `yaml:"user"`
 	// Created is auto created unix timestamp
@@ -132,7 +138,7 @@ func GetLoginByHost(host string) *Login {
 
 // DeleteLogin delete a login by name from config
 func DeleteLogin(name string) error {
-	var idx = -1
+	idx := -1
 	for i, l := range config.Logins {
 		if l.Name == name {
 			idx = i
@@ -172,10 +178,26 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 			Jar: cookieJar,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			}}
+			},
+		}
 	}
 
 	options = append(options, gitea.SetToken(l.Token), gitea.SetHTTPClient(httpClient))
+
+	if ok, err := utils.IsKeyEncrypted(l.SSHKey); ok && err == nil && l.SSHPassphrase == "" {
+		promptPW := &survey.Password{Message: "ssh-key is encrypted please enter the passphrase: "}
+		if err = survey.AskOne(promptPW, &l.SSHPassphrase, survey.WithValidator(survey.Required)); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	if l.SSHCertPrincipal != "" {
+		options = append(options, gitea.UseSSHCert(l.SSHCertPrincipal, l.SSHKey, l.SSHPassphrase))
+	}
+
+	if l.SSHKeyFingerprint != "" {
+		options = append(options, gitea.UseSSHPubkey(l.SSHKeyFingerprint, l.SSHKey, l.SSHPassphrase))
+	}
 
 	client, err := gitea.NewClient(l.URL, options...)
 	if err != nil {

@@ -16,7 +16,7 @@ import (
 )
 
 // CreateLogin create a login to be stored in config
-func CreateLogin(name, token, user, passwd, sshKey, giteaURL string, insecure bool) error {
+func CreateLogin(name, token, user, passwd, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string, insecure, sshAgent bool) error {
 	// checks ...
 	// ... if we have a url
 	if len(giteaURL) == 0 {
@@ -32,13 +32,15 @@ func CreateLogin(name, token, user, passwd, sshKey, giteaURL string, insecure bo
 		return fmt.Errorf("token already been used, delete login '%s' first", login.Name)
 	}
 
-	// .. if we have enough information to authenticate
-	if len(token) == 0 && (len(user)+len(passwd)) == 0 {
-		return fmt.Errorf("No token set")
-	} else if len(user) != 0 && len(passwd) == 0 {
-		return fmt.Errorf("No password set")
-	} else if len(user) == 0 && len(passwd) != 0 {
-		return fmt.Errorf("No user set")
+	if !sshAgent && sshCertPrincipal == "" && sshKey == "" {
+		// .. if we have enough information to authenticate
+		if len(token) == 0 && (len(user)+len(passwd)) == 0 {
+			return fmt.Errorf("No token set")
+		} else if len(user) != 0 && len(passwd) == 0 {
+			return fmt.Errorf("No password set")
+		} else if len(user) == 0 && len(passwd) != 0 {
+			return fmt.Errorf("No user set")
+		}
 	}
 
 	// Normalize URL
@@ -47,16 +49,25 @@ func CreateLogin(name, token, user, passwd, sshKey, giteaURL string, insecure bo
 		return fmt.Errorf("Unable to parse URL: %s", err)
 	}
 
-	login := config.Login{
-		Name:     name,
-		URL:      serverURL.String(),
-		Token:    token,
-		Insecure: insecure,
-		SSHKey:   sshKey,
-		Created:  time.Now().Unix(),
+	// check if it's a certificate the principal doesn't matter as the user
+	// has explicitly selected this private key
+	if _, err := os.Stat(sshKey + "-cert.pub"); err == nil {
+		sshCertPrincipal = "yes"
 	}
 
-	if len(token) == 0 {
+	login := config.Login{
+		Name:              name,
+		URL:               serverURL.String(),
+		Token:             token,
+		Insecure:          insecure,
+		SSHKey:            sshKey,
+		SSHCertPrincipal:  sshCertPrincipal,
+		SSHKeyFingerprint: sshKeyFingerprint,
+		SSHAgent:          sshAgent,
+		Created:           time.Now().Unix(),
+	}
+
+	if len(token) == 0 && sshCertPrincipal == "" && !sshAgent && sshKey == "" {
 		if login.Token, err = generateToken(login, user, passwd); err != nil {
 			return err
 		}
