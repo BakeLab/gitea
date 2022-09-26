@@ -13,9 +13,9 @@ import (
 // CmdMilestonesClose represents a sub command of milestones to close an milestone
 var CmdMilestonesClose = cli.Command{
 	Name:        "close",
-	Usage:       "Change state of an milestone to 'closed'",
-	Description: `Change state of an milestone to 'closed'`,
-	ArgsUsage:   "<milestone name>",
+	Usage:       "Change state of one or more milestones to 'closed'",
+	Description: `Change state of one or more milestones to 'closed'`,
+	ArgsUsage:   "<milestone name> [<milestone name>...]",
 	Action: func(ctx *cli.Context) error {
 		if ctx.Bool("force") {
 			return deleteMilestone(ctx)

@@ -23,16 +23,23 @@ func editPullState(cmd *cli.Context, opts gitea.EditPullRequestOption) error {
 		return fmt.Errorf("Please provide a Pull Request index")
 	}
 
-	index, err := utils.ArgToIndex(ctx.Args().First())
+	indices, err := utils.ArgsToIndices(ctx.Args().Slice())
 	if err != nil {
 		return err
 	}
 
-	pr, _, err := ctx.Login.Client().EditPullRequest(ctx.Owner, ctx.Repo, index, opts)
-	if err != nil {
-		return err
-	}
+	client := ctx.Login.Client()
+	for _, index := range indices {
+		pr, _, err := client.EditPullRequest(ctx.Owner, ctx.Repo, index, opts)
+		if err != nil {
+			return err
+		}
 
-	print.PullDetails(pr, nil, nil)
+		if len(indices) > 1 {
+			fmt.Println(pr.HTMLURL)
+		} else {
+			print.PullDetails(pr, nil, nil)
+		}
+	}
 	return nil
 }

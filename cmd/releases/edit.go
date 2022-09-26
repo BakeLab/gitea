@@ -19,9 +19,9 @@ import (
 var CmdReleaseEdit = cli.Command{
 	Name:        "edit",
 	Aliases:     []string{"e"},
-	Usage:       "Edit a release",
-	Description: `Edit a release`,
-	ArgsUsage:   "<release tag>",
+	Usage:       "Edit one or more releases",
+	Description: `Edit one or more releases`,
+	ArgsUsage:   "<release tag> [<release tag>...]",
 	Action:      runReleaseEdit,
 	Flags: append([]cli.Flag{
 		&cli.StringFlag{
@@ -62,16 +62,6 @@ func runReleaseEdit(cmd *cli.Context) error {
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()
 
-	tag := ctx.Args().First()
-	if len(tag) == 0 {
-		fmt.Println("Release tag needed to edit")
-		return nil
-	}
-
-	release, err := getReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
-	if err != nil {
-		return err
-	}
 	var isDraft, isPre *bool
 	if ctx.IsSet("draft") {
 		isDraft = gitea.OptionalBool(strings.ToLower(ctx.String("draft"))[:1] == "t")
@@ -80,13 +70,28 @@ func runReleaseEdit(cmd *cli.Context) error {
 		isPre = gitea.OptionalBool(strings.ToLower(ctx.String("prerelease"))[:1] == "t")
 	}
 
-	_, _, err = client.EditRelease(ctx.Owner, ctx.Repo, release.ID, gitea.EditReleaseOption{
-		TagName:      ctx.String("tag"),
-		Target:       ctx.String("target"),
-		Title:        ctx.String("title"),
-		Note:         ctx.String("note"),
-		IsDraft:      isDraft,
-		IsPrerelease: isPre,
-	})
-	return err
+	if !ctx.Args().Present() {
+		fmt.Println("Release tag needed to edit")
+		return nil
+	}
+
+	for _, tag := range ctx.Args().Slice() {
+		release, err := getReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
+		if err != nil {
+			return err
+		}
+
+		_, _, err = client.EditRelease(ctx.Owner, ctx.Repo, release.ID, gitea.EditReleaseOption{
+			TagName:      ctx.String("tag"),
+			Target:       ctx.String("target"),
+			Title:        ctx.String("title"),
+			Note:         ctx.String("note"),
+			IsDraft:      isDraft,
+			IsPrerelease: isPre,
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

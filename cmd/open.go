@@ -74,6 +74,5 @@ func runOpen(cmd *cli.Context) error {
 		suffix = number
 	}
 
-	u := path.Join(ctx.Login.URL, ctx.Owner, ctx.Repo, suffix)
-	return open.Run(u)
+	return open.Run(path.Join(ctx.GetRemoteRepoHTMLURL(), suffix))
 }

@@ -19,9 +19,9 @@ import (
 // CmdIssuesClose represents a sub command of issues to close an issue
 var CmdIssuesClose = cli.Command{
 	Name:        "close",
-	Usage:       "Change state of an issue to 'closed'",
-	Description: `Change state of an issue to 'closed'`,
-	ArgsUsage:   "<issue index>",
+	Usage:       "Change state of one ore more issues to 'closed'",
+	Description: `Change state of one ore more issues to 'closed'`,
+	ArgsUsage:   "<issue index> [<issue index>...]",
 	Action: func(ctx *cli.Context) error {
 		var s = gitea.StateClosed
 		return editIssueState(ctx, gitea.EditIssueOption{State: &s})
@@ -37,16 +37,23 @@ func editIssueState(cmd *cli.Context, opts gitea.EditIssueOption) error {
 		return fmt.Errorf(ctx.Command.ArgsUsage)
 	}
 
-	index, err := utils.ArgToIndex(ctx.Args().First())
+	indices, err := utils.ArgsToIndices(ctx.Args().Slice())
 	if err != nil {
 		return err
 	}
 
-	issue, _, err := ctx.Login.Client().EditIssue(ctx.Owner, ctx.Repo, index, opts)
-	if err != nil {
-		return err
-	}
+	client := ctx.Login.Client()
+	for _, index := range indices {
+		issue, _, err := client.EditIssue(ctx.Owner, ctx.Repo, index, opts)
+		if err != nil {
+			return err
+		}
 
-	print.IssueDetails(issue, nil)
+		if len(indices) > 1 {
+			fmt.Println(issue.HTMLURL)
+		} else {
+			print.IssueDetails(issue, nil)
+		}
+	}
 	return nil
 }

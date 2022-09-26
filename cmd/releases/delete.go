@@ -17,9 +17,9 @@ import (
 var CmdReleaseDelete = cli.Command{
 	Name:        "delete",
 	Aliases:     []string{"rm"},
-	Usage:       "Delete a release",
-	Description: `Delete a release`,
-	ArgsUsage:   "<release tag>",
+	Usage:       "Delete one or more releases",
+	Description: `Delete one or more releases`,
+	ArgsUsage:   "<release tag> [<release tag>...]",
 	Action:      runReleaseDelete,
 	Flags: append([]cli.Flag{
 		&cli.BoolFlag{
@@ -39,9 +39,8 @@ func runReleaseDelete(cmd *cli.Context) error {
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()
 
-	tag := ctx.Args().First()
-	if len(tag) == 0 {
-		fmt.Println("Release tag needed to delete")
+	if !ctx.Args().Present() {
+		fmt.Println("Release tag needed to edit")
 		return nil
 	}
 
@@ -50,18 +49,20 @@ func runReleaseDelete(cmd *cli.Context) error {
 		return nil
 	}
 
-	release, err := getReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
-	if err != nil {
-		return err
-	}
-	_, err = client.DeleteRelease(ctx.Owner, ctx.Repo, release.ID)
-	if err != nil {
-		return err
-	}
+	for _, tag := range ctx.Args().Slice() {
+		release, err := getReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
+		if err != nil {
+			return err
+		}
+		_, err = client.DeleteRelease(ctx.Owner, ctx.Repo, release.ID)
+		if err != nil {
+			return err
+		}
 
-	if ctx.Bool("delete-tag") {
-		_, err = client.DeleteTag(ctx.Owner, ctx.Repo, tag)
-		return err
+		if ctx.Bool("delete-tag") {
+			_, err = client.DeleteTag(ctx.Owner, ctx.Repo, tag)
+			return err
+		}
 	}
 
 	return nil

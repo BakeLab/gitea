@@ -14,9 +14,9 @@ import (
 // CmdPullsClose closes a given open pull request
 var CmdPullsClose = cli.Command{
 	Name:        "close",
-	Usage:       "Change state of a pull request to 'closed'",
-	Description: `Change state of a pull request to 'closed'`,
-	ArgsUsage:   "<pull index>",
+	Usage:       "Change state of one or more pull requests to 'closed'",
+	Description: `Change state of one or more pull requests to 'closed'`,
+	ArgsUsage:   "<pull index> [<pull index>...]",
 	Action: func(ctx *cli.Context) error {
 		var s = gitea.StateClosed
 		return editPullState(ctx, gitea.EditPullRequestOption{State: &s})

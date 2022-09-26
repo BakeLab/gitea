@@ -5,8 +5,11 @@
 package milestones
 
 import (
+	"fmt"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
+	"code.gitea.io/tea/modules/print"
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/urfave/cli/v2"
@@ -16,9 +19,9 @@ import (
 var CmdMilestonesReopen = cli.Command{
 	Name:        "reopen",
 	Aliases:     []string{"open"},
-	Usage:       "Change state of an milestone to 'open'",
-	Description: `Change state of an milestone to 'open'`,
-	ArgsUsage:   "<milestone name>",
+	Usage:       "Change state of one or more milestones to 'open'",
+	Description: `Change state of one or more milestones to 'open'`,
+	ArgsUsage:   "<milestone name> [<milestone name> ...]",
 	Action: func(ctx *cli.Context) error {
 		return editMilestoneStatus(ctx, false)
 	},
@@ -28,16 +31,31 @@ var CmdMilestonesReopen = cli.Command{
 func editMilestoneStatus(cmd *cli.Context, close bool) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
-	client := ctx.Login.Client()
+	if ctx.Args().Len() == 0 {
+		return fmt.Errorf(ctx.Command.ArgsUsage)
+	}
 
 	state := gitea.StateOpen
 	if close {
 		state = gitea.StateClosed
 	}
-	_, _, err := client.EditMilestoneByName(ctx.Owner, ctx.Repo, ctx.Args().First(), gitea.EditMilestoneOption{
-		State: &state,
-		Title: ctx.Args().First(),
-	})
 
-	return err
+	client := ctx.Login.Client()
+	for _, ms := range ctx.Args().Slice() {
+		opts := gitea.EditMilestoneOption{
+			State: &state,
+			Title: ms,
+		}
+		milestone, _, err := client.EditMilestoneByName(ctx.Owner, ctx.Repo, ms, opts)
+		if err != nil {
+			return err
+		}
+
+		if ctx.Args().Len() > 1 {
+			fmt.Printf("%s/milestone/%d\n", ctx.GetRemoteRepoHTMLURL(), milestone.ID)
+		} else {
+			print.MilestoneDetails(milestone)
+		}
+	}
+	return nil
 }

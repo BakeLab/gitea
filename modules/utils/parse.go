@@ -10,6 +10,18 @@ import (
 	"strings"
 )
 
+// ArgsToIndices take issue/pull index as string and returns int64s
+func ArgsToIndices(args []string) ([]int64, error) {
+	indices := make([]int64, len(args))
+	for i, arg := range args {
+		var err error
+		if indices[i], err = ArgToIndex(arg); err != nil {
+			return nil, err
+		}
+	}
+	return indices, nil
+}
+
 // ArgToIndex take issue/pull index as string and return int64
 func ArgToIndex(arg string) (int64, error) {
 	if strings.HasPrefix(arg, "#") {

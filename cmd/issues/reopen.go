@@ -15,9 +15,9 @@ import (
 var CmdIssuesReopen = cli.Command{
 	Name:        "reopen",
 	Aliases:     []string{"open"},
-	Usage:       "Change state of an issue to 'open'",
-	Description: `Change state of an issue to 'open'`,
-	ArgsUsage:   "<issue index>",
+	Usage:       "Change state of one or more issues to 'open'",
+	Description: `Change state of one or more issues to 'open'`,
+	ArgsUsage:   "<issue index> [<issue index>...]",
 	Action: func(ctx *cli.Context) error {
 		var s = gitea.StateOpen
 		return editIssueState(ctx, gitea.EditIssueOption{State: &s})

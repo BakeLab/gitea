@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path"
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
@@ -49,6 +50,13 @@ func (ctx *TeaContext) GetListOptions() gitea.ListOptions {
 		Page:     page,
 		PageSize: limit,
 	}
+}
+
+// GetRemoteRepoHTMLURL returns the web-ui url of the remote repo,
+// after ensuring a remote repo is present in the context.
+func (ctx *TeaContext) GetRemoteRepoHTMLURL() string {
+	ctx.Ensure(CtxRequirement{RemoteRepo: true})
+	return path.Join(ctx.Login.URL, ctx.Owner, ctx.Repo)
 }
 
 // Ensure checks if requirements on the context are set, and terminates otherwise.
