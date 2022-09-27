@@ -33,7 +33,7 @@ var RemoteFlag = cli.StringFlag{
 var OutputFlag = cli.StringFlag{
 	Name:    "output",
 	Aliases: []string{"o"},
-	Usage:   "Output format. (csv, simple, table, tsv, yaml)",
+	Usage:   "Output format. (simple, table, csv, tsv, yaml, json)",
 }
 
 // PaginationPageFlag provides flag for pagination options

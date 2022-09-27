@@ -6,7 +6,9 @@ package print
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -72,25 +74,39 @@ func (t table) Less(i, j int) bool {
 }
 
 func (t *table) print(output string) {
+	t.fprint(os.Stdout, output)
+}
+
+func (t *table) fprint(f io.Writer, output string) {
 	switch output {
 	case "", "table":
-		outputtable(t.headers, t.values)
+		outputTable(f, t.headers, t.values)
 	case "csv":
-		outputdsv(t.headers, t.values, ",")
+		outputDsv(f, t.headers, t.values, ",")
 	case "simple":
-		outputsimple(t.headers, t.values)
+		outputSimple(f, t.headers, t.values)
 	case "tsv":
-		outputdsv(t.headers, t.values, "\t")
+		outputDsv(f, t.headers, t.values, "\t")
 	case "yml", "yaml":
-		outputyaml(t.headers, t.values)
+		outputYaml(f, t.headers, t.values)
+	case "json":
+		outputJSON(f, t.headers, t.values)
 	default:
-		fmt.Printf("unknown output type '" + output + "', available types are:\n- csv: comma-separated values\n- simple: space-separated values\n- table: auto-aligned table format (default)\n- tsv: tab-separated values\n- yaml: YAML format\n")
+		fmt.Fprintf(f, `"unknown output type '%s', available types are:
+- csv: comma-separated values
+- simple: space-separated values
+- table: auto-aligned table format (default)
+- tsv: tab-separated values
+- yaml: YAML format
+- json: JSON format
+`, output)
+		os.Exit(1)
 	}
 }
 
-// outputtable prints structured data as table
-func outputtable(headers []string, values [][]string) {
-	table := tablewriter.NewWriter(os.Stdout)
+// outputTable prints structured data as table
+func outputTable(f io.Writer, headers []string, values [][]string) {
+	table := tablewriter.NewWriter(f)
 	if len(headers) > 0 {
 		table.SetHeader(headers)
 	}
@@ -100,47 +116,89 @@ func outputtable(headers []string, values [][]string) {
 	table.Render()
 }
 
-// outputsimple prints structured data as space delimited value
-func outputsimple(headers []string, values [][]string) {
+// outputSimple prints structured data as space delimited value
+func outputSimple(f io.Writer, headers []string, values [][]string) {
 	for _, value := range values {
-		fmt.Printf(strings.Join(value, " "))
-		fmt.Printf("\n")
+		fmt.Fprint(f, strings.Join(value, " "))
+		fmt.Fprintf(f, "\n")
 	}
 }
 
-// outputdsv prints structured data as delimiter separated value format
-func outputdsv(headers []string, values [][]string, delimiterOpt ...string) {
+// outputDsv prints structured data as delimiter separated value format
+func outputDsv(f io.Writer, headers []string, values [][]string, delimiterOpt ...string) {
 	delimiter := ","
 	if len(delimiterOpt) > 0 {
 		delimiter = delimiterOpt[0]
 	}
-	fmt.Println("\"" + strings.Join(headers, "\""+delimiter+"\"") + "\"")
+	fmt.Fprintln(f, "\""+strings.Join(headers, "\""+delimiter+"\"")+"\"")
 	for _, value := range values {
-		fmt.Printf("\"")
-		fmt.Printf(strings.Join(value, "\""+delimiter+"\""))
-		fmt.Printf("\"")
-		fmt.Printf("\n")
+		fmt.Fprintf(f, "\"")
+		fmt.Fprint(f, strings.Join(value, "\""+delimiter+"\""))
+		fmt.Fprintf(f, "\"")
+		fmt.Fprintf(f, "\n")
 	}
 }
 
-// outputyaml prints structured data as yaml
-func outputyaml(headers []string, values [][]string) {
+// outputYaml prints structured data as yaml
+func outputYaml(f io.Writer, headers []string, values [][]string) {
 	for _, value := range values {
-		fmt.Println("-")
+		fmt.Fprintln(f, "-")
 		for j, val := range value {
 			intVal, _ := strconv.Atoi(val)
 			if strconv.Itoa(intVal) == val {
-				fmt.Printf("    %s: %s\n", headers[j], val)
+				fmt.Fprintf(f, "    %s: %s\n", headers[j], val)
 			} else {
-				fmt.Printf("    %s: '%s'\n", headers[j], val)
+				fmt.Fprintf(f, "    %s: '%s'\n", headers[j], val)
 			}
 		}
 	}
 }
 
+var (
+	matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
+	matchAllCap   = regexp.MustCompile("([a-z0-9])([A-Z])")
+)
+
+func toSnakeCase(str string) string {
+	snake := matchFirstCap.ReplaceAllString(str, "${1}_${2}")
+	snake = matchAllCap.ReplaceAllString(snake, "${1}_${2}")
+	return strings.ToLower(snake)
+}
+
+// outputJSON prints structured data as json
+func outputJSON(f io.Writer, headers []string, values [][]string) {
+	fmt.Fprintln(f, "[")
+	itemCount := len(values)
+	headersCount := len(headers)
+	const space = "  "
+	for i, value := range values {
+		fmt.Fprintf(f, "%s{\n", space)
+		for j, val := range value {
+			intVal, _ := strconv.Atoi(val)
+			if strconv.Itoa(intVal) == val {
+				fmt.Fprintf(f, "%s%s\"%s\": %s", space, space, toSnakeCase(headers[j]), val)
+			} else {
+				fmt.Fprintf(f, "%s%s\"%s\": \"%s\"", space, space, toSnakeCase(headers[j]), val)
+			}
+			if j != headersCount-1 {
+				fmt.Fprintln(f, ",")
+			} else {
+				fmt.Fprintln(f)
+			}
+		}
+
+		if i != itemCount-1 {
+			fmt.Fprintf(f, "%s},\n", space)
+		} else {
+			fmt.Fprintf(f, "%s}\n", space)
+		}
+	}
+	fmt.Fprintln(f, "]")
+}
+
 func isMachineReadable(outputFormat string) bool {
 	switch outputFormat {
-	case "yml", "yaml", "csv", "tsv":
+	case "yml", "yaml", "csv", "tsv", "json":
 		return true
 	}
 	return false
