@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	code.gitea.io/gitea-vet v0.2.1
-	code.gitea.io/sdk/gitea v0.15.1-0.20220831004139-a0127ed0e7fe
+	code.gitea.io/sdk/gitea v0.15.1-0.20220927025037-8f846bdb9bbe
 	gitea.com/noerw/unidiff-comments v0.0.0-20220822113322-50f4daa0e35c
 	github.com/AlecAivazis/survey/v2 v2.3.6
 	github.com/adrg/xdg v0.4.0
@@ -17,7 +17,7 @@ require (
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 	github.com/stretchr/testify v1.7.0
 	github.com/urfave/cli/v2 v2.16.3
-	golang.org/x/crypto v0.0.0-20220829220503-c86fa9a7ed90
+	golang.org/x/crypto v0.0.0-20220926161630-eccd6366d1be
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -59,7 +59,7 @@ require (
 	github.com/yuin/goldmark v1.4.14 // indirect
 	github.com/yuin/goldmark-emoji v1.0.1 // indirect
 	golang.org/x/net v0.0.0-20220909164309-bea034e7d591 // indirect
-	golang.org/x/sys v0.0.0-20220913153101-76c7481b5158 // indirect
+	golang.org/x/sys v0.0.0-20220926163933-8cfa568d3c25 // indirect
 	golang.org/x/term v0.0.0-20220722155259-a9ba230a4035 // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/tools v0.1.12 // indirect

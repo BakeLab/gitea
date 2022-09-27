@@ -17,7 +17,7 @@ import (
 )
 
 // CreatePull creates a PR in the given repo and prints the result
-func CreatePull(ctx *context.TeaContext, base, head string, opts *gitea.CreateIssueOption) (err error) {
+func CreatePull(ctx *context.TeaContext, base, head string, allowMaintainerEdits bool, opts *gitea.CreateIssueOption) (err error) {
 	// default is default branch
 	if len(base) == 0 {
 		base, err = GetDefaultPRBase(ctx.Login, ctx.Owner, ctx.Repo)
@@ -53,7 +53,9 @@ func CreatePull(ctx *context.TeaContext, base, head string, opts *gitea.CreateIs
 		return fmt.Errorf("title is required")
 	}
 
-	pr, _, err := ctx.Login.Client().CreatePullRequest(ctx.Owner, ctx.Repo, gitea.CreatePullRequestOption{
+	client := ctx.Login.Client()
+
+	pr, _, err := client.CreatePullRequest(ctx.Owner, ctx.Repo, gitea.CreatePullRequestOption{
 		Head:      head,
 		Base:      base,
 		Title:     opts.Title,
@@ -66,6 +68,15 @@ func CreatePull(ctx *context.TeaContext, base, head string, opts *gitea.CreateIs
 
 	if err != nil {
 		return fmt.Errorf("could not create PR from %s to %s:%s: %s", head, ctx.Owner, base, err)
+	}
+
+	if pr.AllowMaintainerEdit != allowMaintainerEdits {
+		pr, _, err = client.EditPullRequest(ctx.Owner, ctx.Repo, pr.Index, gitea.EditPullRequestOption{
+			AllowMaintainerEdit: gitea.OptionalBool(allowMaintainerEdits),
+		})
+		if err != nil {
+			return fmt.Errorf("could not enable maintainer edit on pull: %v", err)
+		}
 	}
 
 	print.PullDetails(pr, nil, nil)

@@ -14,7 +14,10 @@ import (
 
 // CreatePull interactively creates a PR
 func CreatePull(ctx *context.TeaContext) (err error) {
-	var base, head string
+	var (
+		base, head           string
+		allowMaintainerEdits bool
+	)
 
 	// owner, repo
 	if ctx.Owner, ctx.Repo, err = promptRepoSlug(ctx.Owner, ctx.Repo); err != nil {
@@ -49,6 +52,11 @@ func CreatePull(ctx *context.TeaContext) (err error) {
 		return err
 	}
 
+	promptC := &survey.Confirm{Message: "Allow Maintainers to push to the base branch", Default: true}
+	if err := survey.AskOne(promptC, &allowMaintainerEdits); err != nil {
+		return err
+	}
+
 	head = task.GetHeadSpec(headOwner, headBranch, ctx.Owner)
 
 	opts := gitea.CreateIssueOption{Title: task.GetDefaultPRTitle(head)}
@@ -60,5 +68,6 @@ func CreatePull(ctx *context.TeaContext) (err error) {
 		ctx,
 		base,
 		head,
+		allowMaintainerEdits,
 		&opts)
 }
