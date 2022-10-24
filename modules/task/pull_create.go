@@ -99,11 +99,12 @@ func GetDefaultPRBase(login *config.Login, owner, repo string) (string, error) {
 // that has a branch with the same name, and extracts the owner from its URL.
 // If no remote matches, owner is empty, meaning same as head repo owner.
 func GetDefaultPRHead(localRepo *local_git.TeaRepo) (owner, branch string, err error) {
-	if branch, err = localRepo.TeaGetCurrentBranchName(); err != nil {
+	var sha string
+	if branch, sha, err = localRepo.TeaGetCurrentBranchNameAndSHA(); err != nil {
 		return
 	}
 
-	remote, err := localRepo.TeaFindBranchRemote(branch, "")
+	remote, err := localRepo.TeaFindBranchRemote(branch, sha)
 	if err != nil {
 		err = fmt.Errorf("could not determine remote for current branch: %s", err)
 		return
