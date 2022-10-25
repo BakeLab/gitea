@@ -28,6 +28,7 @@ var CmdIssues = cli.Command{
 	Subcommands: []*cli.Command{
 		&issues.CmdIssuesList,
 		&issues.CmdIssuesCreate,
+		&issues.CmdIssuesEdit,
 		&issues.CmdIssuesReopen,
 		&issues.CmdIssuesClose,
 	},

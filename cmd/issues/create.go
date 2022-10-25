@@ -21,7 +21,7 @@ var CmdIssuesCreate = cli.Command{
 	Description: `Create an issue on repository`,
 	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runIssuesCreate,
-	Flags:       flags.IssuePREditFlags,
+	Flags:       flags.IssuePRCreateFlags,
 }
 
 func runIssuesCreate(cmd *cli.Context) error {
@@ -32,7 +32,7 @@ func runIssuesCreate(cmd *cli.Context) error {
 		return interact.CreateIssue(ctx.Login, ctx.Owner, ctx.Repo)
 	}
 
-	opts, err := flags.GetIssuePREditFlags(ctx)
+	opts, err := flags.GetIssuePRCreateFlags(ctx)
 	if err != nil {
 		return err
 	}

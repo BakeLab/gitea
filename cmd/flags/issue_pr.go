@@ -7,6 +7,7 @@ package flags
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/context"
@@ -84,8 +85,8 @@ var IssueListingFlags = append([]cli.Flag{
 	&PaginationLimitFlag,
 }, AllDefaultFlags...)
 
-// IssuePREditFlags defines flags for properties of issues and PRs
-var IssuePREditFlags = append([]cli.Flag{
+// issuePRFlags defines shared flags between flags IssuePRCreateFlags and IssuePREditFlags
+var issuePRFlags = append([]cli.Flag{
 	&cli.StringFlag{
 		Name:    "title",
 		Aliases: []string{"t"},
@@ -94,6 +95,25 @@ var IssuePREditFlags = append([]cli.Flag{
 		Name:    "description",
 		Aliases: []string{"d"},
 	},
+	&cli.StringFlag{
+		Name:    "referenced-version",
+		Aliases: []string{"v"},
+		Usage:   "commit-hash or tag name to assign",
+	},
+	&cli.StringFlag{
+		Name:    "milestone",
+		Aliases: []string{"m"},
+		Usage:   "Milestone to assign",
+	},
+	&cli.StringFlag{
+		Name:    "deadline",
+		Aliases: []string{"D"},
+		Usage:   "Deadline timestamp to assign",
+	},
+}, LoginRepoFlags...)
+
+// IssuePRCreateFlags defines flags for creation of issues and PRs
+var IssuePRCreateFlags = append([]cli.Flag{
 	&cli.StringFlag{
 		Name:    "assignees",
 		Aliases: []string{"a"},
@@ -104,20 +124,10 @@ var IssuePREditFlags = append([]cli.Flag{
 		Aliases: []string{"L"},
 		Usage:   "Comma-separated list of labels to assign",
 	},
-	&cli.StringFlag{
-		Name:    "deadline",
-		Aliases: []string{"D"},
-		Usage:   "Deadline timestamp to assign",
-	},
-	&cli.StringFlag{
-		Name:    "milestone",
-		Aliases: []string{"m"},
-		Usage:   "Milestone to assign",
-	},
-}, LoginRepoFlags...)
+}, issuePRFlags...)
 
-// GetIssuePREditFlags parses all IssuePREditFlags
-func GetIssuePREditFlags(ctx *context.TeaContext) (*gitea.CreateIssueOption, error) {
+// GetIssuePRCreateFlags parses all IssuePREditFlags
+func GetIssuePRCreateFlags(ctx *context.TeaContext) (*gitea.CreateIssueOption, error) {
 	opts := gitea.CreateIssueOption{
 		Title:     ctx.String("title"),
 		Body:      ctx.String("description"),
@@ -157,5 +167,69 @@ func GetIssuePREditFlags(ctx *context.TeaContext) (*gitea.CreateIssueOption, err
 		opts.Milestone = ms.ID
 	}
 
+	return &opts, nil
+}
+
+// IssuePREditFlags defines flags for editing properties of issues and PRs
+var IssuePREditFlags = append([]cli.Flag{
+	&cli.StringFlag{
+		Name:    "add-assignees",
+		Aliases: []string{"a"},
+		Usage:   "Comma-separated list of usernames to assign",
+	},
+	&cli.StringFlag{
+		Name:    "add-labels",
+		Aliases: []string{"L"},
+		Usage:   "Comma-separated list of labels to assign. Takes precedence over --remove-labels",
+	},
+	&cli.StringFlag{
+		Name:  "remove-labels",
+		Usage: "Comma-separated list of labels to remove",
+	},
+}, issuePRFlags...)
+
+// GetIssuePREditFlags parses all IssuePREditFlags
+func GetIssuePREditFlags(ctx *context.TeaContext) (*task.EditIssueOption, error) {
+	opts := task.EditIssueOption{}
+	if ctx.IsSet("title") {
+		val := ctx.String("title")
+		opts.Title = &val
+	}
+	if ctx.IsSet("description") {
+		val := ctx.String("description")
+		opts.Body = &val
+	}
+	if ctx.IsSet("referenced-version") {
+		val := ctx.String("referenced-version")
+		opts.Ref = &val
+	}
+	if ctx.IsSet("milestone") {
+		val := ctx.String("milestone")
+		opts.Milestone = &val
+	}
+	if ctx.IsSet("deadline") {
+		date := ctx.String("deadline")
+		if date == "" {
+			opts.Deadline = &time.Time{}
+		} else {
+			t, err := dateparse.ParseAny(date)
+			if err != nil {
+				return nil, err
+			}
+			opts.Deadline = &t
+		}
+	}
+	if ctx.IsSet("add-assignees") {
+		val := ctx.String("add-assignees")
+		opts.AddAssignees = strings.Split(val, ",")
+	}
+	if ctx.IsSet("add-labels") {
+		val := ctx.String("add-labels")
+		opts.AddLabels = strings.Split(val, ",")
+	}
+	if ctx.IsSet("remove-labels") {
+		val := ctx.String("remove-labels")
+		opts.RemoveLabels = strings.Split(val, ",")
+	}
 	return &opts, nil
 }

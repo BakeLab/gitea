@@ -36,7 +36,7 @@ var CmdPullsCreate = cli.Command{
 			Usage:   "Enable maintainers to push to the base branch of created pull",
 			Value:   true,
 		},
-	}, flags.IssuePREditFlags...),
+	}, flags.IssuePRCreateFlags...),
 }
 
 func runPullsCreate(cmd *cli.Context) error {
@@ -48,7 +48,7 @@ func runPullsCreate(cmd *cli.Context) error {
 	}
 
 	// else use args to create PR
-	opts, err := flags.GetIssuePREditFlags(ctx)
+	opts, err := flags.GetIssuePRCreateFlags(ctx)
 	if err != nil {
 		return err
 	}
