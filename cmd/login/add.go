@@ -30,6 +30,11 @@ var CmdLoginAdd = cli.Command{
 			EnvVars: []string{"GITEA_SERVER_URL"},
 			Usage:   "Server URL",
 		},
+		&cli.BoolFlag{
+			Name:    "no-version-check",
+			Aliases: []string{"nv"},
+			Usage:   "Do not check version of Gitea instance",
+		},
 		&cli.StringFlag{
 			Name:    "token",
 			Aliases: []string{"t"},
@@ -96,5 +101,6 @@ func runLoginAdd(ctx *cli.Context) error {
 		ctx.String("ssh-agent-principal"),
 		ctx.String("ssh-agent-key"),
 		ctx.Bool("insecure"),
-		sshAgent)
+		sshAgent,
+		!ctx.Bool("no-version-check"))
 }

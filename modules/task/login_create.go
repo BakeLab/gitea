@@ -16,7 +16,7 @@ import (
 )
 
 // CreateLogin create a login to be stored in config
-func CreateLogin(name, token, user, passwd, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string, insecure, sshAgent bool) error {
+func CreateLogin(name, token, user, passwd, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string, insecure, sshAgent, versionCheck bool) error {
 	// checks ...
 	// ... if we have a url
 	if len(giteaURL) == 0 {
@@ -65,6 +65,7 @@ func CreateLogin(name, token, user, passwd, sshKey, giteaURL, sshCertPrincipal, 
 		SSHKeyFingerprint: sshKeyFingerprint,
 		SSHAgent:          sshAgent,
 		Created:           time.Now().Unix(),
+		VersionCheck:      versionCheck,
 	}
 
 	if len(token) == 0 && sshCertPrincipal == "" && !sshAgent && sshKey == "" {

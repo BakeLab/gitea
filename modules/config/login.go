@@ -33,6 +33,7 @@ type Login struct {
 	SSHAgent          bool   `yaml:"ssh_agent"`
 	SSHKeyFingerprint string `yaml:"ssh_key_agent_pub"`
 	SSHPassphrase     string `yaml:"-"`
+	VersionCheck      bool   `yaml:"version_check"`
 	// User is username from gitea
 	User string `yaml:"user"`
 	// Created is auto created unix timestamp
@@ -180,6 +181,11 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			},
 		}
+	}
+
+	// versioncheck must be prepended in options to make sure we don't hit any version checks in the sdk
+	if !l.VersionCheck {
+		options = append([]gitea.ClientOption{gitea.SetGiteaVersion("")}, options...)
 	}
 
 	options = append(options, gitea.SetToken(l.Token), gitea.SetHTTPClient(httpClient))

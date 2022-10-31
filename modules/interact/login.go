@@ -16,9 +16,12 @@ import (
 
 // CreateLogin create an login interactive
 func CreateLogin() error {
-	var name, token, user, passwd, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string
-	var insecure = false
-	var sshAgent = false
+	var (
+		name, token, user, passwd, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string
+		insecure, sshAgent, versionCheck                                                 bool
+	)
+
+	versionCheck = true
 
 	promptI := &survey.Input{Message: "URL of Gitea instance: "}
 	if err := survey.AskOne(promptI, &giteaURL, survey.WithValidator(survey.Required)); err != nil {
@@ -128,7 +131,16 @@ func CreateLogin() error {
 		if err = survey.AskOne(promptYN, &insecure); err != nil {
 			return err
 		}
+
+		promptYN = &survey.Confirm{
+			Message: "Check version of Gitea instance: ",
+			Default: true,
+		}
+		if err = survey.AskOne(promptYN, &versionCheck); err != nil {
+			return err
+		}
+
 	}
 
-	return task.CreateLogin(name, token, user, passwd, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint, insecure, sshAgent)
+	return task.CreateLogin(name, token, user, passwd, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint, insecure, sshAgent, versionCheck)
 }
