@@ -7,7 +7,7 @@ SHASUM ?= shasum -a 256
 
 export PATH := $($(GO) env GOPATH)/bin:$(PATH)
 
-GOFILES := $(shell find . -name "*.go" -type f ! -path "./vendor/*" ! -path "*/bindata.go")
+GOFILES := $(shell find . -name "*.go" -type f ! -path "*/bindata.go")
 GOFMT ?= gofmt -s
 
 ifneq ($(DRONE_TAG),)
@@ -28,9 +28,9 @@ SDK ?= $(shell $(GO) list -f '{{.Version}}' -m code.gitea.io/sdk/gitea)
 LDFLAGS := -X "main.Version=$(TEA_VERSION)" -X "main.Tags=$(TAGS)" -X "main.SDK=$(SDK)" -s -w
 
 # override to allow passing additional goflags via make CLI
-override GOFLAGS := $(GOFLAGS) -mod=vendor -tags '$(TAGS)' -ldflags '$(LDFLAGS)'
+override GOFLAGS := $(GOFLAGS) -tags '$(TAGS)' -ldflags '$(LDFLAGS)'
 
-PACKAGES ?= $(shell $(GO) list ./... | grep -v /vendor/)
+PACKAGES ?= $(shell $(GO) list ./...)
 SOURCES ?= $(shell find . -name "*.go" -type f)
 
 # OS specific vars.
@@ -48,7 +48,7 @@ all: build
 
 .PHONY: clean
 clean:
-	$(GO) clean -mod=vendor -i ./...
+	$(GO) clean -i ./...
 	rm -rf $(EXECUTABLE) $(DIST)
 
 .PHONY: fmt
@@ -58,14 +58,14 @@ fmt:
 .PHONY: vet
 vet:
 	# Default vet
-	$(GO) vet -mod=vendor $(PACKAGES)
+	$(GO) vet $(PACKAGES)
 	# Custom vet
-	$(GO) build -mod=vendor code.gitea.io/gitea-vet
+	$(GO) build code.gitea.io/gitea-vet
 	$(GO) vet -vettool=gitea-vet $(PACKAGES)
 
 .PHONY: lint
 lint: install-lint-tools
-	revive -config .revive.toml -exclude=./vendor/... ./... || exit 1
+	revive -config .revive.toml ./... || exit 1
 
 .PHONY: misspell-check
 misspell-check: install-lint-tools
@@ -87,15 +87,15 @@ fmt-check:
 
 .PHONY: test
 test:
-	$(GO) test -mod=vendor -tags='sqlite sqlite_unlock_notify' $(PACKAGES)
+	$(GO) test -tags='sqlite sqlite_unlock_notify' $(PACKAGES)
 
 .PHONY: unit-test-coverage
 unit-test-coverage:
-	$(GO) test -mod=vendor -tags='sqlite sqlite_unlock_notify' -cover -coverprofile coverage.out $(PACKAGES) && echo "\n==>\033[32m Ok\033[m\n" || exit 1
+	$(GO) test -tags='sqlite sqlite_unlock_notify' -cover -coverprofile coverage.out $(PACKAGES) && echo "\n==>\033[32m Ok\033[m\n" || exit 1
 
-.PHONY: vendor
-vendor:
-	$(GO) mod tidy && $(GO) mod vendor
+.PHONY: tidy
+tidy:
+	$(GO) mod tidy
 
 .PHONY: check
 check: test
