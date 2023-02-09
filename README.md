@@ -117,7 +117,6 @@ Fork -> Patch -> Push -> Pull Request
 
 - `make test` run testsuite
 - `make vet`  run checks (check the order of imports; preventing failure on CI pipeline beforehand)
-- `make vendor` when adding new dependencies
 - ... (for other development tasks, check the `Makefile`)
 
 **Please** read the [CONTRIBUTING](CONTRIBUTING.md) documentation, it will tell you about internal structures and concepts.
