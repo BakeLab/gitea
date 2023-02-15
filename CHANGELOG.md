@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.9.1](https://gitea.com/gitea/tea/releases/tag/v0.9.1) - 2023-02-15
+
+* BUGFIXES
+  * Print pull dont crash if it has TeamReviewRequests (#517)
+
 ## [v0.9.0](https://gitea.com/gitea/tea/releases/tag/v0.9.0) - 2022-09-13
 
 * BREAKING
