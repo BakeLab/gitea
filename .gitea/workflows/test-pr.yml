@@ -1,0 +1,31 @@
+name: check-and-test
+
+on: 
+  - push
+  - pull_request
+
+jobs:
+  check-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: setup go
+        uses: https://github.com/actions/setup-go@v4
+        with:
+          go-version: '>=1.20.1'
+      - name: lint and build
+        run: |
+          make clean
+          make vet
+          make lint
+          make fmt-check
+          make misspell-check
+          make build
+        env:
+          GOPROXY: https://goproxy.io,direct
+      - name: test and coverage
+        run: |
+          make test
+          make unit-test-coverage
+        env:
+          GOPROXY: https://goproxy.io,direct
