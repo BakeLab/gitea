@@ -1,6 +1,9 @@
 name: goreleaser
 
-on: [tags]
+on: 
+  push:
+    tags:
+      - '*'
 
 jobs:
   goreleaser:
@@ -20,6 +23,7 @@ jobs:
         with:
           gpg_private_key: ${{ secrets.GPGSIGN_KEY }}
           passphrase: ${{ secrets.GPGSIGN_PASSPHRASE }}
+          fingerprint: CC64B1DB67ABBEECAB24B6455FC346329753F4B0
       - name: goreleaser
         uses: https://github.com/goreleaser/goreleaser-action@v4
         with:
@@ -33,7 +37,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           S3_REGION: ${{ secrets.AWS_REGION }}
           S3_BUCKET: ${{ secrets.AWS_BUCKET }}
+          GORELEASER_FORCE_TOKEN: 'gitea'
           GPGSIGN_PASSPHRASE: ${{ secrets.GPGSIGN_PASSPHRASE }}
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
           GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          GITHUB_TOKEN:
