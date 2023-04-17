@@ -102,7 +102,7 @@ check: test
 
 .PHONY: install
 install: $(SOURCES)
-	@echo "installing to $(GOPATH)/bin/$(EXECUTABLE)"
+	@echo "installing to $(shell $(GO) env GOPATH)/bin/$(EXECUTABLE)"
 	$(GO) install -v $(BUILDMODE) $(GOFLAGS) 
 
 .PHONY: build
