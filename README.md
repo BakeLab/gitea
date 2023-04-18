@@ -105,6 +105,11 @@ Make sure you have a current go version installed (1.13 or newer).
   make
   ```
   Note that GNU Make (gmake on OpenBSD) is required.
+  If you want to install the compiled program you have to execute the following command:
+  ```sh
+  make install
+  ```
+  This installs the binary into the "bin" folder inside of your GOPATH folder (`go env GOPATH`). It is possible that this folder isn't in your PATH Environment Variable. 
 
 - For a quick installation without `git` & `make`, set $version and exec:
   ```sh
