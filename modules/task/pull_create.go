@@ -6,6 +6,7 @@ package task
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
@@ -14,6 +15,12 @@ import (
 	local_git "code.gitea.io/tea/modules/git"
 	"code.gitea.io/tea/modules/print"
 	"code.gitea.io/tea/modules/utils"
+)
+
+var (
+	spaceRegex  = regexp.MustCompile(`[\s_-]+`)
+	noSpace     = regexp.MustCompile(`^[^a-zA-Z\s]*`)
+	consecutive = regexp.MustCompile(`[\s]{2,}`)
 )
 
 // CreatePull creates a PR in the given repo and prints the result
@@ -65,7 +72,6 @@ func CreatePull(ctx *context.TeaContext, base, head string, allowMaintainerEdits
 		Milestone: opts.Milestone,
 		Deadline:  opts.Deadline,
 	})
-
 	if err != nil {
 		return fmt.Errorf("could not create PR from %s to %s:%s: %s", head, ctx.Owner, base, err)
 	}
@@ -133,13 +139,18 @@ func GetHeadSpec(owner, branch, baseOwner string) string {
 }
 
 // GetDefaultPRTitle transforms a string like a branchname to a readable text
-func GetDefaultPRTitle(head string) string {
-	title := head
-	if strings.Contains(title, ":") {
-		title = strings.SplitN(title, ":", 2)[1]
+func GetDefaultPRTitle(header string) string {
+	// Extract the part after the last colon in the input string
+	colonIndex := strings.LastIndex(header, ":")
+	if colonIndex != -1 {
+		header = header[colonIndex+1:]
 	}
-	title = strings.Replace(title, "-", " ", -1)
-	title = strings.Replace(title, "_", " ", -1)
+
+	title := noSpace.ReplaceAllString(header, "")
+	title = spaceRegex.ReplaceAllString(title, " ")
+	title = strings.TrimSpace(title)
 	title = strings.Title(strings.ToLower(title))
+	title = consecutive.ReplaceAllString(title, " ")
+
 	return title
 }
