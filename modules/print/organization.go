@@ -12,7 +12,7 @@ import (
 
 // OrganizationDetails prints details of an org with formatting
 func OrganizationDetails(org *gitea.Organization) {
-	outputMarkdown(fmt.Sprintf(
+	_ = outputMarkdown(fmt.Sprintf(
 		"# %s\n%s\n\n- Visibility: %s\n- Location: %s\n- Website: %s\n",
 		org.UserName,
 		org.Description,

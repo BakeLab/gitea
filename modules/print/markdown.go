@@ -9,7 +9,7 @@ import (
 	"os"
 
 	"github.com/charmbracelet/glamour"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 )
 
 // outputMarkdown prints markdown to stdout, formatted for terminals.
@@ -47,8 +47,8 @@ func outputMarkdown(markdown string, baseURL string) error {
 func getWordWrap() int {
 	fd := int(os.Stdout.Fd())
 	width := 80
-	if terminal.IsTerminal(fd) {
-		if w, _, err := terminal.GetSize(fd); err == nil {
+	if term.IsTerminal(fd) {
+		if w, _, err := term.GetSize(fd); err == nil {
 			width = w
 		}
 	}

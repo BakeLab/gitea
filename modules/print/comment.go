@@ -18,12 +18,12 @@ func Comments(comments []*gitea.Comment) {
 		baseURL = getRepoURL(comments[0].HTMLURL)
 	}
 
-	var out = make([]string, len(comments))
+	out := make([]string, len(comments))
 	for i, c := range comments {
 		out[i] = formatComment(c)
 	}
 
-	outputMarkdown(fmt.Sprintf(
+	_ = outputMarkdown(fmt.Sprintf(
 		// this will become a heading by means of the first --- from a comment
 		"Comments\n%s",
 		strings.Join(out, "\n"),
@@ -32,7 +32,7 @@ func Comments(comments []*gitea.Comment) {
 
 // Comment renders a comment to stdout
 func Comment(c *gitea.Comment) {
-	outputMarkdown(formatComment(c), getRepoURL(c.HTMLURL))
+	_ = outputMarkdown(formatComment(c), getRepoURL(c.HTMLURL))
 }
 
 func formatComment(c *gitea.Comment) string {

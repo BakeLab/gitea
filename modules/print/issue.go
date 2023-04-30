@@ -28,7 +28,7 @@ func IssueDetails(issue *gitea.Issue, reactions []*gitea.Reaction) {
 		out += fmt.Sprintf("\n---\n\n%s\n", formatReactions(reactions))
 	}
 
-	outputMarkdown(out, getRepoURL(issue.HTMLURL))
+	_ = outputMarkdown(out, getRepoURL(issue.HTMLURL))
 }
 
 func formatReactions(reactions []*gitea.Reaction) string {
@@ -74,7 +74,7 @@ var IssueFields = []string{
 
 func printIssues(issues []*gitea.Issue, output string, fields []string) {
 	labelMap := map[int64]string{}
-	var printables = make([]printable, len(issues))
+	printables := make([]printable, len(issues))
 	machineReadable := isMachineReadable(output)
 
 	for i, x := range issues {
@@ -133,13 +133,13 @@ func (x printableIssue) FormatField(field string, machineReadable bool) string {
 		}
 		return ""
 	case "labels":
-		var labels = make([]string, len(x.Labels))
+		labels := make([]string, len(x.Labels))
 		for i, l := range x.Labels {
 			labels[i] = (*x.formattedLabels)[l.ID]
 		}
 		return strings.Join(labels, " ")
 	case "assignees":
-		var assignees = make([]string, len(x.Assignees))
+		assignees := make([]string, len(x.Assignees))
 		for i, a := range x.Assignees {
 			assignees[i] = formatUserName(a)
 		}

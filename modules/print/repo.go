@@ -14,7 +14,7 @@ import (
 
 // ReposList prints a listing of the repos
 func ReposList(repos []*gitea.Repository, output string, fields []string) {
-	var printables = make([]printable, len(repos))
+	printables := make([]printable, len(repos))
 	for i, r := range repos {
 		printables[i] = &printableRepo{r}
 	}
@@ -56,7 +56,7 @@ func RepoDetails(repo *gitea.Repository, topics []string) {
 	updated := fmt.Sprintf(
 		"Updated: %s (%s ago)\n",
 		repo.Updated.Format("2006-01-02 15:04"),
-		time.Now().Sub(repo.Updated).Truncate(time.Minute),
+		time.Since(repo.Updated).Truncate(time.Minute),
 	)
 
 	urls := fmt.Sprintf(

@@ -91,15 +91,3 @@ func parseKeys(pkinput []byte, sshPath string) string {
 
 	return ssh.FingerprintSHA256(pkey) + " " + pkey.Type() + " " + comment + " (" + sshPath + ")"
 }
-
-func getCertPrincipals(pkey ssh.PublicKey) []string {
-	var principals []string
-
-	if cert, ok := pkey.(*ssh.Certificate); ok {
-		for _, principal := range cert.ValidPrincipals {
-			principals = append(principals, principal)
-		}
-	}
-
-	return principals
-}

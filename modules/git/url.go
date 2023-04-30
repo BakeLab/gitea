@@ -10,13 +10,10 @@ import (
 	"strings"
 )
 
-var (
-	protocolRe = regexp.MustCompile("^[a-zA-Z_+-]+://")
-)
+var protocolRe = regexp.MustCompile("^[a-zA-Z_+-]+://")
 
 // URLParser represents a git URL parser
-type URLParser struct {
-}
+type URLParser struct{}
 
 // Parse parses the git URL
 func (p *URLParser) Parse(rawURL string) (u *url.URL, err error) {
@@ -50,9 +47,7 @@ func (p *URLParser) Parse(rawURL string) (u *url.URL, err error) {
 	}
 
 	// .git suffix is optional and breaks normalization
-	if strings.HasSuffix(u.Path, ".git") {
-		u.Path = strings.TrimSuffix(u.Path, ".git")
-	}
+	u.Path = strings.TrimSuffix(u.Path, ".git")
 
 	return
 }

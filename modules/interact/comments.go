@@ -13,7 +13,7 @@ import (
 	"code.gitea.io/tea/modules/print"
 
 	"github.com/AlecAivazis/survey/v2"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 )
 
 // ShowCommentsMaybeInteractive fetches & prints comments, depending on the --comments flag.
@@ -72,5 +72,5 @@ func ShowCommentsPaginated(ctx *context.TeaContext, idx int64, totalComments int
 
 // IsStdinPiped checks if stdin is piped
 func IsStdinPiped() bool {
-	return !terminal.IsTerminal(int(os.Stdin.Fd()))
+	return !term.IsTerminal(int(os.Stdin.Fd()))
 }

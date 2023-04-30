@@ -66,7 +66,6 @@ func (t *table) sort(column uint, desc bool) {
 func (t table) Len() int      { return len(t.values) }
 func (t table) Swap(i, j int) { t.values[i], t.values[j] = t.values[j], t.values[i] }
 func (t table) Less(i, j int) bool {
-	const column = 0
 	if t.sortDesc {
 		i, j = j, i
 	}

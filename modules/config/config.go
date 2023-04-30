@@ -74,7 +74,7 @@ func GetConfigPath() string {
 
 // GetPreferences returns preferences based on the config file
 func GetPreferences() Preferences {
-	loadConfig()
+	_ = loadConfig()
 	return config.Prefs
 }
 
@@ -105,5 +105,5 @@ func saveConfig() error {
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(ymlPath, bs, 0660)
+	return ioutil.WriteFile(ymlPath, bs, 0o660)
 }

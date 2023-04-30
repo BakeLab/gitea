@@ -26,7 +26,6 @@ func RepoClone(
 	callback func(string) (string, error),
 	depth int,
 ) (*local_git.TeaRepo, error) {
-
 	repoMeta, _, err := login.Client().GetRepo(repoOwner, repoName)
 	if err != nil {
 		return nil, err
@@ -64,10 +63,14 @@ func RepoClone(
 			return nil, err
 		}
 		upstreamBranch := repoMeta.Parent.DefaultBranch
-		repo.CreateRemote(&git_config.RemoteConfig{
+		_, err = repo.CreateRemote(&git_config.RemoteConfig{
 			Name: "upstream",
 			URLs: []string{upstreamURL.String()},
 		})
+		if err != nil {
+			return nil, err
+		}
+
 		repoConf, err := repo.Config()
 		if err != nil {
 			return nil, err

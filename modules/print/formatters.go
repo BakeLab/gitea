@@ -12,12 +12,12 @@ import (
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/muesli/termenv"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 )
 
 // IsInteractive checks if the output is piped, but NOT if the session is run interactively..
 func IsInteractive() bool {
-	return terminal.IsTerminal(int(os.Stdout.Fd()))
+	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 // captures the repo URL part <host>/<owner>/<repo> of an url

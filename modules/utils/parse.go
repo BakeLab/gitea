@@ -24,10 +24,7 @@ func ArgsToIndices(args []string) ([]int64, error) {
 
 // ArgToIndex take issue/pull index as string and return int64
 func ArgToIndex(arg string) (int64, error) {
-	if strings.HasPrefix(arg, "#") {
-		arg = arg[1:]
-	}
-	return strconv.ParseInt(arg, 10, 64)
+	return strconv.ParseInt(strings.TrimPrefix(arg, "#"), 10, 64)
 }
 
 // NormalizeURL normalizes the input with a protocol
