@@ -72,6 +72,10 @@ var IssueListingFlags = append([]cli.Flag{
 		Aliases: []string{"M"},
 	},
 	&cli.StringFlag{
+		Name:    "owner",
+		Aliases: []string{"org"},
+	},
+	&cli.StringFlag{
 		Name:    "from",
 		Aliases: []string{"F"},
 		Usage:   "Filter by activity after this date",

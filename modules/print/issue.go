@@ -70,6 +70,8 @@ var IssueFields = []string{
 	"milestone",
 	"labels",
 	"comments",
+	"owner",
+	"repo",
 }
 
 func printIssues(issues []*gitea.Issue, output string, fields []string) {
@@ -146,6 +148,10 @@ func (x printableIssue) FormatField(field string, machineReadable bool) string {
 		return strings.Join(assignees, " ")
 	case "comments":
 		return fmt.Sprintf("%d", x.Comments)
+	case "owner":
+		return x.Repository.Owner
+	case "repo":
+		return x.Repository.Name
 	}
 	return ""
 }
