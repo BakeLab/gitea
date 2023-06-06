@@ -228,5 +228,5 @@ func (l *Login) GetSSHHost() string {
 		return ""
 	}
 
-	return u.Hostname()
+	return u.Host
 }

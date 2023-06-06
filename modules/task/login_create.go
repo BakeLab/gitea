@@ -90,8 +90,8 @@ func CreateLogin(name, token, user, passwd, sshKey, giteaURL, sshCertPrincipal, 
 	}
 
 	// we do not have a method to get SSH config from api,
-	// so we just use the hostname
-	login.SSHHost = serverURL.Hostname()
+	// so we just use the host
+	login.SSHHost = serverURL.Host
 
 	if len(sshKey) == 0 {
 		login.SSHKey, err = findSSHKey(client)
