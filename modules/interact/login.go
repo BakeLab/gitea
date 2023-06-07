@@ -49,7 +49,7 @@ func CreateLogin() error {
 	}
 
 	switch loginMethod {
-	case "token":
+	default: // token
 		var hasToken bool
 		promptYN := &survey.Confirm{
 			Message: "Do you have an access token?",
