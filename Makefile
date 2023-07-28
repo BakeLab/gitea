@@ -36,8 +36,10 @@ SOURCES ?= $(shell find . -name "*.go" -type f)
 # OS specific vars.
 ifeq ($(OS), Windows_NT)
 	EXECUTABLE := tea.exe
+	VET_TOOL := gitea-vet.exe
 else
 	EXECUTABLE := tea
+	VET_TOOL := gitea-vet
 	ifneq ($(shell uname -s), OpenBSD)
 		override BUILDMODE := -buildmode=pie
 	endif
@@ -61,7 +63,7 @@ vet:
 	$(GO) vet $(PACKAGES)
 	# Custom vet
 	$(GO) build code.gitea.io/gitea-vet
-	$(GO) vet -vettool=gitea-vet $(PACKAGES)
+	$(GO) vet -vettool=$(VET_TOOL) $(PACKAGES)
 
 .PHONY: lint
 lint: install-lint-tools
@@ -120,7 +122,7 @@ release: release-dirs install-release-tools release-os release-compress release-
 
 .PHONY: release-dirs
 release-dirs:
-	mkdir -p $(DIST)/binaries $(DIST)/release
+	mkdir -p $(DIST)/release
 
 .PHONY: release-os
 release-os:
