@@ -8,7 +8,7 @@ labels:
 
 ### describe your environment
 - tea version used (`tea -v`):
-    - [ ] I also reproduced the issue [with the latest master build](https://dl.gitea.io/tea/master)
+    - [ ] I also reproduced the issue [with the latest master build](https://dl.gitea.com/tea/main/)
 - Gitea version used:
     - [ ] the issue only occurred after updating gitea recently
 - operating system:
