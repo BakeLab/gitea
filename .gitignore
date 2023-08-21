@@ -1,5 +1,6 @@
 tea
-/gitea-vet[.exe]
+/gitea-vet
+/gitea-vet.exe
 
 .idea/
 .history/
