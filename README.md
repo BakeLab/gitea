@@ -94,6 +94,8 @@ There are different ways to get `tea`:
 
 4. Docker (thirdparty): [tgerczei/tea](https://hub.docker.com/r/tgerczei/tea)
 
+5. asdf (thirdparty): [mvaldes14/asdf-tea](https://github.com/mvaldes14/asdf-tea)
+
 ## Compilation
 
 Make sure you have a current go version installed (1.13 or newer).
