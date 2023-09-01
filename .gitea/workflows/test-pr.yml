@@ -20,6 +20,7 @@ jobs:
           make lint
           make fmt-check
           make misspell-check
+          make docs-check
           make build
         env:
           GOPROXY: https://goproxy.io,direct
