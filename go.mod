@@ -3,7 +3,7 @@ module code.gitea.io/tea
 go 1.18
 
 require (
-	code.gitea.io/gitea-vet v0.2.1
+	code.gitea.io/gitea-vet v0.2.2
 	code.gitea.io/sdk/gitea v0.15.1-0.20230402213053-7511c6d3cd04
 	gitea.com/noerw/unidiff-comments v0.0.0-20220822113322-50f4daa0e35c
 	github.com/AlecAivazis/survey/v2 v2.3.6
