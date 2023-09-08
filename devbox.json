@@ -1,0 +1,15 @@
+{
+  "packages": [
+    "go@1.20",
+    "gopls@latest",
+    "gnumake@latest"
+  ],
+  "shell": {
+    "init_hook": [
+      "echo 'Welcome to tea. Check out the Makefile for runnable targets.'"
+    ],
+    "scripts": {
+      "build": "make"
+    } 
+  }
+}
