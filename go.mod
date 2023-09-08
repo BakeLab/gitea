@@ -6,7 +6,7 @@ require (
 	code.gitea.io/gitea-vet v0.2.2
 	code.gitea.io/sdk/gitea v0.15.1-0.20230402213053-7511c6d3cd04
 	gitea.com/noerw/unidiff-comments v0.0.0-20220822113322-50f4daa0e35c
-	github.com/AlecAivazis/survey/v2 v2.3.6
+	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/adrg/xdg v0.4.0
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/charmbracelet/glamour v0.6.0
