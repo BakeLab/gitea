@@ -1,6 +1,5 @@
 // Copyright 2020 The Gitea Authors. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file.
+// SPDX-License-Identifier: MIT
 
 // Tea is command line tool for Gitea.
 package main // import "code.gitea.io/tea"
@@ -133,7 +132,7 @@ var helpTemplate = bold(`
  ABOUT
    Written & maintained by The Gitea Authors.
    If you find a bug or want to contribute, we'll welcome you at https://gitea.com/gitea/tea.
-   More info about Gitea itself on https://gitea.io.
+   More info about Gitea itself on https://about.gitea.com.
 `
 
 func bold(t string) string {

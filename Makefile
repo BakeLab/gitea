@@ -67,7 +67,7 @@ vet:
 
 .PHONY: lint
 lint: install-lint-tools
-	$(GO) run github.com/mgechev/revive@latest -config .revive.toml ./... || exit 1
+	$(GO) run github.com/mgechev/revive@v1.3.2 -config .revive.toml ./... || exit 1
 
 .PHONY: misspell-check
 misspell-check: install-lint-tools
@@ -160,7 +160,7 @@ install-release-tools:
 
 install-lint-tools:
 	@hash revive > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		$(GO) install github.com/mgechev/revive@latest; \
+		$(GO) install github.com/mgechev/revive@v1.3.2; \
 	fi
 	@hash misspell > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
 		$(GO) install github.com/client9/misspell/cmd/misspell@latest; \

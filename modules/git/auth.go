@@ -1,13 +1,12 @@
 // Copyright 2020 The Gitea Authors. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file.
+// SPDX-License-Identifier: MIT
 
 package git
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/url"
+	"os"
 
 	"code.gitea.io/tea/modules/utils"
 
@@ -53,7 +52,7 @@ func readSSHPrivKey(keyFile string, passwordCallback pwCallback) (sig ssh.Signer
 	if err != nil {
 		return nil, err
 	}
-	sshKey, err := ioutil.ReadFile(keyFile)
+	sshKey, err := os.ReadFile(keyFile)
 	if err != nil {
 		return nil, fmt.Errorf("can not read ssh key '%s'", keyFile)
 	}

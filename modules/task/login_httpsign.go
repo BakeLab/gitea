@@ -1,11 +1,10 @@
 // Copyright 2022 The Gitea Authors. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file.
+// SPDX-License-Identifier: MIT
 
 package task
 
 import (
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -64,7 +63,7 @@ func getLocalKeys() []string {
 	// parse each local key with present privkey & compare fingerprints to online keys
 	for _, pubkeyPath := range localPubkeyPaths {
 		var pubkeyFile []byte
-		pubkeyFile, err = ioutil.ReadFile(pubkeyPath)
+		pubkeyFile, err = os.ReadFile(pubkeyPath)
 		if err != nil {
 			continue
 		}

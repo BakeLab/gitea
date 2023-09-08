@@ -1,12 +1,11 @@
 // Copyright 2020 The Gitea Authors. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file.
+// SPDX-License-Identifier: MIT
 
 package cmd
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"strings"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -50,7 +49,7 @@ func runAddComment(cmd *cli.Context) error {
 	body := strings.Join(ctx.Args().Tail(), " ")
 	if interact.IsStdinPiped() {
 		// custom solution until https://github.com/AlecAivazis/survey/issues/328 is fixed
-		if bodyStdin, err := ioutil.ReadAll(ctx.App.Reader); err != nil {
+		if bodyStdin, err := io.ReadAll(ctx.App.Reader); err != nil {
 			return err
 		} else if len(bodyStdin) != 0 {
 			body = strings.Join([]string{body, string(bodyStdin)}, "\n\n")
