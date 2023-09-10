@@ -119,7 +119,7 @@ List, create and update issues
 
 **--keyword, -k**="": Filter by search string
 
-**--kind, -K**="": Whether to return `issues`, `pulls`, or `all` (you can use this to apply advanced search filters to PRs)
+**--kind, -K**="": Whether to return `issues`, `pulls`, or `all` (you can use this to apply advanced search filters to PRs) (default: issues)
 
 **--labels, -L**="": Comma-separated list of labels to match issues against.
 			
@@ -145,7 +145,7 @@ List, create and update issues
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by state (all|open|closed)
+**--state**="": Filter by state (all|open|closed) (default: open)
 
 **--until, -u**="": Filter by activity before this date
 
@@ -165,7 +165,7 @@ List issues of the repository
 
 **--keyword, -k**="": Filter by search string
 
-**--kind, -K**="": Whether to return `issues`, `pulls`, or `all` (you can use this to apply advanced search filters to PRs)
+**--kind, -K**="": Whether to return `issues`, `pulls`, or `all` (you can use this to apply advanced search filters to PRs) (default: issues)
 
 **--labels, -L**="": Comma-separated list of labels to match issues against.
 			
@@ -191,7 +191,7 @@ List issues of the repository
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by state (all|open|closed)
+**--state**="": Filter by state (all|open|closed) (default: open)
 
 **--until, -u**="": Filter by activity before this date
 
@@ -291,7 +291,7 @@ Manage and checkout pull requests
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by state (all|open|closed)
+**--state**="": Filter by state (all|open|closed) (default: open)
 
 ### list, ls
 
@@ -313,7 +313,7 @@ List pull requests of the repository
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by state (all|open|closed)
+**--state**="": Filter by state (all|open|closed) (default: open)
 
 ### checkout, co
 
@@ -561,7 +561,7 @@ List and create milestones
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by milestone state (all|open|closed)
+**--state**="": Filter by milestone state (all|open|closed) (default: open)
 
 ### list, ls
 
@@ -583,7 +583,7 @@ List milestones of the repository
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by milestone state (all|open|closed)
+**--state**="": Filter by milestone state (all|open|closed) (default: open)
 
 ### create, c
 
@@ -601,7 +601,7 @@ Create an milestone on repository
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": set milestone state (default is open)
+**--state**="": set milestone state (default is open) (default: open)
 
 **--title, -t**="": milestone title to create
 
@@ -665,7 +665,7 @@ manage issue/pull of an milestone
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by issue state (all|open|closed)
+**--state**="": Filter by issue state (all|open|closed) (default: open)
 
 #### add, a
 
@@ -765,7 +765,7 @@ Delete one or more releases
 
 Edit one or more releases
 
-**--draft, -d**="": Mark as Draft [True/false]
+**--draft, -d**="": Mark as Draft [True/false] (default: true)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
@@ -773,7 +773,7 @@ Edit one or more releases
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--prerelease, -p**="": Mark as Pre-Release [True/false]
+**--prerelease, -p**="": Mark as Pre-Release [True/false] (default: true)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
