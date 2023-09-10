@@ -1,6 +1,6 @@
 module code.gitea.io/tea
 
-go 1.18
+go 1.20
 
 require (
 	code.gitea.io/gitea-vet v0.2.3
@@ -19,7 +19,6 @@ require (
 	github.com/urfave/cli/v2 v2.16.3
 	golang.org/x/crypto v0.13.0
 	golang.org/x/term v0.12.0
-	gopkg.in/yaml.v2 v2.2.4
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -29,7 +28,6 @@ require (
 	github.com/ProtonMail/go-crypto v0.0.0-20230717121422-5aa5874ade95 // indirect
 	github.com/acomagu/bufpipe v1.0.4 // indirect
 	github.com/alecthomas/chroma v0.10.0 // indirect
-	github.com/aymanbagabas/go-osc52 v1.0.3 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/cloudflare/circl v1.3.3 // indirect

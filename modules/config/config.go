@@ -13,7 +13,7 @@ import (
 	"code.gitea.io/tea/modules/utils"
 
 	"github.com/adrg/xdg"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // FlagDefaults defines all flags that can be overridden with a default value
