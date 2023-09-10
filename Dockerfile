@@ -1,10 +1,10 @@
-FROM cgr.dev/chainguard/go:latest AS buildenv
+FROM cgr.dev/chainguard/go:latest AS build
 COPY . /build/
 WORKDIR /build
-RUN	make clean build STATIC=true
+RUN	make build
 
 FROM cgr.dev/chainguard/static:latest
-COPY --from=buildenv /build/tea /tea
+COPY --from=build /build/tea /tea
 VOLUME [ "/app" ]
 ENV HOME="/app"
 ENTRYPOINT ["/tea"]

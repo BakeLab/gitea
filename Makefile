@@ -37,9 +37,6 @@ ifeq ($(OS), Windows_NT)
 else
 	EXECUTABLE := tea
 	VET_TOOL := gitea-vet
-	ifneq ($(shell uname -s), OpenBSD)
-		override BUILDMODE := -buildmode=pie
-	endif
 endif
 
 .PHONY: all
