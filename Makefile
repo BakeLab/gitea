@@ -1,7 +1,4 @@
 DIST := dist
-export GO111MODULE=on
-export CGO_ENABLED=0
-
 GO ?= go
 SHASUM ?= shasum -a 256
 
@@ -17,7 +14,7 @@ else
 	ifneq ($(DRONE_BRANCH),)
 		VERSION ?= $(subst release/v,,$(DRONE_BRANCH))
 	else
-		VERSION ?= master
+		VERSION ?= main
 	endif
 	TEA_VERSION ?= $(shell git describe --tags --always | sed 's/-/+/' | sed 's/^v//')
 endif
@@ -129,34 +126,6 @@ $(EXECUTABLE): $(SOURCES)
 .PHONY: build-image
 build-image:
 	docker build --build-arg VERSION=$(TEA_VERSION) -t gitea/tea:$(TEA_VERSION_TAG) .
-
-.PHONY: release
-release: release-dirs install-release-tools release-os release-compress release-check
-
-.PHONY: release-dirs
-release-dirs:
-	mkdir -p $(DIST)/release
-
-.PHONY: release-os
-release-os:
-	CGO_ENABLED=0 $(GO) run github.com/mitchellh/gox@latest -verbose -cgo=false $(GOFLAGS) -osarch='!darwin/386 !darwin/arm' -os="windows linux darwin" -arch="386 amd64 arm arm64" -output="$(DIST)/release/tea-$(VERSION)-{{.OS}}-{{.Arch}}"
-
-.PHONY: release-compress
-release-compress: install-release-tools
-	cd $(DIST)/release/; for file in `find . -type f -name "*"`; do echo "compressing $${file}" && $(GO) run github.com/ulikunitz/xz/cmd/gxz@latest -k -9 $${file}; done;
-
-.PHONY: release-check
-release-check: install-release-tools
-	cd $(DIST)/release/; for file in `find . -type f -name "*"`; do echo "checksumming $${file}" && $(SHASUM) `echo $${file} | sed 's/^..//'` > $${file}.sha256; done;
-
-### tools
-install-release-tools:
-	@hash gox > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		$(GO) install github.com/mitchellh/gox@latest; \
-	fi
-	@hash gxz > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		$(GO) install github.com/ulikunitz/xz/cmd/gxz@latest; \
-	fi
 
 install-lint-tools:
 	@hash revive > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
