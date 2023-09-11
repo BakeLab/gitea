@@ -1071,6 +1071,50 @@ Fork an existing repository
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
+### migrate, m
+
+Migrate a repository
+
+**--auth-password**="": Password to use for authentication.
+
+**--auth-token**="": Token to use for authentication.
+
+**--auth-user**="": Username to use for authentication.
+
+**--clone-url**="": Clone URL of the repository
+
+**--issues**: Copy the issues
+
+**--lfs**: Copy the LFS objects
+
+**--lfs-endpoint**="": LFS endpoint to use
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--milestones**: Copy the milestones
+
+**--mirror**: Mirror the repository
+
+**--mirror-interval**="": Interval to mirror the repository.
+
+**--name**="": Name of the repository
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--owner**="": Owner of the repository
+
+**--private**: Make the repository private
+
+**--pull-requests**: Copy the pull requests
+
+**--releases**: Copy the releases
+
+**--service**="": Service to migrate from. Supported services are: git, gitea, gitlab, gogs
+
+**--template**: Make the repository a template
+
+**--wiki**: Copy the wiki
+
 ## comment, c
 
 Add a comment to an issue / pr
