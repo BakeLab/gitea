@@ -5,7 +5,7 @@
 [![Join the chat at https://img.shields.io/discord/322538954119184384.svg](https://img.shields.io/discord/322538954119184384.svg)](https://discord.gg/Gitea)
 [![Go Report Card](https://goreportcard.com/badge/code.gitea.io/tea)](https://goreportcard.com/report/code.gitea.io/tea) [![GoDoc](https://pkg.go.dev/badge/code.gitea.io/tea?status.svg)](https://godoc.org/code.gitea.io/tea)
 
-### The official CLI for Gitea
+## The official CLI for Gitea
 
 ![demo gif](./demo.gif)
 
@@ -83,15 +83,14 @@
 There are different ways to get `tea`:
 
 1. Install via your system package manager:
-    - macOS via `brew` (gitea-maintained):
+    - macOS via `brew` (official):
       ```sh
-      brew tap gitea/tap https://gitea.com/gitea/homebrew-gitea
       brew install tea
       ```
     - arch linux ([gitea-tea-git](https://aur.archlinux.org/packages/gitea-tea-git), thirdparty)
     - alpine linux ([tea](https://pkgs.alpinelinux.org/packages?name=tea&branch=edge), thirdparty)
 
-2. Use the prebuilt binaries from [dl.gitea.io](https://dl.gitea.io/tea/)
+2. Use the prebuilt binaries from [dl.gitea.com](https://dl.gitea.com/tea/)
 
 3. Install from source: [see *Compilation*](#compilation)
 
