@@ -1,0 +1,51 @@
+name: gitea-tea
+base: core22
+summary: Gitea CLI Tool
+description: A command line tool to interact with Gitea servers
+grade: stable
+confinement: strict
+
+architectures:
+  - build-on: amd64
+  - build-on: arm64
+  - build-on: armhf
+
+adopt-info: tea
+
+apps:
+  tea:
+    command: tea
+    plugs: [network, network-bind, removable-media]
+
+parts:
+  tea:
+    plugin: make
+    source: https://gitea.com/gitea/tea.git
+    stage-packages: [ git,  openssh-client ]
+    build-packages: [ git, build-essential]
+    build-snaps: [ go/1.21/stable ]
+    build-environment:
+      - LDFLAGS: ""
+    override-pull: |
+      craftctl default
+
+      git config --global --add safe.directory /root/parts/tea/src
+      last_committed_tag="$(git for-each-ref --sort=taggerdate --format '%(tag)' refs/tags | tail -n 1)"
+      last_released_tag="$(snap info gitea-tea | awk '$1 == "latest/candidate:" { print $2 }')"
+      # If the latest tag from the upstream project has not been released to
+      # stable, build that tag instead of main.
+      if [ "${last_committed_tag}" != "${last_released_tag}" ]; then
+        git fetch
+        git checkout "${last_committed_tag}"
+      fi
+
+      version="$(git describe --always | sed -e 's/-/+git/;y/-/./')"
+      [ -n "$(echo $version | grep "+git")" ] && grade=devel || grade=stable
+      craftctl set version="$version"
+      craftctl set grade="$grade"
+
+    override-build: |
+      set -x
+      go mod vendor
+      make build
+      install -D tea "${SNAPCRAFT_PART_INSTALL}/tea"
