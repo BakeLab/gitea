@@ -89,6 +89,7 @@ There are different ways to get `tea`:
       ```
     - arch linux ([gitea-tea-git](https://aur.archlinux.org/packages/gitea-tea-git), thirdparty)
     - alpine linux ([tea](https://pkgs.alpinelinux.org/packages?name=tea&branch=edge), thirdparty)
+    - Windows via `MSYS2` ([tea](https://packages.msys2.org/base/mingw-w64-tea), thirdparty)
 
 2. Use the prebuilt binaries from [dl.gitea.com](https://dl.gitea.com/tea/)
 
