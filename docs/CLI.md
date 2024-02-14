@@ -57,7 +57,11 @@ Add a Gitea login
 
 **--no-version-check, --nv**: Do not check version of Gitea instance
 
+**--otp**="": OTP token for auth, if necessary
+
 **--password, --pwd**="": Password for basic auth (will create token)
+
+**--scopes**="": Token scopes to add when creating a new token, separated by a comma
 
 **--ssh-agent-key, -a**="": Use SSH public key or SSH fingerprint to login (needs a running ssh-agent with ssh key loaded)
 

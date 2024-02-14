@@ -55,6 +55,16 @@ var CmdLoginAdd = cli.Command{
 			Usage:   "Password for basic auth (will create token)",
 		},
 		&cli.StringFlag{
+			Name:    "otp",
+			EnvVars: []string{"GITEA_SERVER_OTP"},
+			Usage:   "OTP token for auth, if necessary",
+		},
+		&cli.StringFlag{
+			Name:    "scopes",
+			EnvVars: []string{"GITEA_SCOPES"},
+			Usage:   "Token scopes to add when creating a new token, separated by a comma",
+		},
+		&cli.StringFlag{
 			Name:    "ssh-key",
 			Aliases: []string{"s"},
 			Usage:   "Path to a SSH key/certificate to use, overrides auto-discovery",
@@ -95,6 +105,8 @@ func runLoginAdd(ctx *cli.Context) error {
 		ctx.String("token"),
 		ctx.String("user"),
 		ctx.String("password"),
+		ctx.String("otp"),
+		ctx.String("scopes"),
 		ctx.String("ssh-key"),
 		ctx.String("url"),
 		ctx.String("ssh-agent-principal"),
