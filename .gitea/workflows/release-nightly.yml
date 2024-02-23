@@ -23,7 +23,7 @@ jobs:
           gpg_private_key: ${{ secrets.GPGSIGN_KEY }}
           passphrase: ${{ secrets.GPGSIGN_PASSPHRASE }}
       - name: goreleaser
-        uses: https://github.com/goreleaser/goreleaser-action@v4
+        uses: https://github.com/goreleaser/goreleaser-action@v5
         with:
             distribution: goreleaser-pro
             version: latest
