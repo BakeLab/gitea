@@ -96,10 +96,6 @@ checksum:
   extra_files:
       - glob: ./**.xz
 
-env_files:
-  # override gitea actions which passes GITHUB_TOKEN to set env var as null
-  github_token: /dev/null
-
 signs:
   -
     signature: "${artifact}.sig"
