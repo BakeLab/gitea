@@ -36,6 +36,7 @@ jobs:
           S3_BUCKET: ${{ secrets.AWS_BUCKET }}
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
           GPGSIGN_PASSPHRASE: ${{ secrets.GPGSIGN_PASSPHRASE }}
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   release-image:
     runs-on: ubuntu-latest
     env:
