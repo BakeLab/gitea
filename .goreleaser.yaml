@@ -96,6 +96,8 @@ checksum:
   extra_files:
       - glob: ./**.xz
 
+force_token: gitea
+
 signs:
   -
     signature: "${artifact}.sig"
