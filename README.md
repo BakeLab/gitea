@@ -4,6 +4,7 @@
 [![Release](https://raster.shields.io/badge/dynamic/json.svg?label=release&url=https://gitea.com/api/v1/repos/gitea/tea/releases&query=$[0].tag_name)](https://gitea.com/gitea/tea/releases)
 [![Join the chat at https://img.shields.io/discord/322538954119184384.svg](https://img.shields.io/discord/322538954119184384.svg)](https://discord.gg/Gitea)
 [![Go Report Card](https://goreportcard.com/badge/code.gitea.io/tea)](https://goreportcard.com/report/code.gitea.io/tea) [![GoDoc](https://pkg.go.dev/badge/code.gitea.io/tea?status.svg)](https://godoc.org/code.gitea.io/tea)
+![Tea Release Status](https://gitea.com/gitea/tea/actions/workflows/release-nightly.yml/badge.svg)
 
 ## The official CLI for Gitea
 
