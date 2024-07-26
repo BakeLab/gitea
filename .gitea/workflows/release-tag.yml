@@ -27,7 +27,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
             distribution: goreleaser-pro
-            version: latest
+            version: "~> v1"
             args: release
         env:
           GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
