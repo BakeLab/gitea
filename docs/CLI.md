@@ -71,7 +71,7 @@ Add a Gitea login
 
 **--token, -t**="": Access token. Can be obtained from Settings > Applications
 
-**--url, -u**="": Server URL (default: https://gitea.com)
+**--url, -u**="": Server URL (default: "https://gitea.com")
 
 **--user**="": User for basic auth (will create token)
 
@@ -117,7 +117,7 @@ List, create and update issues
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			index,state,kind,author,author-id,url,title,body,created,updated,deadline,assignees,milestone,labels,comments,owner,repo
-		 (default: index,title,state,author,milestone,labels,owner,repo)
+		 (default: "index,title,state,author,milestone,labels,owner,repo")
 
 **--from, -F**="": Filter by activity after this date
 
@@ -163,7 +163,7 @@ List issues of the repository
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			index,state,kind,author,author-id,url,title,body,created,updated,deadline,assignees,milestone,labels,comments,owner,repo
-		 (default: index,title,state,author,milestone,labels,owner,repo)
+		 (default: "index,title,state,author,milestone,labels,owner,repo")
 
 **--from, -F**="": Filter by activity after this date
 
@@ -281,7 +281,7 @@ Manage and checkout pull requests
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			index,state,author,author-id,url,title,body,mergeable,base,base-commit,head,diff,patch,created,updated,deadline,assignees,milestone,labels,comments
-		 (default: index,title,state,author,milestone,updated,labels)
+		 (default: "index,title,state,author,milestone,updated,labels")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -303,7 +303,7 @@ List pull requests of the repository
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			index,state,author,author-id,url,title,body,mergeable,base,base-commit,head,diff,patch,created,updated,deadline,assignees,milestone,labels,comments
-		 (default: index,title,state,author,milestone,updated,labels)
+		 (default: "index,title,state,author,milestone,updated,labels")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -451,7 +451,7 @@ Merge a pull request
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--style, -s**="": Kind of merge to perform: merge, rebase, squash, rebase-merge (default: merge)
+**--style, -s**="": Kind of merge to perform: merge, rebase, squash, rebase-merge (default: "merge")
 
 **--title, -t**="": Merge commit title
 
@@ -551,7 +551,7 @@ List and create milestones
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			title,state,items_open,items_closed,items,duedate,description,created,updated,closed,id
-		 (default: title,items,duedate)
+		 (default: "title,items,duedate")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -573,7 +573,7 @@ List milestones of the repository
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			title,state,items_open,items_closed,items,duedate,description,created,updated,closed,id
-		 (default: title,items,duedate)
+		 (default: "title,items,duedate")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -653,7 +653,7 @@ manage issue/pull of an milestone
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			index,state,kind,author,author-id,url,title,body,created,updated,deadline,assignees,milestone,labels,comments,owner,repo
-		 (default: index,kind,title,state,updated,labels)
+		 (default: "index,kind,title,state,updated,labels")
 
 **--kind**="": Filter by kind (issue|pull)
 
@@ -991,7 +991,7 @@ Show repository details
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			description,forks,id,name,owner,stars,ssh,updated,url,permission,type
-		 (default: owner,name,type,ssh)
+		 (default: "owner,name,type,ssh")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1013,7 +1013,7 @@ List repositories you have access to
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			description,forks,id,name,owner,stars,ssh,updated,url,permission,type
-		 (default: owner,name,type,ssh)
+		 (default: "owner,name,type,ssh")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1037,7 +1037,7 @@ Find any repo on an Gitea instance
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			description,forks,id,name,owner,stars,ssh,updated,url,permission,type
-		 (default: owner,name,type,ssh)
+		 (default: "owner,name,type,ssh")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1195,7 +1195,7 @@ Consult branches
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			name,protected,user-can-merge,user-can-push,protection
-		 (default: name,protected,user-can-merge,user-can-push)
+		 (default: "name,protected,user-can-merge,user-can-push")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1215,7 +1215,7 @@ List branches of the repository
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			name,protected,user-can-merge,user-can-push,protection
-		 (default: name,protected,user-can-merge,user-can-push)
+		 (default: "name,protected,user-can-merge,user-can-push")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1235,7 +1235,7 @@ Protect branches
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			name,protected,user-can-merge,user-can-push,protection
-		 (default: name,protected,user-can-merge,user-can-push)
+		 (default: "name,protected,user-can-merge,user-can-push")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1255,7 +1255,7 @@ Unprotect branches
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			name,protected,user-can-merge,user-can-push,protection
-		 (default: name,protected,user-can-merge,user-can-push)
+		 (default: "name,protected,user-can-merge,user-can-push")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1297,7 +1297,7 @@ Show notifications
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			id,status,updated,index,type,state,title,repository
-		 (default: id,status,index,type,state,title)
+		 (default: "id,status,index,type,state,title")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1315,7 +1315,7 @@ Show notifications
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: unread,pinned)
+		 (default: "unread,pinned")
 
 **--types, -t**="": Comma-separated list of subject types to filter by. Available values:
 			issue,pull,repository,commit
@@ -1327,7 +1327,7 @@ List notifications
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			id,status,updated,index,type,state,title,repository
-		 (default: id,status,index,type,state,title)
+		 (default: "id,status,index,type,state,title")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1345,7 +1345,7 @@ List notifications
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: unread,pinned)
+		 (default: "unread,pinned")
 
 **--types, -t**="": Comma-separated list of subject types to filter by. Available values:
 			issue,pull,repository,commit
@@ -1371,7 +1371,7 @@ Mark all filtered or a specific notification as read
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: unread,pinned)
+		 (default: "unread,pinned")
 
 ### unread, u
 
@@ -1393,7 +1393,7 @@ Mark all filtered or a specific notification as unread
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: unread,pinned)
+		 (default: "unread,pinned")
 
 ### pin, p
 
@@ -1415,7 +1415,7 @@ Mark all filtered or a specific notification as pinned
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: unread,pinned)
+		 (default: "unread,pinned")
 
 ### unpin
 
@@ -1437,7 +1437,7 @@ Unpin all pinned or a specific notification
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: unread,pinned)
+		 (default: "unread,pinned")
 
 ## clone, C
 
@@ -1457,7 +1457,7 @@ Manage registered users
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			id,login,full_name,email,avatar_url,language,is_admin,restricted,prohibit_login,location,website,description,visibility,activated,lastlogin_at,created_at
-		 (default: id,login,full_name,email,activated)
+		 (default: "id,login,full_name,email,activated")
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1477,7 +1477,7 @@ List Users
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			id,login,full_name,email,avatar_url,language,is_admin,restricted,prohibit_login,location,website,description,visibility,activated,lastlogin_at,created_at
-		 (default: id,login,full_name,email,activated)
+		 (default: "id,login,full_name,email,activated")
 
 **--limit, --lm**="": specify limit of items per page
 
