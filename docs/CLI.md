@@ -1173,6 +1173,20 @@ Migrate a repository
 
 **--wiki**: Copy the wiki
 
+### delete, rm
+
+Delete an existing repository
+
+**--force, -f**: Force the deletion and don't ask for confirmation
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--name, -**="": name of the repo
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--owner, -O**="": owner of the repo
+
 ## branches, branch, b
 
 Consult branches

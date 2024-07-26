@@ -29,6 +29,7 @@ var CmdRepos = cli.Command{
 		&repos.CmdRepoCreateFromTemplate,
 		&repos.CmdRepoFork,
 		&repos.CmdRepoMigrate,
+		&repos.CmdRepoRm,
 	},
 	Flags: repos.CmdReposListFlags,
 }
