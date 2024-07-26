@@ -25,6 +25,7 @@ var CmdReleases = cli.Command{
 		&releases.CmdReleaseCreate,
 		&releases.CmdReleaseDelete,
 		&releases.CmdReleaseEdit,
+		&CmdReleaseAttachments,
 	},
 	Flags: flags.AllDefaultFlags,
 }

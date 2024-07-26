@@ -789,6 +789,60 @@ Edit one or more releases
 
 **--title, -t**="": Change Title
 
+### assets, asset, a
+
+Manage release assets
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+#### list, ls
+
+List Release Attachments
+
+**--limit, --lm**="": specify limit of items per page
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--page, -p**="": specify page, default is 1
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+#### create, c
+
+Create one or more release attachments
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+#### delete, rm
+
+Delete one or more release attachments
+
+**--confirm, -y**: Confirm deletion (required)
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
 ## times, time, t
 
 Operate on tracked times of a repository's issues & pulls

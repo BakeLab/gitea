@@ -29,15 +29,16 @@
  COMMANDS
    help, h  Shows a list of commands or help for one command
    ENTITIES:
-     issues, issue, i                  List, create and update issues
-     pulls, pull, pr                   Manage and checkout pull requests
-     labels, label                     Manage issue labels
-     milestones, milestone, ms         List and create milestones
-     releases, release, r              Manage releases
-     times, time, t                    Operate on tracked times of a repository's issues & pulls
-     organizations, organization, org  List, create, delete organizations
-     repos, repo                       Show repository details
-     comment, c                        Add a comment to an issue / pr
+     issues, issue, i                    List, create and update issues
+     pulls, pull, pr                     Manage and checkout pull requests
+     labels, label                       Manage issue labels
+     milestones, milestone, ms           List and create milestones
+     releases, release, r                Manage releases
+     release assets, release asset, r a  Manage release attachments
+     times, time, t                      Operate on tracked times of a repository's issues & pulls
+     organizations, organization, org    List, create, delete organizations
+     repos, repo                         Show repository details
+     comment, c                          Add a comment to an issue / pr
    HELPERS:
      open, o                         Open something of the repository in web browser
      notifications, notification, n  Show notifications
