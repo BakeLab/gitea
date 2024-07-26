@@ -4,11 +4,11 @@
 package pulls
 
 import (
-	"fmt"
-
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
+	"code.gitea.io/tea/modules/interact"
+	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
 
 	"github.com/urfave/cli/v2"
@@ -44,7 +44,8 @@ var CmdPullsMerge = cli.Command{
 		ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
 		if ctx.Args().Len() != 1 {
-			return fmt.Errorf("Must specify a PR index")
+			// If no PR index is provided, try interactive mode
+			return interact.MergePull(ctx)
 		}
 
 		idx, err := utils.ArgToIndex(ctx.Args().First())
@@ -52,18 +53,10 @@ var CmdPullsMerge = cli.Command{
 			return err
 		}
 
-		success, _, err := ctx.Login.Client().MergePullRequest(ctx.Owner, ctx.Repo, idx, gitea.MergePullRequestOption{
+		return task.PullMerge(ctx.Login, ctx.Owner, ctx.Repo, idx, gitea.MergePullRequestOption{
 			Style:   gitea.MergeStyle(ctx.String("style")),
 			Title:   ctx.String("title"),
 			Message: ctx.String("message"),
 		})
-
-		if err != nil {
-			return err
-		}
-		if !success {
-			return fmt.Errorf("Failed to merge PR. Is it still open?")
-		}
-		return nil
 	},
 }
