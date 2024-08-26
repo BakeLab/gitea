@@ -18,10 +18,11 @@ import (
 func CreateLogin() error {
 	var (
 		name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string
-		insecure, sshAgent, versionCheck                                                              bool
+		insecure, sshAgent, versionCheck, helper                                                      bool
 	)
 
 	versionCheck = true
+	helper = false
 
 	promptI := &survey.Input{Message: "URL of Gitea instance: "}
 	if err := survey.AskOne(promptI, &giteaURL, survey.WithValidator(survey.Required)); err != nil {
@@ -38,12 +39,12 @@ func CreateLogin() error {
 		return err
 	}
 
-	promptI = &survey.Input{Message: "Name of new Login [" + name + "]: "}
+	promptI = &survey.Input{Message: "Name of new Login: ", Default: name}
 	if err := survey.AskOne(promptI, &name); err != nil {
 		return err
 	}
 
-	loginMethod, err := promptSelect("Login with: ", []string{"token", "ssh-key/certificate"}, "", "")
+	loginMethod, err := promptSelectV2("Login with: ", []string{"token", "ssh-key/certificate"})
 	if err != nil {
 		return err
 	}
@@ -146,6 +147,14 @@ func CreateLogin() error {
 		}
 
 		promptYN = &survey.Confirm{
+			Message: "Add git helper: ",
+			Default: false,
+		}
+		if err = survey.AskOne(promptYN, &helper); err != nil {
+			return err
+		}
+
+		promptYN = &survey.Confirm{
 			Message: "Check version of Gitea instance: ",
 			Default: true,
 		}
@@ -155,7 +164,7 @@ func CreateLogin() error {
 
 	}
 
-	return task.CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint, insecure, sshAgent, versionCheck)
+	return task.CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint, insecure, sshAgent, versionCheck, helper)
 }
 
 var tokenScopeOpts = []string{

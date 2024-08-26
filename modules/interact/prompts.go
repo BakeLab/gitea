@@ -127,6 +127,24 @@ func promptMultiSelect(prompt string, options []string, customVal string) ([]str
 	return promptCustomVal(prompt, customVal, selection)
 }
 
+// promptSelectV2 creates a generic select prompt
+func promptSelectV2(prompt string, options []string) (string, error) {
+	if len(options) == 0 {
+		return "", nil
+	}
+	var selection string
+	promptA := &survey.Select{
+		Message: prompt,
+		Options: options,
+		VimMode: true,
+		Default: options[0],
+	}
+	if err := survey.AskOne(promptA, &selection); err != nil {
+		return "", err
+	}
+	return selection, nil
+}
+
 // promptSelect creates a generic select prompt, with processing of custom values or none-option.
 func promptSelect(prompt string, options []string, customVal, noneVal string) (string, error) {
 	var selection string

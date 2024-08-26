@@ -28,6 +28,7 @@ var CmdLogin = cli.Command{
 		&login.CmdLoginEdit,
 		&login.CmdLoginDelete,
 		&login.CmdLoginSetDefault,
+		&login.CmdLoginHelper,
 	},
 }
 

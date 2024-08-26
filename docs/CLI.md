@@ -51,6 +51,8 @@ List Gitea logins
 
 Add a Gitea login
 
+**--helper, -j**: Add helper
+
 **--insecure, -i**: Disable TLS verification
 
 **--name, -n**="": Login name

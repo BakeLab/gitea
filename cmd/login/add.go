@@ -84,6 +84,11 @@ var CmdLoginAdd = cli.Command{
 			Aliases: []string{"a"},
 			Usage:   "Use SSH public key or SSH fingerprint to login (needs a running ssh-agent with ssh key loaded)",
 		},
+		&cli.BoolFlag{
+			Name:    "helper",
+			Aliases: []string{"j"},
+			Usage:   "Add helper",
+		},
 	},
 	Action: runLoginAdd,
 }
@@ -113,5 +118,7 @@ func runLoginAdd(ctx *cli.Context) error {
 		ctx.String("ssh-agent-key"),
 		ctx.Bool("insecure"),
 		sshAgent,
-		!ctx.Bool("no-version-check"))
+		!ctx.Bool("no-version-check"),
+		ctx.Bool("helper"),
+	)
 }

@@ -6,6 +6,7 @@ package task
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -15,8 +16,49 @@ import (
 	"code.gitea.io/sdk/gitea"
 )
 
+// SetupHelper add tea helper to config global
+func SetupHelper(login config.Login) (ok bool, err error) {
+	// Check that the URL is not blank
+	if login.URL == "" {
+		return false, fmt.Errorf("Invalid gitea url")
+	}
+
+	// get tea binary path
+	var binPath string
+	if binPath, err = os.Executable(); err != nil {
+		return
+	}
+
+	// get all helper to URL in git config
+	var currentHelpers []byte
+	if currentHelpers, err = exec.Command("git", "config", "--global", "--get-all", fmt.Sprintf("credential.%s.helper", login.URL)).Output(); err != nil {
+		return false, err
+	}
+
+	// Check if ared added tea helper
+	for _, line := range strings.Split(strings.ReplaceAll(string(currentHelpers), "\r", ""), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		} else if strings.HasPrefix(line, binPath) && strings.Contains(line[len(binPath):], "login helper") {
+			return false, nil
+		}
+	}
+
+	// Check if tea path have space, if have add quotes
+	if strings.Contains(binPath, " ") {
+		binPath = fmt.Sprintf("%q", binPath)
+	}
+
+	// Add tea helper
+	if _, err = exec.Command("git", "config", "--global", "--add", fmt.Sprintf("credential.%s.helper", login.URL), fmt.Sprintf("!%s login helper", binPath)).Output(); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
 // CreateLogin create a login to be stored in config
-func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string, insecure, sshAgent, versionCheck bool) error {
+func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string, insecure, sshAgent, versionCheck, addHelper bool) error {
 	// checks ...
 	// ... if we have a url
 	if len(giteaURL) == 0 {
@@ -105,6 +147,11 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 	}
 
 	fmt.Printf("Login as %s on %s successful. Added this login as %s\n", login.User, login.URL, login.Name)
+	if addHelper {
+		if _, err := SetupHelper(login); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
