@@ -14,7 +14,7 @@ require (
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/enescakir/emoji v1.0.0
 	github.com/go-git/go-git/v5 v5.12.0
-	github.com/muesli/termenv v0.15.3-0.20240618155329-98d742f6907a
+	github.com/muesli/termenv v0.15.3-0.20240912151726-82936c5ea257
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 	github.com/stretchr/testify v1.9.0
