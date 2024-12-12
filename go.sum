@@ -132,6 +132,8 @@ github.com/muesli/termenv v0.15.3-0.20240618155329-98d742f6907a h1:2MaM6YC3mGu54
 github.com/muesli/termenv v0.15.3-0.20240618155329-98d742f6907a/go.mod h1:hxSnBBYLK21Vtq/PHd0S2FYCxBXzBua8ov5s1RobyRQ=
 github.com/muesli/termenv v0.15.3-0.20240912151726-82936c5ea257 h1:RNw/zu+CJemcRlDFPjElZUbY2UlI/MA2B3I6PM3Isiw=
 github.com/muesli/termenv v0.15.3-0.20240912151726-82936c5ea257/go.mod h1:hxSnBBYLK21Vtq/PHd0S2FYCxBXzBua8ov5s1RobyRQ=
+github.com/muesli/termenv v0.15.3-0.20241211131612-0d230cb6eb15 h1:XGrI/sVwKFHXvDVSGfan37w1AFt14RLDqBqY0ThTgk0=
+github.com/muesli/termenv v0.15.3-0.20241211131612-0d230cb6eb15/go.mod h1:hxSnBBYLK21Vtq/PHd0S2FYCxBXzBua8ov5s1RobyRQ=
 github.com/olekukonko/tablewriter v0.0.5 h1:P2Ga83D34wi1o9J6Wh1mRuqd4mF/x/lgBS7N7AbDhec=
 github.com/olekukonko/tablewriter v0.0.5/go.mod h1:hPp6KlRPjbx+hW8ykQs1w3UBbZlj6HuIJcUGPhkA7kY=
 github.com/onsi/gomega v1.27.10 h1:naR28SdDFlqrG6kScpT8VWpu1xWY5nJRCF3XaYyBjhI=
