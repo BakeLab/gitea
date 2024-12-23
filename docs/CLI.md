@@ -1145,6 +1145,8 @@ Migrate a repository
 
 **--issues**: Copy the issues
 
+**--labels**: Copy the lables
+
 **--lfs**: Copy the LFS objects
 
 **--lfs-endpoint**="": LFS endpoint to use

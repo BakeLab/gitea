@@ -65,6 +65,10 @@ var CmdRepoMigrate = cli.Command{
 			Usage: "Copy the issues",
 		},
 		&cli.BoolFlag{
+			Name:  "labels",
+			Usage: "Copy the lables",
+		},
+		&cli.BoolFlag{
 			Name:  "pull-requests",
 			Usage: "Copy the pull requests",
 		},
