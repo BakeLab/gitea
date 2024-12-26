@@ -20,11 +20,7 @@ jobs:
           make misspell-check
           make docs-check
           make build
-        env:
-          GOPROXY: https://goproxy.io,direct
       - name: test and coverage
         run: |
           make test
           make unit-test-coverage
-        env:
-          GOPROXY: https://goproxy.io,direct
