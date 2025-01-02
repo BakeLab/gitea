@@ -4,6 +4,10 @@
 package login
 
 import (
+	"log"
+	"os"
+	"os/exec"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/config"
 
@@ -23,5 +27,14 @@ var CmdLoginEdit = cli.Command{
 }
 
 func runLoginEdit(_ *cli.Context) error {
+	if e, ok := os.LookupEnv("EDITOR"); ok && e != "" {
+		cmd := exec.Command(e, config.GetConfigPath())
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			log.Fatal(err.Error())
+		}
+	}
 	return open.Start(config.GetConfigPath())
 }
