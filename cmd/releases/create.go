@@ -43,6 +43,11 @@ var CmdReleaseCreate = cli.Command{
 			Aliases: []string{"n"},
 			Usage:   "Release notes",
 		},
+		&cli.StringFlag{
+			Name:    "note-file",
+			Aliases: []string{"f"},
+			Usage:   "Release notes file name. If set, --note is ignored.",
+		},
 		&cli.BoolFlag{
 			Name:    "draft",
 			Aliases: []string{"d"},
@@ -73,15 +78,24 @@ func runReleaseCreate(cmd *cli.Context) error {
 		tag = cmd.Args().First()
 	}
 
+	notestring := ctx.String("note")
+	notefile := ctx.String("note-file")
+	if notefile != "" {
+		notebytes, err := os.ReadFile(notefile)
+		if err != nil {
+			return fmt.Errorf("unable to read the note file")
+		}
+		notestring = string(notebytes)
+	}
+
 	release, resp, err := ctx.Login.Client().CreateRelease(ctx.Owner, ctx.Repo, gitea.CreateReleaseOption{
 		TagName:      tag,
 		Target:       ctx.String("target"),
 		Title:        ctx.String("title"),
-		Note:         ctx.String("note"),
+		Note:         notestring,
 		IsDraft:      ctx.Bool("draft"),
 		IsPrerelease: ctx.Bool("prerelease"),
 	})
-
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusConflict {
 			return fmt.Errorf("There already is a release for this tag")

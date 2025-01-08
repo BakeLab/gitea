@@ -737,6 +737,8 @@ Create a release
 
 **--note, -n**="": Release notes
 
+**--note-file, -f**="": Release notes file name. If set, --note is ignored.
+
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
 **--prerelease, -p**: Is a pre-release
