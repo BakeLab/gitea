@@ -6,7 +6,7 @@ toolchain go1.23.4
 
 require (
 	code.gitea.io/gitea-vet v0.2.3
-	code.gitea.io/sdk/gitea v0.19.0
+	code.gitea.io/sdk/gitea v0.20.0
 	gitea.com/noerw/unidiff-comments v0.0.0-20220822113322-50f4daa0e35c
 	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/adrg/xdg v0.5.3
@@ -26,6 +26,7 @@ require (
 
 require (
 	dario.cat/mergo v1.0.0 // indirect
+	github.com/42wim/httpsig v1.2.1 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/ProtonMail/go-crypto v1.1.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
