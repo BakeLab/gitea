@@ -1,6 +1,6 @@
 module code.gitea.io/tea
 
-go 1.21
+go 1.23.0
 
 toolchain go1.24.0
 
@@ -19,7 +19,7 @@ require (
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.27.5
-	golang.org/x/crypto v0.33.0
+	golang.org/x/crypto v0.35.0
 	golang.org/x/term v0.29.0
 	gopkg.in/yaml.v3 v3.0.1
 )
