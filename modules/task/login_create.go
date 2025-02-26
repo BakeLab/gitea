@@ -23,35 +23,24 @@ func SetupHelper(login config.Login) (ok bool, err error) {
 		return false, fmt.Errorf("Invalid gitea url")
 	}
 
-	// get tea binary path
-	var binPath string
-	if binPath, err = os.Executable(); err != nil {
-		return
-	}
-
 	// get all helper to URL in git config
 	var currentHelpers []byte
 	if currentHelpers, err = exec.Command("git", "config", "--global", "--get-all", fmt.Sprintf("credential.%s.helper", login.URL)).Output(); err != nil {
-		return false, err
+		currentHelpers = []byte{}
 	}
 
 	// Check if ared added tea helper
 	for _, line := range strings.Split(strings.ReplaceAll(string(currentHelpers), "\r", ""), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		} else if strings.HasPrefix(line, binPath) && strings.Contains(line[len(binPath):], "login helper") {
+		if strings.HasSuffix(strings.TrimSpace(line), "login helper") {
 			return false, nil
 		}
 	}
 
-	// Check if tea path have space, if have add quotes
-	if strings.Contains(binPath, " ") {
-		binPath = fmt.Sprintf("%q", binPath)
-	}
-
 	// Add tea helper
-	if _, err = exec.Command("git", "config", "--global", "--add", fmt.Sprintf("credential.%s.helper", login.URL), fmt.Sprintf("!%s login helper", binPath)).Output(); err != nil {
-		return false, err
+	if _, err = exec.Command("git", "config", "--global", fmt.Sprintf("credential.%s.helper", login.URL), "").Output(); err != nil {
+		return false, fmt.Errorf("git config --global %s, error: %s", fmt.Sprintf("credential.%s.helper", login.URL), err)
+	} else if _, err = exec.Command("git", "config", "--global", "--add", fmt.Sprintf("credential.%s.helper", login.URL), "!tea login helper").Output(); err != nil {
+		return false, fmt.Errorf("git config --global --add %s %s, error: %s", fmt.Sprintf("credential.%s.helper", login.URL), "!tea login helper", err)
 	}
 
 	return true, nil

@@ -91,7 +91,9 @@ var CmdLoginHelper = cli.Command{
 				}
 
 				userConfig := config.GetLoginByHost(wants["host"])
-				if len(userConfig.Token) == 0 {
+				if userConfig == nil {
+					log.Fatal("host not exists")
+				} else if len(userConfig.Token) == 0 {
 					log.Fatal("User no set")
 				}
 
