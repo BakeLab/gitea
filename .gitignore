@@ -1,4 +1,4 @@
-tea
+/tea
 /gitea-vet
 /gitea-vet.exe
 
@@ -12,3 +12,8 @@ vendor/
 coverage.out
 
 dist/
+
+# Nix-specific
+.direnv/
+result
+result-*
