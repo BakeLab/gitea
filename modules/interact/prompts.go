@@ -15,10 +15,12 @@ import (
 
 // Multiline represents options for a prompt that expects multiline input
 type Multiline struct {
-	Message   string
-	Default   string
-	Syntax    string
-	UseEditor bool
+	Message             string
+	Default             string
+	Syntax              string
+	UseEditor           bool
+	EditorAppendDefault bool
+	EditorHideDefault   bool
 }
 
 // NewMultiline creates a prompt that switches between the inline multiline text
@@ -26,9 +28,11 @@ type Multiline struct {
 func NewMultiline(opts Multiline) (prompt survey.Prompt) {
 	if opts.UseEditor {
 		prompt = &survey.Editor{
-			Message:  opts.Message,
-			Default:  opts.Default,
-			FileName: "*." + opts.Syntax,
+			Message:       opts.Message,
+			Default:       opts.Default,
+			FileName:      "*." + opts.Syntax,
+			AppendDefault: opts.EditorAppendDefault,
+			HideDefault:   opts.EditorHideDefault,
 		}
 	} else {
 		prompt = &survey.Multiline{Message: opts.Message, Default: opts.Default}
@@ -146,13 +150,17 @@ func promptSelectV2(prompt string, options []string) (string, error) {
 }
 
 // promptSelect creates a generic select prompt, with processing of custom values or none-option.
-func promptSelect(prompt string, options []string, customVal, noneVal string) (string, error) {
+func promptSelect(prompt string, options []string, customVal, noneVal, defaultVal string) (string, error) {
 	var selection string
+	if defaultVal == "" && noneVal != "" {
+		defaultVal = noneVal
+
+	}
 	promptA := &survey.Select{
 		Message: prompt,
 		Options: makeSelectOpts(options, customVal, noneVal),
 		VimMode: true,
-		Default: noneVal,
+		Default: defaultVal,
 	}
 	if err := survey.AskOne(promptA, &selection); err != nil {
 		return "", err

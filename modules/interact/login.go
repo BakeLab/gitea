@@ -96,7 +96,7 @@ func CreateLogin() error {
 		}
 
 		if sshKey == "" {
-			sshKey, err = promptSelect("Select ssh-key: ", task.ListSSHPubkey(), "", "")
+			sshKey, err = promptSelect("Select ssh-key: ", task.ListSSHPubkey(), "", "", "")
 			if err != nil {
 				return err
 			}

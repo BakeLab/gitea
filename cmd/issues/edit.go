@@ -8,6 +8,7 @@ import (
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
+	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/print"
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
@@ -47,6 +48,14 @@ func runIssuesEdit(cmd *cli.Context) error {
 
 	client := ctx.Login.Client()
 	for _, opts.Index = range indices {
+		if ctx.NumFlags() == 0 {
+			var err error
+			opts, err = interact.EditIssue(*ctx, opts.Index)
+			if err != nil {
+				return err
+			}
+		}
+
 		issue, err := task.EditIssue(ctx, client, *opts)
 		if err != nil {
 			return err

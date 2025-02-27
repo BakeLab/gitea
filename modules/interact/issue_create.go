@@ -70,7 +70,7 @@ func promptIssueProperties(login *config.Login, owner, repo string, o *gitea.Cre
 
 	// milestone
 	if len(selectables.MilestoneList) != 0 {
-		if milestoneName, err = promptSelect("Milestone:", selectables.MilestoneList, "", "[none]"); err != nil {
+		if milestoneName, err = promptSelect("Milestone:", selectables.MilestoneList, "", "[none]", ""); err != nil {
 			return err
 		}
 		o.Milestone = selectables.MilestoneMap[milestoneName]
