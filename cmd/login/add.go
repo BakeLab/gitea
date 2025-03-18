@@ -4,6 +4,7 @@
 package login
 
 import (
+	"code.gitea.io/tea/modules/auth"
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/task"
 
@@ -89,6 +90,19 @@ var CmdLoginAdd = cli.Command{
 			Aliases: []string{"j"},
 			Usage:   "Add helper",
 		},
+		&cli.BoolFlag{
+			Name:    "oauth",
+			Aliases: []string{"o"},
+			Usage:   "Use interactive OAuth2 flow for authentication",
+		},
+		&cli.StringFlag{
+			Name:  "client-id",
+			Usage: "OAuth client ID (for use with --oauth)",
+		},
+		&cli.StringFlag{
+			Name:  "redirect-url",
+			Usage: "OAuth redirect URL (for use with --oauth)",
+		},
 	},
 	Action: runLoginAdd,
 }
@@ -97,6 +111,27 @@ func runLoginAdd(ctx *cli.Context) error {
 	// if no args create login interactive
 	if ctx.NumFlags() == 0 {
 		return interact.CreateLogin()
+	}
+
+	// if OAuth flag is provided, use OAuth2 PKCE flow
+	if ctx.Bool("oauth") {
+		opts := auth.OAuthOptions{
+			Name:     ctx.String("name"),
+			URL:      ctx.String("url"),
+			Insecure: ctx.Bool("insecure"),
+		}
+
+		// Only set clientID if provided
+		if ctx.String("client-id") != "" {
+			opts.ClientID = ctx.String("client-id")
+		}
+
+		// Only set redirect URL if provided
+		if ctx.String("redirect-url") != "" {
+			opts.RedirectURL = ctx.String("redirect-url")
+		}
+
+		return auth.OAuthLoginWithFullOptions(opts)
 	}
 
 	sshAgent := false

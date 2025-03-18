@@ -51,6 +51,8 @@ List Gitea logins
 
 Add a Gitea login
 
+**--client-id**="": OAuth client ID (for use with --oauth)
+
 **--helper, -j**: Add helper
 
 **--insecure, -i**: Disable TLS verification
@@ -59,9 +61,13 @@ Add a Gitea login
 
 **--no-version-check, --nv**: Do not check version of Gitea instance
 
+**--oauth, -o**: Use interactive OAuth2 flow for authentication
+
 **--otp**="": OTP token for auth, if necessary
 
 **--password, --pwd**="": Password for basic auth (will create token)
+
+**--redirect-url**="": OAuth redirect URL (for use with --oauth)
 
 **--scopes**="": Token scopes to add when creating a new token, separated by a comma
 
@@ -92,6 +98,10 @@ Remove a Gitea login
 Get or Set Default Login
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+### oauth-refresh
+
+Refresh an OAuth token
 
 ## logout
 

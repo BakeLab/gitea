@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
+	"code.gitea.io/tea/modules/auth"
 	"code.gitea.io/tea/modules/task"
 
 	"github.com/AlecAivazis/survey/v2"
@@ -44,12 +45,22 @@ func CreateLogin() error {
 		return err
 	}
 
-	loginMethod, err := promptSelectV2("Login with: ", []string{"token", "ssh-key/certificate"})
+	loginMethod, err := promptSelectV2("Login with: ", []string{"token", "ssh-key/certificate", "oauth"})
 	if err != nil {
 		return err
 	}
 
 	switch loginMethod {
+	case "oauth":
+		promptYN := &survey.Confirm{
+			Message: "Allow Insecure connections: ",
+			Default: false,
+		}
+		if err = survey.AskOne(promptYN, &insecure); err != nil {
+			return err
+		}
+
+		return auth.OAuthLoginWithOptions(name, giteaURL, insecure)
 	default: // token
 		var hasToken bool
 		promptYN := &survey.Confirm{
@@ -161,7 +172,6 @@ func CreateLogin() error {
 		if err = survey.AskOne(promptYN, &versionCheck); err != nil {
 			return err
 		}
-
 	}
 
 	return task.CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint, insecure, sshAgent, versionCheck, helper)

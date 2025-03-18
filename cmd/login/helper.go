@@ -10,7 +10,9 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
+	"code.gitea.io/tea/modules/auth"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/task"
 	"github.com/urfave/cli/v2"
@@ -100,6 +102,20 @@ var CmdLoginHelper = cli.Command{
 				host, err := url.Parse(userConfig.URL)
 				if err != nil {
 					return err
+				}
+
+				if userConfig.TokenExpiry > 0 && time.Now().Unix() > userConfig.TokenExpiry {
+					// Token is expired, refresh it
+					err = auth.RefreshAccessToken(userConfig)
+					if err != nil {
+						return err
+					}
+
+					// Once token is refreshed, get the latest from the updated config
+					refreshedConfig := config.GetLoginByHost(wants["host"])
+					if refreshedConfig != nil {
+						userConfig = refreshedConfig
+					}
 				}
 
 				_, err = fmt.Fprintf(os.Stdout, "protocol=%s\nhost=%s\nusername=%s\npassword=%s\n", host.Scheme, host.Host, userConfig.User, userConfig.Token)
