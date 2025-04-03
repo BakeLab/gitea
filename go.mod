@@ -2,7 +2,7 @@ module code.gitea.io/tea
 
 go 1.23.0
 
-toolchain go1.24.1
+toolchain go1.24.2
 
 require (
 	code.gitea.io/gitea-vet v0.2.3
