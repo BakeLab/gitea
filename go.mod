@@ -6,7 +6,7 @@ toolchain go1.24.2
 
 require (
 	code.gitea.io/gitea-vet v0.2.3
-	code.gitea.io/sdk/gitea v0.20.0
+	code.gitea.io/sdk/gitea v0.21.0
 	gitea.com/noerw/unidiff-comments v0.0.0-20220822113322-50f4daa0e35c
 	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/adrg/xdg v0.5.3
@@ -27,7 +27,7 @@ require (
 
 require (
 	dario.cat/mergo v1.0.0 // indirect
-	github.com/42wim/httpsig v1.2.1 // indirect
+	github.com/42wim/httpsig v1.2.2 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.1.5 // indirect
 	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
@@ -50,7 +50,7 @@ require (
 	github.com/go-git/go-billy/v5 v5.6.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	github.com/hashicorp/go-version v1.6.0 // indirect
+	github.com/hashicorp/go-version v1.7.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
