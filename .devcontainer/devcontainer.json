@@ -2,7 +2,7 @@
   "name": "Tea DevContainer",
   "image": "mcr.microsoft.com/devcontainers/go:1.24-bullseye",
   "features": {
-    "ghcr.io/devcontainers/features/git-lfs:1.2.3": {}
+    "ghcr.io/devcontainers/features/git-lfs:1.2.4": {}
   },
   "customizations": {
     "vscode": {
