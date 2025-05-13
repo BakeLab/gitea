@@ -106,7 +106,7 @@ func (t *table) fprint(f io.Writer, output string) {
 func outputTable(f io.Writer, headers []string, values [][]string) {
 	table := tablewriter.NewWriter(f)
 	if len(headers) > 0 {
-		table.SetHeader(headers)
+		table.Header(headers)
 	}
 	for _, value := range values {
 		table.Append(value)
