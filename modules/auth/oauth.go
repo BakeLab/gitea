@@ -157,7 +157,7 @@ func OAuthLoginWithFullOptions(opts OAuthOptions) error {
 		if strings.Contains(err.Error(), "no authorization code") ||
 			strings.Contains(err.Error(), "redirect_uri") ||
 			strings.Contains(err.Error(), "redirect") {
-			fmt.Println("\n❌ Error: Redirect URL not registered in Gitea")
+			fmt.Println("\nError: Redirect URL not registered in Gitea")
 			fmt.Println("\nTo fix this, you need to register the redirect URL in Gitea:")
 			fmt.Printf("1. Go to your Gitea instance: %s\n", serverURL)
 			fmt.Println("2. Sign in and go to Settings > Applications")
@@ -415,8 +415,6 @@ func createLoginFromToken(name, serverURL string, token *oauth2.Token, insecure 
 }
 
 // RefreshAccessToken manually renews an expired access token using the refresh token
-// Note: In most cases, tokens are automatically refreshed when using login.Client()
-// This function is primarily used for manual refreshes via CLI command
 func RefreshAccessToken(login *config.Login) error {
 	if login.RefreshToken == "" {
 		return fmt.Errorf("no refresh token available")
@@ -425,11 +423,8 @@ func RefreshAccessToken(login *config.Login) error {
 	// Check if token actually needs refreshing
 	if login.TokenExpiry > 0 && time.Now().Unix() < login.TokenExpiry {
 		// Token is still valid, no need to refresh
-		fmt.Println("Token is still valid, no need to refresh.")
 		return nil
 	}
-
-	fmt.Println("Access token expired, refreshing...")
 
 	// Create an expired Token object
 	expiredToken := &oauth2.Token{
