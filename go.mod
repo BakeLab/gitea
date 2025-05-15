@@ -15,7 +15,7 @@ require (
 	github.com/enescakir/emoji v1.0.0
 	github.com/go-git/go-git/v5 v5.16.0
 	github.com/muesli/termenv v0.16.0
-	github.com/olekukonko/tablewriter v1.0.4
+	github.com/olekukonko/tablewriter v1.0.5
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.27.6
@@ -64,7 +64,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/olekukonko/errors v1.1.0 // indirect
-	github.com/olekukonko/ll v0.0.6 // indirect
+	github.com/olekukonko/ll v0.0.7 // indirect
 	github.com/pjbgf/sha1cd v0.3.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
