@@ -222,7 +222,7 @@ func contextFromLocalRepo(repoPath, remoteValue string) (*git.TeaRepo, *config.L
 					return repo, &l, strings.TrimSuffix(path, ".git"), nil
 				}
 			} else if strings.EqualFold(p.Scheme, "ssh") {
-				if sshHost == p.Host {
+				if sshHost == p.Host || sshHost == p.Hostname() {
 					return repo, &l, strings.TrimLeft(p.Path, "/"), nil
 				}
 			}
