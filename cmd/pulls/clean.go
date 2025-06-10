@@ -6,13 +6,14 @@ package pulls
 import (
 	"fmt"
 
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
-
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdPullsClean removes the remote and local feature branches, if a PR is merged.
@@ -30,7 +31,7 @@ var CmdPullsClean = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runPullsClean(cmd *cli.Context) error {
+func runPullsClean(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{LocalRepo: true})
 	if ctx.Args().Len() != 1 {

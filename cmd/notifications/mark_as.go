@@ -4,13 +4,14 @@
 package notifications
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/utils"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdNotificationsMarkRead represents a sub command of notifications to list read notifications
@@ -21,16 +22,16 @@ var CmdNotificationsMarkRead = cli.Command{
 	Description: "Mark all filtered or a specific notification as read",
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
-	Action: func(ctx *cli.Context) error {
-		cmd := context.InitCommand(ctx)
-		filter, err := flags.NotificationStateFlag.GetValues(ctx)
+	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+		ctx := context.InitCommand(cmd)
+		filter, err := flags.NotificationStateFlag.GetValues(cmd)
 		if err != nil {
 			return err
 		}
-		if !cmd.IsSet(flags.NotificationStateFlag.Name) {
+		if !ctx.IsSet(flags.NotificationStateFlag.Name) {
 			filter = []string{string(gitea.NotifyStatusUnread)}
 		}
-		return markNotificationAs(cmd, filter, gitea.NotifyStatusRead)
+		return markNotificationAs(ctx, filter, gitea.NotifyStatusRead)
 	},
 }
 
@@ -42,16 +43,16 @@ var CmdNotificationsMarkUnread = cli.Command{
 	Description: "Mark all filtered or a specific notification as unread",
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
-	Action: func(ctx *cli.Context) error {
-		cmd := context.InitCommand(ctx)
-		filter, err := flags.NotificationStateFlag.GetValues(ctx)
+	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+		ctx := context.InitCommand(cmd)
+		filter, err := flags.NotificationStateFlag.GetValues(cmd)
 		if err != nil {
 			return err
 		}
-		if !cmd.IsSet(flags.NotificationStateFlag.Name) {
+		if !ctx.IsSet(flags.NotificationStateFlag.Name) {
 			filter = []string{string(gitea.NotifyStatusRead)}
 		}
-		return markNotificationAs(cmd, filter, gitea.NotifyStatusUnread)
+		return markNotificationAs(ctx, filter, gitea.NotifyStatusUnread)
 	},
 }
 
@@ -63,16 +64,16 @@ var CmdNotificationsMarkPinned = cli.Command{
 	Description: "Mark all filtered or a specific notification as pinned",
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
-	Action: func(ctx *cli.Context) error {
-		cmd := context.InitCommand(ctx)
-		filter, err := flags.NotificationStateFlag.GetValues(ctx)
+	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+		ctx := context.InitCommand(cmd)
+		filter, err := flags.NotificationStateFlag.GetValues(cmd)
 		if err != nil {
 			return err
 		}
-		if !cmd.IsSet(flags.NotificationStateFlag.Name) {
+		if !ctx.IsSet(flags.NotificationStateFlag.Name) {
 			filter = []string{string(gitea.NotifyStatusUnread)}
 		}
-		return markNotificationAs(cmd, filter, gitea.NotifyStatusPinned)
+		return markNotificationAs(ctx, filter, gitea.NotifyStatusPinned)
 	},
 }
 
@@ -83,11 +84,11 @@ var CmdNotificationsUnpin = cli.Command{
 	Description: "Marks all pinned or a specific notification as read",
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
-	Action: func(ctx *cli.Context) error {
-		cmd := context.InitCommand(ctx)
+	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+		ctx := context.InitCommand(cmd)
 		filter := []string{string(gitea.NotifyStatusPinned)}
 		// NOTE: we implicitly mark it as read, to match web UI semantics. marking as unread might be more useful?
-		return markNotificationAs(cmd, filter, gitea.NotifyStatusRead)
+		return markNotificationAs(ctx, filter, gitea.NotifyStatusRead)
 	},
 }
 

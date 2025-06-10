@@ -4,12 +4,13 @@
 package login
 
 import (
+	"context"
 	"fmt"
 
 	"code.gitea.io/tea/modules/auth"
 	"code.gitea.io/tea/modules/config"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLoginOAuthRefresh represents a command to refresh an OAuth token
@@ -21,12 +22,12 @@ var CmdLoginOAuthRefresh = cli.Command{
 	Action:      runLoginOAuthRefresh,
 }
 
-func runLoginOAuthRefresh(ctx *cli.Context) error {
+func runLoginOAuthRefresh(_ context.Context, cmd *cli.Command) error {
 	var loginName string
 
 	// Get login name from args or use default
-	if ctx.Args().Len() > 0 {
-		loginName = ctx.Args().First()
+	if cmd.Args().Len() > 0 {
+		loginName = cmd.Args().First()
 	} else {
 		// Get default login
 		login, err := config.GetDefaultLogin()

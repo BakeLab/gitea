@@ -4,6 +4,7 @@
 package pulls
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -12,7 +13,7 @@ import (
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdPullsCheckout is a command to locally checkout the given PR
@@ -32,7 +33,7 @@ var CmdPullsCheckout = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runPullsCheckout(cmd *cli.Context) error {
+func runPullsCheckout(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{
 		LocalRepo:  true,

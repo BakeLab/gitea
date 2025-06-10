@@ -4,13 +4,15 @@
 package labels
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
 	"code.gitea.io/tea/modules/task"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLabelsList represents a sub command of labels to list labels
@@ -33,7 +35,7 @@ var CmdLabelsList = cli.Command{
 }
 
 // RunLabelsList list labels.
-func RunLabelsList(cmd *cli.Context) error {
+func RunLabelsList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

@@ -4,6 +4,7 @@
 package attachments
 
 import (
+	stdctx "context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +12,7 @@ import (
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdReleaseAttachmentCreate represents a sub command of Release Attachments to create a release attachment
@@ -25,7 +26,7 @@ var CmdReleaseAttachmentCreate = cli.Command{
 	Flags:       flags.AllDefaultFlags,
 }
 
-func runReleaseAttachmentCreate(cmd *cli.Context) error {
+func runReleaseAttachmentCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()

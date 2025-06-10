@@ -4,10 +4,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/labels"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLabels represents to operate repositories' labels.
@@ -19,7 +20,7 @@ var CmdLabels = cli.Command{
 	Description: `Manage issue labels`,
 	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runLabels,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&labels.CmdLabelsList,
 		&labels.CmdLabelCreate,
 		&labels.CmdLabelUpdate,
@@ -28,13 +29,13 @@ var CmdLabels = cli.Command{
 	Flags: labels.CmdLabelsList.Flags,
 }
 
-func runLabels(ctx *cli.Context) error {
-	if ctx.Args().Len() == 1 {
-		return runLabelsDetails(ctx)
+func runLabels(ctx context.Context, cmd *cli.Command) error {
+	if cmd.Args().Len() == 1 {
+		return runLabelsDetails(cmd)
 	}
-	return labels.RunLabelsList(ctx)
+	return labels.RunLabelsList(ctx, cmd)
 }
 
-func runLabelsDetails(ctx *cli.Context) error {
+func runLabelsDetails(cmd *cli.Command) error {
 	return fmt.Errorf("Not yet implemented")
 }

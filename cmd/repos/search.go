@@ -4,6 +4,7 @@
 package repos
 
 import (
+	stdctx "context"
 	"fmt"
 	"strings"
 
@@ -12,7 +13,7 @@ import (
 	"code.gitea.io/tea/modules/print"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdReposSearch represents a sub command of repos to find them
@@ -55,14 +56,14 @@ var CmdReposSearch = cli.Command{
 	}, flags.LoginOutputFlags...),
 }
 
-func runReposSearch(cmd *cli.Context) error {
-	ctx := context.InitCommand(cmd)
-	client := ctx.Login.Client()
+func runReposSearch(_ stdctx.Context, cmd *cli.Command) error {
+	teaCmd := context.InitCommand(cmd)
+	client := teaCmd.Login.Client()
 
 	var ownerID int64
-	if ctx.IsSet("owner") {
+	if teaCmd.IsSet("owner") {
 		// test if owner is a organisation
-		org, _, err := client.GetOrg(ctx.String("owner"))
+		org, _, err := client.GetOrg(teaCmd.String("owner"))
 		if err != nil {
 			// HACK: the client does not return a response on 404, so we can't check res.StatusCode
 			if err.Error() != "404 Not Found" {
@@ -70,7 +71,7 @@ func runReposSearch(cmd *cli.Context) error {
 			}
 
 			// if owner is no org, its a user
-			user, _, err := client.GetUserInfo(ctx.String("owner"))
+			user, _, err := client.GetUserInfo(teaCmd.String("owner"))
 			if err != nil {
 				return err
 			}
@@ -81,14 +82,14 @@ func runReposSearch(cmd *cli.Context) error {
 	}
 
 	var isArchived *bool
-	if ctx.IsSet("archived") {
-		archived := strings.ToLower(ctx.String("archived"))[:1] == "t"
+	if teaCmd.IsSet("archived") {
+		archived := strings.ToLower(teaCmd.String("archived"))[:1] == "t"
 		isArchived = &archived
 	}
 
 	var isPrivate *bool
-	if ctx.IsSet("private") {
-		private := strings.ToLower(ctx.String("private"))[:1] == "t"
+	if teaCmd.IsSet("private") {
+		private := strings.ToLower(teaCmd.String("private"))[:1] == "t"
 		isPrivate = &private
 	}
 
@@ -98,8 +99,8 @@ func runReposSearch(cmd *cli.Context) error {
 	}
 
 	var keyword string
-	if ctx.Args().Present() {
-		keyword = strings.Join(ctx.Args().Slice(), " ")
+	if teaCmd.Args().Present() {
+		keyword = strings.Join(teaCmd.Args().Slice(), " ")
 	}
 
 	user, _, err := client.GetMyUserInfo()
@@ -108,14 +109,14 @@ func runReposSearch(cmd *cli.Context) error {
 	}
 
 	rps, _, err := client.SearchRepos(gitea.SearchRepoOptions{
-		ListOptions:          ctx.GetListOptions(),
+		ListOptions:          teaCmd.GetListOptions(),
 		OwnerID:              ownerID,
 		IsPrivate:            isPrivate,
 		IsArchived:           isArchived,
 		Type:                 mode,
 		Keyword:              keyword,
 		KeywordInDescription: true,
-		KeywordIsTopic:       ctx.Bool("topic"),
+		KeywordIsTopic:       teaCmd.Bool("topic"),
 		PrioritizedByOwnerID: user.ID,
 	})
 	if err != nil {
@@ -126,6 +127,6 @@ func runReposSearch(cmd *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	print.ReposList(rps, ctx.Output, fields)
+	print.ReposList(rps, teaCmd.Output, fields)
 	return nil
 }

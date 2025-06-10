@@ -5,6 +5,7 @@ package labels
 
 import (
 	"bufio"
+	stdctx "context"
 	"log"
 	"os"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"code.gitea.io/tea/modules/context"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLabelCreate represents a sub command of labels to create label.
@@ -44,7 +45,7 @@ var CmdLabelCreate = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runLabelCreate(cmd *cli.Context) error {
+func runLabelCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

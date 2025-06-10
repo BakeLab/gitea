@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	stdctx "context"
 	"fmt"
 	"io"
 	"strings"
@@ -17,7 +18,7 @@ import (
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/AlecAivazis/survey/v2"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdAddComment is the main command to operate with notifications
@@ -32,7 +33,7 @@ var CmdAddComment = cli.Command{
 	Flags:       flags.AllDefaultFlags,
 }
 
-func runAddComment(cmd *cli.Context) error {
+func runAddComment(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
@@ -49,7 +50,7 @@ func runAddComment(cmd *cli.Context) error {
 	body := strings.Join(ctx.Args().Tail(), " ")
 	if interact.IsStdinPiped() {
 		// custom solution until https://github.com/AlecAivazis/survey/issues/328 is fixed
-		if bodyStdin, err := io.ReadAll(ctx.App.Reader); err != nil {
+		if bodyStdin, err := io.ReadAll(ctx.Reader); err != nil {
 			return err
 		} else if len(bodyStdin) != 0 {
 			body = strings.Join([]string{body, string(bodyStdin)}, "\n\n")

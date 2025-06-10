@@ -4,6 +4,7 @@
 package pulls
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/modules/context"
@@ -11,11 +12,11 @@ import (
 	"code.gitea.io/tea/modules/utils"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // editPullState abstracts the arg parsing to edit the given pull request
-func editPullState(cmd *cli.Context, opts gitea.EditPullRequestOption) error {
+func editPullState(_ stdctx.Context, cmd *cli.Command, opts gitea.EditPullRequestOption) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	if ctx.Args().Len() == 0 {

@@ -4,6 +4,7 @@
 package milestones
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -11,7 +12,7 @@ import (
 	"code.gitea.io/tea/modules/print"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdMilestonesReopen represents a sub command of milestones to open an milestone
@@ -21,13 +22,13 @@ var CmdMilestonesReopen = cli.Command{
 	Usage:       "Change state of one or more milestones to 'open'",
 	Description: `Change state of one or more milestones to 'open'`,
 	ArgsUsage:   "<milestone name> [<milestone name> ...]",
-	Action: func(ctx *cli.Context) error {
-		return editMilestoneStatus(ctx, false)
+	Action: func(ctx stdctx.Context, cmd *cli.Command) error {
+		return editMilestoneStatus(ctx, cmd, false)
 	},
 	Flags: flags.AllDefaultFlags,
 }
 
-func editMilestoneStatus(cmd *cli.Context, close bool) error {
+func editMilestoneStatus(_ stdctx.Context, cmd *cli.Command, close bool) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	if ctx.Args().Len() == 0 {

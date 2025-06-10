@@ -4,6 +4,7 @@
 package issues
 
 import (
+	stdctx "context"
 	"fmt"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/araddon/dateparse"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var issueFieldsFlag = flags.FieldsFlag(print.IssueFields, []string{
@@ -32,7 +33,7 @@ var CmdIssuesList = cli.Command{
 }
 
 // RunIssuesList list issues
-func RunIssuesList(cmd *cli.Context) error {
+func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 
 	state := gitea.StateOpen

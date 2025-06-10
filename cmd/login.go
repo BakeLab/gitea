@@ -4,13 +4,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/login"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/print"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLogin represents to login a gitea server.
@@ -22,7 +23,7 @@ var CmdLogin = cli.Command{
 	Description: `Log in to a Gitea server`,
 	ArgsUsage:   "[<login name>]",
 	Action:      runLogins,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&login.CmdLoginList,
 		&login.CmdLoginAdd,
 		&login.CmdLoginEdit,
@@ -33,11 +34,11 @@ var CmdLogin = cli.Command{
 	},
 }
 
-func runLogins(ctx *cli.Context) error {
-	if ctx.Args().Len() == 1 {
-		return runLoginDetail(ctx.Args().First())
+func runLogins(ctx context.Context, cmd *cli.Command) error {
+	if cmd.Args().Len() == 1 {
+		return runLoginDetail(cmd.Args().First())
 	}
-	return login.RunLoginList(ctx)
+	return login.RunLoginList(ctx, cmd)
 }
 
 func runLoginDetail(name string) error {

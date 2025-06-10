@@ -4,11 +4,13 @@
 package cmd
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/organizations"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdOrgs represents handle organization
@@ -20,7 +22,7 @@ var CmdOrgs = cli.Command{
 	Description: "Show organization details",
 	ArgsUsage:   "[<organization>]",
 	Action:      runOrganizations,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&organizations.CmdOrganizationList,
 		&organizations.CmdOrganizationCreate,
 		&organizations.CmdOrganizationDelete,
@@ -28,12 +30,12 @@ var CmdOrgs = cli.Command{
 	Flags: organizations.CmdOrganizationList.Flags,
 }
 
-func runOrganizations(cmd *cli.Context) error {
-	ctx := context.InitCommand(cmd)
-	if ctx.Args().Len() == 1 {
-		return runOrganizationDetail(ctx)
+func runOrganizations(ctx stdctx.Context, cmd *cli.Command) error {
+	teaCtx := context.InitCommand(cmd)
+	if teaCtx.Args().Len() == 1 {
+		return runOrganizationDetail(teaCtx)
 	}
-	return organizations.RunOrganizationList(cmd)
+	return organizations.RunOrganizationList(ctx, cmd)
 }
 
 func runOrganizationDetail(ctx *context.TeaContext) error {

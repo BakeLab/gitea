@@ -4,10 +4,12 @@
 package cmd
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/admin/users"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdAdmin represents the namespace of admin commands.
@@ -17,10 +19,10 @@ var CmdAdmin = cli.Command{
 	Usage:    "Operations requiring admin access on the Gitea instance",
 	Aliases:  []string{"a"},
 	Category: catMisc,
-	Action: func(cmd *cli.Context) error {
+	Action: func(_ stdctx.Context, cmd *cli.Command) error {
 		return cli.ShowSubcommandHelp(cmd)
 	},
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&cmdAdminUsers,
 	},
 }
@@ -29,19 +31,19 @@ var cmdAdminUsers = cli.Command{
 	Name:    "users",
 	Aliases: []string{"u"},
 	Usage:   "Manage registered users",
-	Action: func(ctx *cli.Context) error {
-		if ctx.Args().Len() == 1 {
-			return runAdminUserDetail(ctx, ctx.Args().First())
+	Action: func(ctx stdctx.Context, cmd *cli.Command) error {
+		if cmd.Args().Len() == 1 {
+			return runAdminUserDetail(ctx, cmd, cmd.Args().First())
 		}
-		return users.RunUserList(ctx)
+		return users.RunUserList(ctx, cmd)
 	},
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&users.CmdUserList,
 	},
 	Flags: users.CmdUserList.Flags,
 }
 
-func runAdminUserDetail(cmd *cli.Context, u string) error {
+func runAdminUserDetail(_ stdctx.Context, cmd *cli.Command, u string) error {
 	ctx := context.InitCommand(cmd)
 	client := ctx.Login.Client()
 	user, _, err := client.GetUserInfo(u)

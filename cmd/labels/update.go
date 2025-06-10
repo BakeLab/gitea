@@ -4,11 +4,13 @@
 package labels
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLabelUpdate represents a sub command of labels to update label.
@@ -38,7 +40,7 @@ var CmdLabelUpdate = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runLabelUpdate(cmd *cli.Context) error {
+func runLabelUpdate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

@@ -6,12 +6,13 @@ package repos
 import (
 	"fmt"
 
+	stdctx "context"
+
+	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
-
-	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdRepoMigrate represents a sub command of repos to migrate one
@@ -107,7 +108,7 @@ var CmdRepoMigrate = cli.Command{
 	}, flags.LoginOutputFlags...),
 }
 
-func runRepoMigrate(cmd *cli.Context) error {
+func runRepoMigrate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	client := ctx.Login.Client()
 	var (

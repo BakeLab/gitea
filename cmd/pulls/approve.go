@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"strings"
 
+	stdctx "context"
+
+	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
-
-	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdPullsApprove approves a PR
@@ -23,7 +24,7 @@ var CmdPullsApprove = cli.Command{
 	Usage:       "Approve a pull request",
 	Description: "Approve a pull request",
 	ArgsUsage:   "<pull index> [<comment>]",
-	Action: func(cmd *cli.Context) error {
+	Action: func(_ stdctx.Context, cmd *cli.Command) error {
 		ctx := context.InitCommand(cmd)
 		ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

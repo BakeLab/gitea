@@ -4,6 +4,7 @@
 package repos
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -11,7 +12,7 @@ import (
 	"code.gitea.io/tea/modules/print"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdRepoCreate represents a sub command of repos to create one
@@ -90,7 +91,7 @@ var CmdRepoCreate = cli.Command{
 	}, flags.LoginOutputFlags...),
 }
 
-func runRepoCreate(cmd *cli.Context) error {
+func runRepoCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	client := ctx.Login.Client()
 	var (

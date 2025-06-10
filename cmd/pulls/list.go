@@ -4,12 +4,13 @@
 package pulls
 
 import (
+	stdctx "context"
+
+	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
-
-	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var pullFieldsFlag = flags.FieldsFlag(print.PullFields, []string{
@@ -28,7 +29,7 @@ var CmdPullsList = cli.Command{
 }
 
 // RunPullsList return list of pulls
-func RunPullsList(cmd *cli.Context) error {
+func RunPullsList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

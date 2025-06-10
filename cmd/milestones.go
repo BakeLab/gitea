@@ -4,11 +4,12 @@
 package cmd
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/milestones"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
-
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdMilestones represents to operate repositories milestones.
@@ -20,7 +21,7 @@ var CmdMilestones = cli.Command{
 	Description: `List and create milestones`,
 	ArgsUsage:   "[<milestone name>]",
 	Action:      runMilestones,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&milestones.CmdMilestonesList,
 		&milestones.CmdMilestonesCreate,
 		&milestones.CmdMilestonesClose,
@@ -31,14 +32,14 @@ var CmdMilestones = cli.Command{
 	Flags: milestones.CmdMilestonesList.Flags,
 }
 
-func runMilestones(ctx *cli.Context) error {
-	if ctx.Args().Len() == 1 {
-		return runMilestoneDetail(ctx, ctx.Args().First())
+func runMilestones(ctx stdctx.Context, cmd *cli.Command) error {
+	if cmd.Args().Len() == 1 {
+		return runMilestoneDetail(ctx, cmd, cmd.Args().First())
 	}
-	return milestones.RunMilestonesList(ctx)
+	return milestones.RunMilestonesList(ctx, cmd)
 }
 
-func runMilestoneDetail(cmd *cli.Context, name string) error {
+func runMilestoneDetail(_ stdctx.Context, cmd *cli.Command, name string) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()

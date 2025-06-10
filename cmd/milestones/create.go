@@ -6,14 +6,15 @@ package milestones
 import (
 	"time"
 
+	stdctx "context"
+
+	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/task"
-
-	"code.gitea.io/sdk/gitea"
 	"github.com/araddon/dateparse"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdMilestonesCreate represents a sub command of milestones to create milestone
@@ -48,7 +49,7 @@ var CmdMilestonesCreate = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runMilestonesCreate(cmd *cli.Context) error {
+func runMilestonesCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 
 	date := ctx.String("deadline")

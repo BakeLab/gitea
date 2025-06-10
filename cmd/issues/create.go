@@ -4,12 +4,14 @@
 package issues
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/task"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdIssuesCreate represents a sub command of issues to create issue
@@ -23,7 +25,7 @@ var CmdIssuesCreate = cli.Command{
 	Flags:       flags.IssuePRCreateFlags,
 }
 
-func runIssuesCreate(cmd *cli.Context) error {
+func runIssuesCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

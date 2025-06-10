@@ -6,14 +6,15 @@ package issues
 import (
 	"fmt"
 
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/print"
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
-
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdIssuesEdit is the subcommand of issues to edit issues
@@ -28,7 +29,7 @@ use an empty string (eg. --milestone "").`,
 	Flags:     flags.IssuePREditFlags,
 }
 
-func runIssuesEdit(cmd *cli.Context) error {
+func runIssuesEdit(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

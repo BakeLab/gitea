@@ -4,13 +4,14 @@
 package repos
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 
 	"github.com/AlecAivazis/survey/v2"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdRepoRm represents a sub command of repos to delete an existing repo
@@ -44,7 +45,7 @@ var CmdRepoRm = cli.Command{
 	}, flags.LoginOutputFlags...),
 }
 
-func runRepoDelete(cmd *cli.Context) error {
+func runRepoDelete(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 
 	client := ctx.Login.Client()

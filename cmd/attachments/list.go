@@ -4,6 +4,7 @@
 package attachments
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -11,7 +12,7 @@ import (
 	"code.gitea.io/tea/modules/print"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdReleaseAttachmentList represents a sub command of release attachment to list release attachments
@@ -29,7 +30,7 @@ var CmdReleaseAttachmentList = cli.Command{
 }
 
 // RunReleaseAttachmentList list release attachments
-func RunReleaseAttachmentList(cmd *cli.Context) error {
+func RunReleaseAttachmentList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()

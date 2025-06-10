@@ -6,12 +6,13 @@ package organizations
 import (
 	"fmt"
 
+	stdctx "context"
+
+	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
-
-	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdOrganizationCreate represents a sub command of organizations to delete a given user organization
@@ -51,7 +52,7 @@ var CmdOrganizationCreate = cli.Command{
 }
 
 // RunOrganizationCreate sets up a new organization
-func RunOrganizationCreate(cmd *cli.Context) error {
+func RunOrganizationCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 
 	if ctx.Args().Len() < 1 {

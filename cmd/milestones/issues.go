@@ -6,13 +6,14 @@ package milestones
 import (
 	"fmt"
 
+	stdctx "context"
+
+	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
 	"code.gitea.io/tea/modules/utils"
-
-	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var msIssuesFieldsFlag = flags.FieldsFlag(print.IssueFields, []string{
@@ -27,7 +28,7 @@ var CmdMilestonesIssues = cli.Command{
 	Description: "manage issue/pull of an milestone",
 	ArgsUsage:   "<milestone name>",
 	Action:      runMilestoneIssueList,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&CmdMilestoneAddIssue,
 		&CmdMilestoneRemoveIssue,
 	},
@@ -69,7 +70,7 @@ var CmdMilestoneRemoveIssue = cli.Command{
 	Flags:       flags.AllDefaultFlags,
 }
 
-func runMilestoneIssueList(cmd *cli.Context) error {
+func runMilestoneIssueList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()
@@ -119,7 +120,7 @@ func runMilestoneIssueList(cmd *cli.Context) error {
 	return nil
 }
 
-func runMilestoneIssueAdd(cmd *cli.Context) error {
+func runMilestoneIssueAdd(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()
@@ -146,7 +147,7 @@ func runMilestoneIssueAdd(cmd *cli.Context) error {
 	return err
 }
 
-func runMilestoneIssueRemove(cmd *cli.Context) error {
+func runMilestoneIssueRemove(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"code.gitea.io/tea/modules/utils"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CsvFlag is a wrapper around cli.StringFlag, with an added GetValues() method
@@ -38,8 +38,8 @@ func NewCsvFlag(name, usage string, aliases, availableValues, defaults []string)
 }
 
 // GetValues returns the value of the flag, parsed as a commaseparated list
-func (f CsvFlag) GetValues(ctx *cli.Context) ([]string, error) {
-	val := ctx.String(f.Name)
+func (f CsvFlag) GetValues(cmd *cli.Command) ([]string, error) {
+	val := cmd.String(f.Name)
 	selection := strings.Split(val, ",")
 	if f.AvailableFields != nil && val != "" {
 		for _, field := range selection {

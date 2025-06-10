@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"strings"
 
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
+	stdctx "context"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"code.gitea.io/tea/cmd/flags"
+	"code.gitea.io/tea/modules/context"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdReleaseEdit represents a sub command of Release to edit releases
@@ -56,7 +57,7 @@ var CmdReleaseEdit = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runReleaseEdit(cmd *cli.Context) error {
+func runReleaseEdit(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()

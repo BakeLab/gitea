@@ -4,9 +4,10 @@
 package milestones
 
 import (
-	"code.gitea.io/tea/cmd/flags"
+	"context"
 
-	"github.com/urfave/cli/v2"
+	"code.gitea.io/tea/cmd/flags"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdMilestonesClose represents a sub command of milestones to close an milestone
@@ -15,11 +16,11 @@ var CmdMilestonesClose = cli.Command{
 	Usage:       "Change state of one or more milestones to 'closed'",
 	Description: `Change state of one or more milestones to 'closed'`,
 	ArgsUsage:   "<milestone name> [<milestone name>...]",
-	Action: func(ctx *cli.Context) error {
-		if ctx.Bool("force") {
-			return deleteMilestone(ctx)
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		if cmd.Bool("force") {
+			return deleteMilestone(ctx, cmd)
 		}
-		return editMilestoneStatus(ctx, true)
+		return editMilestoneStatus(ctx, cmd, true)
 	},
 	Flags: append([]cli.Flag{
 		&cli.BoolFlag{

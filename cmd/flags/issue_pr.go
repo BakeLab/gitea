@@ -13,7 +13,7 @@ import (
 	"code.gitea.io/tea/modules/task"
 
 	"github.com/araddon/dateparse"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // StateFlag provides flag to specify issue/pr state, defaulting to "open"

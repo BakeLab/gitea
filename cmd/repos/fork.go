@@ -4,6 +4,7 @@
 package repos
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -11,7 +12,7 @@ import (
 	"code.gitea.io/tea/modules/print"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdRepoFork represents a sub command of repos to fork an existing repo
@@ -31,7 +32,7 @@ var CmdRepoFork = cli.Command{
 	}, flags.LoginRepoFlags...),
 }
 
-func runRepoFork(cmd *cli.Context) error {
+func runRepoFork(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()

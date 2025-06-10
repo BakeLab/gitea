@@ -4,6 +4,7 @@
 package releases
 
 import (
+	stdctx "context"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,7 +14,7 @@ import (
 	"code.gitea.io/tea/modules/context"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdReleaseCreate represents a sub command of Release to create release
@@ -66,7 +67,7 @@ var CmdReleaseCreate = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runReleaseCreate(cmd *cli.Context) error {
+func runReleaseCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

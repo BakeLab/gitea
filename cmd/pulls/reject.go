@@ -4,6 +4,7 @@
 package pulls
 
 import (
+	stdctx "context"
 	"fmt"
 	"strings"
 
@@ -13,7 +14,7 @@ import (
 	"code.gitea.io/tea/modules/utils"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdPullsReject requests changes to a PR
@@ -22,7 +23,7 @@ var CmdPullsReject = cli.Command{
 	Usage:       "Request changes to a pull request",
 	Description: "Request changes to a pull request",
 	ArgsUsage:   "<pull index> <reason>",
-	Action: func(cmd *cli.Context) error {
+	Action: func(_ stdctx.Context, cmd *cli.Command) error {
 		ctx := context.InitCommand(cmd)
 		ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

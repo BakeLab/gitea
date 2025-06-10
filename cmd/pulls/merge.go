@@ -4,14 +4,15 @@
 package pulls
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
-
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdPullsMerge merges a PR
@@ -39,7 +40,7 @@ var CmdPullsMerge = cli.Command{
 			Usage:   "Merge commit message",
 		},
 	}, flags.AllDefaultFlags...),
-	Action: func(cmd *cli.Context) error {
+	Action: func(_ stdctx.Context, cmd *cli.Command) error {
 		ctx := context.InitCommand(cmd)
 		ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

@@ -4,12 +4,14 @@
 package branches
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var branchFieldsFlag = flags.FieldsFlag(print.BranchFields, []string{
@@ -35,7 +37,7 @@ var CmdBranchesList = cli.Command{
 }
 
 // RunBranchesList list branches
-func RunBranchesList(cmd *cli.Context) error {
+func RunBranchesList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

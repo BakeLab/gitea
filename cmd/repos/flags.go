@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var typeFilterFlag = cli.StringFlag{
@@ -17,8 +17,8 @@ var typeFilterFlag = cli.StringFlag{
 	Usage:    "Filter by type: fork, mirror, source",
 }
 
-func getTypeFilter(ctx *cli.Context) (filter gitea.RepoType, err error) {
-	t := ctx.String("type")
+func getTypeFilter(cmd *cli.Command) (filter gitea.RepoType, err error) {
+	t := cmd.String("type")
 	filter = gitea.RepoTypeNone
 	switch t {
 	case "":

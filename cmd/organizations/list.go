@@ -4,12 +4,13 @@
 package organizations
 
 import (
+	stdctx "context"
+
+	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
-
-	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdOrganizationList represents a sub command of organizations to list users organizations
@@ -27,7 +28,7 @@ var CmdOrganizationList = cli.Command{
 }
 
 // RunOrganizationList list user organizations
-func RunOrganizationList(cmd *cli.Context) error {
+func RunOrganizationList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	client := ctx.Login.Client()
 

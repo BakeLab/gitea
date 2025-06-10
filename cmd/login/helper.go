@@ -5,6 +5,7 @@ package login
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log"
 	"net/url"
@@ -15,7 +16,7 @@ import (
 	"code.gitea.io/tea/modules/auth"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/task"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLoginHelper represents to login a gitea helper.
@@ -25,19 +26,19 @@ var CmdLoginHelper = cli.Command{
 	Usage:       "Git helper",
 	Description: `Git helper`,
 	Hidden:      true,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		{
 			Name:        "store",
 			Description: "Command drops",
 			Aliases:     []string{"erase"},
-			Action: func(ctx *cli.Context) error {
+			Action: func(_ context.Context, _ *cli.Command) error {
 				return nil
 			},
 		},
 		{
 			Name:        "setup",
 			Description: "Setup helper to tea authenticate",
-			Action: func(ctx *cli.Context) error {
+			Action: func(_ context.Context, _ *cli.Command) error {
 				logins, err := config.GetLogins()
 				if err != nil {
 					return err
@@ -58,7 +59,7 @@ var CmdLoginHelper = cli.Command{
 		{
 			Name:        "get",
 			Description: "Get token to auth",
-			Action: func(cmd *cli.Context) error {
+			Action: func(_ context.Context, cmd *cli.Command) error {
 				wants := map[string]string{}
 				s := bufio.NewScanner(os.Stdin)
 				for s.Scan() {

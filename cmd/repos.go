@@ -4,13 +4,15 @@
 package cmd
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/repos"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
 	"code.gitea.io/tea/modules/utils"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdRepos represents to login a gitea server.
@@ -22,7 +24,7 @@ var CmdRepos = cli.Command{
 	Description: "Show repository details",
 	ArgsUsage:   "[<repo owner>/<repo name>]",
 	Action:      runRepos,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&repos.CmdReposList,
 		&repos.CmdReposSearch,
 		&repos.CmdRepoCreate,
@@ -34,14 +36,14 @@ var CmdRepos = cli.Command{
 	Flags: repos.CmdReposListFlags,
 }
 
-func runRepos(ctx *cli.Context) error {
-	if ctx.Args().Len() == 1 {
-		return runRepoDetail(ctx, ctx.Args().First())
+func runRepos(ctx stdctx.Context, cmd *cli.Command) error {
+	if cmd.Args().Len() == 1 {
+		return runRepoDetail(ctx, cmd, cmd.Args().First())
 	}
-	return repos.RunReposList(ctx)
+	return repos.RunReposList(ctx, cmd)
 }
 
-func runRepoDetail(cmd *cli.Context, path string) error {
+func runRepoDetail(_ stdctx.Context, cmd *cli.Command, path string) error {
 	ctx := context.InitCommand(cmd)
 	client := ctx.Login.Client()
 	repoOwner, repoName := utils.GetOwnerAndRepo(path, ctx.Owner)

@@ -22,7 +22,7 @@ TEA_VERSION_TAG ?= $(shell sed 's/+/_/' <<< $(TEA_VERSION))
 
 TAGS ?=
 SDK ?= $(shell $(GO) list -f '{{.Version}}' -m code.gitea.io/sdk/gitea)
-LDFLAGS := -X "main.Version=$(TEA_VERSION)" -X "main.Tags=$(TAGS)" -X "main.SDK=$(SDK)" -s -w
+LDFLAGS := -X "code.gitea.io/tea/cmd.Version=$(TEA_VERSION)" -X "code.gitea.io/tea/cmd.Tags=$(TAGS)" -X "code.gitea.io/tea/cmd.SDK=$(SDK)" -s -w
 
 # override to allow passing additional goflags via make CLI
 override GOFLAGS := $(GOFLAGS) -tags '$(TAGS)' -ldflags '$(LDFLAGS)'
@@ -83,11 +83,11 @@ fmt-check:
 
 .PHONY: docs
 docs:
-	$(GO) run . docs --out docs/CLI.md
+	$(GO) run docs/docs.go --out docs/CLI.md
 
 .PHONY: docs-check
 docs-check:
-	@DIFF=$$($(GO) run . docs | diff docs/CLI.md -); \
+	@DIFF=$$($(GO) run docs/docs.go | diff docs/CLI.md -); \
 	if [ -n "$$DIFF" ]; then \
 		echo "Please run 'make docs' and commit the result:"; \
 		echo "$$DIFF"; \

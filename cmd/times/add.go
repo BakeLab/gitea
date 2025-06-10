@@ -4,6 +4,7 @@
 package times
 
 import (
+	stdctx "context"
 	"fmt"
 	"strings"
 	"time"
@@ -13,7 +14,7 @@ import (
 	"code.gitea.io/tea/modules/utils"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdTrackedTimesAdd represents a sub command of times to add time to an issue
@@ -30,7 +31,7 @@ var CmdTrackedTimesAdd = cli.Command{
 	Flags:  flags.LoginRepoFlags,
 }
 
-func runTrackedTimesAdd(cmd *cli.Context) error {
+func runTrackedTimesAdd(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

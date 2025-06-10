@@ -18,7 +18,8 @@ require (
 	github.com/olekukonko/tablewriter v1.0.7
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 	github.com/stretchr/testify v1.10.0
-	github.com/urfave/cli/v2 v2.27.6
+	github.com/urfave/cli-docs/v3 v3.0.0-alpha6
+	github.com/urfave/cli/v3 v3.3.3
 	golang.org/x/crypto v0.39.0
 	golang.org/x/oauth2 v0.30.0
 	golang.org/x/term v0.32.0
@@ -73,7 +74,6 @@ require (
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	github.com/yuin/goldmark v1.7.8 // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	golang.org/x/net v0.40.0 // indirect

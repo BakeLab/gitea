@@ -4,13 +4,14 @@
 package branches
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdBranchesProtectFlags Flags for command protect/unprotect
@@ -43,7 +44,7 @@ var CmdBranchesUnprotect = cli.Command{
 }
 
 // RunBranchesProtect function to protect/unprotect a list of branches
-func RunBranchesProtect(cmd *cli.Context) error {
+func RunBranchesProtect(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

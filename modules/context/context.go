@@ -17,7 +17,7 @@ import (
 	"code.gitea.io/tea/modules/utils"
 
 	gogit "github.com/go-git/go-git/v5"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var (
@@ -26,7 +26,7 @@ var (
 
 // TeaContext contains all context derived during command initialization and wraps cli.Context
 type TeaContext struct {
-	*cli.Context
+	*cli.Command
 	Login     *config.Login // config data & client for selected login
 	RepoSlug  string        // <owner>/<repo>, optional
 	Owner     string        // repo owner as derived from context or provided in flag, optional
@@ -83,11 +83,11 @@ type CtxRequirement struct {
 // available the repo slug. It does this by reading the config file for logins, parsing
 // the remotes of the .git repo specified in repoFlag or $PWD, and using overrides from
 // command flags. If a local git repo can't be found, repo slug values are unset.
-func InitCommand(ctx *cli.Context) *TeaContext {
+func InitCommand(cmd *cli.Command) *TeaContext {
 	// these flags are used as overrides to the context detection via local git repo
-	repoFlag := ctx.String("repo")
-	loginFlag := ctx.String("login")
-	remoteFlag := ctx.String("remote")
+	repoFlag := cmd.String("repo")
+	loginFlag := cmd.String("login")
+	remoteFlag := cmd.String("remote")
 
 	var (
 		c                  TeaContext
@@ -147,9 +147,8 @@ and then run your command again.`)
 
 	// parse reposlug (owner falling back to login owner if reposlug contains only repo name)
 	c.Owner, c.Repo = utils.GetOwnerAndRepo(c.RepoSlug, c.Login.User)
-
-	c.Context = ctx
-	c.Output = ctx.String("output")
+	c.Command = cmd
+	c.Output = cmd.String("output")
 	return &c
 }
 

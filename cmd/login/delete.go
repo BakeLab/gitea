@@ -4,12 +4,13 @@
 package login
 
 import (
+	"context"
 	"errors"
 	"log"
 
 	"code.gitea.io/tea/modules/config"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLoginDelete is a command to delete a login
@@ -23,7 +24,7 @@ var CmdLoginDelete = cli.Command{
 }
 
 // RunLoginDelete runs the action of a login delete command
-func RunLoginDelete(ctx *cli.Context) error {
+func RunLoginDelete(_ context.Context, cmd *cli.Command) error {
 	logins, err := config.GetLogins()
 	if err != nil {
 		log.Fatal(err)
@@ -31,8 +32,8 @@ func RunLoginDelete(ctx *cli.Context) error {
 
 	var name string
 
-	if len(ctx.Args().First()) != 0 {
-		name = ctx.Args().First()
+	if len(cmd.Args().First()) != 0 {
+		name = cmd.Args().First()
 	} else if len(logins) == 1 {
 		name = logins[0].Name
 	} else {

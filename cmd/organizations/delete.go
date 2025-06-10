@@ -4,11 +4,12 @@
 package organizations
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdOrganizationDelete represents a sub command of organizations to delete a given user organization
@@ -26,7 +27,7 @@ var CmdOrganizationDelete = cli.Command{
 }
 
 // RunOrganizationDelete delete user organization
-func RunOrganizationDelete(cmd *cli.Context) error {
+func RunOrganizationDelete(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 
 	client := ctx.Login.Client()

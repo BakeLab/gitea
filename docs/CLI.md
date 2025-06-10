@@ -6,11 +6,6 @@ tea - command line tool to interact with Gitea
 
 tea
 
-```
-[--help|-h]
-[--version|-v]
-```
-
 # DESCRIPTION
 
 tea is a productivity helper for Gitea. It can be used to manage most entities on
@@ -25,15 +20,8 @@ doing operations with tea.    Configuration is persisted in $XDG_CONFIG_HOME/tea
 **Usage**:
 
 ```
-tea [GLOBAL OPTIONS] command [COMMAND OPTIONS] [ARGUMENTS...]
+tea [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 ```
-
-# GLOBAL OPTIONS
-
-**--help, -h**: show help
-
-**--version, -v**: print the version
-
 
 # COMMANDS
 
@@ -79,7 +67,7 @@ Add a Gitea login
 
 **--token, -t**="": Access token. Can be obtained from Settings > Applications
 
-**--url, -u**="": Server URL (default: "https://gitea.com")
+**--url, -u**="": Server URL (default: https://gitea.com)
 
 **--user**="": User for basic auth (will create token)
 
@@ -129,13 +117,13 @@ List, create and update issues
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			index,state,kind,author,author-id,url,title,body,created,updated,deadline,assignees,milestone,labels,comments,owner,repo
-		 (default: "index,title,state,author,milestone,labels,owner,repo")
+		 (default: index,title,state,author,milestone,labels,owner,repo)
 
 **--from, -F**="": Filter by activity after this date
 
 **--keyword, -k**="": Filter by search string
 
-**--kind, -K**="": Whether to return `issues`, `pulls`, or `all` (you can use this to apply advanced search filters to PRs) (default: issues)
+**--kind, -K**="": Whether to return `issues`, `pulls`, or `all` (you can use this to apply advanced search filters to PRs)
 
 **--labels, -L**="": Comma-separated list of labels to match issues against.
 			
@@ -161,7 +149,7 @@ List, create and update issues
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by state (all|open|closed) (default: open)
+**--state**="": Filter by state (all|open|closed)
 
 **--until, -u**="": Filter by activity before this date
 
@@ -175,13 +163,13 @@ List issues of the repository
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			index,state,kind,author,author-id,url,title,body,created,updated,deadline,assignees,milestone,labels,comments,owner,repo
-		 (default: "index,title,state,author,milestone,labels,owner,repo")
+		 (default: index,title,state,author,milestone,labels,owner,repo)
 
 **--from, -F**="": Filter by activity after this date
 
 **--keyword, -k**="": Filter by search string
 
-**--kind, -K**="": Whether to return `issues`, `pulls`, or `all` (you can use this to apply advanced search filters to PRs) (default: issues)
+**--kind, -K**="": Whether to return `issues`, `pulls`, or `all` (you can use this to apply advanced search filters to PRs)
 
 **--labels, -L**="": Comma-separated list of labels to match issues against.
 			
@@ -207,7 +195,7 @@ List issues of the repository
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by state (all|open|closed) (default: open)
+**--state**="": Filter by state (all|open|closed)
 
 **--until, -u**="": Filter by activity before this date
 
@@ -293,7 +281,7 @@ Manage and checkout pull requests
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			index,state,author,author-id,url,title,body,mergeable,base,base-commit,head,diff,patch,created,updated,deadline,assignees,milestone,labels,comments
-		 (default: "index,title,state,author,milestone,updated,labels")
+		 (default: index,title,state,author,milestone,updated,labels)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -307,7 +295,7 @@ Manage and checkout pull requests
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by state (all|open|closed) (default: open)
+**--state**="": Filter by state (all|open|closed)
 
 ### list, ls
 
@@ -315,7 +303,7 @@ List pull requests of the repository
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			index,state,author,author-id,url,title,body,mergeable,base,base-commit,head,diff,patch,created,updated,deadline,assignees,milestone,labels,comments
-		 (default: "index,title,state,author,milestone,updated,labels")
+		 (default: index,title,state,author,milestone,updated,labels)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -329,7 +317,7 @@ List pull requests of the repository
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by state (all|open|closed) (default: open)
+**--state**="": Filter by state (all|open|closed)
 
 ### checkout, co
 
@@ -463,7 +451,7 @@ Merge a pull request
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--style, -s**="": Kind of merge to perform: merge, rebase, squash, rebase-merge (default: "merge")
+**--style, -s**="": Kind of merge to perform: merge, rebase, squash, rebase-merge (default: merge)
 
 **--title, -t**="": Merge commit title
 
@@ -563,7 +551,7 @@ List and create milestones
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			title,state,items_open,items_closed,items,duedate,description,created,updated,closed,id
-		 (default: "title,items,duedate")
+		 (default: title,items,duedate)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -577,7 +565,7 @@ List and create milestones
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by milestone state (all|open|closed) (default: open)
+**--state**="": Filter by milestone state (all|open|closed)
 
 ### list, ls
 
@@ -585,7 +573,7 @@ List milestones of the repository
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			title,state,items_open,items_closed,items,duedate,description,created,updated,closed,id
-		 (default: "title,items,duedate")
+		 (default: title,items,duedate)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -599,7 +587,7 @@ List milestones of the repository
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by milestone state (all|open|closed) (default: open)
+**--state**="": Filter by milestone state (all|open|closed)
 
 ### create, c
 
@@ -617,7 +605,7 @@ Create an milestone on repository
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": set milestone state (default is open) (default: open)
+**--state**="": set milestone state (default is open)
 
 **--title, -t**="": milestone title to create
 
@@ -665,7 +653,7 @@ manage issue/pull of an milestone
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			index,state,kind,author,author-id,url,title,body,created,updated,deadline,assignees,milestone,labels,comments,owner,repo
-		 (default: "index,kind,title,state,updated,labels")
+		 (default: index,kind,title,state,updated,labels)
 
 **--kind**="": Filter by kind (issue|pull)
 
@@ -681,7 +669,7 @@ manage issue/pull of an milestone
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
-**--state**="": Filter by issue state (all|open|closed) (default: open)
+**--state**="": Filter by issue state (all|open|closed)
 
 #### add, a
 
@@ -739,7 +727,7 @@ List Releases
 
 Create a release
 
-**--asset, -a**="": Path to file attachment. Can be specified multiple times
+**--asset, -a**="": Path to file attachment. Can be specified multiple times (default: [])
 
 **--draft, -d**: Is a draft
 
@@ -783,7 +771,7 @@ Delete one or more releases
 
 Edit one or more releases
 
-**--draft, -d**="": Mark as Draft [True/false] (default: true)
+**--draft, -d**="": Mark as Draft [True/false]
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
@@ -791,7 +779,7 @@ Edit one or more releases
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--prerelease, -p**="": Mark as Pre-Release [True/false] (default: true)
+**--prerelease, -p**="": Mark as Pre-Release [True/false]
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1005,7 +993,7 @@ Show repository details
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			description,forks,id,name,owner,stars,ssh,updated,url,permission,type
-		 (default: "owner,name,type,ssh")
+		 (default: owner,name,type,ssh)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1027,7 +1015,7 @@ List repositories you have access to
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			description,forks,id,name,owner,stars,ssh,updated,url,permission,type
-		 (default: "owner,name,type,ssh")
+		 (default: owner,name,type,ssh)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1051,7 +1039,7 @@ Find any repo on an Gitea instance
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			description,forks,id,name,owner,stars,ssh,updated,url,permission,type
-		 (default: "owner,name,type,ssh")
+		 (default: owner,name,type,ssh)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1211,7 +1199,7 @@ Consult branches
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			name,protected,user-can-merge,user-can-push,protection
-		 (default: "name,protected,user-can-merge,user-can-push")
+		 (default: name,protected,user-can-merge,user-can-push)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1231,7 +1219,7 @@ List branches of the repository
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			name,protected,user-can-merge,user-can-push,protection
-		 (default: "name,protected,user-can-merge,user-can-push")
+		 (default: name,protected,user-can-merge,user-can-push)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1251,7 +1239,7 @@ Protect branches
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			name,protected,user-can-merge,user-can-push,protection
-		 (default: "name,protected,user-can-merge,user-can-push")
+		 (default: name,protected,user-can-merge,user-can-push)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1271,7 +1259,7 @@ Unprotect branches
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			name,protected,user-can-merge,user-can-push,protection
-		 (default: "name,protected,user-can-merge,user-can-push")
+		 (default: name,protected,user-can-merge,user-can-push)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1313,7 +1301,7 @@ Show notifications
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			id,status,updated,index,type,state,title,repository
-		 (default: "id,status,index,type,state,title")
+		 (default: id,status,index,type,state,title)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1331,7 +1319,7 @@ Show notifications
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: "unread,pinned")
+		 (default: unread,pinned)
 
 **--types, -t**="": Comma-separated list of subject types to filter by. Available values:
 			issue,pull,repository,commit
@@ -1343,7 +1331,7 @@ List notifications
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			id,status,updated,index,type,state,title,repository
-		 (default: "id,status,index,type,state,title")
+		 (default: id,status,index,type,state,title)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1361,7 +1349,7 @@ List notifications
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: "unread,pinned")
+		 (default: unread,pinned)
 
 **--types, -t**="": Comma-separated list of subject types to filter by. Available values:
 			issue,pull,repository,commit
@@ -1387,7 +1375,7 @@ Mark all filtered or a specific notification as read
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: "unread,pinned")
+		 (default: unread,pinned)
 
 ### unread, u
 
@@ -1409,7 +1397,7 @@ Mark all filtered or a specific notification as unread
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: "unread,pinned")
+		 (default: unread,pinned)
 
 ### pin, p
 
@@ -1431,7 +1419,7 @@ Mark all filtered or a specific notification as pinned
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: "unread,pinned")
+		 (default: unread,pinned)
 
 ### unpin
 
@@ -1453,7 +1441,7 @@ Unpin all pinned or a specific notification
 
 **--states, -s**="": Comma-separated list of notification states to filter by. Available values:
 			pinned,unread,read
-		 (default: "unread,pinned")
+		 (default: unread,pinned)
 
 ## clone, C
 
@@ -1473,7 +1461,7 @@ Manage registered users
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			id,login,full_name,email,avatar_url,language,is_admin,restricted,prohibit_login,location,website,description,visibility,activated,lastlogin_at,created_at
-		 (default: "id,login,full_name,email,activated")
+		 (default: id,login,full_name,email,activated)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1493,7 +1481,7 @@ List Users
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			id,login,full_name,email,avatar_url,language,is_admin,restricted,prohibit_login,location,website,description,visibility,activated,lastlogin_at,created_at
-		 (default: "id,login,full_name,email,activated")
+		 (default: id,login,full_name,email,activated)
 
 **--limit, --lm**="": specify limit of items per page
 
@@ -1506,7 +1494,3 @@ List Users
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
-
-## help, h
-
-Shows a list of commands or help for one command

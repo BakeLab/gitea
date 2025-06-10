@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,7 +12,7 @@ import (
 	"os/exec"
 
 	"github.com/adrg/xdg"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdAutocomplete manages autocompletion
@@ -31,9 +32,9 @@ var CmdAutocomplete = cli.Command{
 	Action: runAutocompleteAdd,
 }
 
-func runAutocompleteAdd(ctx *cli.Context) error {
+func runAutocompleteAdd(_ context.Context, cmd *cli.Command) error {
 	var remoteFile, localFile, cmds string
-	shell := ctx.Args().First()
+	shell := cmd.Args().First()
 
 	switch shell {
 	case "zsh":
@@ -55,10 +56,10 @@ func runAutocompleteAdd(ctx *cli.Context) error {
 		// fish is different, in that urfave/cli provides a generator for the shell script needed.
 		// this also means that the fish completion can become out of sync with the tea binary!
 		// writing to this directory suffices, as fish reads files there on startup, no cmds needed.
-		return writeFishAutoCompleteFile(ctx)
+		return writeFishAutoCompleteFile(cmd)
 
 	default:
-		return fmt.Errorf("Must specify valid %s", ctx.Command.ArgsUsage)
+		return fmt.Errorf("Must specify valid %s", cmd.ArgsUsage)
 	}
 
 	localPath, err := xdg.ConfigFile("tea/" + localFile)
@@ -71,7 +72,7 @@ func runAutocompleteAdd(ctx *cli.Context) error {
 		return err
 	}
 
-	if ctx.Bool("install") {
+	if cmd.Bool("install") {
 		fmt.Println("Installing in your shellrc")
 		installer := exec.Command(shell, "-c", cmds)
 		if shell == "powershell" {
@@ -109,14 +110,14 @@ func writeRemoteAutoCompleteFile(file, destPath string) error {
 	return err
 }
 
-func writeFishAutoCompleteFile(ctx *cli.Context) error {
+func writeFishAutoCompleteFile(cmd *cli.Command) error {
 	// NOTE: to make sure this file is in sync with tea commands, we'd need to
 	//   - check if the file exists
 	//   - if it does, check if the tea version that wrote it is the currently running version
 	//   - if not, rewrite the file
 	//   on each application run
 	// NOTE: this generates a completion that also suggests file names, which looks kinda messy..
-	script, err := ctx.App.ToFishCompletion()
+	script, err := cmd.ToFishCompletion()
 	if err != nil {
 		return err
 	}

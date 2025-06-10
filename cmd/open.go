@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	stdctx "context"
 	"path"
 	"strings"
 
@@ -12,7 +13,7 @@ import (
 	local_git "code.gitea.io/tea/modules/git"
 
 	"github.com/skratchdot/open-golang/open"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdOpen represents a sub command of issues to open issue on the web browser
@@ -26,7 +27,7 @@ var CmdOpen = cli.Command{
 	Flags:       append([]cli.Flag{}, flags.LoginRepoFlags...),
 }
 
-func runOpen(cmd *cli.Context) error {
+func runOpen(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

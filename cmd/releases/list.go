@@ -4,6 +4,7 @@
 package releases
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -11,7 +12,7 @@ import (
 	"code.gitea.io/tea/modules/print"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdReleaseList represents a sub command of Release to list releases
@@ -29,7 +30,7 @@ var CmdReleaseList = cli.Command{
 }
 
 // RunReleasesList list releases
-func RunReleasesList(cmd *cli.Context) error {
+func RunReleasesList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

@@ -7,7 +7,7 @@ import (
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/cmd/releases"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdReleases represents to login a gitea server.
@@ -20,7 +20,7 @@ var CmdReleases = cli.Command{
 	Description: "Manage releases",
 	ArgsUsage:   " ", // command does not accept arguments
 	Action:      releases.RunReleasesList,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&releases.CmdReleaseList,
 		&releases.CmdReleaseCreate,
 		&releases.CmdReleaseDelete,

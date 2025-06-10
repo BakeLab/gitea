@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/issues"
@@ -12,7 +13,7 @@ import (
 	"code.gitea.io/tea/modules/print"
 	"code.gitea.io/tea/modules/utils"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdIssues represents to login a gitea server.
@@ -24,7 +25,7 @@ var CmdIssues = cli.Command{
 	Description: `Lists issues when called without argument. If issue index is provided, will show it in detail.`,
 	ArgsUsage:   "[<issue index>]",
 	Action:      runIssues,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&issues.CmdIssuesList,
 		&issues.CmdIssuesCreate,
 		&issues.CmdIssuesEdit,
@@ -39,14 +40,14 @@ var CmdIssues = cli.Command{
 	}, issues.CmdIssuesList.Flags...),
 }
 
-func runIssues(ctx *cli.Context) error {
-	if ctx.Args().Len() == 1 {
-		return runIssueDetail(ctx, ctx.Args().First())
+func runIssues(ctx stdctx.Context, cmd *cli.Command) error {
+	if cmd.Args().Len() == 1 {
+		return runIssueDetail(ctx, cmd, cmd.Args().First())
 	}
-	return issues.RunIssuesList(ctx)
+	return issues.RunIssuesList(ctx, cmd)
 }
 
-func runIssueDetail(cmd *cli.Context, index string) error {
+func runIssueDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

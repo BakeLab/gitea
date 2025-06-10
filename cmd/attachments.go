@@ -7,7 +7,7 @@ import (
 	"code.gitea.io/tea/cmd/attachments"
 	"code.gitea.io/tea/cmd/flags"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdReleaseAttachments represents a release attachment (file attachment)
@@ -19,7 +19,7 @@ var CmdReleaseAttachments = cli.Command{
 	Description: "Manage release assets",
 	ArgsUsage:   " ", // command does not accept arguments
 	Action:      attachments.RunReleaseAttachmentList,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&attachments.CmdReleaseAttachmentList,
 		&attachments.CmdReleaseAttachmentCreate,
 		&attachments.CmdReleaseAttachmentDelete,

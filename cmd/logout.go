@@ -6,7 +6,7 @@ package cmd
 import (
 	"code.gitea.io/tea/cmd/login"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLogout represents to logout a gitea server.

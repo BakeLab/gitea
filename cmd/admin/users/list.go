@@ -4,12 +4,14 @@
 package users
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var userFieldsFlag = flags.FieldsFlag(print.UserFields, []string{
@@ -31,7 +33,7 @@ var CmdUserList = cli.Command{
 }
 
 // RunUserList list users
-func RunUserList(cmd *cli.Context) error {
+func RunUserList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 
 	fields, err := userFieldsFlag.GetValues(cmd)

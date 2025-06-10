@@ -4,6 +4,7 @@
 package notifications
 
 import (
+	stdctx "context"
 	"log"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -11,7 +12,7 @@ import (
 	"code.gitea.io/tea/modules/print"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var notifyFieldsFlag = flags.FieldsFlag(print.NotificationFields, []string{
@@ -36,9 +37,9 @@ var CmdNotificationsList = cli.Command{
 }
 
 // RunNotificationsList list notifications
-func RunNotificationsList(ctx *cli.Context) error {
+func RunNotificationsList(ctx stdctx.Context, cmd *cli.Command) error {
 	var states []gitea.NotifyStatus
-	statesStr, err := flags.NotificationStateFlag.GetValues(ctx)
+	statesStr, err := flags.NotificationStateFlag.GetValues(cmd)
 	if err != nil {
 		return err
 	}
@@ -47,7 +48,7 @@ func RunNotificationsList(ctx *cli.Context) error {
 	}
 
 	var types []gitea.NotifySubjectType
-	typesStr, err := notifyTypeFlag.GetValues(ctx)
+	typesStr, err := notifyTypeFlag.GetValues(cmd)
 	if err != nil {
 		return err
 	}
@@ -55,11 +56,11 @@ func RunNotificationsList(ctx *cli.Context) error {
 		types = append(types, gitea.NotifySubjectType(t))
 	}
 
-	return listNotifications(ctx, states, types)
+	return listNotifications(ctx, cmd, states, types)
 }
 
 // listNotifications will get the notifications based on status and subject type
-func listNotifications(cmd *cli.Context, status []gitea.NotifyStatus, subjects []gitea.NotifySubjectType) error {
+func listNotifications(_ stdctx.Context, cmd *cli.Command, status []gitea.NotifyStatus, subjects []gitea.NotifySubjectType) error {
 	var news []*gitea.NotificationThread
 	var err error
 

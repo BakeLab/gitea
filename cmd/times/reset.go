@@ -4,13 +4,14 @@
 package times
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/utils"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdTrackedTimesReset is a subcommand of CmdTrackedTimes, and
@@ -23,7 +24,7 @@ var CmdTrackedTimesReset = cli.Command{
 	Flags:     flags.LoginRepoFlags,
 }
 
-func runTrackedTimesReset(cmd *cli.Context) error {
+func runTrackedTimesReset(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()

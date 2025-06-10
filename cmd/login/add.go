@@ -4,11 +4,13 @@
 package login
 
 import (
+	"context"
+
 	"code.gitea.io/tea/modules/auth"
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/task"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLoginAdd represents to login a gitea server.
@@ -27,7 +29,7 @@ var CmdLoginAdd = cli.Command{
 			Name:    "url",
 			Aliases: []string{"u"},
 			Value:   "https://gitea.com",
-			EnvVars: []string{"GITEA_SERVER_URL"},
+			Sources: cli.EnvVars("GITEA_SERVER_URL"),
 			Usage:   "Server URL",
 		},
 		&cli.BoolFlag{
@@ -39,30 +41,30 @@ var CmdLoginAdd = cli.Command{
 			Name:    "token",
 			Aliases: []string{"t"},
 			Value:   "",
-			EnvVars: []string{"GITEA_SERVER_TOKEN"},
+			Sources: cli.EnvVars("GITEA_SERVER_TOKEN"),
 			Usage:   "Access token. Can be obtained from Settings > Applications",
 		},
 		&cli.StringFlag{
 			Name:    "user",
 			Value:   "",
-			EnvVars: []string{"GITEA_SERVER_USER"},
+			Sources: cli.EnvVars("GITEA_SERVER_USER"),
 			Usage:   "User for basic auth (will create token)",
 		},
 		&cli.StringFlag{
 			Name:    "password",
 			Aliases: []string{"pwd"},
 			Value:   "",
-			EnvVars: []string{"GITEA_SERVER_PASSWORD"},
+			Sources: cli.EnvVars("GITEA_SERVER_PASSWORD"),
 			Usage:   "Password for basic auth (will create token)",
 		},
 		&cli.StringFlag{
 			Name:    "otp",
-			EnvVars: []string{"GITEA_SERVER_OTP"},
+			Sources: cli.EnvVars("GITEA_SERVER_OTP"),
 			Usage:   "OTP token for auth, if necessary",
 		},
 		&cli.StringFlag{
 			Name:    "scopes",
-			EnvVars: []string{"GITEA_SCOPES"},
+			Sources: cli.EnvVars("GITEA_SCOPES"),
 			Usage:   "Token scopes to add when creating a new token, separated by a comma",
 		},
 		&cli.StringFlag{
@@ -107,53 +109,53 @@ var CmdLoginAdd = cli.Command{
 	Action: runLoginAdd,
 }
 
-func runLoginAdd(ctx *cli.Context) error {
+func runLoginAdd(_ context.Context, cmd *cli.Command) error {
 	// if no args create login interactive
-	if ctx.NumFlags() == 0 {
+	if cmd.NumFlags() == 0 {
 		return interact.CreateLogin()
 	}
 
 	// if OAuth flag is provided, use OAuth2 PKCE flow
-	if ctx.Bool("oauth") {
+	if cmd.Bool("oauth") {
 		opts := auth.OAuthOptions{
-			Name:     ctx.String("name"),
-			URL:      ctx.String("url"),
-			Insecure: ctx.Bool("insecure"),
+			Name:     cmd.String("name"),
+			URL:      cmd.String("url"),
+			Insecure: cmd.Bool("insecure"),
 		}
 
 		// Only set clientID if provided
-		if ctx.String("client-id") != "" {
-			opts.ClientID = ctx.String("client-id")
+		if cmd.String("client-id") != "" {
+			opts.ClientID = cmd.String("client-id")
 		}
 
 		// Only set redirect URL if provided
-		if ctx.String("redirect-url") != "" {
-			opts.RedirectURL = ctx.String("redirect-url")
+		if cmd.String("redirect-url") != "" {
+			opts.RedirectURL = cmd.String("redirect-url")
 		}
 
 		return auth.OAuthLoginWithFullOptions(opts)
 	}
 
 	sshAgent := false
-	if ctx.String("ssh-agent-key") != "" || ctx.String("ssh-agent-principal") != "" {
+	if cmd.String("ssh-agent-key") != "" || cmd.String("ssh-agent-principal") != "" {
 		sshAgent = true
 	}
 
 	// else use args to add login
 	return task.CreateLogin(
-		ctx.String("name"),
-		ctx.String("token"),
-		ctx.String("user"),
-		ctx.String("password"),
-		ctx.String("otp"),
-		ctx.String("scopes"),
-		ctx.String("ssh-key"),
-		ctx.String("url"),
-		ctx.String("ssh-agent-principal"),
-		ctx.String("ssh-agent-key"),
-		ctx.Bool("insecure"),
+		cmd.String("name"),
+		cmd.String("token"),
+		cmd.String("user"),
+		cmd.String("password"),
+		cmd.String("otp"),
+		cmd.String("scopes"),
+		cmd.String("ssh-key"),
+		cmd.String("url"),
+		cmd.String("ssh-agent-principal"),
+		cmd.String("ssh-agent-key"),
+		cmd.Bool("insecure"),
 		sshAgent,
-		!ctx.Bool("no-version-check"),
-		ctx.Bool("helper"),
+		!cmd.Bool("no-version-check"),
+		cmd.Bool("helper"),
 	)
 }

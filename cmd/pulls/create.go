@@ -4,12 +4,13 @@
 package pulls
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/task"
-
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdPullsCreate creates a pull request
@@ -38,7 +39,7 @@ var CmdPullsCreate = cli.Command{
 	}, flags.IssuePRCreateFlags...),
 }
 
-func runPullsCreate(cmd *cli.Context) error {
+func runPullsCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 
 	// no args -> interactive mode

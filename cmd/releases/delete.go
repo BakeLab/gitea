@@ -4,12 +4,13 @@
 package releases
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdReleaseDelete represents a sub command of Release to delete a release
@@ -33,7 +34,7 @@ var CmdReleaseDelete = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runReleaseDelete(cmd *cli.Context) error {
+func runReleaseDelete(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()

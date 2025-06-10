@@ -6,7 +6,7 @@ package cmd
 import (
 	"code.gitea.io/tea/cmd/notifications"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdNotifications is the main command to operate with notifications
@@ -17,7 +17,7 @@ var CmdNotifications = cli.Command{
 	Usage:       "Show notifications",
 	Description: "Show notifications, by default based on the current repo if available",
 	Action:      notifications.RunNotificationsList,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&notifications.CmdNotificationsList,
 		&notifications.CmdNotificationsMarkRead,
 		&notifications.CmdNotificationsMarkUnread,

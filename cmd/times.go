@@ -5,7 +5,7 @@ package cmd
 
 import (
 	"code.gitea.io/tea/cmd/times"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdTrackedTimes represents the command to operate repositories' times.
@@ -19,7 +19,7 @@ var CmdTrackedTimes = cli.Command{
 		 times might be listed.`,
 	ArgsUsage: "[username | #issue]",
 	Action:    times.RunTimesList,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&times.CmdTrackedTimesAdd,
 		&times.CmdTrackedTimesDelete,
 		&times.CmdTrackedTimesReset,

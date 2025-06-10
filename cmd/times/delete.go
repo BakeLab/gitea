@@ -4,6 +4,7 @@
 package times
 
 import (
+	stdctx "context"
 	"fmt"
 	"strconv"
 
@@ -11,7 +12,7 @@ import (
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/utils"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdTrackedTimesDelete is a sub command of CmdTrackedTimes, and removes time from an issue
@@ -24,7 +25,7 @@ var CmdTrackedTimesDelete = cli.Command{
 	Flags:     flags.LoginRepoFlags,
 }
 
-func runTrackedTimesDelete(cmd *cli.Context) error {
+func runTrackedTimesDelete(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()

@@ -4,12 +4,14 @@
 package repos
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var repoFieldsFlag = flags.FieldsFlag(print.RepoFields, []string{
@@ -47,9 +49,9 @@ var CmdReposList = cli.Command{
 }
 
 // RunReposList list repositories
-func RunReposList(cmd *cli.Context) error {
-	ctx := context.InitCommand(cmd)
-	client := ctx.Login.Client()
+func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
+	teaCmd := context.InitCommand(cmd)
+	client := teaCmd.Login.Client()
 
 	typeFilter, err := getTypeFilter(cmd)
 	if err != nil {
@@ -57,20 +59,20 @@ func RunReposList(cmd *cli.Context) error {
 	}
 
 	var rps []*gitea.Repository
-	if ctx.Bool("starred") {
+	if teaCmd.Bool("starred") {
 		user, _, err := client.GetMyUserInfo()
 		if err != nil {
 			return err
 		}
 		rps, _, err = client.SearchRepos(gitea.SearchRepoOptions{
-			ListOptions:     ctx.GetListOptions(),
+			ListOptions:     teaCmd.GetListOptions(),
 			StarredByUserID: user.ID,
 		})
-	} else if ctx.Bool("watched") {
+	} else if teaCmd.Bool("watched") {
 		rps, _, err = client.GetMyWatchedRepos() // TODO: this does not expose pagination..
 	} else {
 		rps, _, err = client.ListMyRepos(gitea.ListReposOptions{
-			ListOptions: ctx.GetListOptions(),
+			ListOptions: teaCmd.GetListOptions(),
 		})
 	}
 
@@ -88,7 +90,7 @@ func RunReposList(cmd *cli.Context) error {
 		return err
 	}
 
-	print.ReposList(reposFiltered, ctx.Output, fields)
+	print.ReposList(reposFiltered, teaCmd.Output, fields)
 	return nil
 }
 

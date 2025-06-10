@@ -4,13 +4,14 @@
 package attachments
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdReleaseAttachmentDelete represents a sub command of Release Attachments to delete a release attachment
@@ -30,7 +31,7 @@ var CmdReleaseAttachmentDelete = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runReleaseAttachmentDelete(cmd *cli.Context) error {
+func runReleaseAttachmentDelete(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()

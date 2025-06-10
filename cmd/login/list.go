@@ -4,11 +4,13 @@
 package login
 
 import (
+	"context"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/print"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLoginList represents to login a gitea server.
@@ -23,7 +25,7 @@ var CmdLoginList = cli.Command{
 }
 
 // RunLoginList list all logins
-func RunLoginList(cmd *cli.Context) error {
+func RunLoginList(_ context.Context, cmd *cli.Command) error {
 	logins, err := config.GetLogins()
 	if err != nil {
 		return err

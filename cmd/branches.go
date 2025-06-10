@@ -4,9 +4,11 @@
 package cmd
 
 import (
+	"context"
+
 	"code.gitea.io/tea/cmd/branches"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdBranches represents to login a gitea server.
@@ -18,7 +20,7 @@ var CmdBranches = cli.Command{
 	Description: `Lists branches when called without argument. If a branch is provided, will show it in detail.`,
 	ArgsUsage:   "[<branch name>]",
 	Action:      runBranches,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&branches.CmdBranchesList,
 		&branches.CmdBranchesProtect,
 		&branches.CmdBranchesUnprotect,
@@ -31,6 +33,6 @@ var CmdBranches = cli.Command{
 	}, branches.CmdBranchesList.Flags...),
 }
 
-func runBranches(ctx *cli.Context) error {
-	return branches.RunBranchesList(ctx)
+func runBranches(ctx context.Context, cmd *cli.Command) error {
+	return branches.RunBranchesList(ctx, cmd)
 }

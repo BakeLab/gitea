@@ -4,6 +4,7 @@
 package issues
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -12,7 +13,7 @@ import (
 	"code.gitea.io/tea/modules/utils"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdIssuesClose represents a sub command of issues to close an issue
@@ -21,15 +22,15 @@ var CmdIssuesClose = cli.Command{
 	Usage:       "Change state of one ore more issues to 'closed'",
 	Description: `Change state of one ore more issues to 'closed'`,
 	ArgsUsage:   "<issue index> [<issue index>...]",
-	Action: func(ctx *cli.Context) error {
+	Action: func(ctx stdctx.Context, cmd *cli.Command) error {
 		var s = gitea.StateClosed
-		return editIssueState(ctx, gitea.EditIssueOption{State: &s})
+		return editIssueState(ctx, cmd, gitea.EditIssueOption{State: &s})
 	},
 	Flags: flags.AllDefaultFlags,
 }
 
 // editIssueState abstracts the arg parsing to edit the given issue
-func editIssueState(cmd *cli.Context, opts gitea.EditIssueOption) error {
+func editIssueState(_ stdctx.Context, cmd *cli.Command, opts gitea.EditIssueOption) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	if ctx.Args().Len() == 0 {

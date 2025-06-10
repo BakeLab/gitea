@@ -4,12 +4,13 @@
 package login
 
 import (
+	"context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/config"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLoginSetDefault represents to login a gitea server.
@@ -22,8 +23,8 @@ var CmdLoginSetDefault = cli.Command{
 	Flags:       []cli.Flag{&flags.OutputFlag},
 }
 
-func runLoginSetDefault(ctx *cli.Context) error {
-	if ctx.Args().Len() == 0 {
+func runLoginSetDefault(_ context.Context, cmd *cli.Command) error {
+	if cmd.Args().Len() == 0 {
 		l, err := config.GetDefaultLogin()
 		if err != nil {
 			return err
@@ -32,6 +33,6 @@ func runLoginSetDefault(ctx *cli.Context) error {
 		return nil
 	}
 
-	name := ctx.Args().First()
+	name := cmd.Args().First()
 	return config.SetDefaultLogin(name)
 }

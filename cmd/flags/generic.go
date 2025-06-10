@@ -4,7 +4,7 @@
 package flags
 
 import (
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // LoginFlag provides flag to specify tea login profile

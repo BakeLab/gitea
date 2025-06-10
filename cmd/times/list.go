@@ -4,6 +4,7 @@
 package times
 
 import (
+	stdctx "context"
 	"fmt"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/araddon/dateparse"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // NOTE: not using NewCsvFlag, as we don't want an alias & default value.
@@ -68,7 +69,7 @@ Depending on your permissions on the repository, only your own tracked times mig
 }
 
 // RunTimesList list repositories
-func RunTimesList(cmd *cli.Context) error {
+func RunTimesList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()

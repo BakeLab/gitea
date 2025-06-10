@@ -4,10 +4,12 @@
 package pulls
 
 import (
+	"context"
+
 	"code.gitea.io/tea/cmd/flags"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdPullsClose closes a given open pull request
@@ -16,9 +18,9 @@ var CmdPullsClose = cli.Command{
 	Usage:       "Change state of one or more pull requests to 'closed'",
 	Description: `Change state of one or more pull requests to 'closed'`,
 	ArgsUsage:   "<pull index> [<pull index>...]",
-	Action: func(ctx *cli.Context) error {
+	Action: func(ctx context.Context, cmd *cli.Command) error {
 		var s = gitea.StateClosed
-		return editPullState(ctx, gitea.EditPullRequestOption{State: &s})
+		return editPullState(ctx, cmd, gitea.EditPullRequestOption{State: &s})
 	},
 	Flags: flags.AllDefaultFlags,
 }

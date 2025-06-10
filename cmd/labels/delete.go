@@ -4,10 +4,12 @@
 package labels
 
 import (
+	stdctx "context"
+
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdLabelDelete represents a sub command of labels to delete label.
@@ -26,7 +28,7 @@ var CmdLabelDelete = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runLabelDelete(cmd *cli.Context) error {
+func runLabelDelete(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 

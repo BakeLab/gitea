@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -14,7 +15,7 @@ import (
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdRepoClone represents a sub command of repos to create a local copy
@@ -45,18 +46,18 @@ When a host is specified in the repo-slug, it will override the login specified 
 	},
 }
 
-func runRepoClone(cmd *cli.Context) error {
-	ctx := context.InitCommand(cmd)
+func runRepoClone(ctx stdctx.Context, cmd *cli.Command) error {
+	teaCmd := context.InitCommand(cmd)
 
-	args := ctx.Args()
+	args := teaCmd.Args()
 	if args.Len() < 1 {
-		return cli.ShowCommandHelp(cmd, "clone")
+		return cli.ShowCommandHelp(ctx, cmd, "clone")
 	}
 	dir := args.Get(1)
 
 	var (
-		login *config.Login = ctx.Login
-		owner string        = ctx.Login.User
+		login *config.Login = teaCmd.Login
+		owner string        = teaCmd.Login.User
 		repo  string
 	)
 
@@ -81,7 +82,7 @@ func runRepoClone(cmd *cli.Context) error {
 		owner,
 		repo,
 		interact.PromptPassword,
-		ctx.Int("depth"),
+		teaCmd.Int("depth"),
 	)
 
 	return err

@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/pulls"
@@ -14,7 +15,7 @@ import (
 	"code.gitea.io/tea/modules/workaround"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdPulls is the main command to operate on PRs
@@ -32,7 +33,7 @@ var CmdPulls = cli.Command{
 			Usage: "Whether to display comments (will prompt if not provided & run interactively)",
 		},
 	}, pulls.CmdPullsList.Flags...),
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		&pulls.CmdPullsList,
 		&pulls.CmdPullsCheckout,
 		&pulls.CmdPullsClean,
@@ -46,14 +47,14 @@ var CmdPulls = cli.Command{
 	},
 }
 
-func runPulls(ctx *cli.Context) error {
-	if ctx.Args().Len() == 1 {
-		return runPullDetail(ctx, ctx.Args().First())
+func runPulls(ctx stdctx.Context, cmd *cli.Command) error {
+	if cmd.Args().Len() == 1 {
+		return runPullDetail(ctx, cmd, cmd.Args().First())
 	}
-	return pulls.RunPullsList(ctx)
+	return pulls.RunPullsList(ctx, cmd)
 }
 
-func runPullDetail(cmd *cli.Context, index string) error {
+func runPullDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	idx, err := utils.ArgToIndex(index)

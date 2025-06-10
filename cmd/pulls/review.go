@@ -4,6 +4,7 @@
 package pulls
 
 import (
+	stdctx "context"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -11,7 +12,7 @@ import (
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/utils"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // CmdPullsReview starts an interactive review session
@@ -20,7 +21,7 @@ var CmdPullsReview = cli.Command{
 	Usage:       "Interactively review a pull request",
 	Description: "Interactively review a pull request",
 	ArgsUsage:   "<pull index>",
-	Action: func(cmd *cli.Context) error {
+	Action: func(_ stdctx.Context, cmd *cli.Command) error {
 		ctx := context.InitCommand(cmd)
 		ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
