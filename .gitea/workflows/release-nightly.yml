@@ -34,9 +34,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           S3_REGION: ${{ secrets.AWS_REGION }}
           S3_BUCKET: ${{ secrets.AWS_BUCKET }}
-          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+          GORELEASER_FORCE_TOKEN: 'gitea'
           GPGSIGN_PASSPHRASE: ${{ secrets.GPGSIGN_PASSPHRASE }}
-          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
   release-image:
     runs-on: ubuntu-latest
     env:
