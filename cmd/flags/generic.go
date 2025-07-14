@@ -36,17 +36,19 @@ var OutputFlag = cli.StringFlag{
 }
 
 // PaginationPageFlag provides flag for pagination options
-var PaginationPageFlag = cli.StringFlag{
+var PaginationPageFlag = cli.IntFlag{
 	Name:    "page",
 	Aliases: []string{"p"},
-	Usage:   "specify page, default is 1",
+	Usage:   "specify page",
+	Value:   1,
 }
 
 // PaginationLimitFlag provides flag for pagination options
-var PaginationLimitFlag = cli.StringFlag{
+var PaginationLimitFlag = cli.IntFlag{
 	Name:    "limit",
 	Aliases: []string{"lm"},
 	Usage:   "specify limit of items per page",
+	Value:   30,
 }
 
 // LoginOutputFlags defines login and output flags that should

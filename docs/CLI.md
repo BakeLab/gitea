@@ -129,7 +129,7 @@ List, create and update issues
 			
 		
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
@@ -143,7 +143,7 @@ List, create and update issues
 
 **--owner, --org**="": 
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -175,7 +175,7 @@ List issues of the repository
 			
 		
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
@@ -189,7 +189,7 @@ List issues of the repository
 
 **--owner, --org**="": 
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -283,13 +283,13 @@ Manage and checkout pull requests
 			index,state,author,author-id,url,title,body,mergeable,base,base-commit,head,diff,patch,created,updated,deadline,assignees,milestone,labels,comments
 		 (default: index,title,state,author,milestone,updated,labels)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -305,13 +305,13 @@ List pull requests of the repository
 			index,state,author,author-id,url,title,body,mergeable,base,base-commit,head,diff,patch,created,updated,deadline,assignees,milestone,labels,comments
 		 (default: index,title,state,author,milestone,updated,labels)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -459,13 +459,13 @@ Merge a pull request
 
 Manage issue labels
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -477,13 +477,13 @@ Manage issue labels
 
 List labels
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -553,13 +553,13 @@ List and create milestones
 			title,state,items_open,items_closed,items,duedate,description,created,updated,closed,id
 		 (default: title,items,duedate)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -575,13 +575,13 @@ List milestones of the repository
 			title,state,items_open,items_closed,items,duedate,description,created,updated,closed,id
 		 (default: title,items,duedate)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -657,13 +657,13 @@ manage issue/pull of an milestone
 
 **--kind**="": Filter by kind (issue|pull)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -711,13 +711,13 @@ Manage releases
 
 List Releases
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -807,13 +807,13 @@ Manage release assets
 
 List Release Attachments
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -933,13 +933,13 @@ List tracked times on issues & pulls
 
 List, create, delete organizations
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -949,13 +949,13 @@ List, create, delete organizations
 
 List Organizations
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -995,13 +995,13 @@ Show repository details
 			description,forks,id,name,owner,stars,ssh,updated,url,permission,type
 		 (default: owner,name,type,ssh)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--starred, -s**: List your starred repos instead
 
@@ -1017,13 +1017,13 @@ List repositories you have access to
 			description,forks,id,name,owner,stars,ssh,updated,url,permission,type
 		 (default: owner,name,type,ssh)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--starred, -s**: List your starred repos instead
 
@@ -1041,7 +1041,7 @@ Find any repo on an Gitea instance
 			description,forks,id,name,owner,stars,ssh,updated,url,permission,type
 		 (default: owner,name,type,ssh)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
@@ -1049,7 +1049,7 @@ Find any repo on an Gitea instance
 
 **--owner, -O**="": Filter by owner
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--private**="": Filter private repos (true|false)
 
@@ -1201,13 +1201,13 @@ Consult branches
 			name,protected,user-can-merge,user-can-push,protection
 		 (default: name,protected,user-can-merge,user-can-push)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1221,13 +1221,13 @@ List branches of the repository
 			name,protected,user-can-merge,user-can-push,protection
 		 (default: name,protected,user-can-merge,user-can-push)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1241,13 +1241,13 @@ Protect branches
 			name,protected,user-can-merge,user-can-push,protection
 		 (default: name,protected,user-can-merge,user-can-push)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1261,13 +1261,13 @@ Unprotect branches
 			name,protected,user-can-merge,user-can-push,protection
 		 (default: name,protected,user-can-merge,user-can-push)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1303,7 +1303,7 @@ Show notifications
 			id,status,updated,index,type,state,title,repository
 		 (default: id,status,index,type,state,title)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
@@ -1311,7 +1311,7 @@ Show notifications
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1333,7 +1333,7 @@ List notifications
 			id,status,updated,index,type,state,title,repository
 		 (default: id,status,index,type,state,title)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
@@ -1341,7 +1341,7 @@ List notifications
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1359,7 +1359,7 @@ List notifications
 
 Mark all filtered or a specific notification as read
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
@@ -1367,7 +1367,7 @@ Mark all filtered or a specific notification as read
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1381,7 +1381,7 @@ Mark all filtered or a specific notification as read
 
 Mark all filtered or a specific notification as unread
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
@@ -1389,7 +1389,7 @@ Mark all filtered or a specific notification as unread
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1403,7 +1403,7 @@ Mark all filtered or a specific notification as unread
 
 Mark all filtered or a specific notification as pinned
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
@@ -1411,7 +1411,7 @@ Mark all filtered or a specific notification as pinned
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1425,7 +1425,7 @@ Mark all filtered or a specific notification as pinned
 
 Unpin all pinned or a specific notification
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
@@ -1433,7 +1433,7 @@ Unpin all pinned or a specific notification
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1463,13 +1463,13 @@ Manage registered users
 			id,login,full_name,email,avatar_url,language,is_admin,restricted,prohibit_login,location,website,description,visibility,activated,lastlogin_at,created_at
 		 (default: id,login,full_name,email,activated)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1483,13 +1483,13 @@ List Users
 			id,login,full_name,email,avatar_url,language,is_admin,restricted,prohibit_login,location,website,description,visibility,activated,lastlogin_at,created_at
 		 (default: id,login,full_name,email,activated)
 
-**--limit, --lm**="": specify limit of items per page
+**--limit, --lm**="": specify limit of items per page (default: 30)
 
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
-**--page, -p**="": specify page, default is 1
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
