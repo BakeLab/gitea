@@ -89,7 +89,7 @@ There are different ways to get `tea`:
       ```sh
       brew install tea
       ```
-    - arch linux ([gitea-tea-git](https://aur.archlinux.org/packages/gitea-tea-git), thirdparty)
+    - arch linux ([tea](https://archlinux.org/packages/extra/x86_64/tea/), thirdparty)
     - alpine linux ([tea](https://pkgs.alpinelinux.org/packages?name=tea&branch=edge), thirdparty)
     - Windows via `MSYS2` ([tea](https://packages.msys2.org/base/mingw-w64-tea), thirdparty)
 
