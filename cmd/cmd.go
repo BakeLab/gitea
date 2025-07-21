@@ -36,7 +36,6 @@ func App() *cli.Command {
 		Commands: []*cli.Command{
 			&CmdLogin,
 			&CmdLogout,
-			&CmdAutocomplete,
 			&CmdWhoami,
 
 			&CmdIssues,

@@ -95,12 +95,6 @@ Refresh an OAuth token
 
 Log out from a Gitea server
 
-## shellcompletion, autocomplete
-
-Install shell completion for tea
-
-**--install**: Persist in shell config instead of printing commands
-
 ## whoami
 
 Show current logged in user

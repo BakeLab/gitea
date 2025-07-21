@@ -46,7 +46,6 @@
    SETUP:
      logins, login                  Log in to a Gitea server
      logout                         Log out from a Gitea server
-     shellcompletion, autocomplete  Install shell completion for tea
      whoami                         Show current logged in user
 
  OPTIONS
@@ -100,6 +99,24 @@ There are different ways to get `tea`:
 4. Docker (thirdparty): [tgerczei/tea](https://hub.docker.com/r/tgerczei/tea)
 
 5. asdf (thirdparty): [mvaldes14/asdf-tea](https://github.com/mvaldes14/asdf-tea)
+
+### Shell completion
+
+If you installed from source or the package does not provide the completions with it you can add them yourself with `tea completion <shell>` command which is not visible in help. To generate the completions run one of the following commands depending on your shell.
+
+```shell
+# .bashrc
+source <(tea completion bash)
+
+# .zshrc
+source <(tea completion zsh)
+
+# fish
+tea completion fish > ~/.config/fish/completions/tea.fish
+
+# Powershell
+Output the script to path/to/autocomplete/tea.ps1 an run it.
+```
 
 ## Compilation
 
