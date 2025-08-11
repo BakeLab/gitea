@@ -5,6 +5,7 @@ package interact
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -125,7 +126,9 @@ func promptSelect(prompt string, options []string, customVal, noneVal, defaultVa
 	if defaultVal == "" && noneVal != "" {
 		defaultVal = noneVal
 	}
-
+	if len(options) > 0 && !slices.Contains(options, defaultVal) {
+		defaultVal = options[0]
+	}
 	selection = defaultVal
 	if err := huh.NewSelect[string]().
 		Title(prompt).

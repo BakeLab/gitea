@@ -168,7 +168,12 @@ func CreateLogin() error {
 		printTitleAndContent("SSH Key/Certificate Path (leave empty for auto-discovery in ~/.ssh and ssh-agent):", sshKey)
 
 		if sshKey == "" {
-			sshKey, err = promptSelect("Select ssh-key: ", task.ListSSHPubkey(), "", "", "")
+			pubKeys := task.ListSSHPubkey()
+			if len(pubKeys) == 0 {
+				fmt.Println("No SSH keys found in ~/.ssh or ssh-agent")
+				return nil
+			}
+			sshKey, err = promptSelect("Select ssh-key: ", pubKeys, "", "", "")
 			if err != nil {
 				return err
 			}
