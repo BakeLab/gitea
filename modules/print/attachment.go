@@ -4,8 +4,17 @@
 package print
 
 import (
+	"fmt"
+
 	"code.gitea.io/sdk/gitea"
 )
+
+func formatByteSize(size int64) string {
+	if size < 1024 {
+		return fmt.Sprintf("%d B", size)
+	}
+	return formatSize(size / 1024)
+}
 
 // ReleaseAttachmentsList prints a listing of release attachments
 func ReleaseAttachmentsList(attachments []*gitea.Attachment, output string) {
@@ -17,7 +26,7 @@ func ReleaseAttachmentsList(attachments []*gitea.Attachment, output string) {
 	for _, attachment := range attachments {
 		t.addRow(
 			attachment.Name,
-			formatSize(attachment.Size),
+			formatByteSize(attachment.Size),
 		)
 	}
 

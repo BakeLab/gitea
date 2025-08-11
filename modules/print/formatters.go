@@ -29,17 +29,17 @@ func getRepoURL(resourceURL string) string {
 // formatSize get kb in int and return string
 func formatSize(kb int64) string {
 	if kb < 1024 {
-		return fmt.Sprintf("%d Kb", kb)
+		return fmt.Sprintf("%d KB", kb)
 	}
 	mb := kb / 1024
 	if mb < 1024 {
-		return fmt.Sprintf("%d Mb", mb)
+		return fmt.Sprintf("%d MB", mb)
 	}
 	gb := mb / 1024
 	if gb < 1024 {
-		return fmt.Sprintf("%d Gb", gb)
+		return fmt.Sprintf("%d GB", gb)
 	}
-	return fmt.Sprintf("%d Tb", gb/1024)
+	return fmt.Sprintf("%d TB", gb/1024)
 }
 
 // FormatTime provides a string for the given time value.
