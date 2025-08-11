@@ -100,21 +100,21 @@ There are different ways to get `tea`:
 
 5. asdf (thirdparty): [mvaldes14/asdf-tea](https://github.com/mvaldes14/asdf-tea)
 
-### Log in to gitea from tea
+### Log in to Gitea from tea
 
-gitea can use many different authentication schemes, and not every authentication method will work with every gitea deployment. When you are a gitea instance administrator you can tweak your settings to fit your use case. For the method that is most likely to work with any gitea deployment use the following steps:
+Gitea can use many different authentication schemes, and not every authentication method will work with every Gitea deployment. When you are a Gitea instance administrator you can tweak your settings to fit your use case. For the method that is most likely to work with any Gitea deployment use the following steps:
 
-1. Open the gitea web in a web browser
+1. Open your Gitea instance in a web browser
 
-2. Do whatever it takes to log in to gitea in your web browser. Any MFA, IDP, or whatever else should be available this way.
+2. Log in to Gitea in your web browser. Any MFA, IDP, or whatever else should be available this way.
 
-3. In gitea settings generate an application token with at least **user read** permissions. If you want to do anything useful with the token add additional permissions/scopes.
+3. In your "user settings", generate an application token with at least **user read** permissions. If you want to do anything useful with the token add additional permissions/scopes.
 
 4. Run `tea login add`, select **application token** authentication when asked for authentication type, and answer **yes** to the question if you have a token. Paste the generated token when asked for one.
 
 You should now be logged in to your gitea instance from tea.
 
-Since 0.10 gitea supports the much simpler oauth workflow but oauth may not be available on all gitea deployments, and gets much more complex when running tea on a remote system.
+Since 0.10 Gitea supports the much simpler oauth workflow but oauth may not be available on all Gitea deployments, and gets much more complex when running tea on a remote system.
 
 ### Shell completion
 
