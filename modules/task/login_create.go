@@ -63,21 +63,17 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 		return fmt.Errorf("token already been used, delete login '%s' first", login.Name)
 	}
 
-	if !sshAgent && sshCertPrincipal == "" && sshKey == "" {
-		// .. if we have enough information to authenticate
-		if len(token) == 0 && (len(user)+len(passwd)) == 0 {
-			return fmt.Errorf("No token set")
-		} else if len(user) != 0 && len(passwd) == 0 {
-			return fmt.Errorf("No password set")
-		} else if len(user) == 0 && len(passwd) != 0 {
-			return fmt.Errorf("No user set")
-		}
-	}
-
-	// Normalize URL
-	serverURL, err := utils.NormalizeURL(giteaURL)
+	serverURL, err := utils.ValidateAuthenticationMethod(
+		giteaURL,
+		token,
+		user,
+		passwd,
+		sshAgent,
+		sshKey,
+		sshCertPrincipal,
+	)
 	if err != nil {
-		return fmt.Errorf("Unable to parse URL: %s", err)
+		return err
 	}
 
 	// check if it's a certificate the principal doesn't matter as the user

@@ -9,7 +9,9 @@ import (
 	"log"
 	"os"
 	"path"
+	"strconv"
 	"strings"
+	"time"
 
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/config"
@@ -20,9 +22,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-var (
-	errNotAGiteaRepo = errors.New("No Gitea login found. You might want to specify --repo (and --login) to work outside of a repository")
-)
+var errNotAGiteaRepo = errors.New("No Gitea login found. You might want to specify --repo (and --login) to work outside of a repository")
 
 // TeaContext contains all context derived during command initialization and wraps cli.Context
 type TeaContext struct {
@@ -123,6 +123,16 @@ func InitCommand(cmd *cli.Command) *TeaContext {
 	if len(repoFlag) != 0 && !repoFlagPathExists {
 		// if repoFlag is not a valid path, use it to override repoSlug
 		c.RepoSlug = repoFlag
+	}
+
+	// override config user with env variable
+	envLogin := GetLoginByEnvVar()
+	if envLogin != nil {
+		_, err := utils.ValidateAuthenticationMethod(envLogin.URL, envLogin.Token, "", "", false, "", "")
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		c.Login = envLogin
 	}
 
 	// override login from flag, or use default login if repo based detection failed
@@ -229,4 +239,41 @@ func contextFromLocalRepo(repoPath, remoteValue string) (*git.TeaRepo, *config.L
 	}
 
 	return repo, nil, "", errNotAGiteaRepo
+}
+
+// GetLoginByEnvVar returns a login based on environment variables, or nil if no login can be created
+func GetLoginByEnvVar() *config.Login {
+	var token string
+
+	giteaToken := os.Getenv("GITEA_TOKEN")
+	githubToken := os.Getenv("GH_TOKEN")
+	giteaInstanceURL := os.Getenv("GITEA_INSTANCE_URL")
+	instanceInsecure := os.Getenv("GITEA_INSTANCE_INSECURE")
+	insecure := false
+	if len(instanceInsecure) > 0 {
+		insecure, _ = strconv.ParseBool(instanceInsecure)
+	}
+
+	// if no tokens are set, or no instance url for gitea fail fast
+	if len(giteaInstanceURL) == 0 || (len(giteaToken) == 0 && len(githubToken) == 0) {
+		return nil
+	}
+
+	token = giteaToken
+	if len(giteaToken) == 0 {
+		token = githubToken
+	}
+
+	return &config.Login{
+		Name:              "GITEA_LOGIN_VIA_ENV",
+		URL:               giteaInstanceURL,
+		Token:             token,
+		Insecure:          insecure,
+		SSHKey:            "",
+		SSHCertPrincipal:  "",
+		SSHKeyFingerprint: "",
+		SSHAgent:          false,
+		Created:           time.Now().Unix(),
+		VersionCheck:      false,
+	}
 }
