@@ -4,12 +4,20 @@
 package interact
 
 import (
+	"strings"
+
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/task"
+	"code.gitea.io/tea/modules/theme"
 
-	"github.com/AlecAivazis/survey/v2"
+	"github.com/charmbracelet/huh"
 )
+
+// IsQuitting checks if the user has aborted the interactive prompt
+func IsQuitting(err error) bool {
+	return err == huh.ErrUserAborted
+}
 
 // CreateIssue interactively creates an issue
 func CreateIssue(login *config.Login, owner, repo string) error {
@@ -17,6 +25,7 @@ func CreateIssue(login *config.Login, owner, repo string) error {
 	if err != nil {
 		return err
 	}
+	printTitleAndContent("Target repo:", owner+"/"+repo)
 
 	var opts gitea.CreateIssueOption
 	if err := promptIssueProperties(login, owner, repo, &opts); err != nil {
@@ -28,29 +37,36 @@ func CreateIssue(login *config.Login, owner, repo string) error {
 
 func promptIssueProperties(login *config.Login, owner, repo string, o *gitea.CreateIssueOption) error {
 	var milestoneName string
-	var labels []string
 	var err error
 
 	selectableChan := make(chan (issueSelectables), 1)
 	go fetchIssueSelectables(login, owner, repo, selectableChan)
 
 	// title
-	promptOpts := survey.WithValidator(survey.Required)
-	promptI := &survey.Input{Message: "Issue title:", Default: o.Title}
-	if err = survey.AskOne(promptI, &o.Title, promptOpts); err != nil {
+	if err := huh.NewInput().
+		Title("Issue title:").
+		Value(&o.Title).
+		Validate(huh.ValidateNotEmpty()).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return err
 	}
+	printTitleAndContent("Issue title:", o.Title)
 
 	// description
-	promptD := NewMultiline(Multiline{
-		Message:   "Issue description:",
-		Default:   o.Body,
-		Syntax:    "md",
-		UseEditor: config.GetPreferences().Editor,
-	})
-	if err = survey.AskOne(promptD, &o.Body); err != nil {
+	if err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewText().
+				Title("Issue description(markdown):").
+				ExternalEditor(config.GetPreferences().Editor).
+				EditorExtension("md").
+				Value(&o.Body),
+		),
+	).WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return err
 	}
+	printTitleAndContent("Issue description(markdown):", o.Body)
 
 	// wait until selectables are fetched
 	selectables := <-selectableChan
@@ -67,6 +83,7 @@ func promptIssueProperties(login *config.Login, owner, repo string, o *gitea.Cre
 	if o.Assignees, err = promptMultiSelect("Assignees:", selectables.Assignees, "[other]"); err != nil {
 		return err
 	}
+	printTitleAndContent("Assignees:", strings.Join(o.Assignees, "\n"))
 
 	// milestone
 	if len(selectables.MilestoneList) != 0 {
@@ -74,24 +91,40 @@ func promptIssueProperties(login *config.Login, owner, repo string, o *gitea.Cre
 			return err
 		}
 		o.Milestone = selectables.MilestoneMap[milestoneName]
+		printTitleAndContent("Milestone:", milestoneName)
 	}
 
 	// labels
 	if len(selectables.LabelList) != 0 {
-		promptL := &survey.MultiSelect{Message: "Labels:", Options: selectables.LabelList, VimMode: true, Default: o.Labels}
-		if err := survey.AskOne(promptL, &labels); err != nil {
+		options := make([]huh.Option[int64], 0, len(selectables.LabelList))
+		labelsMap := make(map[int64]string, len(selectables.LabelList))
+		for _, l := range selectables.LabelList {
+			options = append(options, huh.Option[int64]{Key: l, Value: selectables.LabelMap[l]})
+			labelsMap[selectables.LabelMap[l]] = l
+		}
+		if err := huh.NewMultiSelect[int64]().
+			Title("Labels:").
+			Options(options...).
+			Value(&o.Labels).
+			Run(); err != nil {
 			return err
 		}
-		o.Labels = make([]int64, len(labels))
-		for i, l := range labels {
-			o.Labels[i] = selectables.LabelMap[l]
+		var labels []string
+		for _, labelID := range o.Labels {
+			labels = append(labels, labelsMap[labelID])
 		}
+		printTitleAndContent("Labels:", strings.Join(labels, "\n"))
 	}
 
 	// deadline
 	if o.Deadline, err = promptDatetime("Due date:"); err != nil {
 		return err
 	}
+	deadlineStr := "No due date"
+	if o.Deadline != nil && !o.Deadline.IsZero() {
+		deadlineStr = o.Deadline.Format("2006-01-02")
+	}
+	printTitleAndContent("Due date:", deadlineStr)
 
 	return nil
 }

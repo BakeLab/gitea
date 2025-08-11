@@ -5,6 +5,7 @@ package login
 
 import (
 	"context"
+	"fmt"
 
 	"code.gitea.io/tea/modules/auth"
 	"code.gitea.io/tea/modules/interact"
@@ -112,7 +113,10 @@ var CmdLoginAdd = cli.Command{
 func runLoginAdd(_ context.Context, cmd *cli.Command) error {
 	// if no args create login interactive
 	if cmd.NumFlags() == 0 {
-		return interact.CreateLogin()
+		if err := interact.CreateLogin(); err != nil && !interact.IsQuitting(err) {
+			return fmt.Errorf("error adding login: %w", err)
+		}
+		return nil
 	}
 
 	// if OAuth flag is provided, use OAuth2 PKCE flow

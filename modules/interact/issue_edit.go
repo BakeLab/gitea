@@ -5,23 +5,26 @@ package interact
 
 import (
 	"slices"
+	"strings"
 
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/task"
+	"code.gitea.io/tea/modules/theme"
 
-	"github.com/AlecAivazis/survey/v2"
+	"github.com/charmbracelet/huh"
 )
 
 // EditIssue interactively edits an issue
 func EditIssue(ctx context.TeaContext, index int64) (*task.EditIssueOption, error) {
-	var opts = task.EditIssueOption{}
+	opts := task.EditIssueOption{}
 	var err error
 
 	ctx.Owner, ctx.Repo, err = promptRepoSlug(ctx.Owner, ctx.Repo)
 	if err != nil {
 		return &opts, err
 	}
+	printTitleAndContent("Target repo:", ctx.Owner+"/"+ctx.Repo)
 
 	c := ctx.Login.Client()
 	i, _, err := c.GetIssue(ctx.Owner, ctx.Repo, index)
@@ -68,25 +71,31 @@ func promptIssueEditProperties(ctx *context.TeaContext, o *task.EditIssueOption)
 	go fetchIssueSelectables(ctx.Login, ctx.Owner, ctx.Repo, selectableChan)
 
 	// title
-	promptOpts := survey.WithValidator(survey.Required)
-	promptI := &survey.Input{Message: "Issue title:", Default: *o.Title}
-	if err = survey.AskOne(promptI, o.Title, promptOpts); err != nil {
+	if err := huh.NewInput().
+		Title("Issue title:").
+		Value(o.Title).
+		Validate(huh.ValidateNotEmpty()).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return err
 	}
+	printTitleAndContent("Issue title:", *o.Title)
 
 	// description
-	promptD := NewMultiline(Multiline{
-		Message:             "Issue description:",
-		Default:             *o.Body,
-		Syntax:              "md",
-		UseEditor:           config.GetPreferences().Editor,
-		EditorAppendDefault: true,
-		EditorHideDefault:   true,
-	})
-
-	if err = survey.AskOne(promptD, o.Body); err != nil {
+	if err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewText().
+				Title("Issue description(markdown):").
+				ExternalEditor(config.GetPreferences().Editor).
+				EditorExtension("md").
+				Value(o.Body),
+		),
+	).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return err
 	}
+	printTitleAndContent("Issue description(markdown):", *o.Body)
 
 	// wait until selectables are fetched
 	selectables := <-selectableChan
@@ -112,6 +121,7 @@ func promptIssueEditProperties(ctx *context.TeaContext, o *task.EditIssueOption)
 	if o.AddAssignees, err = promptMultiSelect("Add Assignees:", newAssignees, "[other]"); err != nil {
 		return err
 	}
+	printTitleAndContent("Assignees:", strings.Join(o.AddAssignees, "\n"))
 
 	// milestone
 	if len(selectables.MilestoneList) != 0 {
@@ -123,14 +133,22 @@ func promptIssueEditProperties(ctx *context.TeaContext, o *task.EditIssueOption)
 			return err
 		}
 		o.Milestone = &milestoneName
+		printTitleAndContent("Milestone:", milestoneName)
 	}
 
 	// labels
 	if len(selectables.LabelList) != 0 {
-		promptL := &survey.MultiSelect{Message: "Labels:", Options: selectables.LabelList, VimMode: true, Default: o.AddLabels}
-		if err := survey.AskOne(promptL, &labelsSelected); err != nil {
+		copy(labelsSelected, o.AddLabels)
+		if err := huh.NewMultiSelect[string]().
+			Title("Labels:").
+			Options(huh.NewOptions(selectables.LabelList...)...).
+			Value(&labelsSelected).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			return err
 		}
+		printTitleAndContent("Labels:", strings.Join(labelsSelected, "\n"))
+
 		// removed labels
 		for _, l := range o.AddLabels {
 			if !slices.Contains(labelsSelected, l) {
@@ -148,6 +166,11 @@ func promptIssueEditProperties(ctx *context.TeaContext, o *task.EditIssueOption)
 	if o.Deadline, err = promptDatetime("Due date:"); err != nil {
 		return err
 	}
+	deadlineStr := "No due date"
+	if o.Deadline != nil && !o.Deadline.IsZero() {
+		deadlineStr = o.Deadline.Format("2006-01-02")
+	}
+	printTitleAndContent("Due date:", deadlineStr)
 
 	return nil
 }

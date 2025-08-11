@@ -53,6 +53,9 @@ func runIssuesEdit(_ stdctx.Context, cmd *cli.Command) error {
 			var err error
 			opts, err = interact.EditIssue(*ctx, opts.Index)
 			if err != nil {
+				if interact.IsQuitting(err) {
+					return nil // user quit
+				}
 				return err
 			}
 		}

@@ -13,7 +13,6 @@ import (
 
 // CreateIssue creates an issue in the given repo and prints the result
 func CreateIssue(login *config.Login, repoOwner, repoName string, opts gitea.CreateIssueOption) error {
-
 	// title is required
 	if len(opts.Title) == 0 {
 		return fmt.Errorf("Title is required")

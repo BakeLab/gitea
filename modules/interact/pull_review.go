@@ -6,13 +6,15 @@ package interact
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/task"
+	"code.gitea.io/tea/modules/theme"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/AlecAivazis/survey/v2"
+	"github.com/charmbracelet/huh"
 )
 
 var reviewStates = map[string]gitea.ReviewStateType{
@@ -30,11 +32,16 @@ func ReviewPull(ctx *context.TeaContext, idx int64) error {
 	var err error
 
 	// codeComments
-	var reviewDiff bool
-	promptDiff := &survey.Confirm{Message: "Review / comment the diff?", Default: true}
-	if err = survey.AskOne(promptDiff, &reviewDiff); err != nil {
+	reviewDiff := true
+	if err := huh.NewConfirm().
+		Title("Review / comment the diff?").
+		Value(&reviewDiff).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return err
 	}
+	printTitleAndContent("Review / comment the diff?", strconv.FormatBool(reviewDiff))
+
 	if reviewDiff {
 		if codeComments, err = DoDiffReview(ctx, idx); err != nil {
 			fmt.Printf("Error during diff review: %s\n", err)
@@ -44,25 +51,31 @@ func ReviewPull(ctx *context.TeaContext, idx int64) error {
 
 	// state
 	var stateString string
-	promptState := &survey.Select{Message: "Your assessment:", Options: reviewStateOptions, VimMode: true}
-	if err = survey.AskOne(promptState, &stateString); err != nil {
+	if err := huh.NewSelect[string]().
+		Title("Your assessment:").
+		Options(huh.NewOptions(reviewStateOptions...)...).
+		Value(&stateString).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return err
 	}
+	printTitleAndContent("Your assessment:", stateString)
+
 	state = reviewStates[stateString]
 
 	// comment
-	var promptOpts survey.AskOpt
+	field := huh.NewText().
+		Title("Concluding comment(markdown):").
+		ExternalEditor(config.GetPreferences().Editor).
+		EditorExtension("md").
+		Value(&comment)
 	if (state == gitea.ReviewStateComment && len(codeComments) == 0) || state == gitea.ReviewStateRequestChanges {
-		promptOpts = survey.WithValidator(survey.Required)
+		field = field.Validate(huh.ValidateNotEmpty())
 	}
-	err = survey.AskOne(NewMultiline(Multiline{
-		Message:   "Concluding comment:",
-		Syntax:    "md",
-		UseEditor: config.GetPreferences().Editor,
-	}), &comment, promptOpts)
-	if err != nil {
+	if err := huh.NewForm(huh.NewGroup(field)).WithTheme(theme.GetTheme()).Run(); err != nil {
 		return err
 	}
+	printTitleAndContent("Concluding comment(markdown):", comment)
 
 	return task.CreatePullReview(ctx, idx, state, comment, codeComments)
 }

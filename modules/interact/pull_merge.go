@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
 
-	"github.com/AlecAivazis/survey/v2"
+	"code.gitea.io/sdk/gitea"
+	"github.com/charmbracelet/huh"
 )
 
 // MergePull interactively creates a PR
@@ -76,15 +76,15 @@ func getPullIndex(ctx *context.TeaContext, branch string) (int64, error) {
 
 		prOptions = append(prOptions, loadMoreOption)
 
-		q := &survey.Select{
-			Message:  "Select a PR to merge",
-			Options:  prOptions,
-			PageSize: 10,
-		}
-		err = survey.AskOne(q, &selected)
-		if err != nil {
+		if err := huh.NewSelect[string]().
+			Title("Select a PR to merge:").
+			Options(huh.NewOptions(prOptions...)...).
+			Value(&selected).
+			Filtering(true).
+			Run(); err != nil {
 			return 0, err
 		}
+
 		if selected != loadMoreOption {
 			break
 		}

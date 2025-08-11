@@ -8,42 +8,19 @@ import (
 	"strings"
 	"time"
 
+	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
-	"github.com/AlecAivazis/survey/v2"
-	"github.com/araddon/dateparse"
+	"github.com/charmbracelet/huh"
 )
-
-// Multiline represents options for a prompt that expects multiline input
-type Multiline struct {
-	Message             string
-	Default             string
-	Syntax              string
-	UseEditor           bool
-	EditorAppendDefault bool
-	EditorHideDefault   bool
-}
-
-// NewMultiline creates a prompt that switches between the inline multiline text
-// and a texteditor based prompt
-func NewMultiline(opts Multiline) (prompt survey.Prompt) {
-	if opts.UseEditor {
-		prompt = &survey.Editor{
-			Message:       opts.Message,
-			Default:       opts.Default,
-			FileName:      "*." + opts.Syntax,
-			AppendDefault: opts.EditorAppendDefault,
-			HideDefault:   opts.EditorHideDefault,
-		}
-	} else {
-		prompt = &survey.Multiline{Message: opts.Message, Default: opts.Default}
-	}
-	return
-}
 
 // PromptPassword asks for a password and blocks until input was made.
 func PromptPassword(name string) (pass string, err error) {
-	promptPW := &survey.Password{Message: name + " password:"}
-	err = survey.AskOne(promptPW, &pass, survey.WithValidator(survey.Required))
+	err = huh.NewInput().
+		Title(name + " password:").
+		Validate(huh.ValidateNotEmpty()).EchoMode(huh.EchoModePassword).
+		Value(&pass).
+		WithTheme(theme.GetTheme()).
+		Run()
 	return
 }
 
@@ -60,28 +37,21 @@ func promptRepoSlug(defaultOwner, defaultRepo string) (owner, repo string, err e
 
 	owner = defaultOwner
 	repo = defaultRepo
+	repoSlug = defaultVal
 
-	err = survey.AskOne(
-		&survey.Input{
-			Message: prompt,
-			Default: defaultVal,
-		},
-		&repoSlug,
-		survey.WithValidator(func(input interface{}) error {
-			if str, ok := input.(string); ok {
-				if !required && len(str) == 0 {
-					return nil
-				}
-				split := strings.Split(str, "/")
-				if len(split) != 2 || len(split[0]) == 0 || len(split[1]) == 0 {
-					return fmt.Errorf("must follow the <owner>/<repo> syntax")
-				}
-			} else {
-				return fmt.Errorf("invalid result type")
+	err = huh.NewInput().
+		Title(prompt).
+		Value(&repoSlug).
+		Validate(func(str string) error {
+			if !required && len(str) == 0 {
+				return nil
+			}
+			split := strings.Split(str, "/")
+			if len(split) != 2 || len(split[0]) == 0 || len(split[1]) == 0 {
+				return fmt.Errorf("must follow the <owner>/<repo> syntax")
 			}
 			return nil
-		}),
-	)
+		}).WithTheme(theme.GetTheme()).Run()
 
 	if err == nil && len(repoSlug) != 0 {
 		repoSlugSplit := strings.Split(repoSlug, "/")
@@ -94,38 +64,39 @@ func promptRepoSlug(defaultOwner, defaultRepo string) (owner, repo string, err e
 // promptDatetime prompts for a date or datetime string.
 // Supports all formats understood by araddon/dateparse.
 func promptDatetime(prompt string) (val *time.Time, err error) {
-	var input string
-	err = survey.AskOne(
-		&survey.Input{Message: prompt},
-		&input,
-		survey.WithValidator(func(input interface{}) error {
-			if str, ok := input.(string); ok {
-				if len(str) == 0 {
-					return nil
-				}
-				t, err := dateparse.ParseAny(str)
-				if err != nil {
-					return err
-				}
-				val = &t
-			} else {
-				return fmt.Errorf("invalid result type")
+	var date string
+	if err := huh.NewInput().
+		Title(prompt).
+		Placeholder("YYYY-MM-DD").
+		Validate(func(s string) error {
+			if s == "" {
+				return nil
 			}
-			return nil
-		}),
-	)
-	return
+			_, err := time.Parse("2006-01-02", s)
+			return err
+		}).
+		Value(&date).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
+		return nil, err
+	}
+
+	if date == "" {
+		return nil, nil // no date
+	}
+	t, _ := time.Parse("2006-01-02", date)
+	return &t, nil
 }
 
 // promptSelect creates a generic multiselect prompt, with processing of custom values.
 func promptMultiSelect(prompt string, options []string, customVal string) ([]string, error) {
 	var selection []string
-	promptA := &survey.MultiSelect{
-		Message: prompt,
-		Options: makeSelectOpts(options, customVal, ""),
-		VimMode: true,
-	}
-	if err := survey.AskOne(promptA, &selection); err != nil {
+	if err := huh.NewMultiSelect[string]().
+		Title(prompt).
+		Options(huh.NewOptions(makeSelectOpts(options, customVal, "")...)...).
+		Value(&selection).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return nil, err
 	}
 	return promptCustomVal(prompt, customVal, selection)
@@ -136,14 +107,13 @@ func promptSelectV2(prompt string, options []string) (string, error) {
 	if len(options) == 0 {
 		return "", nil
 	}
-	var selection string
-	promptA := &survey.Select{
-		Message: prompt,
-		Options: options,
-		VimMode: true,
-		Default: options[0],
-	}
-	if err := survey.AskOne(promptA, &selection); err != nil {
+	selection := options[0]
+	if err := huh.NewSelect[string]().
+		Title(prompt).
+		Options(huh.NewOptions(options...)...).
+		Value(&selection).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return "", err
 	}
 	return selection, nil
@@ -154,17 +124,18 @@ func promptSelect(prompt string, options []string, customVal, noneVal, defaultVa
 	var selection string
 	if defaultVal == "" && noneVal != "" {
 		defaultVal = noneVal
+	}
 
-	}
-	promptA := &survey.Select{
-		Message: prompt,
-		Options: makeSelectOpts(options, customVal, noneVal),
-		VimMode: true,
-		Default: defaultVal,
-	}
-	if err := survey.AskOne(promptA, &selection); err != nil {
+	selection = defaultVal
+	if err := huh.NewSelect[string]().
+		Title(prompt).
+		Options(huh.NewOptions(makeSelectOpts(options, customVal, noneVal)...)...).
+		Value(&selection).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return "", err
 	}
+
 	if noneVal != "" && selection == noneVal {
 		return "", nil
 	}
@@ -193,11 +164,14 @@ func makeSelectOpts(opts []string, customVal, noneVal string) []string {
 // for custom input to add to the selection instead.
 func promptCustomVal(prompt, customVal string, selection []string) ([]string, error) {
 	// check for custom value & prompt again with text input
-	// HACK until https://github.com/AlecAivazis/survey/issues/339 is implemented
 	if otherIndex := utils.IndexOf(selection, customVal); otherIndex != -1 {
 		var customAssignees string
-		promptA := &survey.Input{Message: prompt, Help: "comma separated list"}
-		if err := survey.AskOne(promptA, &customAssignees); err != nil {
+		if err := huh.NewInput().
+			Title(prompt).
+			Description("comma separated list").
+			Value(&customAssignees).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			return nil, err
 		}
 		selection = append(selection[:otherIndex], selection[otherIndex+1:]...)

@@ -10,7 +10,7 @@ import (
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 
-	"github.com/AlecAivazis/survey/v2"
+	"github.com/charmbracelet/huh"
 	"github.com/urfave/cli/v3"
 )
 
@@ -53,7 +53,6 @@ func runRepoDelete(_ stdctx.Context, cmd *cli.Command) error {
 	var owner string
 	if ctx.IsSet("owner") {
 		owner = ctx.String("owner")
-
 	} else {
 		owner = ctx.Login.User
 	}
@@ -64,15 +63,16 @@ func runRepoDelete(_ stdctx.Context, cmd *cli.Command) error {
 
 	if !ctx.Bool("force") {
 		var enteredRepoSlug string
-		promptRepoName := &survey.Input{
-			Message: fmt.Sprintf("Confirm the deletion of the repository '%s' by typing its name: ", repoSlug),
-		}
-		if err := survey.AskOne(promptRepoName, &enteredRepoSlug, survey.WithValidator(survey.Required)); err != nil {
+		if err := huh.NewInput().
+			Title(fmt.Sprintf("Confirm the deletion of the repository '%s' by typing its name: ", repoSlug)).
+			Validate(huh.ValidateNotEmpty()).
+			Value(&enteredRepoSlug).
+			Run(); err != nil {
 			return err
 		}
 
 		if enteredRepoSlug != repoSlug {
-			return fmt.Errorf("Entered wrong repository name '%s', expected '%s'", enteredRepoSlug, repoSlug)
+			return fmt.Errorf("entered wrong repository name '%s', expected '%s'", enteredRepoSlug, repoSlug)
 		}
 	}
 

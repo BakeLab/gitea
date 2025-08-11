@@ -46,7 +46,10 @@ var CmdPullsMerge = cli.Command{
 
 		if ctx.Args().Len() != 1 {
 			// If no PR index is provided, try interactive mode
-			return interact.MergePull(ctx)
+			if err := interact.MergePull(ctx); err != nil && !interact.IsQuitting(err) {
+				return err
+			}
+			return nil
 		}
 
 		idx, err := utils.ArgToIndex(ctx.Args().First())

@@ -8,14 +8,14 @@ import (
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/task"
 
-	"github.com/AlecAivazis/survey/v2"
+	"github.com/charmbracelet/huh"
 )
 
 // CreatePull interactively creates a PR
 func CreatePull(ctx *context.TeaContext) (err error) {
 	var (
 		base, head           string
-		allowMaintainerEdits bool
+		allowMaintainerEdits = true
 	)
 
 	// owner, repo
@@ -27,32 +27,37 @@ func CreatePull(ctx *context.TeaContext) (err error) {
 	if base, err = task.GetDefaultPRBase(ctx.Login, ctx.Owner, ctx.Repo); err != nil {
 		return err
 	}
-	promptI := &survey.Input{Message: "Target branch:", Default: base}
-	if err := survey.AskOne(promptI, &base); err != nil {
-		return err
-	}
 
-	// head
 	var headOwner, headBranch string
-	promptOpts := survey.WithValidator(survey.Required)
-
+	validator := huh.ValidateNotEmpty()
 	if ctx.LocalRepo != nil {
 		headOwner, headBranch, err = task.GetDefaultPRHead(ctx.LocalRepo)
 		if err == nil {
-			promptOpts = nil
+			validator = nil
 		}
 	}
-	promptI = &survey.Input{Message: "Source repo owner:", Default: headOwner}
-	if err := survey.AskOne(promptI, &headOwner); err != nil {
-		return err
-	}
-	promptI = &survey.Input{Message: "Source branch:", Default: headBranch}
-	if err := survey.AskOne(promptI, &headBranch, promptOpts); err != nil {
-		return err
-	}
 
-	promptC := &survey.Confirm{Message: "Allow Maintainers to push to the base branch", Default: true}
-	if err := survey.AskOne(promptC, &allowMaintainerEdits); err != nil {
+	if err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Target branch:").
+				Value(&base).
+				Validate(huh.ValidateNotEmpty()),
+
+			huh.NewInput().
+				Title("Source repo owner:").
+				Value(&headOwner),
+
+			huh.NewInput().
+				Title("Source branch:").
+				Value(&headBranch).
+				Validate(validator),
+
+			huh.NewConfirm().
+				Title("Allow maintainers to push to the base branch:").
+				Value(&allowMaintainerEdits),
+		),
+	).Run(); err != nil {
 		return err
 	}
 

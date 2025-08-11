@@ -10,8 +10,9 @@ import (
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
+	"code.gitea.io/tea/modules/theme"
 
-	"github.com/AlecAivazis/survey/v2"
+	"github.com/charmbracelet/huh"
 	"golang.org/x/term"
 )
 
@@ -46,9 +47,12 @@ func ShowCommentsPaginated(ctx *context.TeaContext, idx int64, totalComments int
 	// NOTE: as of gitea 1.13, pagination is not provided by this endpoint, but handles
 	// this function gracefully anyways.
 	for {
-		loadComments := false
-		confirm := survey.Confirm{Message: prompt, Default: true}
-		if err := survey.AskOne(&confirm, &loadComments); err != nil {
+		loadComments := true
+		if err := huh.NewConfirm().
+			Title(prompt).
+			Value(&loadComments).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			return err
 		} else if !loadComments {
 			break

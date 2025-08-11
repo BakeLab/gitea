@@ -4,113 +4,175 @@
 package interact
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/auth"
 	"code.gitea.io/tea/modules/task"
+	"code.gitea.io/tea/modules/theme"
 
-	"github.com/AlecAivazis/survey/v2"
+	"github.com/charmbracelet/huh"
 )
 
 // CreateLogin create an login interactive
 func CreateLogin() error {
 	var (
-		name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string
-		insecure, sshAgent, versionCheck, helper                                                      bool
+		name, token, user, passwd, otp, scopes, sshKey, sshCertPrincipal, sshKeyFingerprint string
+		insecure, sshAgent, versionCheck, helper                                            bool
 	)
 
 	versionCheck = true
 	helper = false
 
-	promptI := &survey.Input{Message: "URL of Gitea instance: "}
-	if err := survey.AskOne(promptI, &giteaURL, survey.WithValidator(survey.Required)); err != nil {
+	giteaURL := "https://gitea.com"
+	if err := huh.NewInput().
+		Title("URL of Gitea instance: ").
+		Value(&giteaURL).
+		Validate(func(s string) error {
+			s = strings.TrimSpace(s)
+			if len(s) == 0 {
+				return fmt.Errorf("URL is required")
+			}
+			_, err := url.Parse(s)
+			if err != nil {
+				return fmt.Errorf("Invalid URL: %v", err)
+			}
+			return nil
+		}).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return err
 	}
+	printTitleAndContent("URL of Gitea instance: ", giteaURL)
+
 	giteaURL = strings.TrimSuffix(strings.TrimSpace(giteaURL), "/")
-	if len(giteaURL) == 0 {
-		fmt.Println("URL is required!")
-		return nil
-	}
 
 	name, err := task.GenerateLoginName(giteaURL, "")
 	if err != nil {
 		return err
 	}
 
-	promptI = &survey.Input{Message: "Name of new Login: ", Default: name}
-	if err := survey.AskOne(promptI, &name); err != nil {
+	if err := huh.NewInput().
+		Title("Name of new Login: ").
+		Value(&name).
+		Validate(huh.ValidateNotEmpty()).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return err
 	}
+	printTitleAndContent("Name of new Login: ", name)
 
 	loginMethod, err := promptSelectV2("Login with: ", []string{"token", "ssh-key/certificate", "oauth"})
 	if err != nil {
 		return err
 	}
+	printTitleAndContent("Login with: ", loginMethod)
 
 	switch loginMethod {
 	case "oauth":
-		promptYN := &survey.Confirm{
-			Message: "Allow Insecure connections: ",
-			Default: false,
-		}
-		if err = survey.AskOne(promptYN, &insecure); err != nil {
+		if err := huh.NewConfirm().
+			Title("Allow Insecure connections:").
+			Value(&insecure).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			return err
 		}
+		printTitleAndContent("Allow Insecure connections:", strconv.FormatBool(insecure))
 
 		return auth.OAuthLoginWithOptions(name, giteaURL, insecure)
 	default: // token
 		var hasToken bool
-		promptYN := &survey.Confirm{
-			Message: "Do you have an access token?",
-			Default: false,
-		}
-		if err = survey.AskOne(promptYN, &hasToken); err != nil {
+		if err := huh.NewConfirm().
+			Title("Do you have an access token?").
+			Value(&hasToken).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			return err
 		}
+		printTitleAndContent("Do you have an access token?", strconv.FormatBool(hasToken))
 
 		if hasToken {
-			promptI = &survey.Input{Message: "Token: "}
-			if err := survey.AskOne(promptI, &token, survey.WithValidator(survey.Required)); err != nil {
+			if err := huh.NewInput().
+				Title("Token:").
+				Value(&token).
+				Validate(huh.ValidateNotEmpty()).
+				WithTheme(theme.GetTheme()).
+				Run(); err != nil {
 				return err
 			}
+			printTitleAndContent("Token:", token)
 		} else {
-			promptI = &survey.Input{Message: "Username: "}
-			if err = survey.AskOne(promptI, &user, survey.WithValidator(survey.Required)); err != nil {
+			if err := huh.NewInput().
+				Title("Username:").
+				Value(&user).
+				Validate(huh.ValidateNotEmpty()).
+				WithTheme(theme.GetTheme()).
+				Run(); err != nil {
 				return err
 			}
+			printTitleAndContent("Username:", user)
 
-			promptPW := &survey.Password{Message: "Password: "}
-			if err = survey.AskOne(promptPW, &passwd, survey.WithValidator(survey.Required)); err != nil {
+			if err := huh.NewInput().
+				Title("Password:").
+				Value(&passwd).
+				Validate(huh.ValidateNotEmpty()).
+				EchoMode(huh.EchoModePassword).
+				WithTheme(theme.GetTheme()).
+				Run(); err != nil {
 				return err
 			}
+			printTitleAndContent("Password:", "********")
 
 			var tokenScopes []string
-			promptS := &survey.MultiSelect{Message: "Token Scopes:", Options: tokenScopeOpts}
-			if err := survey.AskOne(promptS, &tokenScopes, survey.WithValidator(survey.Required)); err != nil {
+			if err := huh.NewMultiSelect[string]().
+				Title("Token Scopes:").
+				Options(huh.NewOptions(tokenScopeOpts...)...).
+				Value(&tokenScopes).
+				Validate(func(s []string) error {
+					if len(s) == 0 {
+						return errors.New("At least one scope is required")
+					}
+					return nil
+				}).
+				WithTheme(theme.GetTheme()).
+				Run(); err != nil {
 				return err
 			}
+			printTitleAndContent("Token Scopes:", strings.Join(tokenScopes, "\n"))
+
 			scopes = strings.Join(tokenScopes, ",")
 
 			// Ask for OTP last so it's less likely to timeout
-			promptO := &survey.Input{Message: "OTP (if applicable)"}
-			if err := survey.AskOne(promptO, &otp); err != nil {
+			if err := huh.NewInput().
+				Title("OTP (if applicable):").
+				Value(&otp).
+				WithTheme(theme.GetTheme()).
+				Run(); err != nil {
 				return err
 			}
+			printTitleAndContent("OTP (if applicable):", otp)
 		}
 	case "ssh-key/certificate":
-		promptI = &survey.Input{Message: "SSH Key/Certificate Path (leave empty for auto-discovery in ~/.ssh and ssh-agent):"}
-		if err := survey.AskOne(promptI, &sshKey); err != nil {
+		if err := huh.NewInput().
+			Title("SSH Key/Certificate Path (leave empty for auto-discovery in ~/.ssh and ssh-agent):").
+			Value(&sshKey).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			return err
 		}
+		printTitleAndContent("SSH Key/Certificate Path (leave empty for auto-discovery in ~/.ssh and ssh-agent):", sshKey)
 
 		if sshKey == "" {
 			sshKey, err = promptSelect("Select ssh-key: ", task.ListSSHPubkey(), "", "", "")
 			if err != nil {
 				return err
 			}
+			printTitleAndContent("Selected ssh-key:", sshKey)
 
 			// ssh certificate
 			if strings.Contains(sshKey, "principals") {
@@ -136,42 +198,51 @@ func CreateLogin() error {
 	}
 
 	var optSettings bool
-	promptYN := &survey.Confirm{
-		Message: "Set Optional settings: ",
-		Default: false,
-	}
-	if err = survey.AskOne(promptYN, &optSettings); err != nil {
+	if err := huh.NewConfirm().
+		Title("Set Optional settings:").
+		Value(&optSettings).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
 		return err
 	}
+	printTitleAndContent("Set Optional settings:", strconv.FormatBool(optSettings))
+
 	if optSettings {
-		promptI = &survey.Input{Message: "SSH Key Path (leave empty for auto-discovery):"}
-		if err := survey.AskOne(promptI, &sshKey); err != nil {
+		if err := huh.NewInput().
+			Title("SSH Key Path (leave empty for auto-discovery):").
+			Value(&sshKey).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			return err
 		}
+		printTitleAndContent("SSH Key Path (leave empty for auto-discovery):", sshKey)
 
-		promptYN = &survey.Confirm{
-			Message: "Allow Insecure connections: ",
-			Default: false,
-		}
-		if err = survey.AskOne(promptYN, &insecure); err != nil {
+		if err := huh.NewConfirm().
+			Title("Allow Insecure connections:").
+			Value(&insecure).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			return err
 		}
+		printTitleAndContent("Allow Insecure connections:", strconv.FormatBool(insecure))
 
-		promptYN = &survey.Confirm{
-			Message: "Add git helper: ",
-			Default: false,
-		}
-		if err = survey.AskOne(promptYN, &helper); err != nil {
+		if err := huh.NewConfirm().
+			Title("Add git helper:").
+			Value(&helper).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			return err
 		}
+		printTitleAndContent("Add git helper:", strconv.FormatBool(helper))
 
-		promptYN = &survey.Confirm{
-			Message: "Check version of Gitea instance: ",
-			Default: true,
-		}
-		if err = survey.AskOne(promptYN, &versionCheck); err != nil {
+		if err := huh.NewConfirm().
+			Title("Check version of Gitea instance:").
+			Value(&versionCheck).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			return err
 		}
+		printTitleAndContent("Check version of Gitea instance:", strconv.FormatBool(versionCheck))
 	}
 
 	return task.CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint, insecure, sshAgent, versionCheck, helper)

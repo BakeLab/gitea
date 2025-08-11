@@ -26,7 +26,7 @@ var CmdPullsReview = cli.Command{
 		ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
 		if ctx.Args().Len() != 1 {
-			return fmt.Errorf("Must specify a PR index")
+			return fmt.Errorf("must specify a PR index")
 		}
 
 		idx, err := utils.ArgToIndex(ctx.Args().First())
@@ -34,7 +34,10 @@ var CmdPullsReview = cli.Command{
 			return err
 		}
 
-		return interact.ReviewPull(ctx, idx)
+		if err := interact.ReviewPull(ctx, idx); err != nil && !interact.IsQuitting(err) {
+			return err
+		}
+		return nil
 	},
 	Flags: flags.AllDefaultFlags,
 }

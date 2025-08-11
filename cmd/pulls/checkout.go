@@ -47,5 +47,8 @@ func runPullsCheckout(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return task.PullCheckout(ctx.Login, ctx.Owner, ctx.Repo, ctx.Bool("branch"), idx, interact.PromptPassword)
+	if err := task.PullCheckout(ctx.Login, ctx.Owner, ctx.Repo, ctx.Bool("branch"), idx, interact.PromptPassword); err != nil && !interact.IsQuitting(err) {
+		return err
+	}
+	return nil
 }

@@ -44,7 +44,10 @@ func runPullsCreate(_ stdctx.Context, cmd *cli.Command) error {
 
 	// no args -> interactive mode
 	if ctx.NumFlags() == 0 {
-		return interact.CreatePull(ctx)
+		if err := interact.CreatePull(ctx); err != nil && !interact.IsQuitting(err) {
+			return err
+		}
+		return nil
 	}
 
 	// else use args to create PR

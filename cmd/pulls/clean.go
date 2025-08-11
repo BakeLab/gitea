@@ -43,5 +43,8 @@ func runPullsClean(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return task.PullClean(ctx.Login, ctx.Owner, ctx.Repo, idx, ctx.Bool("ignore-sha"), interact.PromptPassword)
+	if err := task.PullClean(ctx.Login, ctx.Owner, ctx.Repo, idx, ctx.Bool("ignore-sha"), interact.PromptPassword); err != nil && !interact.IsQuitting(err) {
+		return err
+	}
+	return nil
 }

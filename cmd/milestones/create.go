@@ -68,7 +68,10 @@ func runMilestonesCreate(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	if ctx.NumFlags() == 0 {
-		return interact.CreateMilestone(ctx.Login, ctx.Owner, ctx.Repo)
+		if err := interact.CreateMilestone(ctx.Login, ctx.Owner, ctx.Repo); err != nil && !interact.IsQuitting(err) {
+			return err
+		}
+		return nil
 	}
 
 	return task.CreateMilestone(

@@ -17,8 +17,9 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
+	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
-	"github.com/AlecAivazis/survey/v2"
+	"github.com/charmbracelet/huh"
 	"golang.org/x/oauth2"
 )
 
@@ -278,8 +279,13 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 	options = append(options, gitea.SetToken(l.Token), gitea.SetHTTPClient(httpClient))
 
 	if ok, err := utils.IsKeyEncrypted(l.SSHKey); ok && err == nil && l.SSHPassphrase == "" {
-		promptPW := &survey.Password{Message: "ssh-key is encrypted please enter the passphrase: "}
-		if err = survey.AskOne(promptPW, &l.SSHPassphrase, survey.WithValidator(survey.Required)); err != nil {
+		if err := huh.NewInput().
+			Title("ssh-key is encrypted please enter the passphrase: ").
+			Validate(huh.ValidateNotEmpty()).
+			EchoMode(huh.EchoModePassword).
+			Value(&l.SSHPassphrase).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			log.Fatal(err)
 		}
 	}

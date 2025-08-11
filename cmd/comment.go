@@ -5,6 +5,7 @@ package cmd
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -14,10 +15,11 @@ import (
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/print"
+	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/AlecAivazis/survey/v2"
+	"github.com/charmbracelet/huh"
 	"github.com/urfave/cli/v3"
 )
 
@@ -56,17 +58,22 @@ func runAddComment(_ stdctx.Context, cmd *cli.Command) error {
 			body = strings.Join([]string{body, string(bodyStdin)}, "\n\n")
 		}
 	} else if len(body) == 0 {
-		if err = survey.AskOne(interact.NewMultiline(interact.Multiline{
-			Message:   "Comment:",
-			Syntax:    "md",
-			UseEditor: config.GetPreferences().Editor,
-		}), &body); err != nil {
+		if err := huh.NewForm(
+			huh.NewGroup(
+				huh.NewText().
+					Title("Comment(markdown):").
+					ExternalEditor(config.GetPreferences().Editor).
+					EditorExtension("md").
+					Value(&body),
+			),
+		).WithTheme(theme.GetTheme()).
+			Run(); err != nil {
 			return err
 		}
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("No comment body provided")
+		return errors.New("no comment content provided")
 	}
 
 	client := ctx.Login.Client()

@@ -15,7 +15,7 @@ func MilestoneDetails(milestone *gitea.Milestone) {
 		milestone.Title,
 	)
 	if len(milestone.Description) != 0 {
-		fmt.Printf("\n%s\n", milestone.Description)
+		outputMarkdown(milestone.Description, "")
 	}
 	if milestone.Deadline != nil && !milestone.Deadline.IsZero() {
 		fmt.Printf("\nDeadline: %s\n", FormatTime(*milestone.Deadline, false))
@@ -24,7 +24,7 @@ func MilestoneDetails(milestone *gitea.Milestone) {
 
 // MilestonesList prints a listing of milestones
 func MilestonesList(news []*gitea.Milestone, output string, fields []string) {
-	var printables = make([]printable, len(news))
+	printables := make([]printable, len(news))
 	for i, x := range news {
 		printables[i] = &printableMilestone{x}
 	}

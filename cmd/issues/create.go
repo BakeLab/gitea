@@ -30,7 +30,11 @@ func runIssuesCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
 	if ctx.NumFlags() == 0 {
-		return interact.CreateIssue(ctx.Login, ctx.Owner, ctx.Repo)
+		err := interact.CreateIssue(ctx.Login, ctx.Owner, ctx.Repo)
+		if err != nil && !interact.IsQuitting(err) {
+			return err
+		}
+		return nil
 	}
 
 	opts, err := flags.GetIssuePRCreateFlags(ctx)
