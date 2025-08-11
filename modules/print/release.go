@@ -14,7 +14,7 @@ func ReleasesList(releases []*gitea.Release, output string) {
 		"Title",
 		"Published At",
 		"Status",
-		"Tar URL",
+		"Tar/Zip URL",
 	)
 
 	for _, release := range releases {
@@ -29,7 +29,7 @@ func ReleasesList(releases []*gitea.Release, output string) {
 			release.Title,
 			FormatTime(release.PublishedAt, isMachineReadable(output)),
 			status,
-			release.TarURL,
+			release.TarURL+"\n"+release.ZipURL,
 		)
 	}
 
