@@ -23,7 +23,7 @@ var (
 )
 
 // CreatePull creates a PR in the given repo and prints the result
-func CreatePull(ctx *context.TeaContext, base, head string, allowMaintainerEdits bool, opts *gitea.CreateIssueOption) (err error) {
+func CreatePull(ctx *context.TeaContext, base, head string, allowMaintainerEdits *bool, opts *gitea.CreateIssueOption) (err error) {
 	// default is default branch
 	if len(base) == 0 {
 		base, err = GetDefaultPRBase(ctx.Login, ctx.Owner, ctx.Repo)
@@ -75,9 +75,9 @@ func CreatePull(ctx *context.TeaContext, base, head string, allowMaintainerEdits
 		return fmt.Errorf("could not create PR from %s to %s:%s: %s", head, ctx.Owner, base, err)
 	}
 
-	if pr.AllowMaintainerEdit != allowMaintainerEdits {
+	if allowMaintainerEdits != nil && pr.AllowMaintainerEdit != *allowMaintainerEdits {
 		pr, _, err = client.EditPullRequest(ctx.Owner, ctx.Repo, pr.Index, gitea.EditPullRequestOption{
-			AllowMaintainerEdit: gitea.OptionalBool(allowMaintainerEdits),
+			AllowMaintainerEdit: allowMaintainerEdits,
 		})
 		if err != nil {
 			return fmt.Errorf("could not enable maintainer edit on pull: %v", err)

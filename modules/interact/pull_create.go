@@ -72,6 +72,6 @@ func CreatePull(ctx *context.TeaContext) (err error) {
 		ctx,
 		base,
 		head,
-		allowMaintainerEdits,
+		&allowMaintainerEdits,
 		&opts)
 }

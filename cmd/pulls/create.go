@@ -6,6 +6,7 @@ package pulls
 import (
 	stdctx "context"
 
+	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/interact"
@@ -56,11 +57,16 @@ func runPullsCreate(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	var allowMaintainerEdits *bool
+	if ctx.IsSet("allow-maintainer-edits") {
+		allowMaintainerEdits = gitea.OptionalBool(ctx.Bool("allow-maintainer-edits"))
+	}
+
 	return task.CreatePull(
 		ctx,
 		ctx.String("base"),
 		ctx.String("head"),
-		ctx.Bool("allow-maintainer-edits"),
+		allowMaintainerEdits,
 		opts,
 	)
 }
