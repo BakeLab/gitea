@@ -336,7 +336,7 @@ func startLocalServerAndOpenBrowser(authURL, expectedState string, opts OAuthOpt
 	// Open browser
 	fmt.Println("Opening browser for authorization...")
 	if err := openBrowser(authURL); err != nil {
-		return "", "", fmt.Errorf("failed to open browser: %s", err)
+		fmt.Println("Failed to open browser: ", err)
 	}
 
 	// Wait for code, error, or timeout
