@@ -61,7 +61,7 @@ func RunMilestonesList(_ stdctx.Context, cmd *cli.Command) error {
 
 	client := ctx.Login.Client()
 	milestones, _, err := client.ListRepoMilestones(ctx.Owner, ctx.Repo, gitea.ListMilestoneOption{
-		ListOptions: ctx.GetListOptions(),
+		ListOptions: flags.GetListOptions(),
 		State:       state,
 	})
 

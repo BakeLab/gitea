@@ -43,7 +43,7 @@ func RunUserList(_ stdctx.Context, cmd *cli.Command) error {
 
 	client := ctx.Login.Client()
 	users, _, err := client.AdminListUsers(gitea.AdminListUsersOptions{
-		ListOptions: ctx.GetListOptions(),
+		ListOptions: flags.GetListOptions(),
 	})
 	if err != nil {
 		return err

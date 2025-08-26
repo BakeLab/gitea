@@ -46,7 +46,7 @@ func RunReleaseAttachmentList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	attachments, _, err := ctx.Login.Client().ListReleaseAttachments(ctx.Owner, ctx.Repo, release.ID, gitea.ListReleaseAttachmentsOptions{
-		ListOptions: ctx.GetListOptions(),
+		ListOptions: flags.GetListOptions(),
 	})
 	if err != nil {
 		return err

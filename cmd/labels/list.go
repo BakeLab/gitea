@@ -41,7 +41,7 @@ func RunLabelsList(_ stdctx.Context, cmd *cli.Command) error {
 
 	client := ctx.Login.Client()
 	labels, _, err := client.ListRepoLabels(ctx.Owner, ctx.Repo, gitea.ListLabelsOptions{
-		ListOptions: ctx.GetListOptions(),
+		ListOptions: flags.GetListOptions(),
 	})
 	if err != nil {
 		return err

@@ -69,7 +69,7 @@ func listNotifications(_ stdctx.Context, cmd *cli.Command, status []gitea.Notify
 	all := ctx.Bool("mine")
 
 	// This enforces pagination (see https://github.com/go-gitea/gitea/issues/16733)
-	listOpts := ctx.GetListOptions()
+	listOpts := flags.GetListOptions()
 	if listOpts.Page == 0 {
 		listOpts.Page = 1
 	}

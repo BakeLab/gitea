@@ -35,7 +35,7 @@ func RunReleasesList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
 	releases, _, err := ctx.Login.Client().ListReleases(ctx.Owner, ctx.Repo, gitea.ListReleasesOptions{
-		ListOptions: ctx.GetListOptions(),
+		ListOptions: flags.GetListOptions(),
 	})
 	if err != nil {
 		return err

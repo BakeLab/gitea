@@ -1,9 +1,12 @@
-// Copyright 2019 The Gitea Authors. All rights reserved.
+// Copyright 2025 The Gitea Authors. All rights reserved.
 // SPDX-License-Identifier: MIT
 
 package flags
 
 import (
+	"errors"
+
+	"code.gitea.io/sdk/gitea"
 	"github.com/urfave/cli/v3"
 )
 
@@ -35,12 +38,38 @@ var OutputFlag = cli.StringFlag{
 	Usage:   "Output format. (simple, table, csv, tsv, yaml, json)",
 }
 
+var (
+	paging gitea.ListOptions
+	// ErrPage indicates that the provided page value is invalid (less than -1 or equal to 0).
+	ErrPage = errors.New("page cannot be smaller than 1")
+	// ErrLimit indicates that the provided limit value is invalid (negative).
+	ErrLimit = errors.New("limit cannot be negative")
+)
+
+// GetListOptions returns configured paging struct
+func GetListOptions() gitea.ListOptions {
+	return paging
+}
+
+// PaginationFlags provides all pagination related flags
+var PaginationFlags = []cli.Flag{
+	&PaginationPageFlag,
+	&PaginationLimitFlag,
+}
+
 // PaginationPageFlag provides flag for pagination options
 var PaginationPageFlag = cli.IntFlag{
 	Name:    "page",
 	Aliases: []string{"p"},
 	Usage:   "specify page",
 	Value:   1,
+	Validator: func(i int) error {
+		if i < 1 && i != -1 {
+			return ErrPage
+		}
+		return nil
+	},
+	Destination: &paging.Page,
 }
 
 // PaginationLimitFlag provides flag for pagination options
@@ -49,6 +78,13 @@ var PaginationLimitFlag = cli.IntFlag{
 	Aliases: []string{"lm"},
 	Usage:   "specify limit of items per page",
 	Value:   30,
+	Validator: func(i int) error {
+		if i < 0 {
+			return ErrLimit
+		}
+		return nil
+	},
+	Destination: &paging.PageSize,
 }
 
 // LoginOutputFlags defines login and output flags that should

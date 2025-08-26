@@ -33,7 +33,7 @@ func RunOrganizationList(_ stdctx.Context, cmd *cli.Command) error {
 	client := ctx.Login.Client()
 
 	userOrganizations, _, err := client.ListUserOrgs(ctx.Login.User, gitea.ListOrgsOptions{
-		ListOptions: ctx.GetListOptions(),
+		ListOptions: flags.GetListOptions(),
 	})
 	if err != nil {
 		return err

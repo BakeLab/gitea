@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/git"
 	"code.gitea.io/tea/modules/utils"
@@ -33,22 +32,6 @@ type TeaContext struct {
 	Repo      string        // repo name as derived from context or provided in flag, optional
 	Output    string        // value of output flag
 	LocalRepo *git.TeaRepo  // is set if flags specified a local repo via --repo, or if $PWD is a git repo
-}
-
-// GetListOptions return ListOptions based on PaginationFlags
-func (ctx *TeaContext) GetListOptions() gitea.ListOptions {
-	page := ctx.Int("page")
-	limit := ctx.Int("limit")
-	if limit < 0 {
-		limit = 0
-	}
-	if limit != 0 && page == 0 {
-		page = 1
-	}
-	return gitea.ListOptions{
-		Page:     page,
-		PageSize: limit,
-	}
 }
 
 // GetRemoteRepoHTMLURL returns the web-ui url of the remote repo,

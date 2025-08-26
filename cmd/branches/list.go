@@ -50,7 +50,7 @@ func RunBranchesList(_ stdctx.Context, cmd *cli.Command) error {
 	var protections []*gitea.BranchProtection
 	var err error
 	branches, _, err = ctx.Login.Client().ListRepoBranches(owner, ctx.Repo, gitea.ListRepoBranchesOptions{
-		ListOptions: ctx.GetListOptions(),
+		ListOptions: flags.GetListOptions(),
 	})
 
 	if err != nil {
@@ -58,7 +58,7 @@ func RunBranchesList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	protections, _, err = ctx.Login.Client().ListBranchProtections(owner, ctx.Repo, gitea.ListBranchProtectionsOptions{
-		ListOptions: ctx.GetListOptions(),
+		ListOptions: flags.GetListOptions(),
 	})
 
 	if err != nil {

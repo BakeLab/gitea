@@ -103,7 +103,7 @@ func runMilestoneIssueList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	issues, _, err := client.ListRepoIssues(ctx.Owner, ctx.Repo, gitea.ListIssueOption{
-		ListOptions: ctx.GetListOptions(),
+		ListOptions: flags.GetListOptions(),
 		Milestones:  []string{milestone},
 		Type:        kind,
 		State:       state,

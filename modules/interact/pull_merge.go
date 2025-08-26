@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
@@ -43,7 +44,7 @@ func getPullIndex(ctx *context.TeaContext, branch string) (int64, error) {
 	c := ctx.Login.Client()
 	opts := gitea.ListPullRequestsOptions{
 		State:       gitea.StateOpen,
-		ListOptions: ctx.GetListOptions(),
+		ListOptions: flags.GetListOptions(),
 	}
 	selected := ""
 	loadMoreOption := "PR not found? Load more PRs..."

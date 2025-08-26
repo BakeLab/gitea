@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"code.gitea.io/sdk/gitea"
+	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
 	"code.gitea.io/tea/modules/theme"
@@ -20,7 +21,7 @@ import (
 // If that flag is unset, and output is not piped, prompts the user first.
 func ShowCommentsMaybeInteractive(ctx *context.TeaContext, idx int64, totalComments int) error {
 	if ctx.Bool("comments") {
-		opts := gitea.ListIssueCommentOptions{ListOptions: ctx.GetListOptions()}
+		opts := gitea.ListIssueCommentOptions{ListOptions: flags.GetListOptions()}
 		c := ctx.Login.Client()
 		comments, _, err := c.ListIssueComments(ctx.Owner, ctx.Repo, idx, opts)
 		if err != nil {
@@ -39,7 +40,7 @@ func ShowCommentsMaybeInteractive(ctx *context.TeaContext, idx int64, totalComme
 // ShowCommentsPaginated prompts if issue/pr comments should be shown and continues to do so.
 func ShowCommentsPaginated(ctx *context.TeaContext, idx int64, totalComments int) error {
 	c := ctx.Login.Client()
-	opts := gitea.ListIssueCommentOptions{ListOptions: ctx.GetListOptions()}
+	opts := gitea.ListIssueCommentOptions{ListOptions: flags.GetListOptions()}
 	prompt := "show comments?"
 	commentsLoaded := 0
 
