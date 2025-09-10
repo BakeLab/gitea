@@ -10,10 +10,12 @@ import (
 	"os"
 
 	"code.gitea.io/tea/cmd"
+	"code.gitea.io/tea/modules/debug"
 )
 
 func main() {
 	app := cmd.App()
+	app.Flags = append(app.Flags, debug.CliFlag())
 	err := app.Run(context.Background(), os.Args)
 	if err != nil {
 		// app.Run already exits for errors implementing ErrorCoder,

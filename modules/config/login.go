@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
+	"code.gitea.io/tea/modules/debug"
 	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
 	"github.com/charmbracelet/huh"
@@ -277,6 +278,9 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 	}
 
 	options = append(options, gitea.SetToken(l.Token), gitea.SetHTTPClient(httpClient))
+	if debug.IsDebug() {
+		options = append(options, gitea.SetDebugMode())
+	}
 
 	if ok, err := utils.IsKeyEncrypted(l.SSHKey); ok && err == nil && l.SSHPassphrase == "" {
 		if err := huh.NewInput().

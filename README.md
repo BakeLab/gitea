@@ -11,69 +11,79 @@
 ![demo gif](./demo.gif)
 
 ```
-   tea - command line tool to interact with Gitea
-   version 0.8.0-preview
+NAME:
+  tea - command line tool to interact with Gitea
 
- USAGE
-   tea command [subcommand] [command options] [arguments...]
+USAGE:
+  tea [global options] [command [command options]]
 
- DESCRIPTION
-   tea is a productivity helper for Gitea. It can be used to manage most entities on
-   one or multiple Gitea instances & provides local helpers like 'tea pr checkout'.
-   
-   tea tries to make use of context provided by the repository in $PWD if available.
-   tea works best in a upstream/fork workflow, when the local main branch tracks the
-   upstream repo. tea assumes that local git state is published on the remote before
-   doing operations with tea.    Configuration is persisted in $XDG_CONFIG_HOME/tea.
+VERSION:
+  Version: 0.10.1+15-g8876fe3  golang: 1.25.0  go-sdk: v0.21.0
 
- COMMANDS
-   help, h  Shows a list of commands or help for one command
-   ENTITIES:
-     issues, issue, i                    List, create and update issues
-     pulls, pull, pr                     Manage and checkout pull requests
-     labels, label                       Manage issue labels
-     milestones, milestone, ms           List and create milestones
-     releases, release, r                Manage releases
-     release assets, release asset, r a  Manage release attachments
-     times, time, t                      Operate on tracked times of a repository's issues & pulls
-     organizations, organization, org    List, create, delete organizations
-     repos, repo                         Show repository details
-     comment, c                          Add a comment to an issue / pr
-   HELPERS:
-     open, o                         Open something of the repository in web browser
-     notifications, notification, n  Show notifications
-     clone, C                        Clone a repository locally
-   SETUP:
-     logins, login                  Log in to a Gitea server
-     logout                         Log out from a Gitea server
-     whoami                         Show current logged in user
+DESCRIPTION:
+  tea is a productivity helper for Gitea. It can be used to manage most entities on
+  one or multiple Gitea instances & provides local helpers like 'tea pr checkout'.
 
- OPTIONS
-   --help, -h     show help (default: false)
-   --version, -v  print the version (default: false)
+  tea tries to make use of context provided by the repository in $PWD if available.
+  tea works best in a upstream/fork workflow, when the local main branch tracks the
+  upstream repo. tea assumes that local git state is published on the remote before
+  doing operations with tea.    Configuration is persisted in $XDG_CONFIG_HOME/tea.
 
- EXAMPLES
-   tea login add                       # add a login once to get started
+COMMANDS:
+  help, h  Shows a list of commands or help for one command
 
-   tea pulls                           # list open pulls for the repo in $PWD
-   tea pulls --repo $HOME/foo          # list open pulls for the repo in $HOME/foo
-   tea pulls --remote upstream         # list open pulls for the repo pointed at by
-                                       # your local "upstream" git remote
-   # list open pulls for any gitea repo at the given login instance
-   tea pulls --repo gitea/tea --login gitea.com
+  ENTITIES:
+    issues, issue, i                  List, create and update issues
+    pulls, pull, pr                   Manage and checkout pull requests
+    labels, label                     Manage issue labels
+    milestones, milestone, ms         List and create milestones
+    releases, release, r              Manage releases
+    times, time, t                    Operate on tracked times of a repository's issues & pulls
+    organizations, organization, org  List, create, delete organizations
+    repos, repo                       Show repository details
+    branches, branch, b               Consult branches
+    comment, c                        Add a comment to an issue / pr
 
-   tea milestone issues 0.7.0          # view open issues for milestone '0.7.0'
-   tea issue 189                       # view contents of issue 189
-   tea open 189                        # open web ui for issue 189
-   tea open milestones                 # open web ui for milestones
+  HELPERS:
+    open, o                         Open something of the repository in web browser
+    notifications, notification, n  Show notifications
+    clone, C                        Clone a repository locally
 
-   # send gitea desktop notifications every 5 minutes (bash + libnotify)
-   while :; do tea notifications --mine -o simple | xargs -i notify-send {}; sleep 300; done
+  MISCELLANEOUS:
+    whoami    Show current logged in user
+    admin, a  Operations requiring admin access on the Gitea instance
 
- ABOUT
-   Written & maintained by The Gitea Authors.
-   If you find a bug or want to contribute, we'll welcome you at https://gitea.com/gitea/tea.
-   More info about Gitea itself on https://about.gitea.com.
+  SETUP:
+    logins, login  Log in to a Gitea server
+    logout         Log out from a Gitea server
+
+GLOBAL OPTIONS:
+  --debug, --vvv  Enable debug mode (default: false)
+  --help, -h      show help
+  --version, -v   print the version
+
+EXAMPLES
+  tea login add                       # add a login once to get started
+
+  tea pulls                           # list open pulls for the repo in $PWD
+  tea pulls --repo $HOME/foo          # list open pulls for the repo in $HOME/foo
+  tea pulls --remote upstream         # list open pulls for the repo pointed at by
+                                      # your local "upstream" git remote
+  # list open pulls for any gitea repo at the given login instance
+  tea pulls --repo gitea/tea --login gitea.com
+
+  tea milestone issues 0.7.0          # view open issues for milestone '0.7.0'
+  tea issue 189                       # view contents of issue 189
+  tea open 189                        # open web ui for issue 189
+  tea open milestones                 # open web ui for milestones
+
+  # send gitea desktop notifications every 5 minutes (bash + libnotify)
+  while :; do tea notifications --mine -o simple | xargs -i notify-send {}; sleep 300; done
+
+ABOUT
+  Written & maintained by The Gitea Authors.
+  If you find a bug or want to contribute, we'll welcome you at https://gitea.com/gitea/tea.
+  More info about Gitea itself on https://about.gitea.com.
 ```
 
 - [Compare features with other git forge CLIs](./FEATURE-COMPARISON.md)

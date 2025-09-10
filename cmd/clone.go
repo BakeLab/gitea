@@ -10,6 +10,7 @@ import (
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/context"
+	"code.gitea.io/tea/modules/debug"
 	"code.gitea.io/tea/modules/git"
 	"code.gitea.io/tea/modules/interact"
 	"code.gitea.io/tea/modules/task"
@@ -68,12 +69,15 @@ func runRepoClone(ctx stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	debug.Printf("Cloning repository %s into %s", url.String(), dir)
+
 	owner, repo = utils.GetOwnerAndRepo(url.Path, login.User)
 	if url.Host != "" {
 		login = config.GetLoginByHost(url.Host)
 		if login == nil {
 			return fmt.Errorf("No login configured matching host '%s', run `tea login add` first", url.Host)
 		}
+		debug.Printf("Matched login '%s' for host '%s'", login.Name, url.Host)
 	}
 
 	_, err = task.RepoClone(
