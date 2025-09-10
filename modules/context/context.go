@@ -15,8 +15,10 @@ import (
 
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/git"
+	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
 
+	"github.com/charmbracelet/huh"
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/urfave/cli/v3"
 )
@@ -135,7 +137,18 @@ and then run your command again.`)
 			}
 			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "NOTE: no gitea login detected, falling back to login '%s'\n", c.Login.Name)
+
+		fallback := false
+		if err := huh.NewConfirm().
+			Title(fmt.Sprintf("NOTE: no gitea login detected, whether falling back to login '%s'?", c.Login.Name)).
+			Value(&fallback).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
+			log.Fatalf("Get confirm failed: %v", err)
+		}
+		if !fallback {
+			os.Exit(1)
+		}
 	}
 
 	// parse reposlug (owner falling back to login owner if reposlug contains only repo name)
