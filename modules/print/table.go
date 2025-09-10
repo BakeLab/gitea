@@ -4,6 +4,7 @@
 package print
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -164,6 +165,8 @@ func toSnakeCase(str string) string {
 }
 
 // outputJSON prints structured data as json
+// Since golang's map is unordered, we need to ensure consistent ordering, we have
+// to output the JSON ourselves.
 func outputJSON(f io.Writer, headers []string, values [][]string) {
 	fmt.Fprintln(f, "[")
 	itemCount := len(values)
@@ -172,12 +175,17 @@ func outputJSON(f io.Writer, headers []string, values [][]string) {
 	for i, value := range values {
 		fmt.Fprintf(f, "%s{\n", space)
 		for j, val := range value {
-			intVal, _ := strconv.Atoi(val)
-			if strconv.Itoa(intVal) == val {
-				fmt.Fprintf(f, "%s%s\"%s\": %s", space, space, toSnakeCase(headers[j]), val)
-			} else {
-				fmt.Fprintf(f, "%s%s\"%s\": \"%s\"", space, space, toSnakeCase(headers[j]), val)
+			v, err := json.Marshal(val)
+			if err != nil {
+				fmt.Printf("Failed to format JSON for value '%s': %v\n", val, err)
+				return
 			}
+			key, err := json.Marshal(toSnakeCase(headers[j]))
+			if err != nil {
+				fmt.Printf("Failed to format JSON for header '%s': %v\n", headers[j], err)
+				return
+			}
+			fmt.Fprintf(f, "%s:%s", key, v)
 			if j != headersCount-1 {
 				fmt.Fprintln(f, ",")
 			} else {

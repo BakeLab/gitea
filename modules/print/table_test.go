@@ -21,6 +21,9 @@ func TestPrint(t *testing.T) {
 		values: [][]string{
 			{"new a", "some bbbb"},
 			{"AAAAA", "b2"},
+			{"\"abc", "\"def"},
+			{"'abc", "de'f"},
+			{"\\abc", "'def\\"},
 		},
 	}
 
@@ -33,7 +36,16 @@ func TestPrint(t *testing.T) {
 	}{}
 	assert.NoError(t, json.NewDecoder(buf).Decode(&result))
 
-	if assert.Len(t, result, 2) {
+	if assert.Len(t, result, 5) {
 		assert.EqualValues(t, "new a", result[0].A)
+		assert.EqualValues(t, "some bbbb", result[0].B)
+		assert.EqualValues(t, "AAAAA", result[1].A)
+		assert.EqualValues(t, "b2", result[1].B)
+		assert.EqualValues(t, "\"abc", result[2].A)
+		assert.EqualValues(t, "\"def", result[2].B)
+		assert.EqualValues(t, "'abc", result[3].A)
+		assert.EqualValues(t, "de'f", result[3].B)
+		assert.EqualValues(t, "\\abc", result[4].A)
+		assert.EqualValues(t, "'def\\", result[4].B)
 	}
 }
