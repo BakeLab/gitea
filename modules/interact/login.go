@@ -13,6 +13,7 @@ import (
 
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/auth"
+	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/theme"
 
@@ -57,14 +58,32 @@ func CreateLogin() error {
 		return err
 	}
 
+	validateFunc := func(s string) error {
+		if err := huh.ValidateNotEmpty()(s); err != nil {
+			return err
+		}
+
+		logins, err := config.GetLogins()
+		if err != nil {
+			return err
+		}
+		for _, login := range logins {
+			if login.Name == name {
+				return fmt.Errorf("Login with name '%s' already exists", name)
+			}
+		}
+		return nil
+	}
+
 	if err := huh.NewInput().
 		Title("Name of new Login: ").
 		Value(&name).
-		Validate(huh.ValidateNotEmpty()).
+		Validate(validateFunc).
 		WithTheme(theme.GetTheme()).
 		Run(); err != nil {
 		return err
 	}
+
 	printTitleAndContent("Name of new Login: ", name)
 
 	loginMethod, err := promptSelectV2("Login with: ", []string{"token", "ssh-key/certificate", "oauth"})
