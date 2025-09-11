@@ -13,6 +13,8 @@ import (
 )
 
 // Version holds the current tea version
+// If the Version is moved to another package or name changed,
+// build flags in .goreleaser.yaml or Makefile need to be updated accordingly.
 var Version = "development"
 
 // Tags holds the build tags used
