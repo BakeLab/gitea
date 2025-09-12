@@ -167,8 +167,12 @@ func generateToken(login config.Login, user, pass, otp, scopes string) (string, 
 	}
 
 	var tokenScopes []gitea.AccessTokenScope
-	for _, scope := range strings.Split(scopes, ",") {
-		tokenScopes = append(tokenScopes, gitea.AccessTokenScope(strings.TrimSpace(scope)))
+	if len(scopes) == 0 {
+		tokenScopes = []gitea.AccessTokenScope{gitea.AccessTokenScopeAll}
+	} else {
+		for _, scope := range strings.Split(scopes, ",") {
+			tokenScopes = append(tokenScopes, gitea.AccessTokenScope(strings.TrimSpace(scope)))
+		}
 	}
 
 	t, _, err := client.CreateAccessToken(gitea.CreateAccessTokenOption{

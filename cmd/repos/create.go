@@ -88,6 +88,17 @@ var CmdRepoCreate = cli.Command{
 			Name:  "trustmodel",
 			Usage: "select trust model (committer,collaborator,collaborator+committer)",
 		},
+		&cli.StringFlag{
+			Name:     "object-format",
+			Required: false,
+			Usage:    "select git object format (sha1,sha256)",
+			Validator: func(v string) error {
+				if v != "sha1" && v != "sha256" {
+					return fmt.Errorf("invalid object format '%s', must be either 'sha1' or 'sha256'", v)
+				}
+				return nil
+			},
+		},
 	}, flags.LoginOutputFlags...),
 }
 
@@ -114,17 +125,18 @@ func runRepoCreate(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	opts := gitea.CreateRepoOption{
-		Name:          ctx.String("name"),
-		Description:   ctx.String("description"),
-		Private:       ctx.Bool("private"),
-		AutoInit:      ctx.Bool("init"),
-		IssueLabels:   ctx.String("labels"),
-		Gitignores:    ctx.String("gitignores"),
-		License:       ctx.String("license"),
-		Readme:        ctx.String("readme"),
-		DefaultBranch: ctx.String("branch"),
-		Template:      ctx.Bool("template"),
-		TrustModel:    trustmodel,
+		Name:             ctx.String("name"),
+		Description:      ctx.String("description"),
+		Private:          ctx.Bool("private"),
+		AutoInit:         ctx.Bool("init"),
+		IssueLabels:      ctx.String("labels"),
+		Gitignores:       ctx.String("gitignores"),
+		License:          ctx.String("license"),
+		Readme:           ctx.String("readme"),
+		DefaultBranch:    ctx.String("branch"),
+		Template:         ctx.Bool("template"),
+		TrustModel:       trustmodel,
+		ObjectFormatName: ctx.String("object-format"),
 	}
 	if len(ctx.String("owner")) != 0 {
 		repo, _, err = client.CreateOrgRepo(ctx.String("owner"), opts)

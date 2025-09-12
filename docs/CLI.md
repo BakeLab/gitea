@@ -1071,6 +1071,8 @@ Create a repository
 
 **--name, -**="": name of new repo
 
+**--object-format**="": select git object format (sha1,sha256)
+
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
 **--owner, -O**="": name of repo owner
