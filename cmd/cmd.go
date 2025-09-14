@@ -56,6 +56,8 @@ func App() *cli.Command {
 			&CmdRepoClone,
 
 			&CmdAdmin,
+
+			&CmdGenerateManPage,
 		},
 		EnableShellCompletion: true,
 	}

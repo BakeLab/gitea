@@ -144,6 +144,21 @@ tea completion fish > ~/.config/fish/completions/tea.fish
 Output the script to path/to/autocomplete/tea.ps1 an run it.
 ```
 
+### Man Page
+
+The hidden command `tea man` can be used to generate the `tea` man page.
+
+```shell
+# for bash or zsh
+man <(tea man)
+
+# for fish
+man (tea man | psub)
+
+# write man page to a file
+tea man --out ./tea.man
+```
+
 ## Compilation
 
 Make sure you have a current go version installed (1.13 or newer).
