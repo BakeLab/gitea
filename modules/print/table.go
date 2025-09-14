@@ -104,15 +104,17 @@ func (t *table) fprint(f io.Writer, output string) {
 }
 
 // outputTable prints structured data as table
-func outputTable(f io.Writer, headers []string, values [][]string) {
+func outputTable(f io.Writer, headers []string, values [][]string) error {
 	table := tablewriter.NewWriter(f)
 	if len(headers) > 0 {
 		table.Header(headers)
 	}
 	for _, value := range values {
-		table.Append(value)
+		if err := table.Append(value); err != nil {
+			return err
+		}
 	}
-	table.Render()
+	return table.Render()
 }
 
 // outputSimple prints structured data as space delimited value
@@ -145,9 +147,9 @@ func outputYaml(f io.Writer, headers []string, values [][]string) {
 		for j, val := range value {
 			intVal, _ := strconv.Atoi(val)
 			if strconv.Itoa(intVal) == val {
-				fmt.Fprintf(f, "    %s: %s\n", headers[j], val)
+				fmt.Fprintf(f, "  %s: %s\n", headers[j], val)
 			} else {
-				fmt.Fprintf(f, "    %s: '%s'\n", headers[j], val)
+				fmt.Fprintf(f, "  %s: '%s'\n", headers[j], strings.ReplaceAll(val, "'", "''"))
 			}
 		}
 	}

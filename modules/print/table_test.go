@@ -48,4 +48,25 @@ func TestPrint(t *testing.T) {
 		assert.EqualValues(t, "\\abc", result[4].A)
 		assert.EqualValues(t, "'def\\", result[4].B)
 	}
+
+	buf.Reset()
+
+	tData.fprint(buf, "yaml")
+
+	assert.Equal(t, `-
+  A: 'new a'
+  B: 'some bbbb'
+-
+  A: 'AAAAA'
+  B: 'b2'
+-
+  A: '"abc'
+  B: '"def'
+-
+  A: '''abc'
+  B: 'de''f'
+-
+  A: '\abc'
+  B: '''def\'
+`, buf.String())
 }
