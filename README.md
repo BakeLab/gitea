@@ -106,9 +106,7 @@ There are different ways to get `tea`:
 
 3. Install from source: [see *Compilation*](#compilation)
 
-4. Docker (thirdparty): [tgerczei/tea](https://hub.docker.com/r/tgerczei/tea)
-
-5. asdf (thirdparty): [mvaldes14/asdf-tea](https://github.com/mvaldes14/asdf-tea)
+4. Docker: [Tea at docker hub](https://hub.docker.com/r/gitea/tea)
 
 ### Log in to Gitea from tea
 
