@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"code.gitea.io/tea/modules/config"
+	"code.gitea.io/tea/modules/debug"
 	"code.gitea.io/tea/modules/git"
 	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
@@ -95,6 +96,12 @@ func InitCommand(cmd *cli.Command) *TeaContext {
 		remoteFlag = config.GetPreferences().FlagDefaults.Remote
 	}
 
+	if repoPath == "" {
+		if repoPath, err = os.Getwd(); err != nil {
+			log.Fatal(err.Error())
+		}
+	}
+
 	// try to read local git repo & extract context: if repoFlag specifies a valid path, read repo in that dir,
 	// otherwise attempt PWD. if no repo is found, continue with default login
 	if c.LocalRepo, c.Login, c.RepoSlug, err = contextFromLocalRepo(repoPath, remoteFlag); err != nil {
@@ -168,6 +175,7 @@ func contextFromLocalRepo(repoPath, remoteValue string) (*git.TeaRepo, *config.L
 	if err != nil {
 		return repo, nil, "", err
 	}
+	debug.Printf("Get git config %v of %s in repo %s", gitConfig, remoteValue, repoPath)
 
 	if len(gitConfig.Remotes) == 0 {
 		return repo, nil, "", errNotAGiteaRepo
@@ -206,35 +214,67 @@ func contextFromLocalRepo(repoPath, remoteValue string) (*git.TeaRepo, *config.L
 
 	remoteConfig, ok := gitConfig.Remotes[remoteValue]
 	if !ok || remoteConfig == nil {
-		return repo, nil, "", fmt.Errorf("Remote '%s' not found in this Git repository", remoteValue)
+		return repo, nil, "", fmt.Errorf("remote '%s' not found in this Git repository", remoteValue)
 	}
+
+	debug.Printf("Get remote configurations %v of %s in repo %s", remoteConfig, remoteValue, repoPath)
 
 	logins, err := config.GetLogins()
 	if err != nil {
 		return repo, nil, "", err
 	}
-	for _, l := range logins {
-		sshHost := l.GetSSHHost()
-		for _, u := range remoteConfig.URLs {
-			p, err := git.ParseURL(u)
-			if err != nil {
-				return repo, nil, "", fmt.Errorf("Git remote URL parse failed: %s", err.Error())
-			}
-			if strings.EqualFold(p.Scheme, "http") || strings.EqualFold(p.Scheme, "https") {
-				if strings.HasPrefix(u, l.URL) {
-					ps := strings.Split(p.Path, "/")
-					path := strings.Join(ps[len(ps)-2:], "/")
-					return repo, &l, strings.TrimSuffix(path, ".git"), nil
-				}
-			} else if strings.EqualFold(p.Scheme, "ssh") {
-				if sshHost == p.Host || sshHost == p.Hostname() {
-					return repo, &l, strings.TrimLeft(p.Path, "/"), nil
-				}
-			}
+	for _, u := range remoteConfig.URLs {
+		if l, p, err := MatchLogins(u, logins); err == nil {
+			return repo, l, p, nil
 		}
 	}
 
 	return repo, nil, "", errNotAGiteaRepo
+}
+
+// MatchLogins matches the given remoteURL against the provided logins and returns
+// the first matching login
+// remoteURL could be like:
+//
+//	https://gitea.com/owner/repo.git
+//	http://gitea.com/owner/repo.git
+//	ssh://gitea.com/owner/repo.git
+//	git@gitea.com:owner/repo.git
+func MatchLogins(remoteURL string, logins []config.Login) (*config.Login, string, error) {
+	for _, l := range logins {
+		debug.Printf("Matching remote URL '%s' against %v login", remoteURL, l)
+		sshHost := l.GetSSHHost()
+		atIdx := strings.Index(remoteURL, "@")
+		colonIdx := strings.Index(remoteURL, ":")
+		if atIdx > 0 && colonIdx > atIdx {
+			domain := remoteURL[atIdx+1 : colonIdx]
+			if domain == sshHost {
+				return &l, strings.TrimSuffix(remoteURL[colonIdx+1:], ".git"), nil
+			}
+		} else {
+			p, err := git.ParseURL(remoteURL)
+			if err != nil {
+				return nil, "", fmt.Errorf("git remote URL parse failed: %s", err.Error())
+			}
+
+			switch {
+			case strings.EqualFold(p.Scheme, "http") || strings.EqualFold(p.Scheme, "https"):
+				if strings.HasPrefix(remoteURL, l.URL) {
+					ps := strings.Split(p.Path, "/")
+					path := strings.Join(ps[len(ps)-2:], "/")
+					return &l, strings.TrimSuffix(path, ".git"), nil
+				}
+			case strings.EqualFold(p.Scheme, "ssh"):
+				if sshHost == p.Host || sshHost == p.Hostname() {
+					return &l, strings.TrimLeft(p.Path, "/"), nil
+				}
+			default:
+				// unknown scheme
+				return nil, "", fmt.Errorf("git remote URL parse failed: %s", "unknown scheme "+p.Scheme)
+			}
+		}
+	}
+	return nil, "", errNotAGiteaRepo
 }
 
 // GetLoginByEnvVar returns a login based on environment variables, or nil if no login can be created
