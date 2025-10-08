@@ -33,7 +33,7 @@ func CreatePull(ctx *context.TeaContext) (err error) {
 	if ctx.LocalRepo != nil {
 		headOwner, headBranch, err = task.GetDefaultPRHead(ctx.LocalRepo)
 		if err == nil {
-			validator = nil
+			validator = func(string) error { return nil }
 		}
 	}
 
