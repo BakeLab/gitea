@@ -120,7 +120,7 @@ func InitCommand(cmd *cli.Command) *TeaContext {
 	// override config user with env variable
 	envLogin := GetLoginByEnvVar()
 	if envLogin != nil {
-		_, err := utils.ValidateAuthenticationMethod(envLogin.URL, envLogin.Token, "", "", false, "", "")
+		_, err := utils.ValidateAuthenticationMethod(envLogin.URL, envLogin.Token, "", "")
 		if err != nil {
 			log.Fatal(err.Error())
 		}

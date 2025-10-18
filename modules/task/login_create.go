@@ -68,9 +68,6 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 		token,
 		user,
 		passwd,
-		sshAgent,
-		sshKey,
-		sshCertPrincipal,
 	)
 	if err != nil {
 		return err
@@ -95,7 +92,7 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 		VersionCheck:      versionCheck,
 	}
 
-	if len(token) == 0 && sshCertPrincipal == "" && !sshAgent && sshKey == "" {
+	if len(token) == 0 {
 		if login.Token, err = generateToken(login, user, passwd, otp, scopes); err != nil {
 			return err
 		}

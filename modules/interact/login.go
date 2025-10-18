@@ -86,7 +86,7 @@ func CreateLogin() error {
 
 	printTitleAndContent("Name of new Login: ", name)
 
-	loginMethod, err := promptSelectV2("Login with: ", []string{"token", "ssh-key/certificate", "oauth"})
+	loginMethod, err := promptSelectV2("Login with: ", []string{"token", "oauth"})
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func CreateLogin() error {
 		printTitleAndContent("Allow Insecure connections:", strconv.FormatBool(insecure))
 
 		return auth.OAuthLoginWithOptions(name, giteaURL, insecure)
-	default: // token
+	case "token":
 		var hasToken bool
 		if err := huh.NewConfirm().
 			Title("Do you have an access token?").
@@ -154,7 +154,7 @@ func CreateLogin() error {
 				Value(&tokenScopes).
 				Validate(func(s []string) error {
 					if len(s) == 0 {
-						return errors.New("At least one scope is required")
+						return errors.New("at least one scope is required")
 					}
 					return nil
 				}).
@@ -176,26 +176,36 @@ func CreateLogin() error {
 			}
 			printTitleAndContent("OTP (if applicable):", otp)
 		}
-	case "ssh-key/certificate":
-		if err := huh.NewInput().
-			Title("SSH Key/Certificate Path (leave empty for auto-discovery in ~/.ssh and ssh-agent):").
-			Value(&sshKey).
-			WithTheme(theme.GetTheme()).
-			Run(); err != nil {
+	default:
+		return fmt.Errorf("unknown login method: %s", loginMethod)
+	}
+
+	var optSettings bool
+	if err := huh.NewConfirm().
+		Title("Set Optional settings:").
+		Value(&optSettings).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
+		return err
+	}
+	printTitleAndContent("Set Optional settings:", strconv.FormatBool(optSettings))
+
+	if optSettings {
+		pubKeys := task.ListSSHPubkey()
+		emptyOpt := "Auto-discovery SSH Key in ~/.ssh and ssh-agent"
+		pubKeys = append([]string{emptyOpt}, pubKeys...)
+
+		sshKey, err = promptSelect("Select ssh-key: ", pubKeys, "", "", "")
+		if err != nil {
 			return err
 		}
-		printTitleAndContent("SSH Key/Certificate Path (leave empty for auto-discovery in ~/.ssh and ssh-agent):", sshKey)
+		if sshKey == emptyOpt {
+			sshKey = ""
+		}
 
-		if sshKey == "" {
-			pubKeys := task.ListSSHPubkey()
-			if len(pubKeys) == 0 {
-				fmt.Println("No SSH keys found in ~/.ssh or ssh-agent")
-				return nil
-			}
-			sshKey, err = promptSelect("Select ssh-key: ", pubKeys, "", "", "")
-			if err != nil {
-				return err
-			}
+		printTitleAndContent("SSH Key Path (leave empty for auto-discovery) in ~/.ssh and ssh-agent):", sshKey)
+
+		if sshKey != "" {
 			printTitleAndContent("Selected ssh-key:", sshKey)
 
 			// ssh certificate
@@ -219,27 +229,6 @@ func CreateLogin() error {
 				}
 			}
 		}
-	}
-
-	var optSettings bool
-	if err := huh.NewConfirm().
-		Title("Set Optional settings:").
-		Value(&optSettings).
-		WithTheme(theme.GetTheme()).
-		Run(); err != nil {
-		return err
-	}
-	printTitleAndContent("Set Optional settings:", strconv.FormatBool(optSettings))
-
-	if optSettings {
-		if err := huh.NewInput().
-			Title("SSH Key Path (leave empty for auto-discovery):").
-			Value(&sshKey).
-			WithTheme(theme.GetTheme()).
-			Run(); err != nil {
-			return err
-		}
-		printTitleAndContent("SSH Key Path (leave empty for auto-discovery):", sshKey)
 
 		if err := huh.NewConfirm().
 			Title("Allow Insecure connections:").
