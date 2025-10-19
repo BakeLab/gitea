@@ -44,6 +44,7 @@ COMMANDS:
     branches, branch, b               Consult branches
     actions                           Manage repository actions (secrets, variables)
     comment, c                        Add a comment to an issue / pr
+    webhooks, webhook                 Manage repository webhooks
 
   HELPERS:
     open, o                         Open something of the repository in web browser
@@ -82,6 +83,10 @@ EXAMPLES
   tea actions secrets create API_KEY  # create a new secret (will prompt for value)
   tea actions variables list          # list all repository action variables
   tea actions variables set API_URL https://api.example.com
+
+  tea webhooks list                   # list repository webhooks
+  tea webhooks list --org myorg       # list organization webhooks
+  tea webhooks create https://example.com/hook --events push,pull_request
 
   # send gitea desktop notifications every 5 minutes (bash + libnotify)
   while :; do tea notifications --mine -o simple | xargs -i notify-send {}; sleep 300; done

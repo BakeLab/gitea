@@ -33,6 +33,8 @@ type TeaContext struct {
 	RepoSlug  string        // <owner>/<repo>, optional
 	Owner     string        // repo owner as derived from context or provided in flag, optional
 	Repo      string        // repo name as derived from context or provided in flag, optional
+	Org       string        // organization name, optional
+	IsGlobal  bool          // true if operating on global level
 	Output    string        // value of output flag
 	LocalRepo *git.TeaRepo  // is set if flags specified a local repo via --repo, or if $PWD is a git repo
 }
@@ -55,6 +57,16 @@ func (ctx *TeaContext) Ensure(req CtxRequirement) {
 		fmt.Println("Remote repository required: Specify ID via --repo or execute from a local git repo.")
 		os.Exit(1)
 	}
+
+	if req.Org && len(ctx.Org) == 0 {
+		fmt.Println("Organization required: Specify organization via --org.")
+		os.Exit(1)
+	}
+
+	if req.Global && !ctx.IsGlobal {
+		fmt.Println("Global scope required: Specify --global.")
+		os.Exit(1)
+	}
 }
 
 // CtxRequirement specifies context needed for operation
@@ -63,6 +75,10 @@ type CtxRequirement struct {
 	LocalRepo bool
 	// ensures ctx.RepoSlug, .Owner, .Repo are set
 	RemoteRepo bool
+	// ensures ctx.Org is set
+	Org bool
+	// ensures ctx.IsGlobal is true
+	Global bool
 }
 
 // InitCommand resolves the application context, and returns the active login, and if
@@ -74,6 +90,8 @@ func InitCommand(cmd *cli.Command) *TeaContext {
 	repoFlag := cmd.String("repo")
 	loginFlag := cmd.String("login")
 	remoteFlag := cmd.String("remote")
+	orgFlag := cmd.String("org")
+	globalFlag := cmd.Bool("global")
 
 	var (
 		c                  TeaContext
@@ -160,6 +178,8 @@ and then run your command again.`)
 
 	// parse reposlug (owner falling back to login owner if reposlug contains only repo name)
 	c.Owner, c.Repo = utils.GetOwnerAndRepo(c.RepoSlug, c.Login.User)
+	c.Org = orgFlag
+	c.IsGlobal = globalFlag
 	c.Command = cmd
 	c.Output = cmd.String("output")
 	return &c
