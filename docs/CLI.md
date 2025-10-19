@@ -1269,6 +1269,110 @@ Unprotect branches
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
+## actions, action
+
+Manage repository actions
+
+**--login**="": gitea login instance to use
+
+**--output, -o**="": output format [table, csv, simple, tsv, yaml, json]
+
+**--repo**="": repository to operate on
+
+### secrets, secret
+
+Manage repository action secrets
+
+#### list, ls
+
+List action secrets
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+#### create, add, set
+
+Create an action secret
+
+**--file**="": read secret value from file
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+**--stdin**: read secret value from stdin
+
+#### delete, remove, rm
+
+Delete an action secret
+
+**--confirm, -y**: confirm deletion without prompting
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+### variables, variable, vars, var
+
+Manage repository action variables
+
+#### list, ls
+
+List action variables
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--name**="": show specific variable by name
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+#### set, create, update
+
+Set an action variable
+
+**--file**="": read variable value from file
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+**--stdin**: read variable value from stdin
+
+#### delete, remove, rm
+
+Delete an action variable
+
+**--confirm, -y**: confirm deletion without prompting
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
 ## comment, c
 
 Add a comment to an issue / pr

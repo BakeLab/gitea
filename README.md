@@ -42,6 +42,7 @@ COMMANDS:
     organizations, organization, org  List, create, delete organizations
     repos, repo                       Show repository details
     branches, branch, b               Consult branches
+    actions                           Manage repository actions (secrets, variables)
     comment, c                        Add a comment to an issue / pr
 
   HELPERS:
@@ -76,6 +77,11 @@ EXAMPLES
   tea issue 189                       # view contents of issue 189
   tea open 189                        # open web ui for issue 189
   tea open milestones                 # open web ui for milestones
+
+  tea actions secrets list            # list all repository action secrets
+  tea actions secrets create API_KEY  # create a new secret (will prompt for value)
+  tea actions variables list          # list all repository action variables
+  tea actions variables set API_URL https://api.example.com
 
   # send gitea desktop notifications every 5 minutes (bash + libnotify)
   while :; do tea notifications --mine -o simple | xargs -i notify-send {}; sleep 300; done
