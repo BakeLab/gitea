@@ -163,16 +163,19 @@ and then run your command again.`)
 			os.Exit(1)
 		}
 
-		fallback := false
-		if err := huh.NewConfirm().
-			Title(fmt.Sprintf("NOTE: no gitea login detected, whether falling back to login '%s'?", c.Login.Name)).
-			Value(&fallback).
-			WithTheme(theme.GetTheme()).
-			Run(); err != nil {
-			log.Fatalf("Get confirm failed: %v", err)
-		}
-		if !fallback {
-			os.Exit(1)
+		// Only prompt for confirmation if the fallback login is not explicitly set as default
+		if !c.Login.Default {
+			fallback := false
+			if err := huh.NewConfirm().
+				Title(fmt.Sprintf("NOTE: no gitea login detected, whether falling back to login '%s'?", c.Login.Name)).
+				Value(&fallback).
+				WithTheme(theme.GetTheme()).
+				Run(); err != nil {
+				log.Fatalf("Get confirm failed: %v", err)
+			}
+			if !fallback {
+				os.Exit(1)
+			}
 		}
 	}
 
