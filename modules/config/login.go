@@ -282,23 +282,13 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 		options = append(options, gitea.SetDebugMode())
 	}
 
-	if ok, err := utils.IsKeyEncrypted(l.SSHKey); ok && err == nil && l.SSHPassphrase == "" {
-		if err := huh.NewInput().
-			Title("ssh-key is encrypted please enter the passphrase: ").
-			Validate(huh.ValidateNotEmpty()).
-			EchoMode(huh.EchoModePassword).
-			Value(&l.SSHPassphrase).
-			WithTheme(theme.GetTheme()).
-			Run(); err != nil {
-			log.Fatal(err)
-		}
-	}
-
 	if l.SSHCertPrincipal != "" {
+		l.askForSSHPassphrase()
 		options = append(options, gitea.UseSSHCert(l.SSHCertPrincipal, l.SSHKey, l.SSHPassphrase))
 	}
 
 	if l.SSHKeyFingerprint != "" {
+		l.askForSSHPassphrase()
 		options = append(options, gitea.UseSSHPubkey(l.SSHKeyFingerprint, l.SSHKey, l.SSHPassphrase))
 	}
 
@@ -311,6 +301,20 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 		fmt.Fprintf(os.Stderr, "WARNING: could not detect gitea version: %s\nINFO: set gitea version: to last supported one\n", versionError)
 	}
 	return client
+}
+
+func (l *Login) askForSSHPassphrase() {
+	if ok, err := utils.IsKeyEncrypted(l.SSHKey); ok && err == nil && l.SSHPassphrase == "" {
+		if err := huh.NewInput().
+			Title("ssh-key is encrypted please enter the passphrase: ").
+			Validate(huh.ValidateNotEmpty()).
+			EchoMode(huh.EchoModePassword).
+			Value(&l.SSHPassphrase).
+			WithTheme(theme.GetTheme()).
+			Run(); err != nil {
+			log.Fatal(err)
+		}
+	}
 }
 
 // GetSSHHost returns SSH host name
