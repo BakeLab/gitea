@@ -5,6 +5,7 @@ package issues
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -23,7 +24,7 @@ var CmdIssuesClose = cli.Command{
 	Description: `Change state of one ore more issues to 'closed'`,
 	ArgsUsage:   "<issue index> [<issue index>...]",
 	Action: func(ctx stdctx.Context, cmd *cli.Command) error {
-		var s = gitea.StateClosed
+		s := gitea.StateClosed
 		return editIssueState(ctx, cmd, gitea.EditIssueOption{State: &s})
 	},
 	Flags: flags.AllDefaultFlags,
@@ -34,7 +35,7 @@ func editIssueState(_ stdctx.Context, cmd *cli.Command, opts gitea.EditIssueOpti
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	if ctx.Args().Len() == 0 {
-		return fmt.Errorf(ctx.Command.ArgsUsage)
+		return errors.New(ctx.Command.ArgsUsage)
 	}
 
 	indices, err := utils.ArgsToIndices(ctx.Args().Slice())

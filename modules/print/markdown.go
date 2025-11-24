@@ -29,13 +29,13 @@ func outputMarkdown(markdown string, baseURL string) error {
 		glamour.WithWordWrap(getWordWrap()),
 	)
 	if err != nil {
-		fmt.Printf(markdown)
+		fmt.Print(markdown)
 		return err
 	}
 
 	out, err := renderer.Render(markdown)
 	if err != nil {
-		fmt.Printf(markdown)
+		fmt.Print(markdown)
 		return err
 	}
 	fmt.Print(out)

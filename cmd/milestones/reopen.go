@@ -5,6 +5,7 @@ package milestones
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -32,7 +33,7 @@ func editMilestoneStatus(_ stdctx.Context, cmd *cli.Command, close bool) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	if ctx.Args().Len() == 0 {
-		return fmt.Errorf(ctx.Command.ArgsUsage)
+		return errors.New(ctx.Command.ArgsUsage)
 	}
 
 	state := gitea.StateOpen
