@@ -24,7 +24,8 @@ func RepoFromPath(path string) (*TeaRepo, error) {
 		path = "./"
 	}
 	repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{
-		DetectDotGit: true,
+		DetectDotGit:          true,
+		EnableDotGitCommonDir: true, // Enable commondir support for worktrees
 	})
 	if err != nil {
 		return nil, err
