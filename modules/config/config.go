@@ -104,5 +104,5 @@ func saveConfig() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ymlPath, bs, 0o660)
+	return os.WriteFile(ymlPath, bs, 0o600)
 }
