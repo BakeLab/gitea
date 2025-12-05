@@ -22,7 +22,10 @@ var CmdWebhooksList = cli.Command{
 	Usage:       "List webhooks",
 	Description: "List webhooks in repository, organization, or globally",
 	Action:      RunWebhooksList,
-	Flags:       flags.AllDefaultFlags,
+	Flags: append([]cli.Flag{
+		&flags.PaginationPageFlag,
+		&flags.PaginationLimitFlag,
+	}, flags.AllDefaultFlags...),
 }
 
 // RunWebhooksList list webhooks

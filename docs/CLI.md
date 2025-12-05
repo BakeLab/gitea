@@ -1379,6 +1379,8 @@ Manage webhooks
 
 **--global**: operate on global webhooks
 
+**--limit, --lm**="": specify limit of items per page (default: 30)
+
 **--login**="": gitea login instance to use
 
 **--login, -l**="": Use a different Gitea Login. Optional
@@ -1388,6 +1390,8 @@ Manage webhooks
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
 **--output, -o**="": output format [table, csv, simple, tsv, yaml, json]
+
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -1399,9 +1403,13 @@ Manage webhooks
 
 List webhooks
 
+**--limit, --lm**="": specify limit of items per page (default: 30)
+
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
