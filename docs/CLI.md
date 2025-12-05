@@ -1287,9 +1287,13 @@ Manage repository action secrets
 
 List action secrets
 
+**--limit, --lm**="": specify limit of items per page (default: 30)
+
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 

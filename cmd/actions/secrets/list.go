@@ -21,7 +21,10 @@ var CmdSecretsList = cli.Command{
 	Usage:       "List action secrets",
 	Description: "List secrets configured for repository actions",
 	Action:      RunSecretsList,
-	Flags:       flags.AllDefaultFlags,
+	Flags: append([]cli.Flag{
+		&flags.PaginationPageFlag,
+		&flags.PaginationLimitFlag,
+	}, flags.AllDefaultFlags...),
 }
 
 // RunSecretsList list action secrets
