@@ -44,7 +44,8 @@ func RunPullsList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	prs, _, err := ctx.Login.Client().ListRepoPullRequests(ctx.Owner, ctx.Repo, gitea.ListPullRequestsOptions{
-		State: state,
+		ListOptions: flags.GetListOptions(),
+		State:       state,
 	})
 
 	if err != nil {
