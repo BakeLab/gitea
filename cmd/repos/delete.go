@@ -19,7 +19,7 @@ var CmdRepoRm = cli.Command{
 	Name:        "delete",
 	Aliases:     []string{"rm"},
 	Usage:       "Delete an existing repository",
-	Description: "Removes a repository from Create a repository from an existing repo",
+	Description: "Removes a repository from your Gitea instance",
 	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runRepoDelete,
 	Flags: append([]cli.Flag{
