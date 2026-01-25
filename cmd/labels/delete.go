@@ -5,6 +5,7 @@ package labels
 
 import (
 	stdctx "context"
+	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
@@ -21,9 +22,10 @@ var CmdLabelDelete = cli.Command{
 	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runLabelDelete,
 	Flags: append([]cli.Flag{
-		&cli.IntFlag{
-			Name:  "id",
-			Usage: "label id",
+		&cli.Int64Flag{
+			Name:     "id",
+			Usage:    "label id",
+			Required: true,
 		},
 	}, flags.AllDefaultFlags...),
 }
@@ -32,6 +34,20 @@ func runLabelDelete(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
-	_, err := ctx.Login.Client().DeleteLabel(ctx.Owner, ctx.Repo, ctx.Int64("id"))
-	return err
+	labelID := ctx.Int64("id")
+	client := ctx.Login.Client()
+
+	// Verify the label exists first
+	label, _, err := client.GetRepoLabel(ctx.Owner, ctx.Repo, labelID)
+	if err != nil {
+		return fmt.Errorf("failed to get label %d: %w", labelID, err)
+	}
+
+	_, err = client.DeleteLabel(ctx.Owner, ctx.Repo, labelID)
+	if err != nil {
+		return fmt.Errorf("failed to delete label '%s' (id: %d): %w", label.Name, labelID, err)
+	}
+
+	fmt.Printf("Label '%s' (id: %d) deleted successfully\n", label.Name, labelID)
+	return nil
 }

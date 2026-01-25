@@ -21,7 +21,7 @@ var CmdLabelUpdate = cli.Command{
 	ArgsUsage:   " ", // command does not accept arguments
 	Action:      runLabelUpdate,
 	Flags: append([]cli.Flag{
-		&cli.IntFlag{
+		&cli.Int64Flag{
 			Name:  "id",
 			Usage: "label id",
 		},
