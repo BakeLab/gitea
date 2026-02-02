@@ -20,7 +20,7 @@ var CmdIssuesReopen = cli.Command{
 	Description: `Change state of one or more issues to 'open'`,
 	ArgsUsage:   "<issue index> [<issue index>...]",
 	Action: func(ctx context.Context, cmd *cli.Command) error {
-		var s = gitea.StateOpen
+		s := gitea.StateOpen
 		return editIssueState(ctx, cmd, gitea.EditIssueOption{State: &s})
 	},
 	Flags: flags.AllDefaultFlags,

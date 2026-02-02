@@ -8,7 +8,6 @@ import (
 
 	"code.gitea.io/tea/modules/config"
 	local_git "code.gitea.io/tea/modules/git"
-	"code.gitea.io/tea/modules/workaround"
 
 	"code.gitea.io/sdk/gitea"
 	git_config "github.com/go-git/go-git/v5/config"
@@ -31,9 +30,6 @@ func PullClean(login *config.Login, repoOwner, repoName string, index int64, ign
 	// fetch PR source-repo & -branch from gitea
 	pr, _, err := client.GetPullRequest(repoOwner, repoName, index)
 	if err != nil {
-		return err
-	}
-	if err := workaround.FixPullHeadSha(client, pr); err != nil {
 		return err
 	}
 
@@ -96,15 +92,15 @@ call me again with the --ignore-sha flag`, remoteBranch)
 
 	if !remoteDeleted && pr.Head.Repository.Permissions.Push {
 		fmt.Printf("Deleting remote branch %s\n", remoteBranch)
-		url, err := r.TeaRemoteURL(branch.Remote)
-		if err != nil {
-			return err
+		url, urlErr := r.TeaRemoteURL(branch.Remote)
+		if urlErr != nil {
+			return urlErr
 		}
-		auth, err := local_git.GetAuthForURL(url, login.Token, login.SSHKey, callback)
-		if err != nil {
-			return err
+		auth, authErr := local_git.GetAuthForURL(url, login.Token, login.SSHKey, callback)
+		if authErr != nil {
+			return authErr
 		}
-		err = r.TeaDeleteRemoteBranch(branch.Remote, remoteBranch, auth)
+		return r.TeaDeleteRemoteBranch(branch.Remote, remoteBranch, auth)
 	}
-	return err
+	return nil
 }

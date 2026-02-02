@@ -55,7 +55,7 @@ func TestPaginationFlags(t *testing.T) {
 			expectedPage:  2,
 			expectedLimit: 20,
 		},
-		{ //TODO: Should no paging be applied as -1 or a separate flag? It's not obvious that page=-1 turns off paging and limit is ignored
+		{ // TODO: Should no paging be applied as -1 or a separate flag? It's not obvious that page=-1 turns off paging and limit is ignored
 			name:          "no paging",
 			args:          []string{"test", "--limit", "20", "--page", "-1"},
 			expectedPage:  -1,
@@ -78,8 +78,8 @@ func TestPaginationFlags(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
-
 }
+
 func TestPaginationFailures(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -102,7 +102,7 @@ func TestPaginationFailures(t *testing.T) {
 			expectedError: ErrPage,
 		},
 		{
-			//urfave does not validate all flags in one pass
+			// urfave does not validate all flags in one pass
 			name:          "negative paging and paging",
 			args:          []string{"test", "--page", "-2", "--limit", "-10"},
 			expectedError: ErrPage,

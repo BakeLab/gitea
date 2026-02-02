@@ -157,7 +157,6 @@ func runRepoMigrate(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	repo, _, err = client.MigrateRepo(opts)
-
 	if err != nil {
 		return err
 	}

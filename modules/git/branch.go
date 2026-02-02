@@ -143,7 +143,7 @@ func (r TeaRepo) TeaFindBranchByName(branchName, repoURL string) (b *git_config.
 	defer iter.Close()
 	var remoteRefName git_plumbing.ReferenceName
 	var localRefName git_plumbing.ReferenceName
-	var remoteSearchingName = fmt.Sprintf("%s/%s", remoteName, branchName)
+	remoteSearchingName := fmt.Sprintf("%s/%s", remoteName, branchName)
 	err = iter.ForEach(func(ref *git_plumbing.Reference) error {
 		if ref.Name().IsRemote() && ref.Name().Short() == remoteSearchingName {
 			remoteRefName = ref.Name()

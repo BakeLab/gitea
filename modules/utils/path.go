@@ -62,9 +62,9 @@ func AbsPathWithExpansion(p string) (string, error) {
 	}
 	if p == "~" {
 		return u.HomeDir, nil
-	} else if strings.HasPrefix(p, "~/") {
-		return filepath.Join(u.HomeDir, p[2:]), nil
-	} else {
-		return filepath.Abs(p)
 	}
+	if strings.HasPrefix(p, "~/") {
+		return filepath.Join(u.HomeDir, p[2:]), nil
+	}
+	return filepath.Abs(p)
 }

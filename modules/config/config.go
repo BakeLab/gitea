@@ -83,14 +83,15 @@ func loadConfig() (err error) {
 		ymlPath := GetConfigPath()
 		exist, _ := utils.FileExist(ymlPath)
 		if exist {
-			bs, err := os.ReadFile(ymlPath)
-			if err != nil {
-				err = fmt.Errorf("Failed to read config file: %s", ymlPath)
+			bs, readErr := os.ReadFile(ymlPath)
+			if readErr != nil {
+				err = fmt.Errorf("failed to read config file %s: %w", ymlPath, readErr)
+				return
 			}
 
-			err = yaml.Unmarshal(bs, &config)
-			if err != nil {
-				err = fmt.Errorf("Failed to parse contents of config file: %s", ymlPath)
+			if unmarshalErr := yaml.Unmarshal(bs, &config); unmarshalErr != nil {
+				err = fmt.Errorf("failed to parse config file %s: %w", ymlPath, unmarshalErr)
+				return
 			}
 		}
 	})

@@ -19,7 +19,7 @@ import (
 // MergePull interactively creates a PR
 func MergePull(ctx *context.TeaContext) error {
 	if ctx.LocalRepo == nil {
-		return fmt.Errorf("Must specify a PR index")
+		return fmt.Errorf("pull request index is required")
 	}
 
 	branch, _, err := ctx.LocalRepo.TeaGetCurrentBranchNameAndSHA()
@@ -51,9 +51,12 @@ func getPullIndex(ctx *context.TeaContext, branch string) (int64, error) {
 
 	// paginated fetch
 	var prs []*gitea.PullRequest
-	var err error
 	for {
+		var err error
 		prs, _, err = c.ListRepoPullRequests(ctx.Owner, ctx.Repo, opts)
+		if err != nil {
+			return 0, err
+		}
 		if len(prs) == 0 {
 			return 0, fmt.Errorf("No open PRs found")
 		}

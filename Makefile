@@ -5,7 +5,10 @@ SHASUM ?= shasum -a 256
 export PATH := $($(GO) env GOPATH)/bin:$(PATH)
 
 GOFILES := $(shell find . -name "*.go" -type f ! -path "*/bindata.go")
-GOFMT ?= gofmt -s
+
+# Tool packages with pinned versions
+GOFUMPT_PACKAGE ?= mvdan.cc/gofumpt@v0.7.0
+GOLANGCI_LINT_PACKAGE ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
 
 ifneq ($(DRONE_TAG),)
 	VERSION ?= $(subst v,,$(DRONE_TAG))
@@ -49,7 +52,7 @@ clean:
 
 .PHONY: fmt
 fmt:
-	$(GOFMT) -w $(GOFILES)
+	$(GO) run $(GOFUMPT_PACKAGE) -w $(GOFILES)
 
 .PHONY: vet
 vet:
@@ -60,21 +63,17 @@ vet:
 	$(GO) vet -vettool=$(VET_TOOL) $(PACKAGES)
 
 .PHONY: lint
-lint: install-lint-tools
-	$(GO) run github.com/mgechev/revive@v1.3.2 -config .revive.toml ./... || exit 1
+lint:
+	$(GO) run $(GOLANGCI_LINT_PACKAGE) run
 
-.PHONY: misspell-check
-misspell-check: install-lint-tools
-	$(GO) run github.com/client9/misspell/cmd/misspell@latest -error -i unknwon,destory $(GOFILES)
-
-.PHONY: misspell
-misspell: install-lint-tools
-	$(GO) run github.com/client9/misspell/cmd/misspell@latest -w -i unknwon $(GOFILES)
+.PHONY: lint-fix
+lint-fix:
+	$(GO) run $(GOLANGCI_LINT_PACKAGE) run --fix
 
 .PHONY: fmt-check
 fmt-check:
-	# get all go files and run go fmt on them
-	@diff=$$($(GOFMT) -d $(GOFILES)); \
+	# get all go files and run gofumpt on them
+	@diff=$$($(GO) run $(GOFUMPT_PACKAGE) -d $(GOFILES)); \
 	if [ -n "$$diff" ]; then \
 		echo "Please run 'make fmt' and commit the result:"; \
 		echo "$${diff}"; \
@@ -124,10 +123,3 @@ $(EXECUTABLE): $(SOURCES)
 build-image:
 	docker build --build-arg VERSION=$(TEA_VERSION) -t gitea/tea:$(TEA_VERSION_TAG) .
 
-install-lint-tools:
-	@hash revive > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		$(GO) install github.com/mgechev/revive@v1.3.2; \
-	fi
-	@hash misspell > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		$(GO) install github.com/client9/misspell/cmd/misspell@latest; \
-	fi

@@ -56,7 +56,7 @@ func RunOrganizationCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 
 	if ctx.Args().Len() < 1 {
-		return fmt.Errorf("You have to specify the organization name you want to create")
+		return fmt.Errorf("organization name is required")
 	}
 
 	var visibility gitea.VisibleType

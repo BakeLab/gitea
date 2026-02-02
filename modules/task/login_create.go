@@ -51,7 +51,7 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 	// checks ...
 	// ... if we have a url
 	if len(giteaURL) == 0 {
-		return fmt.Errorf("You have to input Gitea server URL")
+		return fmt.Errorf("Gitea server URL is required")
 	}
 
 	// ... if there already exist a login with same name

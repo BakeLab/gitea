@@ -81,21 +81,3 @@ func runReleaseAttachmentDelete(_ stdctx.Context, cmd *cli.Command) error {
 
 	return nil
 }
-
-func getReleaseAttachmentByName(owner, repo string, release int64, name string, client *gitea.Client) (*gitea.Attachment, error) {
-	al, _, err := client.ListReleaseAttachments(owner, repo, release, gitea.ListReleaseAttachmentsOptions{
-		ListOptions: gitea.ListOptions{Page: -1},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(al) == 0 {
-		return nil, fmt.Errorf("Release does not have any attachments")
-	}
-	for _, a := range al {
-		if a.Name == name {
-			return a, nil
-		}
-	}
-	return nil, fmt.Errorf("Attachment does not exist")
-}

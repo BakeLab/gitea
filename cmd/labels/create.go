@@ -50,40 +50,43 @@ func runLabelCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
 	labelFile := ctx.String("file")
-	var err error
 	if len(labelFile) == 0 {
-		_, _, err = ctx.Login.Client().CreateLabel(ctx.Owner, ctx.Repo, gitea.CreateLabelOption{
+		_, _, err := ctx.Login.Client().CreateLabel(ctx.Owner, ctx.Repo, gitea.CreateLabelOption{
 			Name:        ctx.String("name"),
 			Color:       ctx.String("color"),
 			Description: ctx.String("description"),
 		})
-	} else {
-		f, err := os.Open(labelFile)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
-		scanner := bufio.NewScanner(f)
-		var i = 1
-		for scanner.Scan() {
-			line := scanner.Text()
-			color, name, description := splitLabelLine(line)
-			if color == "" || name == "" {
-				log.Printf("Line %d ignored because lack of enough fields: %s\n", i, line)
-			} else {
-				_, _, err = ctx.Login.Client().CreateLabel(ctx.Owner, ctx.Repo, gitea.CreateLabelOption{
-					Name:        name,
-					Color:       color,
-					Description: description,
-				})
-			}
-
-			i++
-		}
+		return err
 	}
 
-	return err
+	f, err := os.Open(labelFile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	i := 1
+	for scanner.Scan() {
+		line := scanner.Text()
+		color, name, description := splitLabelLine(line)
+		if color == "" || name == "" {
+			log.Printf("Line %d ignored because lack of enough fields: %s\n", i, line)
+		} else {
+			_, _, err = ctx.Login.Client().CreateLabel(ctx.Owner, ctx.Repo, gitea.CreateLabelOption{
+				Name:        name,
+				Color:       color,
+				Description: description,
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		i++
+	}
+
+	return nil
 }
 
 func splitLabelLine(line string) (string, string, string) {

@@ -33,7 +33,7 @@ func RunOrganizationDelete(_ stdctx.Context, cmd *cli.Command) error {
 	client := ctx.Login.Client()
 
 	if ctx.Args().Len() < 1 {
-		return fmt.Errorf("You have to specify the organization name you want to delete")
+		return fmt.Errorf("organization name is required")
 	}
 
 	response, err := client.DeleteOrg(ctx.Args().First())

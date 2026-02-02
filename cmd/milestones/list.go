@@ -48,15 +48,12 @@ func RunMilestonesList(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	state := gitea.StateOpen
-	switch ctx.String("state") {
-	case "all":
-		state = gitea.StateAll
-		if !cmd.IsSet("fields") { // add to default fields
-			fields = append(fields, "state")
-		}
-	case "closed":
-		state = gitea.StateClosed
+	state, err := flags.ParseState(ctx.String("state"))
+	if err != nil {
+		return err
+	}
+	if state == gitea.StateAll && !cmd.IsSet("fields") {
+		fields = append(fields, "state")
 	}
 
 	client := ctx.Login.Client()
@@ -64,7 +61,6 @@ func RunMilestonesList(_ stdctx.Context, cmd *cli.Command) error {
 		ListOptions: flags.GetListOptions(),
 		State:       state,
 	})
-
 	if err != nil {
 		return err
 	}

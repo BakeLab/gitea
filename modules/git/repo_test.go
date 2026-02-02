@@ -37,7 +37,7 @@ func TestRepoFromPath_Worktree(t *testing.T) {
 
 	// Create an initial commit (required for worktree)
 	readmePath := filepath.Join(mainRepoPath, "README.md")
-	err = os.WriteFile(readmePath, []byte("# Test Repo\n"), 0644)
+	err = os.WriteFile(readmePath, []byte("# Test Repo\n"), 0o644)
 	assert.NoError(t, err)
 	cmd = exec.Command("git", "-C", mainRepoPath, "add", "README.md")
 	assert.NoError(t, cmd.Run())

@@ -58,7 +58,7 @@ func runRepoClone(ctx stdctx.Context, cmd *cli.Command) error {
 
 	var (
 		login *config.Login = teaCmd.Login
-		owner string        = teaCmd.Login.User
+		owner string
 		repo  string
 	)
 

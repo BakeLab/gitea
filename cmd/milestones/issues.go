@@ -75,29 +75,23 @@ func runMilestoneIssueList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	client := ctx.Login.Client()
 
-	state := gitea.StateOpen
-	switch ctx.String("state") {
-	case "all":
-		state = gitea.StateAll
-	case "closed":
-		state = gitea.StateClosed
+	state, err := flags.ParseState(ctx.String("state"))
+	if err != nil {
+		return err
 	}
 
-	kind := gitea.IssueTypeAll
-	switch ctx.String("kind") {
-	case "issue":
-		kind = gitea.IssueTypeIssue
-	case "pull":
-		kind = gitea.IssueTypePull
+	kind, err := flags.ParseIssueKind(ctx.String("kind"), gitea.IssueTypeAll)
+	if err != nil {
+		return err
 	}
 
 	if ctx.Args().Len() != 1 {
-		return fmt.Errorf("Must specify milestone name")
+		return fmt.Errorf("milestone name is required")
 	}
 
 	milestone := ctx.Args().First()
 	// make sure milestone exist
-	_, _, err := client.GetMilestoneByName(ctx.Owner, ctx.Repo, milestone)
+	_, _, err = client.GetMilestoneByName(ctx.Owner, ctx.Repo, milestone)
 	if err != nil {
 		return err
 	}

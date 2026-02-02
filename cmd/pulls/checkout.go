@@ -40,7 +40,7 @@ func runPullsCheckout(_ stdctx.Context, cmd *cli.Command) error {
 		RemoteRepo: true,
 	})
 	if ctx.Args().Len() != 1 {
-		return fmt.Errorf("Must specify a PR index")
+		return fmt.Errorf("pull request index is required")
 	}
 	idx, err := utils.ArgToIndex(ctx.Args().First())
 	if err != nil {

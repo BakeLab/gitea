@@ -26,7 +26,7 @@ const (
 )
 
 func createTestIssue(comments int, isClosed bool) gitea.Issue {
-	var issue = gitea.Issue{
+	issue := gitea.Issue{
 		ID:      42,
 		Index:   1,
 		Title:   "Test issue",
@@ -55,11 +55,11 @@ func createTestIssue(comments int, isClosed bool) gitea.Issue {
 			{UserName: "testUser3"},
 		},
 		HTMLURL: "<space holder>",
-		Closed:  nil, //2025-11-10T21:20:19Z
+		Closed:  nil, // 2025-11-10T21:20:19Z
 	}
 
 	if isClosed {
-		var closed = time.Date(2025, 11, 10, 21, 20, 19, 0, time.UTC)
+		closed := time.Date(2025, 11, 10, 21, 20, 19, 0, time.UTC)
 		issue.Closed = &closed
 	}
 
@@ -70,7 +70,6 @@ func createTestIssue(comments int, isClosed bool) gitea.Issue {
 	}
 
 	return issue
-
 }
 
 func createTestIssueComments(comments int) []gitea.Comment {
@@ -90,7 +89,6 @@ func createTestIssueComments(comments int) []gitea.Comment {
 	}
 
 	return result
-
 }
 
 func TestRunIssueDetailAsJSON(t *testing.T) {
@@ -99,9 +97,6 @@ func TestRunIssueDetailAsJSON(t *testing.T) {
 		issue        gitea.Issue
 		comments     []gitea.Comment
 		flagComments bool
-		flagOutput   string
-		flagOut      string
-		closed       bool
 	}
 
 	cmd := cli.Command{
@@ -205,7 +200,7 @@ func TestRunIssueDetailAsJSON(t *testing.T) {
 
 			require.NotEmpty(t, out, "Unexpected empty output from runIssueDetailAsJSON")
 
-			//setting expectations
+			// setting expectations
 
 			var expectedLabels []labelData
 			expectedLabels = []labelData{}
@@ -266,5 +261,4 @@ func TestRunIssueDetailAsJSON(t *testing.T) {
 			assert.Equal(t, expected, actual, "Expected structs differ from expected one")
 		})
 	}
-
 }

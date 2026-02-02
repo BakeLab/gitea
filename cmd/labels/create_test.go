@@ -20,7 +20,7 @@ func TestParseLabelLine(t *testing.T) {
 `
 
 	scanner := bufio.NewScanner(strings.NewReader(labels))
-	var i = 1
+	i := 1
 	for scanner.Scan() {
 		line := scanner.Text()
 		color, name, description := splitLabelLine(line)

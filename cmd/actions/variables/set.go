@@ -6,13 +6,11 @@ package variables
 import (
 	stdctx "context"
 	"fmt"
-	"io"
-	"os"
 	"regexp"
-	"strings"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
+	"code.gitea.io/tea/modules/utils"
 
 	"github.com/urfave/cli/v3"
 )
@@ -46,39 +44,26 @@ func runVariablesSet(ctx stdctx.Context, cmd *cli.Command) error {
 	client := c.Login.Client()
 
 	variableName := cmd.Args().First()
-	var variableValue string
-
-	// Determine how to get the variable value
-	if cmd.String("file") != "" {
-		// Read from file
-		content, err := os.ReadFile(cmd.String("file"))
-		if err != nil {
-			return fmt.Errorf("failed to read file: %w", err)
-		}
-		variableValue = strings.TrimSpace(string(content))
-	} else if cmd.Bool("stdin") {
-		// Read from stdin
-		content, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("failed to read from stdin: %w", err)
-		}
-		variableValue = strings.TrimSpace(string(content))
-	} else if cmd.Args().Len() >= 2 {
-		// Use provided argument
-		variableValue = cmd.Args().Get(1)
-	} else {
-		// Interactive prompt
-		fmt.Printf("Enter variable value for '%s': ", variableName)
-		var input string
-		fmt.Scanln(&input)
-		variableValue = input
+	if err := validateVariableName(variableName); err != nil {
+		return err
 	}
 
-	if variableValue == "" {
-		return fmt.Errorf("variable value cannot be empty")
+	// Read variable value using the utility
+	variableValue, err := utils.ReadValue(cmd, utils.ReadValueOptions{
+		ResourceName: "variable",
+		PromptMsg:    fmt.Sprintf("Enter variable value for '%s'", variableName),
+		Hidden:       false,
+		AllowEmpty:   false,
+	})
+	if err != nil {
+		return err
 	}
 
-	_, err := client.CreateRepoActionVariable(c.Owner, c.Repo, variableName, variableValue)
+	if err := validateVariableValue(variableValue); err != nil {
+		return err
+	}
+
+	_, err = client.CreateRepoActionVariable(c.Owner, c.Repo, variableName, variableValue)
 	if err != nil {
 		return err
 	}

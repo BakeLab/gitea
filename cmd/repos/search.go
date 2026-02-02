@@ -62,7 +62,7 @@ func runReposSearch(_ stdctx.Context, cmd *cli.Command) error {
 
 	var ownerID int64
 	if teaCmd.IsSet("owner") {
-		// test if owner is a organisation
+		// test if owner is an organization
 		org, _, err := client.GetOrg(teaCmd.String("owner"))
 		if err != nil {
 			// HACK: the client does not return a response on 404, so we can't check res.StatusCode

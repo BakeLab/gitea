@@ -12,7 +12,7 @@ import (
 
 // NotificationsList prints a listing of notification threads
 func NotificationsList(news []*gitea.NotificationThread, output string, fields []string) {
-	var printables = make([]printable, len(news))
+	printables := make([]printable, len(news))
 	for i, x := range news {
 		printables[i] = &printableNotification{x}
 	}

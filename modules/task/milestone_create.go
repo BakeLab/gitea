@@ -15,7 +15,6 @@ import (
 
 // CreateMilestone creates a milestone in the given repo and prints the result
 func CreateMilestone(login *config.Login, repoOwner, repoName, title, description string, deadline *time.Time, state gitea.StateType) error {
-
 	// title is required
 	if len(title) == 0 {
 		return fmt.Errorf("Title is required")

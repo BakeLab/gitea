@@ -65,6 +65,8 @@ Depending on your permissions on the repository, only your own tracked times mig
 			Usage:   "Show all times tracked by you across all repositories (overrides command arguments)",
 		},
 		timeFieldsFlag,
+		&flags.PaginationPageFlag,
+		&flags.PaginationLimitFlag,
 	}, flags.AllDefaultFlags...),
 }
 
@@ -92,11 +94,15 @@ func RunTimesList(_ stdctx.Context, cmd *cli.Command) error {
 		}
 	}
 
-	opts := gitea.ListTrackedTimesOptions{Since: from, Before: until}
+	opts := gitea.ListTrackedTimesOptions{
+		ListOptions: flags.GetListOptions(),
+		Since:       from,
+		Before:      until,
+	}
 
 	user := ctx.Args().First()
 	if ctx.Bool("mine") {
-		times, _, err = client.GetMyTrackedTimes()
+		times, _, err = client.ListMyTrackedTimes(opts)
 		fields = []string{"created", "repo", "issue", "duration"}
 	} else if user == "" {
 		// get all tracked times on the repo
@@ -104,9 +110,9 @@ func RunTimesList(_ stdctx.Context, cmd *cli.Command) error {
 		fields = []string{"created", "issue", "user", "duration"}
 	} else if strings.HasPrefix(user, "#") {
 		// get all tracked times on the specified issue
-		issue, err := utils.ArgToIndex(user)
-		if err != nil {
-			return err
+		issue, parseErr := utils.ArgToIndex(user)
+		if parseErr != nil {
+			return parseErr
 		}
 		times, _, err = client.ListIssueTrackedTimes(ctx.Owner, ctx.Repo, issue, opts)
 		fields = []string{"created", "user", "duration"}

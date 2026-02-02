@@ -849,11 +849,15 @@ Operate on tracked times of a repository's issues & pulls
 
 **--from, -f**="": Show only times tracked after this date
 
+**--limit, --lm**="": specify limit of items per page (default: 30)
+
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--mine, -m**: Show all times tracked by you across all repositories (overrides command arguments)
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 
@@ -909,11 +913,15 @@ List tracked times on issues & pulls
 
 **--from, -f**="": Show only times tracked after this date
 
+**--limit, --lm**="": specify limit of items per page (default: 30)
+
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--mine, -m**: Show all times tracked by you across all repositories (overrides command arguments)
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--page, -p**="": specify page (default: 1)
 
 **--remote, -R**="": Discover Gitea login from remote. Optional
 

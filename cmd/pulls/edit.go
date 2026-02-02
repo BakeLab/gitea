@@ -20,7 +20,7 @@ func editPullState(_ stdctx.Context, cmd *cli.Command, opts gitea.EditPullReques
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 	if ctx.Args().Len() == 0 {
-		return fmt.Errorf("Please provide a Pull Request index")
+		return fmt.Errorf("pull request index is required")
 	}
 
 	indices, err := utils.ArgsToIndices(ctx.Args().Slice())

@@ -141,3 +141,34 @@ var NotificationStateFlag = NewCsvFlag(
 func FieldsFlag(availableFields, defaultFields []string) *CsvFlag {
 	return NewCsvFlag("fields", "fields to print", []string{"f"}, availableFields, defaultFields)
 }
+
+// ParseState parses a state string and returns the corresponding gitea.StateType
+func ParseState(stateStr string) (gitea.StateType, error) {
+	switch stateStr {
+	case "all":
+		return gitea.StateAll, nil
+	case "", "open":
+		return gitea.StateOpen, nil
+	case "closed":
+		return gitea.StateClosed, nil
+	default:
+		return "", errors.New("unknown state '" + stateStr + "'")
+	}
+}
+
+// ParseIssueKind parses a kind string and returns the corresponding gitea.IssueType.
+// If kindStr is empty, returns the provided defaultKind.
+func ParseIssueKind(kindStr string, defaultKind gitea.IssueType) (gitea.IssueType, error) {
+	switch kindStr {
+	case "":
+		return defaultKind, nil
+	case "all":
+		return gitea.IssueTypeAll, nil
+	case "issue", "issues":
+		return gitea.IssueTypeIssue, nil
+	case "pull", "pulls", "pr":
+		return gitea.IssueTypePull, nil
+	default:
+		return "", errors.New("unknown kind '" + kindStr + "'")
+	}
+}

@@ -48,7 +48,7 @@ func runPullsCreate(_ stdctx.Context, cmd *cli.Command) error {
 	})
 
 	// no args -> interactive mode
-	if ctx.NumFlags() == 0 {
+	if ctx.IsInteractiveMode() {
 		if err := interact.CreatePull(ctx); err != nil && !interact.IsQuitting(err) {
 			return err
 		}

@@ -49,7 +49,7 @@ func runIssuesEdit(_ stdctx.Context, cmd *cli.Command) error {
 
 	client := ctx.Login.Client()
 	for _, opts.Index = range indices {
-		if ctx.NumFlags() == 0 {
+		if ctx.IsInteractiveMode() {
 			var err error
 			opts, err = interact.EditIssue(*ctx, opts.Index)
 			if err != nil {

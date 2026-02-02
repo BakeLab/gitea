@@ -435,9 +435,9 @@ func TestDeleteSuccessMessage(t *testing.T) {
 }
 
 func TestDeleteCancellationMessage(t *testing.T) {
-	expectedMessage := "Deletion cancelled."
+	expectedMessage := "Deletion canceled."
 
 	assert.NotEmpty(t, expectedMessage)
-	assert.Contains(t, expectedMessage, "cancelled")
+	assert.Contains(t, expectedMessage, "canceled")
 	assert.NotContains(t, expectedMessage, "\n", "Cancellation message should not end with newline")
 }

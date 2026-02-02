@@ -6,17 +6,13 @@ package secrets
 import (
 	stdctx "context"
 	"fmt"
-	"io"
-	"os"
-	"strings"
-	"syscall"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
+	"code.gitea.io/tea/modules/utils"
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/urfave/cli/v3"
-	"golang.org/x/term"
 )
 
 // CmdSecretsCreate represents a sub command to create action secrets
@@ -48,42 +44,19 @@ func runSecretsCreate(ctx stdctx.Context, cmd *cli.Command) error {
 	client := c.Login.Client()
 
 	secretName := cmd.Args().First()
-	var secretValue string
 
-	// Determine how to get the secret value
-	if cmd.String("file") != "" {
-		// Read from file
-		content, err := os.ReadFile(cmd.String("file"))
-		if err != nil {
-			return fmt.Errorf("failed to read file: %w", err)
-		}
-		secretValue = strings.TrimSpace(string(content))
-	} else if cmd.Bool("stdin") {
-		// Read from stdin
-		content, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("failed to read from stdin: %w", err)
-		}
-		secretValue = strings.TrimSpace(string(content))
-	} else if cmd.Args().Len() >= 2 {
-		// Use provided argument
-		secretValue = cmd.Args().Get(1)
-	} else {
-		// Interactive prompt (hidden input)
-		fmt.Printf("Enter secret value for '%s': ", secretName)
-		byteValue, err := term.ReadPassword(int(syscall.Stdin))
-		if err != nil {
-			return fmt.Errorf("failed to read secret value: %w", err)
-		}
-		fmt.Println() // Add newline after hidden input
-		secretValue = string(byteValue)
+	// Read secret value using the utility
+	secretValue, err := utils.ReadValue(cmd, utils.ReadValueOptions{
+		ResourceName: "secret",
+		PromptMsg:    fmt.Sprintf("Enter secret value for '%s'", secretName),
+		Hidden:       true,
+		AllowEmpty:   false,
+	})
+	if err != nil {
+		return err
 	}
 
-	if secretValue == "" {
-		return fmt.Errorf("secret value cannot be empty")
-	}
-
-	_, err := client.CreateRepoActionSecret(c.Owner, c.Repo, gitea.CreateSecretOption{
+	_, err = client.CreateRepoActionSecret(c.Owner, c.Repo, gitea.CreateSecretOption{
 		Name: secretName,
 		Data: secretValue,
 	})

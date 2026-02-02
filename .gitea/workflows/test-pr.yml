@@ -30,7 +30,6 @@ jobs:
           make vet
           make lint
           make fmt-check
-          make misspell-check
           make docs-check
           make build
       - run: curl --noproxy "*" http://gitea:3000/api/v1/version # verify connection to instance

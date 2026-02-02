@@ -29,7 +29,7 @@ func runIssuesCreate(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
-	if ctx.NumFlags() == 0 {
+	if ctx.IsInteractiveMode() {
 		err := interact.CreateIssue(ctx.Login, ctx.Owner, ctx.Repo)
 		if err != nil && !interact.IsQuitting(err) {
 			return err

@@ -45,7 +45,7 @@ func runSecretsDelete(ctx stdctx.Context, cmd *cli.Command) error {
 		var response string
 		fmt.Scanln(&response)
 		if response != "y" && response != "Y" && response != "yes" {
-			fmt.Println("Deletion cancelled.")
+			fmt.Println("Deletion canceled.")
 			return nil
 		}
 	}

@@ -40,7 +40,7 @@ func RepoClone(
 		return nil, err
 	}
 
-	// default path behaviour as native git
+	// default path behavior as native git
 	if path == "" {
 		path = repoName
 	}

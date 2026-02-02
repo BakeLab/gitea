@@ -53,7 +53,7 @@ func UserDetails(user *gitea.User) {
 
 // UserList prints a listing of the users
 func UserList(user []*gitea.User, output string, fields []string) {
-	var printables = make([]printable, len(user))
+	printables := make([]printable, len(user))
 	for i, u := range user {
 		printables[i] = &printableUser{u}
 	}

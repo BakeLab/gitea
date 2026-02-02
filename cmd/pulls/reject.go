@@ -5,15 +5,10 @@ package pulls
 
 import (
 	stdctx "context"
-	"fmt"
-	"strings"
-
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/task"
-	"code.gitea.io/tea/modules/utils"
 
 	"code.gitea.io/sdk/gitea"
+	"code.gitea.io/tea/cmd/flags"
+	"code.gitea.io/tea/modules/context"
 	"github.com/urfave/cli/v3"
 )
 
@@ -25,20 +20,7 @@ var CmdPullsReject = cli.Command{
 	ArgsUsage:   "<pull index> <reason>",
 	Action: func(_ stdctx.Context, cmd *cli.Command) error {
 		ctx := context.InitCommand(cmd)
-		ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
-
-		if ctx.Args().Len() < 2 {
-			return fmt.Errorf("Must specify a PR index and comment")
-		}
-
-		idx, err := utils.ArgToIndex(ctx.Args().First())
-		if err != nil {
-			return err
-		}
-
-		comment := strings.Join(ctx.Args().Tail(), " ")
-
-		return task.CreatePullReview(ctx, idx, gitea.ReviewStateRequestChanges, comment, nil)
+		return runPullReview(ctx, gitea.ReviewStateRequestChanges, true)
 	},
 	Flags: flags.AllDefaultFlags,
 }

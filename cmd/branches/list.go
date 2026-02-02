@@ -52,7 +52,6 @@ func RunBranchesList(_ stdctx.Context, cmd *cli.Command) error {
 	branches, _, err = ctx.Login.Client().ListRepoBranches(owner, ctx.Repo, gitea.ListRepoBranchesOptions{
 		ListOptions: flags.GetListOptions(),
 	})
-
 	if err != nil {
 		return err
 	}
@@ -60,7 +59,6 @@ func RunBranchesList(_ stdctx.Context, cmd *cli.Command) error {
 	protections, _, err = ctx.Login.Client().ListBranchProtections(owner, ctx.Repo, gitea.ListBranchProtectionsOptions{
 		ListOptions: flags.GetListOptions(),
 	})
-
 	if err != nil {
 		return err
 	}

@@ -46,6 +46,12 @@ func (ctx *TeaContext) GetRemoteRepoHTMLURL() string {
 	return path.Join(ctx.Login.URL, ctx.Owner, ctx.Repo)
 }
 
+// IsInteractiveMode returns true if the command is running in interactive mode
+// (no flags provided and stdout is a terminal)
+func (ctx *TeaContext) IsInteractiveMode() bool {
+	return ctx.Command.NumFlags() == 0
+}
+
 // Ensure checks if requirements on the context are set, and terminates otherwise.
 func (ctx *TeaContext) Ensure(req CtxRequirement) {
 	if req.LocalRepo && ctx.LocalRepo == nil {

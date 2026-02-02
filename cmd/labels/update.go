@@ -67,7 +67,6 @@ func runLabelUpdate(_ stdctx.Context, cmd *cli.Command) error {
 		Color:       pColor,
 		Description: pDescription,
 	})
-
 	if err != nil {
 		return err
 	}

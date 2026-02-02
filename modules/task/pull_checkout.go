@@ -9,7 +9,6 @@ import (
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/config"
 	local_git "code.gitea.io/tea/modules/git"
-	"code.gitea.io/tea/modules/workaround"
 
 	"github.com/go-git/go-git/v5"
 	git_config "github.com/go-git/go-git/v5/config"
@@ -28,9 +27,6 @@ func PullCheckout(
 	pr, _, err := client.GetPullRequest(repoOwner, repoName, index)
 	if err != nil {
 		return fmt.Errorf("couldn't fetch PR: %s", err)
-	}
-	if err := workaround.FixPullHeadSha(client, pr); err != nil {
-		return err
 	}
 
 	// FIXME: should use ctx.LocalRepo..?

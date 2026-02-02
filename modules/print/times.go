@@ -11,7 +11,7 @@ import (
 
 // TrackedTimesList print list of tracked times to stdout
 func TrackedTimesList(times []*gitea.TrackedTime, outputType string, fields []string, printTotal bool) {
-	var printables = make([]printable, len(times))
+	printables := make([]printable, len(times))
 	var totalDuration int64
 	for i, t := range times {
 		totalDuration += t.Time

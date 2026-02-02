@@ -5,7 +5,6 @@ package issues
 
 import (
 	stdctx "context"
-	"fmt"
 	"time"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -36,31 +35,16 @@ var CmdIssuesList = cli.Command{
 func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 
-	state := gitea.StateOpen
-	switch ctx.String("state") {
-	case "all":
-		state = gitea.StateAll
-	case "", "open":
-		state = gitea.StateOpen
-	case "closed":
-		state = gitea.StateClosed
-	default:
-		return fmt.Errorf("unknown state '%s'", ctx.String("state"))
+	state, err := flags.ParseState(ctx.String("state"))
+	if err != nil {
+		return err
 	}
 
-	kind := gitea.IssueTypeIssue
-	switch ctx.String("kind") {
-	case "", "issues", "issue":
-		kind = gitea.IssueTypeIssue
-	case "pulls", "pull", "pr":
-		kind = gitea.IssueTypePull
-	case "all":
-		kind = gitea.IssueTypeAll
-	default:
-		return fmt.Errorf("unknown kind '%s'", ctx.String("kind"))
+	kind, err := flags.ParseIssueKind(ctx.String("kind"), gitea.IssueTypeIssue)
+	if err != nil {
+		return err
 	}
 
-	var err error
 	var from, until time.Time
 	if ctx.IsSet("from") {
 		from, err = dateparse.ParseLocal(ctx.String("from"))
@@ -97,7 +81,6 @@ func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
 			Since:       from,
 			Before:      until,
 		})
-
 		if err != nil {
 			return err
 		}
@@ -116,7 +99,6 @@ func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
 			Before:      until,
 			Owner:       owner,
 		})
-
 		if err != nil {
 			return err
 		}

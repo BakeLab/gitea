@@ -67,7 +67,7 @@ func runMilestonesCreate(_ stdctx.Context, cmd *cli.Command) error {
 		state = gitea.StateClosed
 	}
 
-	if ctx.NumFlags() == 0 {
+	if ctx.IsInteractiveMode() {
 		if err := interact.CreateMilestone(ctx.Login, ctx.Owner, ctx.Repo); err != nil && !interact.IsQuitting(err) {
 			return err
 		}

@@ -111,7 +111,6 @@ func formatReviews(pr *gitea.PullRequest, reviews []*gitea.PullReview) string {
 					reviewByUserOrTeam[fmt.Sprintf("team_%d", review.ReviewerTeam.ID)] = review
 				}
 			}
-
 		}
 	}
 
@@ -173,7 +172,7 @@ var PullFields = []string{
 
 func printPulls(pulls []*gitea.PullRequest, output string, fields []string) {
 	labelMap := map[int64]string{}
-	var printables = make([]printable, len(pulls))
+	printables := make([]printable, len(pulls))
 	machineReadable := isMachineReadable(output)
 
 	for i, x := range pulls {
@@ -227,13 +226,13 @@ func (x printablePull) FormatField(field string, machineReadable bool) string {
 		}
 		return ""
 	case "labels":
-		var labels = make([]string, len(x.Labels))
+		labels := make([]string, len(x.Labels))
 		for i, l := range x.Labels {
 			labels[i] = (*x.formattedLabels)[l.ID]
 		}
 		return strings.Join(labels, " ")
 	case "assignees":
-		var assignees = make([]string, len(x.Assignees))
+		assignees := make([]string, len(x.Assignees))
 		for i, a := range x.Assignees {
 			assignees[i] = formatUserName(a)
 		}

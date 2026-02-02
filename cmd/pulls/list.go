@@ -33,21 +33,15 @@ func RunPullsList(_ stdctx.Context, cmd *cli.Command) error {
 	ctx := context.InitCommand(cmd)
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
-	state := gitea.StateOpen
-	switch ctx.String("state") {
-	case "all":
-		state = gitea.StateAll
-	case "open":
-		state = gitea.StateOpen
-	case "closed":
-		state = gitea.StateClosed
+	state, err := flags.ParseState(ctx.String("state"))
+	if err != nil {
+		return err
 	}
 
 	prs, _, err := ctx.Login.Client().ListRepoPullRequests(ctx.Owner, ctx.Repo, gitea.ListPullRequestsOptions{
 		ListOptions: flags.GetListOptions(),
 		State:       state,
 	})
-
 	if err != nil {
 		return err
 	}
