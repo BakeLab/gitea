@@ -132,13 +132,16 @@ func runMilestoneIssueAdd(_ stdctx.Context, cmd *cli.Command) error {
 	// make sure milestone exist
 	mile, _, err := client.GetMilestoneByName(ctx.Owner, ctx.Repo, mileName)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get milestone '%s': %w", mileName, err)
 	}
 
 	_, _, err = client.EditIssue(ctx.Owner, ctx.Repo, idx, gitea.EditIssueOption{
 		Milestone: &mile.ID,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to add issue #%d to milestone '%s': %w", idx, mileName, err)
+	}
+	return nil
 }
 
 func runMilestoneIssueRemove(_ stdctx.Context, cmd *cli.Command) error {
@@ -153,25 +156,28 @@ func runMilestoneIssueRemove(_ stdctx.Context, cmd *cli.Command) error {
 	issueIndex := ctx.Args().Get(1)
 	idx, err := utils.ArgToIndex(issueIndex)
 	if err != nil {
-		return err
+		return fmt.Errorf("invalid issue index '%s': %w", issueIndex, err)
 	}
 
 	issue, _, err := client.GetIssue(ctx.Owner, ctx.Repo, idx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get issue #%d: %w", idx, err)
 	}
 
 	if issue.Milestone == nil {
-		return fmt.Errorf("issue is not assigned to a milestone")
+		return fmt.Errorf("issue #%d is not assigned to a milestone", idx)
 	}
 
 	if issue.Milestone.Title != mileName {
-		return fmt.Errorf("issue is not assigned to this milestone")
+		return fmt.Errorf("issue #%d is assigned to milestone '%s', not '%s'", idx, issue.Milestone.Title, mileName)
 	}
 
 	zero := int64(0)
 	_, _, err = client.EditIssue(ctx.Owner, ctx.Repo, idx, gitea.EditIssueOption{
 		Milestone: &zero,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to remove issue #%d from milestone '%s': %w", idx, mileName, err)
+	}
+	return nil
 }

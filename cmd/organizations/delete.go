@@ -38,7 +38,7 @@ func RunOrganizationDelete(_ stdctx.Context, cmd *cli.Command) error {
 
 	response, err := client.DeleteOrg(ctx.Args().First())
 	if response != nil && response.StatusCode == 404 {
-		return fmt.Errorf("The given organization does not exist")
+		return fmt.Errorf("organization not found: %s", ctx.Args().First())
 	}
 
 	return err
