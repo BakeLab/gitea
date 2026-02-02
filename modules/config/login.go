@@ -170,6 +170,13 @@ func AddLogin(login *Login) error {
 		return err
 	}
 
+	// Check for duplicate login names
+	for _, existing := range config.Logins {
+		if strings.EqualFold(existing.Name, login.Name) {
+			return fmt.Errorf("login name '%s' already exists", login.Name)
+		}
+	}
+
 	// save login to global var
 	config.Logins = append(config.Logins, *login)
 

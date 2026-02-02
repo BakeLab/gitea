@@ -72,11 +72,13 @@ func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
 			return err
 		}
 	} else if teaCmd.Bool("watched") {
-		var err error
-		rps, _, err = client.GetMyWatchedRepos() // TODO: this does not expose pagination..
+		// GetMyWatchedRepos doesn't expose server-side pagination,
+		// so we implement client-side pagination as a workaround
+		allRepos, _, err := client.GetMyWatchedRepos()
 		if err != nil {
 			return err
 		}
+		rps = paginateRepos(allRepos, flags.GetListOptions())
 	} else {
 		var err error
 		rps, _, err = client.ListMyRepos(gitea.ListReposOptions{
@@ -122,4 +124,35 @@ func filterReposByType(repos []*gitea.Repository, t gitea.RepoType) []*gitea.Rep
 		filtered = append(filtered, r)
 	}
 	return filtered
+}
+
+// paginateRepos implements client-side pagination for repositories.
+// This is a workaround for API endpoints that don't support server-side pagination.
+func paginateRepos(repos []*gitea.Repository, opts gitea.ListOptions) []*gitea.Repository {
+	if len(repos) == 0 {
+		return repos
+	}
+
+	pageSize := opts.PageSize
+	if pageSize <= 0 {
+		pageSize = flags.PaginationLimitFlag.Value
+	}
+
+	page := opts.Page
+	if page < 1 {
+		page = 1
+	}
+
+	start := (page - 1) * pageSize
+	end := start + pageSize
+
+	if start >= len(repos) {
+		return []*gitea.Repository{}
+	}
+
+	if end > len(repos) {
+		end = len(repos)
+	}
+
+	return repos[start:end]
 }

@@ -130,8 +130,12 @@ func markNotificationAs(cmd *context.TeaContext, filterStates []string, targetSt
 		if err != nil {
 			return err
 		}
-		// FIXME: this is an API URL, we want to display a web ui link..
-		fmt.Println(n.Subject.URL)
+		// Use LatestCommentHTMLURL if available, otherwise fall back to HTMLURL
+		if n.Subject.LatestCommentHTMLURL != "" {
+			fmt.Println(n.Subject.LatestCommentHTMLURL)
+		} else {
+			fmt.Println(n.Subject.HTMLURL)
+		}
 		return nil
 	}
 
