@@ -15,7 +15,7 @@
         devShells.default = pkgs.mkShell {
           name = "tea-dev-environment";
           buildInputs = with pkgs; [
-            go_1_24
+            go_1_25
             gopls
             gnumake
             # Add other dependencies here if needed
