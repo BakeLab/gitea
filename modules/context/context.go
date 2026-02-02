@@ -9,12 +9,8 @@ import (
 	"log"
 	"os"
 	"path"
-	"strconv"
-	"strings"
-	"time"
 
 	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/debug"
 	"code.gitea.io/tea/modules/git"
 	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
@@ -50,41 +46,6 @@ func (ctx *TeaContext) GetRemoteRepoHTMLURL() string {
 // (no flags provided and stdout is a terminal)
 func (ctx *TeaContext) IsInteractiveMode() bool {
 	return ctx.Command.NumFlags() == 0
-}
-
-// Ensure checks if requirements on the context are set, and terminates otherwise.
-func (ctx *TeaContext) Ensure(req CtxRequirement) {
-	if req.LocalRepo && ctx.LocalRepo == nil {
-		fmt.Println("Local repository required: Execute from a repo dir, or specify a path with --repo.")
-		os.Exit(1)
-	}
-
-	if req.RemoteRepo && len(ctx.RepoSlug) == 0 {
-		fmt.Println("Remote repository required: Specify ID via --repo or execute from a local git repo.")
-		os.Exit(1)
-	}
-
-	if req.Org && len(ctx.Org) == 0 {
-		fmt.Println("Organization required: Specify organization via --org.")
-		os.Exit(1)
-	}
-
-	if req.Global && !ctx.IsGlobal {
-		fmt.Println("Global scope required: Specify --global.")
-		os.Exit(1)
-	}
-}
-
-// CtxRequirement specifies context needed for operation
-type CtxRequirement struct {
-	// ensures a local git repo is available & ctx.LocalRepo is set. Implies .RemoteRepo
-	LocalRepo bool
-	// ensures ctx.RepoSlug, .Owner, .Repo are set
-	RemoteRepo bool
-	// ensures ctx.Org is set
-	Org bool
-	// ensures ctx.IsGlobal is true
-	Global bool
 }
 
 // InitCommand resolves the application context, and returns the active login, and if
@@ -192,153 +153,4 @@ and then run your command again.`)
 	c.Command = cmd
 	c.Output = cmd.String("output")
 	return &c
-}
-
-// contextFromLocalRepo discovers login & repo slug from the default branch remote of the given local repo
-func contextFromLocalRepo(repoPath, remoteValue string) (*git.TeaRepo, *config.Login, string, error) {
-	repo, err := git.RepoFromPath(repoPath)
-	if err != nil {
-		return nil, nil, "", err
-	}
-	gitConfig, err := repo.Config()
-	if err != nil {
-		return repo, nil, "", err
-	}
-	debug.Printf("Get git config %v of %s in repo %s", gitConfig, remoteValue, repoPath)
-
-	if len(gitConfig.Remotes) == 0 {
-		return repo, nil, "", errNotAGiteaRepo
-	}
-
-	// When no preferred value is given, choose a remote to find a
-	// matching login based on its URL.
-	if len(gitConfig.Remotes) > 1 && len(remoteValue) == 0 {
-		// if master branch is present, use it as the default remote
-		mainBranches := []string{"main", "master", "trunk"}
-		for _, b := range mainBranches {
-			masterBranch, ok := gitConfig.Branches[b]
-			if ok {
-				if len(masterBranch.Remote) > 0 {
-					remoteValue = masterBranch.Remote
-				}
-				break
-			}
-		}
-		// if no branch has matched, default to origin or upstream remote.
-		if len(remoteValue) == 0 {
-			if _, ok := gitConfig.Remotes["upstream"]; ok {
-				remoteValue = "upstream"
-			} else if _, ok := gitConfig.Remotes["origin"]; ok {
-				remoteValue = "origin"
-			}
-		}
-	}
-	// make sure a remote is selected
-	if len(remoteValue) == 0 {
-		for remote := range gitConfig.Remotes {
-			remoteValue = remote
-			break
-		}
-	}
-
-	remoteConfig, ok := gitConfig.Remotes[remoteValue]
-	if !ok || remoteConfig == nil {
-		return repo, nil, "", fmt.Errorf("remote '%s' not found in this Git repository", remoteValue)
-	}
-
-	debug.Printf("Get remote configurations %v of %s in repo %s", remoteConfig, remoteValue, repoPath)
-
-	logins, err := config.GetLogins()
-	if err != nil {
-		return repo, nil, "", err
-	}
-	for _, u := range remoteConfig.URLs {
-		if l, p, err := MatchLogins(u, logins); err == nil {
-			return repo, l, p, nil
-		}
-	}
-
-	return repo, nil, "", errNotAGiteaRepo
-}
-
-// MatchLogins matches the given remoteURL against the provided logins and returns
-// the first matching login
-// remoteURL could be like:
-//
-//	https://gitea.com/owner/repo.git
-//	http://gitea.com/owner/repo.git
-//	ssh://gitea.com/owner/repo.git
-//	git@gitea.com:owner/repo.git
-func MatchLogins(remoteURL string, logins []config.Login) (*config.Login, string, error) {
-	for _, l := range logins {
-		debug.Printf("Matching remote URL '%s' against %v login", remoteURL, l)
-		sshHost := l.GetSSHHost()
-		atIdx := strings.Index(remoteURL, "@")
-		colonIdx := strings.Index(remoteURL, ":")
-		if atIdx > 0 && colonIdx > atIdx {
-			domain := remoteURL[atIdx+1 : colonIdx]
-			if domain == sshHost {
-				return &l, strings.TrimSuffix(remoteURL[colonIdx+1:], ".git"), nil
-			}
-		} else {
-			p, err := git.ParseURL(remoteURL)
-			if err != nil {
-				return nil, "", fmt.Errorf("git remote URL parse failed: %s", err.Error())
-			}
-
-			switch {
-			case strings.EqualFold(p.Scheme, "http") || strings.EqualFold(p.Scheme, "https"):
-				if strings.HasPrefix(remoteURL, l.URL) {
-					ps := strings.Split(p.Path, "/")
-					path := strings.Join(ps[len(ps)-2:], "/")
-					return &l, strings.TrimSuffix(path, ".git"), nil
-				}
-			case strings.EqualFold(p.Scheme, "ssh"):
-				if sshHost == p.Host || sshHost == p.Hostname() {
-					return &l, strings.TrimLeft(p.Path, "/"), nil
-				}
-			default:
-				// unknown scheme
-				return nil, "", fmt.Errorf("git remote URL parse failed: %s", "unknown scheme "+p.Scheme)
-			}
-		}
-	}
-	return nil, "", errNotAGiteaRepo
-}
-
-// GetLoginByEnvVar returns a login based on environment variables, or nil if no login can be created
-func GetLoginByEnvVar() *config.Login {
-	var token string
-
-	giteaToken := os.Getenv("GITEA_TOKEN")
-	githubToken := os.Getenv("GH_TOKEN")
-	giteaInstanceURL := os.Getenv("GITEA_INSTANCE_URL")
-	instanceInsecure := os.Getenv("GITEA_INSTANCE_INSECURE")
-	insecure := false
-	if len(instanceInsecure) > 0 {
-		insecure, _ = strconv.ParseBool(instanceInsecure)
-	}
-
-	// if no tokens are set, or no instance url for gitea fail fast
-	if len(giteaInstanceURL) == 0 || (len(giteaToken) == 0 && len(githubToken) == 0) {
-		return nil
-	}
-
-	token = giteaToken
-	if len(giteaToken) == 0 {
-		token = githubToken
-	}
-
-	return &config.Login{
-		Name:              "GITEA_LOGIN_VIA_ENV",
-		URL:               giteaInstanceURL,
-		Token:             token,
-		Insecure:          insecure,
-		SSHKey:            "",
-		SSHCertPrincipal:  "",
-		SSHKeyFingerprint: "",
-		SSHAgent:          false,
-		Created:           time.Now().Unix(),
-		VersionCheck:      false,
-	}
 }
