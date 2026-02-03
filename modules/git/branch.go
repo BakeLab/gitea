@@ -4,8 +4,10 @@
 package git
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/go-git/go-git/v5"
 	git_config "github.com/go-git/go-git/v5/config"
@@ -246,4 +248,48 @@ func (r TeaRepo) TeaGetCurrentBranchNameAndSHA() (string, string, error) {
 	}
 
 	return localHead.Name().Short(), localHead.Hash().String(), nil
+}
+
+// PushToCreatAgitFlowPR pushes the given head to the refs/for/<base>/<topic> ref on the remote to create an agit flow PR.
+func (r TeaRepo) PushToCreatAgitFlowPR(remoteName, head, base, topic, title, description string, auth git_transport.AuthMethod) error {
+	if !strings.HasPrefix(head, "refs/") {
+		head = "refs/heads/" + head
+	}
+
+	ref := fmt.Sprintf("%s:refs/for/%s/%s", head, base, topic)
+
+	pushOptions := make(map[string]string)
+	if len(title) > 0 {
+		pushOptions["title"] = b64Encode(title)
+	}
+	if len(description) > 0 {
+		pushOptions["description"] = b64Encode(description)
+	}
+
+	opts := &git.PushOptions{
+		RemoteName: remoteName,
+		RefSpecs:   []git_config.RefSpec{git_config.RefSpec(ref)},
+		Options:    pushOptions,
+		Auth:       auth,
+	}
+
+	return r.Push(opts)
+}
+
+// b64Encode implements base64 encode for string if necessary.
+func b64Encode(s string) string {
+	if strings.Contains(s, "\n") || !isASCII(s) {
+		return "{base64}" + base64.StdEncoding.EncodeToString([]byte(s))
+	}
+	return s
+}
+
+// isASCII indicates string contains only ASCII.
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > unicode.MaxASCII {
+			return false
+		}
+	}
+	return true
 }

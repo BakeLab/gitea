@@ -153,3 +153,67 @@ func GetDefaultPRTitle(header string) string {
 
 	return title
 }
+
+// CreateAgitFlowPull creates a agit flow PR in the given repo and prints the result
+func CreateAgitFlowPull(ctx *context.TeaContext, remote, head, base, topic string,
+	opts *gitea.CreateIssueOption,
+	callback func(string) (string, error)) (err error) {
+	// default is default branch
+	if len(base) == 0 {
+		base, err = GetDefaultPRBase(ctx.Login, ctx.Owner, ctx.Repo)
+		if err != nil {
+			return err
+		}
+	}
+
+	// default is current one
+	if len(head) == 0 {
+		if ctx.LocalRepo == nil {
+			return fmt.Errorf("no local git repo detected, please specify topic branch")
+		}
+		headOwner, headBranch, err := GetDefaultPRHead(ctx.LocalRepo)
+		if err != nil {
+			return err
+		}
+
+		head = GetHeadSpec(headOwner, headBranch, ctx.Owner)
+	}
+
+	if len(remote) == 0 {
+		return fmt.Errorf("remote is required for agit flow PR")
+	}
+
+	if len(topic) == 0 {
+		topic = head
+	}
+
+	if head == base || topic == base {
+		return fmt.Errorf("can't create PR from %s to %s", topic, base)
+	}
+
+	// default is head branch name
+	if len(opts.Title) == 0 {
+		opts.Title = GetDefaultPRTitle(head)
+	}
+	// title is required
+	if len(opts.Title) == 0 {
+		return fmt.Errorf("title is required")
+	}
+
+	localRepo, err := local_git.RepoForWorkdir()
+	if err != nil {
+		return err
+	}
+
+	url, err := localRepo.RemoteURL(remote)
+	if err != nil {
+		return err
+	}
+
+	auth, err := local_git.GetAuthForURL(url, ctx.Login.Token, ctx.Login.SSHKey, callback)
+	if err != nil {
+		return err
+	}
+
+	return localRepo.PushToCreatAgitFlowPR(remote, head, base, topic, opts.Title, opts.Body, auth)
+}

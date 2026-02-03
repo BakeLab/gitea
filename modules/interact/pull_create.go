@@ -7,6 +7,7 @@ import (
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/task"
+	"code.gitea.io/tea/modules/theme"
 
 	"github.com/charmbracelet/huh"
 )
@@ -16,6 +17,8 @@ func CreatePull(ctx *context.TeaContext) (err error) {
 	var (
 		base, head           string
 		allowMaintainerEdits = true
+
+		agit bool
 	)
 
 	// owner, repo
@@ -35,6 +38,66 @@ func CreatePull(ctx *context.TeaContext) (err error) {
 		if err == nil {
 			validator = func(string) error { return nil }
 		}
+	}
+
+	if err := huh.NewConfirm().
+		Title("Do you want to create an agit flow pull request?").
+		Value(&agit).
+		WithTheme(theme.GetTheme()).
+		Run(); err != nil {
+		return err
+	}
+
+	if agit {
+		var (
+			topic      string
+			baseRemote string
+		)
+
+		topic = headBranch
+
+		head = "HEAD"
+		baseRemote = "origin"
+
+		if err := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Target branch:").
+					Value(&base).
+					Validate(huh.ValidateNotEmpty()),
+
+				huh.NewInput().
+					Title("Source repo remote:").
+					Value(&baseRemote),
+
+				huh.NewInput().
+					Title("Topic branch:").
+					Value(&topic).
+					Validate(validator),
+
+				huh.NewInput().
+					Title("Head branch:").
+					Value(&head).
+					Validate(validator),
+			),
+		).Run(); err != nil {
+			return err
+		}
+
+		opts := gitea.CreateIssueOption{Title: task.GetDefaultPRTitle(head)}
+		if err = promptIssueProperties(ctx.Login, ctx.Owner, ctx.Repo, &opts); err != nil {
+			return err
+		}
+
+		return task.CreateAgitFlowPull(
+			ctx,
+			baseRemote,
+			head,
+			base,
+			topic,
+			&opts,
+			PromptPassword,
+		)
 	}
 
 	if err := huh.NewForm(

@@ -345,6 +345,8 @@ Deletes local & remote feature-branches for a closed pull request
 
 Create a pull-request
 
+**--agit**: Create an agit flow pull request
+
 **--allow-maintainer-edits, --edits**: Enable maintainers to push to the base branch of created pull
 
 **--assignees, -a**="": Comma-separated list of usernames to assign
@@ -370,6 +372,8 @@ Create a pull-request
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
 **--title, -t**="": 
+
+**--topic**="": Topic name for agit flow pull request
 
 ### close
 

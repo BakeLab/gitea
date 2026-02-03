@@ -4,6 +4,8 @@
 package git
 
 import (
+	"net/url"
+
 	"github.com/go-git/go-git/v5"
 )
 
@@ -32,4 +34,14 @@ func RepoFromPath(path string) (*TeaRepo, error) {
 	}
 
 	return &TeaRepo{repo}, nil
+}
+
+// RemoteURL returns the URL of the given remote
+func (r TeaRepo) RemoteURL(remoteName string) (*url.URL, error) {
+	remote, err := r.Remote(remoteName)
+	if err != nil {
+		return nil, err
+	}
+
+	return url.Parse(remote.Config().URLs[0])
 }

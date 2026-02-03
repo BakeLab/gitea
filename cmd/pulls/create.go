@@ -37,6 +37,14 @@ var CmdPullsCreate = cli.Command{
 			Usage:   "Enable maintainers to push to the base branch of created pull",
 			Value:   true,
 		},
+		&cli.BoolFlag{
+			Name:  "agit",
+			Usage: "Create an agit flow pull request",
+		},
+		&cli.StringFlag{
+			Name:  "topic",
+			Usage: "Topic name for agit flow pull request",
+		},
 	}, flags.IssuePRCreateFlags...),
 }
 
@@ -59,6 +67,18 @@ func runPullsCreate(_ stdctx.Context, cmd *cli.Command) error {
 	opts, err := flags.GetIssuePRCreateFlags(ctx)
 	if err != nil {
 		return err
+	}
+
+	if ctx.Bool("agit") {
+		return task.CreateAgitFlowPull(
+			ctx,
+			ctx.String("remote"),
+			ctx.String("head"),
+			ctx.String("base"),
+			ctx.String("topic"),
+			opts,
+			interact.PromptPassword,
+		)
 	}
 
 	var allowMaintainerEdits *bool
