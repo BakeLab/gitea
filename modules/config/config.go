@@ -98,8 +98,33 @@ func loadConfig() (err error) {
 	return
 }
 
-// saveConfig save config to file
-func saveConfig() error {
+// reloadConfigFromDisk re-reads the config file from disk, bypassing the sync.Once.
+// This is used after acquiring a lock to ensure we have the latest config state.
+// The caller must hold the config lock.
+func reloadConfigFromDisk() error {
+	ymlPath := GetConfigPath()
+	exist, _ := utils.FileExist(ymlPath)
+	if !exist {
+		// No config file yet, start with empty config
+		config = LocalConfig{}
+		return nil
+	}
+
+	bs, err := os.ReadFile(ymlPath)
+	if err != nil {
+		return fmt.Errorf("failed to read config file %s: %w", ymlPath, err)
+	}
+
+	if err := yaml.Unmarshal(bs, &config); err != nil {
+		return fmt.Errorf("failed to parse config file %s: %w", ymlPath, err)
+	}
+
+	return nil
+}
+
+// saveConfigUnsafe saves config to file without acquiring a lock.
+// Caller must hold the config lock.
+func saveConfigUnsafe() error {
 	ymlPath := GetConfigPath()
 	bs, err := yaml.Marshal(config)
 	if err != nil {

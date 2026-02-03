@@ -157,7 +157,8 @@ func GetDefaultPRTitle(header string) string {
 // CreateAgitFlowPull creates a agit flow PR in the given repo and prints the result
 func CreateAgitFlowPull(ctx *context.TeaContext, remote, head, base, topic string,
 	opts *gitea.CreateIssueOption,
-	callback func(string) (string, error)) (err error) {
+	callback func(string) (string, error),
+) (err error) {
 	// default is default branch
 	if len(base) == 0 {
 		base, err = GetDefaultPRBase(ctx.Login, ctx.Owner, ctx.Repo)

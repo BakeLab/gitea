@@ -17,7 +17,7 @@ import (
 var CmdLoginOAuthRefresh = cli.Command{
 	Name:        "oauth-refresh",
 	Usage:       "Refresh an OAuth token",
-	Description: "Manually refresh an expired OAuth token. Usually only used when troubleshooting authentication.",
+	Description: "Manually refresh an expired OAuth token. If the refresh token is also expired, opens a browser for re-authentication.",
 	ArgsUsage:   "[<login name>]",
 	Action:      runLoginOAuthRefresh,
 }
@@ -48,12 +48,21 @@ func runLoginOAuthRefresh(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("login '%s' does not have a refresh token. It may have been created using a different authentication method", loginName)
 	}
 
-	// Refresh the token
+	// Try to refresh the token
 	err := auth.RefreshAccessToken(login)
-	if err != nil {
-		return fmt.Errorf("failed to refresh token: %s", err)
+	if err == nil {
+		fmt.Printf("Successfully refreshed OAuth token for %s\n", loginName)
+		return nil
 	}
 
-	fmt.Printf("Successfully refreshed OAuth token for %s\n", loginName)
+	// Refresh failed - fall back to browser-based re-authentication
+	fmt.Printf("Token refresh failed: %s\n", err)
+	fmt.Println("Opening browser for re-authentication...")
+
+	if err := auth.ReauthenticateLogin(login); err != nil {
+		return fmt.Errorf("re-authentication failed: %s", err)
+	}
+
+	fmt.Printf("Successfully re-authenticated %s\n", loginName)
 	return nil
 }

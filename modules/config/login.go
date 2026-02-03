@@ -84,24 +84,22 @@ func GetDefaultLogin() (*Login, error) {
 
 // SetDefaultLogin set the default login by name (case insensitive)
 func SetDefaultLogin(name string) error {
-	if err := loadConfig(); err != nil {
-		return err
-	}
-
-	loginExist := false
-	for i := range config.Logins {
-		config.Logins[i].Default = false
-		if strings.ToLower(config.Logins[i].Name) == strings.ToLower(name) {
-			config.Logins[i].Default = true
-			loginExist = true
+	return withConfigLock(func() error {
+		loginExist := false
+		for i := range config.Logins {
+			config.Logins[i].Default = false
+			if strings.EqualFold(config.Logins[i].Name, name) {
+				config.Logins[i].Default = true
+				loginExist = true
+			}
 		}
-	}
 
-	if !loginExist {
-		return fmt.Errorf("login '%s' not found", name)
-	}
+		if !loginExist {
+			return fmt.Errorf("login '%s' not found", name)
+		}
 
-	return saveConfig()
+		return saveConfigUnsafe()
+	})
 }
 
 // GetLoginByName get login by name (case insensitive)
@@ -112,7 +110,7 @@ func GetLoginByName(name string) *Login {
 	}
 
 	for _, l := range config.Logins {
-		if strings.ToLower(l.Name) == strings.ToLower(name) {
+		if strings.EqualFold(l.Name, name) {
 			return &l
 		}
 	}
@@ -165,64 +163,56 @@ func GetLoginsByHost(host string) []*Login {
 
 // DeleteLogin delete a login by name from config
 func DeleteLogin(name string) error {
-	idx := -1
-	for i, l := range config.Logins {
-		if l.Name == name {
-			idx = i
-			break
+	return withConfigLock(func() error {
+		idx := -1
+		for i, l := range config.Logins {
+			if strings.EqualFold(l.Name, name) {
+				idx = i
+				break
+			}
 		}
-	}
-	if idx == -1 {
-		return fmt.Errorf("can not delete login '%s', does not exist", name)
-	}
+		if idx == -1 {
+			return fmt.Errorf("can not delete login '%s', does not exist", name)
+		}
 
-	config.Logins = append(config.Logins[:idx], config.Logins[idx+1:]...)
+		config.Logins = append(config.Logins[:idx], config.Logins[idx+1:]...)
 
-	return saveConfig()
+		return saveConfigUnsafe()
+	})
 }
 
 // AddLogin save a login to config
 func AddLogin(login *Login) error {
-	if err := loadConfig(); err != nil {
-		return err
-	}
-
-	// Check for duplicate login names
-	for _, existing := range config.Logins {
-		if strings.EqualFold(existing.Name, login.Name) {
-			return fmt.Errorf("login name '%s' already exists", login.Name)
+	return withConfigLock(func() error {
+		// Check for duplicate login names
+		for _, existing := range config.Logins {
+			if strings.EqualFold(existing.Name, login.Name) {
+				return fmt.Errorf("login name '%s' already exists", login.Name)
+			}
 		}
-	}
 
-	// save login to global var
-	config.Logins = append(config.Logins, *login)
+		// save login to global var
+		config.Logins = append(config.Logins, *login)
 
-	// save login to config file
-	return saveConfig()
+		// save login to config file
+		return saveConfigUnsafe()
+	})
 }
 
-// UpdateLogin updates an existing login in the config
-func UpdateLogin(login *Login) error {
-	if err := loadConfig(); err != nil {
-		return err
-	}
-
-	// Find and update the login
-	found := false
-	for i, l := range config.Logins {
-		if l.Name == login.Name {
-			config.Logins[i] = *login
-			found = true
-			break
+// SaveLoginTokens updates the token fields for an existing login.
+// This is used after browser-based re-authentication to save new tokens.
+func SaveLoginTokens(login *Login) error {
+	return withConfigLock(func() error {
+		for i, l := range config.Logins {
+			if strings.EqualFold(l.Name, login.Name) {
+				config.Logins[i].Token = login.Token
+				config.Logins[i].RefreshToken = login.RefreshToken
+				config.Logins[i].TokenExpiry = login.TokenExpiry
+				return saveConfigUnsafe()
+			}
 		}
-	}
-
-	if !found {
 		return fmt.Errorf("login %s not found", login.Name)
-	}
-
-	// Save updated config
-	return saveConfig()
+	})
 }
 
 // RefreshOAuthTokenIfNeeded refreshes the OAuth token if it's expired or near expiry.
@@ -240,22 +230,65 @@ func (l *Login) RefreshOAuthTokenIfNeeded() error {
 
 // RefreshOAuthToken refreshes the OAuth access token using the refresh token.
 // It updates the login with new token information and saves it to config.
+// Uses double-checked locking to avoid unnecessary refresh calls when multiple
+// processes race to refresh the same token.
 func (l *Login) RefreshOAuthToken() error {
 	if l.RefreshToken == "" {
 		return fmt.Errorf("no refresh token available")
 	}
 
-	// Create a Token object with current values
+	return withConfigLock(func() error {
+		// Double-check: after acquiring lock, re-read config and check if
+		// another process already refreshed the token
+		for i, login := range config.Logins {
+			if login.Name == l.Name {
+				// Check if token was refreshed by another process
+				if login.TokenExpiry != l.TokenExpiry && login.TokenExpiry > 0 {
+					expiryTime := time.Unix(login.TokenExpiry, 0)
+					if time.Now().Add(TokenRefreshThreshold).Before(expiryTime) {
+						// Token was refreshed by another process, update our copy
+						l.Token = login.Token
+						l.RefreshToken = login.RefreshToken
+						l.TokenExpiry = login.TokenExpiry
+						return nil
+					}
+				}
+
+				// Still need to refresh - proceed with OAuth call
+				newToken, err := doOAuthRefresh(l)
+				if err != nil {
+					return err
+				}
+
+				// Update login with new token information
+				l.Token = newToken.AccessToken
+				if newToken.RefreshToken != "" {
+					l.RefreshToken = newToken.RefreshToken
+				}
+				if !newToken.Expiry.IsZero() {
+					l.TokenExpiry = newToken.Expiry.Unix()
+				}
+
+				// Update in config slice and save
+				config.Logins[i] = *l
+				return saveConfigUnsafe()
+			}
+		}
+
+		return fmt.Errorf("login %s not found", l.Name)
+	})
+}
+
+// doOAuthRefresh performs the actual OAuth token refresh API call.
+func doOAuthRefresh(l *Login) (*oauth2.Token, error) {
 	currentToken := &oauth2.Token{
 		AccessToken:  l.Token,
 		RefreshToken: l.RefreshToken,
 		Expiry:       time.Unix(l.TokenExpiry, 0),
 	}
 
-	// Set up the OAuth2 config
 	ctx := context.Background()
 
-	// Create HTTP client, respecting the login's TLS settings
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: l.Insecure},
@@ -263,7 +296,6 @@ func (l *Login) RefreshOAuthToken() error {
 	}
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
 
-	// Configure the OAuth2 endpoints
 	oauth2Config := &oauth2.Config{
 		ClientID: DefaultClientID,
 		Endpoint: oauth2.Endpoint{
@@ -271,25 +303,12 @@ func (l *Login) RefreshOAuthToken() error {
 		},
 	}
 
-	// Refresh the token
 	newToken, err := oauth2Config.TokenSource(ctx, currentToken).Token()
 	if err != nil {
-		return fmt.Errorf("failed to refresh token: %w", err)
+		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
 
-	// Update login with new token information
-	l.Token = newToken.AccessToken
-
-	if newToken.RefreshToken != "" {
-		l.RefreshToken = newToken.RefreshToken
-	}
-
-	if !newToken.Expiry.IsZero() {
-		l.TokenExpiry = newToken.Expiry.Unix()
-	}
-
-	// Save updated login to config
-	return UpdateLogin(l)
+	return newToken, nil
 }
 
 // Client returns a client to operate Gitea API. You may provide additional modifiers

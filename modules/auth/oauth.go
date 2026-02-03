@@ -71,11 +71,23 @@ func OAuthLoginWithOptions(name, giteaURL string, insecure bool) error {
 
 // OAuthLoginWithFullOptions performs an OAuth2 PKCE login flow with full options control
 func OAuthLoginWithFullOptions(opts OAuthOptions) error {
-	// Normalize URL
-	serverURL, err := utils.NormalizeURL(opts.URL)
+	serverURL, token, err := performBrowserOAuthFlow(opts)
 	if err != nil {
-		return fmt.Errorf("unable to parse URL: %s", err)
+		return err
 	}
+
+	return createLoginFromToken(opts.Name, serverURL, token, opts.Insecure)
+}
+
+// performBrowserOAuthFlow performs the browser-based OAuth2 PKCE flow and returns the token.
+// This is the shared implementation used by both new logins and re-authentication.
+func performBrowserOAuthFlow(opts OAuthOptions) (serverURL string, token *oauth2.Token, err error) {
+	// Normalize URL
+	normalizedURL, err := utils.NormalizeURL(opts.URL)
+	if err != nil {
+		return "", nil, fmt.Errorf("unable to parse URL: %s", err)
+	}
+	serverURL = normalizedURL.String()
 
 	// Set defaults if needed
 	if opts.ClientID == "" {
@@ -107,7 +119,7 @@ func OAuthLoginWithFullOptions(opts OAuthOptions) error {
 	// Generate code verifier (random string)
 	codeVerifier, err := generateCodeVerifier(codeVerifierLength)
 	if err != nil {
-		return fmt.Errorf("failed to generate code verifier: %s", err)
+		return "", nil, fmt.Errorf("failed to generate code verifier: %s", err)
 	}
 
 	// Generate code challenge (SHA256 hash of code verifier)
@@ -118,8 +130,8 @@ func OAuthLoginWithFullOptions(opts OAuthOptions) error {
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, createHTTPClient(opts.Insecure))
 
 	// Configure the OAuth2 endpoints
-	authURL := fmt.Sprintf("%s/login/oauth/authorize", serverURL)
-	tokenURL := fmt.Sprintf("%s/login/oauth/access_token", serverURL)
+	authURL := fmt.Sprintf("%s/login/oauth/authorize", normalizedURL)
+	tokenURL := fmt.Sprintf("%s/login/oauth/access_token", normalizedURL)
 
 	oauth2Config := &oauth2.Config{
 		ClientID:     opts.ClientID,
@@ -141,7 +153,7 @@ func OAuthLoginWithFullOptions(opts OAuthOptions) error {
 	// Generate state parameter to protect against CSRF
 	state, err := generateCodeVerifier(32)
 	if err != nil {
-		return fmt.Errorf("failed to generate state: %s", err)
+		return "", nil, fmt.Errorf("failed to generate state: %s", err)
 	}
 
 	// Get the authorization URL
@@ -156,7 +168,7 @@ func OAuthLoginWithFullOptions(opts OAuthOptions) error {
 			strings.Contains(err.Error(), "redirect") {
 			fmt.Println("\nError: Redirect URL not registered in Gitea")
 			fmt.Println("\nTo fix this, you need to register the redirect URL in Gitea:")
-			fmt.Printf("1. Go to your Gitea instance: %s\n", serverURL)
+			fmt.Printf("1. Go to your Gitea instance: %s\n", normalizedURL)
 			fmt.Println("2. Sign in and go to Settings > Applications")
 			fmt.Println("3. Register a new OAuth2 application with:")
 			fmt.Printf("   - Application Name: tea-cli (or any name)\n")
@@ -165,22 +177,21 @@ func OAuthLoginWithFullOptions(opts OAuthOptions) error {
 			fmt.Printf("   tea login add --oauth --client-id YOUR_CLIENT_ID --redirect-url %s\n", opts.RedirectURL)
 			fmt.Println("\nAlternatively, you can use a token-based login: tea login add")
 		}
-		return fmt.Errorf("authorization failed: %s", err)
+		return "", nil, fmt.Errorf("authorization failed: %s", err)
 	}
 
 	// Verify state to prevent CSRF attacks
 	if state != receivedState {
-		return fmt.Errorf("state mismatch, possible CSRF attack")
+		return "", nil, fmt.Errorf("state mismatch, possible CSRF attack")
 	}
 
 	// Exchange authorization code for token
-	token, err := oauth2Config.Exchange(ctx, code, oauth2.SetAuthURLParam("code_verifier", codeVerifier))
+	token, err = oauth2Config.Exchange(ctx, code, oauth2.SetAuthURLParam("code_verifier", codeVerifier))
 	if err != nil {
-		return fmt.Errorf("token exchange failed: %s", err)
+		return "", nil, fmt.Errorf("token exchange failed: %s", err)
 	}
 
-	// Create login with token data
-	return createLoginFromToken(opts.Name, serverURL.String(), token, opts.Insecure)
+	return serverURL, token, nil
 }
 
 // createHTTPClient creates an HTTP client with optional insecure setting
@@ -416,4 +427,34 @@ func createLoginFromToken(name, serverURL string, token *oauth2.Token, insecure 
 // For automatic threshold-based refresh, use login.Client() which handles it internally.
 func RefreshAccessToken(login *config.Login) error {
 	return login.RefreshOAuthToken()
+}
+
+// ReauthenticateLogin performs a full browser-based OAuth flow to get new tokens
+// for an existing login. This is used when the refresh token is expired or invalid.
+func ReauthenticateLogin(login *config.Login) error {
+	opts := OAuthOptions{
+		Name:        login.Name,
+		URL:         login.URL,
+		Insecure:    login.Insecure,
+		ClientID:    config.DefaultClientID,
+		RedirectURL: fmt.Sprintf("http://%s:%d", redirectHost, redirectPort),
+		Port:        redirectPort,
+	}
+
+	_, token, err := performBrowserOAuthFlow(opts)
+	if err != nil {
+		return err
+	}
+
+	// Update the existing login with new token data
+	login.Token = token.AccessToken
+	if token.RefreshToken != "" {
+		login.RefreshToken = token.RefreshToken
+	}
+	if !token.Expiry.IsZero() {
+		login.TokenExpiry = token.Expiry.Unix()
+	}
+
+	// Save updated login
+	return config.SaveLoginTokens(login)
 }
