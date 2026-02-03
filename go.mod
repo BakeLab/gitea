@@ -18,7 +18,7 @@ require (
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli-docs/v3 v3.1.0
-	github.com/urfave/cli/v3 v3.6.1
+	github.com/urfave/cli/v3 v3.6.2
 	golang.org/x/crypto v0.47.0
 	golang.org/x/oauth2 v0.33.0
 	golang.org/x/term v0.39.0
