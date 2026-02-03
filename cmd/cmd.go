@@ -59,6 +59,7 @@ func App() *cli.Command {
 
 			&CmdAdmin,
 
+			&CmdApi,
 			&CmdGenerateManPage,
 		},
 		EnableShellCompletion: true,

@@ -11,9 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"time"
 
-	"code.gitea.io/tea/modules/auth"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/task"
 	"github.com/urfave/cli/v3"
@@ -59,6 +57,13 @@ var CmdLoginHelper = cli.Command{
 		{
 			Name:        "get",
 			Description: "Get token to auth",
+			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:    "login",
+					Aliases: []string{"l"},
+					Usage:   "Use a specific login",
+				},
+			},
 			Action: func(_ context.Context, cmd *cli.Command) error {
 				wants := map[string]string{}
 				s := bufio.NewScanner(os.Stdin)
@@ -93,10 +98,21 @@ var CmdLoginHelper = cli.Command{
 					wants["protocol"] = "http"
 				}
 
-				userConfig := config.GetLoginByHost(wants["host"])
-				if userConfig == nil {
-					log.Fatal("host not exists")
-				} else if len(userConfig.Token) == 0 {
+				// Use --login flag if provided, otherwise fall back to host lookup
+				var userConfig *config.Login
+				if loginName := cmd.String("login"); loginName != "" {
+					userConfig = config.GetLoginByName(loginName)
+					if userConfig == nil {
+						log.Fatalf("Login '%s' not found", loginName)
+					}
+				} else {
+					userConfig = config.GetLoginByHost(wants["host"])
+					if userConfig == nil {
+						log.Fatalf("No login found for host '%s'", wants["host"])
+					}
+				}
+
+				if len(userConfig.Token) == 0 {
 					log.Fatal("User no set")
 				}
 
@@ -105,18 +121,9 @@ var CmdLoginHelper = cli.Command{
 					return err
 				}
 
-				if userConfig.TokenExpiry > 0 && time.Now().Unix() > userConfig.TokenExpiry {
-					// Token is expired, refresh it
-					err = auth.RefreshAccessToken(userConfig)
-					if err != nil {
-						return err
-					}
-
-					// Once token is refreshed, get the latest from the updated config
-					refreshedConfig := config.GetLoginByHost(wants["host"])
-					if refreshedConfig != nil {
-						userConfig = refreshedConfig
-					}
+				// Refresh token if expired or near expiry (updates userConfig in place)
+				if err = userConfig.RefreshOAuthTokenIfNeeded(); err != nil {
+					return err
 				}
 
 				_, err = fmt.Fprintf(os.Stdout, "protocol=%s\nhost=%s\nusername=%s\npassword=%s\n", host.Scheme, host.Host, userConfig.User, userConfig.Token)

@@ -27,9 +27,6 @@ import (
 
 // Constants for OAuth2 PKCE flow
 const (
-	// default client ID included in most Gitea instances
-	defaultClientID = "d57cb8c4-630c-4168-8324-ec79935e18d4"
-
 	// default scopes to request
 	defaultScopes = "admin,user,issue,misc,notification,organization,package,repository"
 
@@ -65,7 +62,7 @@ func OAuthLoginWithOptions(name, giteaURL string, insecure bool) error {
 		Name:        name,
 		URL:         giteaURL,
 		Insecure:    insecure,
-		ClientID:    defaultClientID,
+		ClientID:    config.DefaultClientID,
 		RedirectURL: fmt.Sprintf("http://%s:%d", redirectHost, redirectPort),
 		Port:        redirectPort,
 	}
@@ -82,7 +79,7 @@ func OAuthLoginWithFullOptions(opts OAuthOptions) error {
 
 	// Set defaults if needed
 	if opts.ClientID == "" {
-		opts.ClientID = defaultClientID
+		opts.ClientID = config.DefaultClientID
 	}
 
 	// If the redirect URL is specified, parse it to extract port if needed
@@ -414,55 +411,9 @@ func createLoginFromToken(name, serverURL string, token *oauth2.Token, insecure 
 	return nil
 }
 
-// RefreshAccessToken manually renews an expired access token using the refresh token
+// RefreshAccessToken manually renews an access token using the refresh token.
+// This is used by the "tea login oauth-refresh" command for explicit token refresh.
+// For automatic threshold-based refresh, use login.Client() which handles it internally.
 func RefreshAccessToken(login *config.Login) error {
-	if login.RefreshToken == "" {
-		return fmt.Errorf("no refresh token available")
-	}
-
-	// Check if token actually needs refreshing
-	if login.TokenExpiry > 0 && time.Now().Unix() < login.TokenExpiry {
-		// Token is still valid, no need to refresh
-		return nil
-	}
-
-	// Create an expired Token object
-	expiredToken := &oauth2.Token{
-		AccessToken:  login.Token,
-		RefreshToken: login.RefreshToken,
-		// Set expiry in the past to force refresh
-		Expiry: time.Unix(login.TokenExpiry, 0),
-	}
-
-	// Set up the OAuth2 config
-	ctx := context.Background()
-	ctx = context.WithValue(ctx, oauth2.HTTPClient, createHTTPClient(login.Insecure))
-
-	// Configure the OAuth2 endpoints
-	oauth2Config := &oauth2.Config{
-		ClientID: defaultClientID,
-		Endpoint: oauth2.Endpoint{
-			TokenURL: fmt.Sprintf("%s/login/oauth/access_token", login.URL),
-		},
-	}
-
-	// Refresh the token
-	newToken, err := oauth2Config.TokenSource(ctx, expiredToken).Token()
-	if err != nil {
-		return fmt.Errorf("failed to refresh token: %s", err)
-	}
-
-	// Update login with new token information
-	login.Token = newToken.AccessToken
-
-	if newToken.RefreshToken != "" {
-		login.RefreshToken = newToken.RefreshToken
-	}
-
-	if !newToken.Expiry.IsZero() {
-		login.TokenExpiry = newToken.Expiry.Unix()
-	}
-
-	// Save updated login to config
-	return config.UpdateLogin(login)
+	return login.RefreshOAuthToken()
 }

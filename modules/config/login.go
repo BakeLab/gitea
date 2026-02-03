@@ -24,6 +24,13 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// TokenRefreshThreshold is how far before expiry we should refresh OAuth tokens.
+// This is used by config.Login.Client() for automatic token refresh.
+const TokenRefreshThreshold = 5 * time.Minute
+
+// DefaultClientID is the default OAuth2 client ID included in most Gitea instances
+const DefaultClientID = "d57cb8c4-630c-4168-8324-ec79935e18d4"
+
 // Login represents a login to a gitea server, you even could add multiple logins for one gitea server
 type Login struct {
 	Name    string `yaml:"name"`
@@ -129,21 +136,31 @@ func GetLoginByToken(token string) *Login {
 
 // GetLoginByHost finds a login by it's server URL
 func GetLoginByHost(host string) *Login {
+	logins := GetLoginsByHost(host)
+	if len(logins) > 0 {
+		return logins[0]
+	}
+	return nil
+}
+
+// GetLoginsByHost returns all logins matching a host
+func GetLoginsByHost(host string) []*Login {
 	err := loadConfig()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	for _, l := range config.Logins {
-		loginURL, err := url.Parse(l.URL)
+	var matches []*Login
+	for i := range config.Logins {
+		loginURL, err := url.Parse(config.Logins[i].URL)
 		if err != nil {
 			log.Fatal(err)
 		}
 		if loginURL.Host == host {
-			return &l
+			matches = append(matches, &config.Logins[i])
 		}
 	}
-	return nil
+	return matches
 }
 
 // DeleteLogin delete a login by name from config
@@ -208,63 +225,79 @@ func UpdateLogin(login *Login) error {
 	return saveConfig()
 }
 
+// RefreshOAuthTokenIfNeeded refreshes the OAuth token if it's expired or near expiry.
+// Returns nil without doing anything if no refresh is needed.
+func (l *Login) RefreshOAuthTokenIfNeeded() error {
+	if l.RefreshToken == "" || l.TokenExpiry == 0 {
+		return nil
+	}
+	expiryTime := time.Unix(l.TokenExpiry, 0)
+	if time.Now().Add(TokenRefreshThreshold).After(expiryTime) {
+		return l.RefreshOAuthToken()
+	}
+	return nil
+}
+
+// RefreshOAuthToken refreshes the OAuth access token using the refresh token.
+// It updates the login with new token information and saves it to config.
+func (l *Login) RefreshOAuthToken() error {
+	if l.RefreshToken == "" {
+		return fmt.Errorf("no refresh token available")
+	}
+
+	// Create a Token object with current values
+	currentToken := &oauth2.Token{
+		AccessToken:  l.Token,
+		RefreshToken: l.RefreshToken,
+		Expiry:       time.Unix(l.TokenExpiry, 0),
+	}
+
+	// Set up the OAuth2 config
+	ctx := context.Background()
+
+	// Create HTTP client, respecting the login's TLS settings
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: l.Insecure},
+		},
+	}
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
+
+	// Configure the OAuth2 endpoints
+	oauth2Config := &oauth2.Config{
+		ClientID: DefaultClientID,
+		Endpoint: oauth2.Endpoint{
+			TokenURL: fmt.Sprintf("%s/login/oauth/access_token", l.URL),
+		},
+	}
+
+	// Refresh the token
+	newToken, err := oauth2Config.TokenSource(ctx, currentToken).Token()
+	if err != nil {
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	// Update login with new token information
+	l.Token = newToken.AccessToken
+
+	if newToken.RefreshToken != "" {
+		l.RefreshToken = newToken.RefreshToken
+	}
+
+	if !newToken.Expiry.IsZero() {
+		l.TokenExpiry = newToken.Expiry.Unix()
+	}
+
+	// Save updated login to config
+	return UpdateLogin(l)
+}
+
 // Client returns a client to operate Gitea API. You may provide additional modifiers
 // for the client like gitea.SetBasicAuth() for customization
 func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
-	// Check if token needs refreshing (if we have a refresh token and expiry time)
-	if l.RefreshToken != "" && l.TokenExpiry > 0 && time.Now().Unix() > l.TokenExpiry {
-		// Since we can't directly call auth.RefreshAccessToken due to import cycles,
-		// we'll implement the token refresh logic here.
-		// Create an expired Token object
-		expiredToken := &oauth2.Token{
-			AccessToken:  l.Token,
-			RefreshToken: l.RefreshToken,
-			// Set expiry in the past to force refresh
-			Expiry: time.Unix(l.TokenExpiry, 0),
-		}
-
-		// Set up the OAuth2 config
-		ctx := context.Background()
-
-		// Create HTTP client with proper insecure settings
-		httpClient := &http.Client{}
-		if l.Insecure {
-			httpClient = &http.Client{
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-				},
-			}
-		}
-		ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
-
-		// Configure the OAuth2 endpoints
-		oauth2Config := &oauth2.Config{
-			ClientID: "d57cb8c4-630c-4168-8324-ec79935e18d4", // defaultClientID from modules/auth/oauth.go
-			Endpoint: oauth2.Endpoint{
-				TokenURL: fmt.Sprintf("%s/login/oauth/access_token", l.URL),
-			},
-		}
-
-		// Refresh the token
-		newToken, err := oauth2Config.TokenSource(ctx, expiredToken).Token()
-		if err != nil {
-			log.Fatalf("Failed to refresh token: %s\nPlease use 'tea login oauth-refresh %s' to manually refresh the token.\n", err, l.Name)
-		}
-		// Update login with new token information
-		l.Token = newToken.AccessToken
-
-		if newToken.RefreshToken != "" {
-			l.RefreshToken = newToken.RefreshToken
-		}
-
-		if !newToken.Expiry.IsZero() {
-			l.TokenExpiry = newToken.Expiry.Unix()
-		}
-
-		// Save updated login to config
-		if err := UpdateLogin(l); err != nil {
-			log.Fatalf("Failed to save refreshed token: %s\n", err)
-		}
+	// Refresh OAuth token if expired or near expiry
+	if err := l.RefreshOAuthTokenIfNeeded(); err != nil {
+		log.Fatalf("Failed to refresh token: %s\nPlease use 'tea login oauth-refresh %s' to manually refresh the token.\n", err, l.Name)
 	}
 
 	httpClient := &http.Client{}
