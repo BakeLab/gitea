@@ -97,7 +97,6 @@ ABOUT
   More info about Gitea itself on https://about.gitea.com.
 ```
 
-- [Compare features with other git forge CLIs](./FEATURE-COMPARISON.md)
 - tea uses [code.gitea.io/sdk](https://code.gitea.io/sdk) and interacts with the Gitea API.
 
 ## Installation
