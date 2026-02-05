@@ -5,9 +5,10 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"sync"
 	"time"
+
+	"code.gitea.io/tea/modules/filelock"
 )
 
 const (
@@ -16,9 +17,6 @@ const (
 
 	// mutexPollInterval is how often to retry acquiring the in-process mutex.
 	mutexPollInterval = 10 * time.Millisecond
-
-	// fileLockPollInterval is how often to retry acquiring the file lock.
-	fileLockPollInterval = 50 * time.Millisecond
 )
 
 // configMutex protects in-process concurrent access to the config.
@@ -42,30 +40,20 @@ func acquireConfigLock(lockPath string, timeout time.Duration) (unlock func() er
 	}
 
 	// Mutex acquired, now try file lock
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	remaining := max(time.Until(deadline), 0)
+	locker := filelock.New(lockPath, remaining)
+
+	fileUnlock, err := locker.Acquire()
 	if err != nil {
 		configMutex.Unlock()
-		return nil, fmt.Errorf("failed to open lock file: %w", err)
-	}
-
-	// Try to acquire file lock with remaining timeout
-	remaining := max(time.Until(deadline), 0)
-
-	if err := lockFile(file, remaining); err != nil {
-		file.Close()
-		configMutex.Unlock()
-		return nil, fmt.Errorf("failed to acquire file lock: %w", err)
+		return nil, err
 	}
 
 	// Return unlock function
 	return func() error {
-		unlockErr := unlockFile(file)
-		closeErr := file.Close()
+		unlockErr := fileUnlock()
 		configMutex.Unlock()
-		if unlockErr != nil {
-			return unlockErr
-		}
-		return closeErr
+		return unlockErr
 	}, nil
 }
 

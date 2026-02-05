@@ -18,6 +18,7 @@ import (
 
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/debug"
+	"code.gitea.io/tea/modules/httputil"
 	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
 	"github.com/charmbracelet/huh"
@@ -290,9 +291,9 @@ func doOAuthRefresh(l *Login) (*oauth2.Token, error) {
 	ctx := context.Background()
 
 	httpClient := &http.Client{
-		Transport: &http.Transport{
+		Transport: httputil.WrapTransport(&http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: l.Insecure},
-		},
+		}),
 	}
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
 
@@ -336,7 +337,7 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 		options = append([]gitea.ClientOption{gitea.SetGiteaVersion("")}, options...)
 	}
 
-	options = append(options, gitea.SetToken(l.Token), gitea.SetHTTPClient(httpClient))
+	options = append(options, gitea.SetToken(l.Token), gitea.SetHTTPClient(httpClient), gitea.SetUserAgent(httputil.UserAgent()))
 	if debug.IsDebug() {
 		options = append(options, gitea.SetDebugMode())
 	}

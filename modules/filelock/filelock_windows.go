@@ -3,7 +3,7 @@
 
 //go:build windows
 
-package config
+package filelock
 
 import (
 	"fmt"
@@ -36,7 +36,7 @@ func lockFile(file *os.File, timeout time.Duration) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("timeout waiting for file lock")
 		}
-		time.Sleep(fileLockPollInterval)
+		time.Sleep(FileLockPollInterval)
 	}
 }
 

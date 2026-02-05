@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"code.gitea.io/tea/modules/config"
+	"code.gitea.io/tea/modules/httputil"
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
 
@@ -196,15 +197,11 @@ func performBrowserOAuthFlow(opts OAuthOptions) (serverURL string, token *oauth2
 
 // createHTTPClient creates an HTTP client with optional insecure setting
 func createHTTPClient(insecure bool) *http.Client {
-	client := &http.Client{}
-	if insecure {
-		client = &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+	return &http.Client{
+		Transport: httputil.WrapTransport(&http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
+		}),
 	}
-	return client
 }
 
 // generateCodeVerifier creates a cryptographically random string for PKCE

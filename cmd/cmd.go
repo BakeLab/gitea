@@ -6,22 +6,10 @@ package cmd // import "code.gitea.io/tea"
 
 import (
 	"fmt"
-	"runtime"
-	"strings"
 
+	"code.gitea.io/tea/modules/version"
 	"github.com/urfave/cli/v3"
 )
-
-// Version holds the current tea version
-// If the Version is moved to another package or name changed,
-// build flags in .goreleaser.yaml or Makefile need to be updated accordingly.
-var Version = "development"
-
-// Tags holds the build tags used
-var Tags = ""
-
-// SDK holds the sdk version from go.mod
-var SDK = ""
 
 // App creates and returns a tea Command with all subcommands set
 // it was separated from main so docs can be generated for it
@@ -34,7 +22,7 @@ func App() *cli.Command {
 		Usage:              "command line tool to interact with Gitea",
 		Description:        appDescription,
 		CustomHelpTemplate: helpTemplate,
-		Version:            formatVersion(),
+		Version:            version.Format(),
 		Commands: []*cli.Command{
 			&CmdLogin,
 			&CmdLogout,
@@ -66,22 +54,6 @@ func App() *cli.Command {
 	}
 }
 
-func formatVersion() string {
-	version := fmt.Sprintf("Version: %s\tgolang: %s",
-		bold(Version),
-		strings.ReplaceAll(runtime.Version(), "go", ""))
-
-	if len(Tags) != 0 {
-		version += fmt.Sprintf("\tbuilt with: %s", strings.Replace(Tags, " ", ", ", -1))
-	}
-
-	if len(SDK) != 0 {
-		version += fmt.Sprintf("\tgo-sdk: %s", SDK)
-	}
-
-	return version
-}
-
 var appDescription = `tea is a productivity helper for Gitea. It can be used to manage most entities on
 one or multiple Gitea instances & provides local helpers like 'tea pr checkout'.
 
@@ -91,7 +63,7 @@ upstream repo. tea assumes that local git state is published on the remote befor
 doing operations with tea.    Configuration is persisted in $XDG_CONFIG_HOME/tea.
 `
 
-var helpTemplate = bold(`
+var helpTemplate = fmt.Sprintf("\033[1m%s\033[0m", `
    {{.Name}}{{if .Usage}} - {{.Usage}}{{end}}`) + `
    {{if .Version}}{{if not .HideVersion}}version {{.Version}}{{end}}{{end}}
 
@@ -133,7 +105,3 @@ var helpTemplate = bold(`
    If you find a bug or want to contribute, we'll welcome you at https://gitea.com/gitea/tea.
    More info about Gitea itself on https://about.gitea.com.
 `
-
-func bold(t string) string {
-	return fmt.Sprintf("\033[1m%s\033[0m", t)
-}

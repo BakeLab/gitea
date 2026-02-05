@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"code.gitea.io/tea/modules/config"
+	"code.gitea.io/tea/modules/httputil"
 )
 
 // Client provides direct HTTP access to Gitea API
@@ -30,9 +31,9 @@ func NewClient(login *config.Login) *Client {
 	}
 
 	httpClient := &http.Client{
-		Transport: &http.Transport{
+		Transport: httputil.WrapTransport(&http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: login.Insecure},
-		},
+		}),
 	}
 
 	return &Client{
