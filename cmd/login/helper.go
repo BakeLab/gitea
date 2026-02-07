@@ -93,7 +93,7 @@ var CmdLoginHelper = cli.Command{
 				}
 
 				if len(wants["host"]) == 0 {
-					log.Fatal("Require hostname")
+					log.Fatal("Hostname is required")
 				} else if len(wants["protocol"]) == 0 {
 					wants["protocol"] = "http"
 				}
@@ -113,7 +113,7 @@ var CmdLoginHelper = cli.Command{
 				}
 
 				if len(userConfig.Token) == 0 {
-					log.Fatal("User no set")
+					log.Fatal("User not set")
 				}
 
 				host, err := url.Parse(userConfig.URL)
