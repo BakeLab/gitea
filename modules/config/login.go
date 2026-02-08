@@ -120,6 +120,9 @@ func GetLoginByName(name string) *Login {
 
 // GetLoginByToken get login by token
 func GetLoginByToken(token string) *Login {
+	if token == "" {
+		return nil
+	}
 	err := loadConfig()
 	if err != nil {
 		log.Fatal(err)
