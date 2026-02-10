@@ -12,7 +12,7 @@ require (
 	github.com/charmbracelet/huh v0.8.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20260202080749-832bc9d6b9d2
 	github.com/enescakir/emoji v1.0.0
-	github.com/go-git/go-git/v5 v5.16.4
+	github.com/go-git/go-git/v5 v5.16.5
 	github.com/muesli/termenv v0.16.0
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
