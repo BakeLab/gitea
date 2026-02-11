@@ -17,11 +17,13 @@ var CmdActions = cli.Command{
 	Aliases:     []string{"action"},
 	Category:    catEntities,
 	Usage:       "Manage repository actions",
-	Description: "Manage repository actions including secrets, variables, and workflows",
+	Description: "Manage repository actions including secrets, variables, and workflow runs",
 	Action:      runActionsDefault,
 	Commands: []*cli.Command{
 		&actions.CmdActionsSecrets,
 		&actions.CmdActionsVariables,
+		&actions.CmdActionsRuns,
+		&actions.CmdActionsWorkflows,
 	},
 	Flags: []cli.Flag{
 		&cli.StringFlag{
@@ -40,7 +42,6 @@ var CmdActions = cli.Command{
 	},
 }
 
-func runActionsDefault(ctx stdctx.Context, cmd *cli.Command) error {
-	// Default to showing help
-	return cli.ShowCommandHelp(ctx, cmd, "actions")
+func runActionsDefault(_ stdctx.Context, cmd *cli.Command) error {
+	return cli.ShowSubcommandHelp(cmd)
 }

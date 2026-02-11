@@ -1389,6 +1389,102 @@ Delete an action variable
 
 **--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
 
+### runs, run
+
+Manage workflow runs
+
+#### list, ls
+
+List workflow runs
+
+**--actor**="": Filter by actor username (who triggered the run)
+
+**--branch**="": Filter by branch name
+
+**--event**="": Filter by event type (push, pull_request, etc.)
+
+**--limit, --lm**="": specify limit of items per page (default: 30)
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--page, -p**="": specify page (default: 1)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+**--since**="": Show runs started after this time (e.g., '24h', '2024-01-01')
+
+**--status**="": Filter by status (success, failure, pending, queued, in_progress, skipped, canceled)
+
+**--until**="": Show runs started before this time (e.g., '2024-01-01')
+
+#### view, show, get
+
+View workflow run details
+
+**--jobs**: show jobs table
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+#### delete, remove, rm, cancel
+
+Delete or cancel a workflow run
+
+**--confirm, -y**: confirm deletion without prompting
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+#### logs, log
+
+View workflow run logs
+
+**--follow, -f**: follow log output (like tail -f), requires job to be in progress
+
+**--job**="": specific job ID to view logs for (if omitted, shows all jobs)
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+### workflows, workflow
+
+Manage repository workflows
+
+#### list, ls
+
+List repository workflows
+
+**--limit, --lm**="": specify limit of items per page (default: 30)
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--page, -p**="": specify page (default: 1)
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
 ## webhooks, webhook, hooks, hook
 
 Manage webhooks
