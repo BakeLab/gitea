@@ -26,6 +26,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+replace github.com/muesli/termenv v0.16.0 => github.com/hramrach/termenv v0.16.1-0.20260212100405-cc30261f3059
+
 require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/42wim/httpsig v1.2.3 // indirect
