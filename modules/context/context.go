@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/huh"
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/urfave/cli/v3"
+	"golang.org/x/term"
 )
 
 var errNotAGiteaRepo = errors.New("No Gitea login found. You might want to specify --repo (and --login) to work outside of a repository")
@@ -46,6 +47,10 @@ func (ctx *TeaContext) GetRemoteRepoHTMLURL() string {
 // (no flags provided and stdout is a terminal)
 func (ctx *TeaContext) IsInteractiveMode() bool {
 	return ctx.Command.NumFlags() == 0
+}
+
+func shouldPromptFallbackLogin(login *config.Login, canPrompt bool) bool {
+	return login != nil && !login.Default && canPrompt
 }
 
 // InitCommand resolves the application context, and returns the active login, and if
@@ -131,7 +136,8 @@ and then run your command again.`)
 		}
 
 		// Only prompt for confirmation if the fallback login is not explicitly set as default
-		if !c.Login.Default {
+		canPrompt := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+		if shouldPromptFallbackLogin(c.Login, canPrompt) {
 			fallback := false
 			if err := huh.NewConfirm().
 				Title(fmt.Sprintf("NOTE: no gitea login detected, whether falling back to login '%s'?", c.Login.Name)).
@@ -143,6 +149,8 @@ and then run your command again.`)
 			if !fallback {
 				os.Exit(1)
 			}
+		} else if !c.Login.Default {
+			fmt.Fprintf(os.Stderr, "NOTE: no gitea login detected, falling back to login '%s' in non-interactive mode.\n", c.Login.Name)
 		}
 	}
 
