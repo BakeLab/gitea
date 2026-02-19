@@ -18,6 +18,7 @@ func GetLoginByEnvVar() *config.Login {
 	giteaToken := os.Getenv("GITEA_TOKEN")
 	githubToken := os.Getenv("GH_TOKEN")
 	giteaInstanceURL := os.Getenv("GITEA_INSTANCE_URL")
+	giteaInstanceSSHHost := os.Getenv("GITEA_INSTANCE_SSH_HOST")
 	instanceInsecure := os.Getenv("GITEA_INSTANCE_INSECURE")
 	insecure := false
 	if len(instanceInsecure) > 0 {
@@ -38,6 +39,7 @@ func GetLoginByEnvVar() *config.Login {
 		Name:              "GITEA_LOGIN_VIA_ENV",
 		URL:               giteaInstanceURL,
 		Token:             token,
+		SSHHost:           giteaInstanceSSHHost,
 		Insecure:          insecure,
 		SSHKey:            "",
 		SSHCertPrincipal:  "",

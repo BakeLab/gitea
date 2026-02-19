@@ -92,9 +92,19 @@ func InitCommand(cmd *cli.Command) *TeaContext {
 		}
 	}
 
+	// Create env login before repo context detection so it participates in remote URL matching
+	var extraLogins []config.Login
+	envLogin := GetLoginByEnvVar()
+	if envLogin != nil {
+		if _, err := utils.ValidateAuthenticationMethod(envLogin.URL, envLogin.Token, "", "", false, "", ""); err != nil {
+			log.Fatal(err.Error())
+		}
+		extraLogins = append(extraLogins, *envLogin)
+	}
+
 	// try to read local git repo & extract context: if repoFlag specifies a valid path, read repo in that dir,
 	// otherwise attempt PWD. if no repo is found, continue with default login
-	if c.LocalRepo, c.Login, c.RepoSlug, err = contextFromLocalRepo(repoPath, remoteFlag); err != nil {
+	if c.LocalRepo, c.Login, c.RepoSlug, err = contextFromLocalRepo(repoPath, remoteFlag, extraLogins); err != nil {
 		if err == errNotAGiteaRepo || err == gogit.ErrRepositoryNotExists {
 			// we can deal with that, commands needing the optional values use ctx.Ensure()
 		} else {
@@ -107,13 +117,9 @@ func InitCommand(cmd *cli.Command) *TeaContext {
 		c.RepoSlug = repoFlag
 	}
 
-	// override config user with env variable
-	envLogin := GetLoginByEnvVar()
+	// If env vars are set, always use the env login (but repo slug was already
+	// resolved by contextFromLocalRepo with the env login in the match list)
 	if envLogin != nil {
-		_, err := utils.ValidateAuthenticationMethod(envLogin.URL, envLogin.Token, "", "", false, "", "")
-		if err != nil {
-			log.Fatal(err.Error())
-		}
 		c.Login = envLogin
 	}
 

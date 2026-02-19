@@ -12,7 +12,7 @@ import (
 )
 
 // contextFromLocalRepo discovers login & repo slug from the default branch remote of the given local repo
-func contextFromLocalRepo(repoPath, remoteValue string) (*git.TeaRepo, *config.Login, string, error) {
+func contextFromLocalRepo(repoPath, remoteValue string, extraLogins []config.Login) (*git.TeaRepo, *config.Login, string, error) {
 	repo, err := git.RepoFromPath(repoPath)
 	if err != nil {
 		return nil, nil, "", err
@@ -68,6 +68,10 @@ func contextFromLocalRepo(repoPath, remoteValue string) (*git.TeaRepo, *config.L
 	logins, err := config.GetLogins()
 	if err != nil {
 		return repo, nil, "", err
+	}
+	// Prepend extra logins (e.g. from env vars) so they are matched first
+	if len(extraLogins) > 0 {
+		logins = append(extraLogins, logins...)
 	}
 	for _, u := range remoteConfig.URLs {
 		if l, p, err := MatchLogins(u, logins); err == nil {

@@ -31,16 +31,36 @@ func Test_MatchLogins(t *testing.T) {
 			expectedRepoPath: "owner/repo",
 			hasError:         false,
 		},
+		{
+			remoteURL:        "git@custom-ssh.example.com:owner/repo.git",
+			logins:           []config.Login{{Name: "env", URL: "https://gitea.example.com", SSHHost: "custom-ssh.example.com"}},
+			matchedLoginName: "env",
+			expectedRepoPath: "owner/repo",
+			hasError:         false,
+		},
+		{
+			remoteURL: "https://gitea.example.com/owner/repo.git",
+			logins: []config.Login{
+				{Name: "env", URL: "https://gitea.example.com"},
+				{Name: "config", URL: "https://gitea.example.com"},
+			},
+			matchedLoginName: "env",
+			expectedRepoPath: "owner/repo",
+			hasError:         false,
+		},
 	}
 
 	for _, kase := range kases {
 		t.Run(kase.remoteURL, func(t *testing.T) {
-			_, repoPath, err := MatchLogins(kase.remoteURL, kase.logins)
+			login, repoPath, err := MatchLogins(kase.remoteURL, kase.logins)
 			if (err != nil) != kase.hasError {
 				t.Errorf("Expected error: %v, got: %v", kase.hasError, err)
 			}
 			if repoPath != kase.expectedRepoPath {
 				t.Errorf("Expected repo path: %s, got: %s", kase.expectedRepoPath, repoPath)
+			}
+			if !kase.hasError && login.Name != kase.matchedLoginName {
+				t.Errorf("Expected login name: %s, got: %s", kase.matchedLoginName, login.Name)
 			}
 		})
 	}
