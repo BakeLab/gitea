@@ -59,8 +59,10 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 		return fmt.Errorf("login name '%s' has already been used", login.Name)
 	}
 	// ... if we already use this token
-	if login := config.GetLoginByToken(token); login != nil {
-		return fmt.Errorf("token already been used, delete login '%s' first", login.Name)
+	if shouldCheckTokenUniqueness(token, sshAgent, sshKey, sshCertPrincipal, sshKeyFingerprint) {
+		if login := config.GetLoginByToken(token); login != nil {
+			return fmt.Errorf("token already been used, delete login '%s' first", login.Name)
+		}
 	}
 
 	serverURL, err := utils.ValidateAuthenticationMethod(
@@ -139,6 +141,14 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 	}
 
 	return nil
+}
+
+func shouldCheckTokenUniqueness(token string, sshAgent bool, sshKey, sshCertPrincipal, sshKeyFingerprint string) bool {
+	if sshAgent || sshKey != "" || sshCertPrincipal != "" || sshKeyFingerprint != "" {
+		return false
+	}
+
+	return true
 }
 
 // generateToken creates a new token when given BasicAuth credentials
