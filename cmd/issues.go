@@ -81,6 +81,9 @@ func runIssues(ctx stdctx.Context, cmd *cli.Command) error {
 
 func runIssueDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
 	ctx := context.InitCommand(cmd)
+	if ctx.IsSet("owner") {
+		ctx.Owner = ctx.String("owner")
+	}
 	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
 
 	idx, err := utils.ArgToIndex(index)

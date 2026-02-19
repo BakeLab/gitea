@@ -122,6 +122,13 @@ func reloadConfigFromDisk() error {
 	return nil
 }
 
+// SetConfigForTesting replaces the in-memory config and marks it as loaded.
+// This allows tests to inject config without relying on file-based loading.
+func SetConfigForTesting(cfg LocalConfig) {
+	loadConfigOnce.Do(func() {}) // ensure sync.Once is spent
+	config = cfg
+}
+
 // saveConfigUnsafe saves config to file without acquiring a lock.
 // Caller must hold the config lock.
 func saveConfigUnsafe() error {

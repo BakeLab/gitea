@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"bytes"
+	stdctx "context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
+	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/context"
 	"github.com/stretchr/testify/assert"
@@ -261,4 +263,79 @@ func TestRunIssueDetailAsJSON(t *testing.T) {
 			assert.Equal(t, expected, actual, "Expected structs differ from expected one")
 		})
 	}
+}
+
+func TestRunIssueDetailUsesOwnerFlag(t *testing.T) {
+	issueIndex := int64(12)
+	expectedOwner := "overrideOwner"
+	expectedRepo := "overrideRepo"
+	issue := gitea.Issue{
+		ID:      99,
+		Index:   issueIndex,
+		Title:   "Owner override test",
+		State:   gitea.StateOpen,
+		Created: time.Date(2025, 11, 1, 10, 0, 0, 0, time.UTC),
+		Poster: &gitea.User{
+			UserName: "tester",
+		},
+		HTMLURL: "https://example.test/issues/12",
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", expectedOwner, expectedRepo, issueIndex):
+			jsonIssue, err := json.Marshal(issue)
+			require.NoError(t, err, "Testing setup failed: failed to marshal issue")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(jsonIssue)
+			require.NoError(t, err, "Testing setup failed: failed to write issue")
+		case fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/reactions", expectedOwner, expectedRepo, issueIndex):
+			jsonReactions, err := json.Marshal([]gitea.Reaction{})
+			require.NoError(t, err, "Testing setup failed: failed to marshal reactions")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(jsonReactions)
+			require.NoError(t, err, "Testing setup failed: failed to write reactions")
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	config.SetConfigForTesting(config.LocalConfig{
+		Logins: []config.Login{{
+			Name:    "testLogin",
+			URL:     server.URL,
+			Token:   "token",
+			User:    "loginUser",
+			Default: true,
+		}},
+	})
+
+	cmd := cli.Command{
+		Name: "issues",
+		Flags: []cli.Flag{
+			&flags.LoginFlag,
+			&flags.RepoFlag,
+			&flags.RemoteFlag,
+			&flags.OutputFlag,
+			&cli.StringFlag{Name: "owner"},
+			&cli.BoolFlag{Name: "comments"},
+		},
+	}
+	var outBuffer bytes.Buffer
+	var errBuffer bytes.Buffer
+	cmd.Writer = &outBuffer
+	cmd.ErrWriter = &errBuffer
+	require.NoError(t, cmd.Set("login", "testLogin"))
+	require.NoError(t, cmd.Set("repo", expectedRepo))
+	require.NoError(t, cmd.Set("owner", expectedOwner))
+	require.NoError(t, cmd.Set("output", "json"))
+	require.NoError(t, cmd.Set("comments", "false"))
+
+	err := runIssueDetail(stdctx.Background(), &cmd, fmt.Sprintf("%d", issueIndex))
+	require.NoError(t, err, "Expected runIssueDetail to succeed")
 }
