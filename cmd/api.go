@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"bytes"
 	stdctx "context"
 	"encoding/json"
 	"fmt"
@@ -20,23 +21,11 @@ import (
 	"golang.org/x/term"
 )
 
-// CmdApi represents the api command
-var CmdApi = cli.Command{
-	Name:  "api",
-	Usage: "Make an authenticated API request",
-	Description: `Makes an authenticated HTTP request to the Gitea API and prints the response.
-
-The endpoint argument is the path to the API endpoint, which will be prefixed
-with /api/v1/ if it doesn't start with /api/ or http(s)://.
-
-Placeholders like {owner} and {repo} in the endpoint will be replaced with
-values from the current repository context.
-
-Use -f for string fields and -F for typed fields (numbers, booleans, null).
-With -F, prefix value with @ to read from file (@- for stdin).`,
-	ArgsUsage: "<endpoint>",
-	Action:    runApi,
-	Flags: append([]cli.Flag{
+// apiFlags returns a fresh set of flag instances for the api command.
+// This is a factory function so that each invocation gets independent flag
+// objects, avoiding shared hasBeenSet state across tests.
+func apiFlags() []cli.Flag {
+	return []cli.Flag{
 		&cli.StringFlag{
 			Name:    "method",
 			Aliases: []string{"X"},
@@ -58,6 +47,11 @@ With -F, prefix value with @ to read from file (@- for stdin).`,
 			Aliases: []string{"H"},
 			Usage:   "Add a custom header (key:value)",
 		},
+		&cli.StringFlag{
+			Name:    "data",
+			Aliases: []string{"d"},
+			Usage:   "Raw JSON request body (use @file to read from file, @- for stdin)",
+		},
 		&cli.BoolFlag{
 			Name:    "include",
 			Aliases: []string{"i"},
@@ -68,7 +62,39 @@ With -F, prefix value with @ to read from file (@- for stdin).`,
 			Aliases: []string{"o"},
 			Usage:   "Write response body to file instead of stdout (use '-' for stdout)",
 		},
-	}, flags.LoginRepoFlags...),
+	}
+}
+
+// CmdApi represents the api command
+var CmdApi = cli.Command{
+	Name:                      "api",
+	Category:                  catHelpers,
+	DisableSliceFlagSeparator: true,
+	Usage:                     "Make an authenticated API request",
+	Description: `Makes an authenticated HTTP request to the Gitea API and prints the response.
+
+The endpoint argument is the path to the API endpoint, which will be prefixed
+with /api/v1/ if it doesn't start with /api/ or http(s)://.
+
+Placeholders like {owner} and {repo} in the endpoint will be replaced with
+values from the current repository context.
+
+Use -f for string fields and -F for typed fields (numbers, booleans, null).
+With -F, prefix value with @ to read from file (@- for stdin). Values starting
+with [ or { are parsed as JSON arrays/objects. Wrap values in quotes to force
+string type (e.g., -F key="null" for literal string "null").
+
+Use -d/--data to send a raw JSON body. Use @file to read from a file, or @-
+to read from stdin. The -d flag cannot be combined with -f or -F.
+
+When a request body is provided via -f, -F, or -d, the method defaults to POST
+unless explicitly set with -X/--method.
+
+Note: if your endpoint contains ? or &, quote it to prevent shell expansion
+(e.g., '/repos/{owner}/{repo}/issues?state=open').`,
+	ArgsUsage: "<endpoint>",
+	Action:    runApi,
+	Flags:     append(apiFlags(), flags.LoginRepoFlags...),
 }
 
 func runApi(_ stdctx.Context, cmd *cli.Command) error {
@@ -97,8 +123,39 @@ func runApi(_ stdctx.Context, cmd *cli.Command) error {
 	var body io.Reader
 	stringFields := cmd.StringSlice("field")
 	typedFields := cmd.StringSlice("Field")
+	dataRaw := cmd.String("data")
 
-	if len(stringFields) > 0 || len(typedFields) > 0 {
+	if dataRaw != "" && (len(stringFields) > 0 || len(typedFields) > 0) {
+		return fmt.Errorf("--data/-d cannot be combined with --field/-f or --Field/-F")
+	}
+
+	if dataRaw != "" {
+		var dataBytes []byte
+		var dataSource string
+		if strings.HasPrefix(dataRaw, "@") {
+			filename := dataRaw[1:]
+			var err error
+			if filename == "-" {
+				dataBytes, err = io.ReadAll(os.Stdin)
+				dataSource = "stdin"
+			} else {
+				dataBytes, err = os.ReadFile(filename)
+				dataSource = filename
+			}
+			if err != nil {
+				return fmt.Errorf("failed to read %q: %w", dataRaw, err)
+			}
+		} else {
+			dataBytes = []byte(dataRaw)
+		}
+		if !json.Valid(dataBytes) {
+			if dataSource != "" {
+				return fmt.Errorf("--data/-d value from %s is not valid JSON", dataSource)
+			}
+			return fmt.Errorf("--data/-d value is not valid JSON")
+		}
+		body = bytes.NewReader(dataBytes)
+	} else if len(stringFields) > 0 || len(typedFields) > 0 {
 		bodyMap := make(map[string]any)
 
 		// Process string fields (-f)
@@ -107,7 +164,14 @@ func runApi(_ stdctx.Context, cmd *cli.Command) error {
 			if len(parts) != 2 {
 				return fmt.Errorf("invalid field format: %q (expected key=value)", f)
 			}
-			bodyMap[parts[0]] = parts[1]
+			key := parts[0]
+			if key == "" {
+				return fmt.Errorf("field key cannot be empty in %q", f)
+			}
+			if _, exists := bodyMap[key]; exists {
+				return fmt.Errorf("duplicate field key %q", key)
+			}
+			bodyMap[key] = parts[1]
 		}
 
 		// Process typed fields (-F)
@@ -117,6 +181,12 @@ func runApi(_ stdctx.Context, cmd *cli.Command) error {
 				return fmt.Errorf("invalid field format: %q (expected key=value)", f)
 			}
 			key := parts[0]
+			if key == "" {
+				return fmt.Errorf("field key cannot be empty in %q", f)
+			}
+			if _, exists := bodyMap[key]; exists {
+				return fmt.Errorf("duplicate field key %q", key)
+			}
 			value := parts[1]
 
 			parsedValue, err := parseTypedValue(value)
@@ -130,12 +200,19 @@ func runApi(_ stdctx.Context, cmd *cli.Command) error {
 		if err != nil {
 			return fmt.Errorf("failed to encode request body: %w", err)
 		}
-		body = strings.NewReader(string(bodyBytes))
+		body = bytes.NewReader(bodyBytes)
 	}
 
 	// Create API client and make request
 	client := api.NewClient(ctx.Login)
 	method := strings.ToUpper(cmd.String("method"))
+	if !cmd.IsSet("method") {
+		if body != nil {
+			method = "POST"
+		} else {
+			method = "GET"
+		}
+	}
 
 	resp, err := client.Do(method, endpoint, body, headers)
 	if err != nil {
@@ -193,12 +270,16 @@ func runApi(_ stdctx.Context, cmd *cli.Command) error {
 // parseTypedValue parses a value for -F flag, handling:
 // - @filename: read content from file
 // - @-: read content from stdin
+// - "quoted": literal string (prevents type parsing)
 // - true/false: boolean
 // - null: nil
 // - numbers: int or float
+// - []/{}:  JSON arrays/objects
 // - otherwise: string
 func parseTypedValue(value string) (any, error) {
-	// Handle file references
+	// Handle file references.
+	// Note: if multiple fields use @- (stdin), only the first will get data;
+	// subsequent reads will return empty since stdin is consumed once.
 	if strings.HasPrefix(value, "@") {
 		filename := value[1:]
 		var content []byte
@@ -213,6 +294,16 @@ func parseTypedValue(value string) (any, error) {
 			return nil, fmt.Errorf("failed to read %q: %w", value, err)
 		}
 		return strings.TrimSuffix(string(content), "\n"), nil
+	}
+
+	// Handle quoted strings (literal strings, no type parsing).
+	// Uses strconv.Unquote so escape sequences like \" are handled correctly.
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		unquoted, err := strconv.Unquote(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid quoted string %s: %w", value, err)
+		}
+		return unquoted, nil
 	}
 
 	// Handle null
@@ -236,6 +327,14 @@ func parseTypedValue(value string) (any, error) {
 	// Handle floats
 	if f, err := strconv.ParseFloat(value, 64); err == nil {
 		return f, nil
+	}
+
+	// Handle JSON arrays and objects
+	if len(value) > 0 && (value[0] == '[' || value[0] == '{') {
+		var jsonVal any
+		if err := json.Unmarshal([]byte(value), &jsonVal); err == nil {
+			return jsonVal, nil
+		}
 	}
 
 	// Default to string

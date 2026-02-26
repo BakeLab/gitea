@@ -1819,6 +1819,8 @@ Make an authenticated API request
 
 **--Field, -F**="": Add a typed field to the request body (key=value, @file, or @- for stdin)
 
+**--data, -d**="": Raw JSON request body (use @file to read from file, @- for stdin)
+
 **--field, -f**="": Add a string field to the request body (key=value)
 
 **--header, -H**="": Add a custom header (key:value)
