@@ -1,6 +1,6 @@
 module code.gitea.io/tea
 
-go 1.25
+go 1.26
 
 require (
 	code.gitea.io/gitea-vet v0.2.3
