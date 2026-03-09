@@ -15,7 +15,7 @@ import (
 	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/term"

@@ -21,7 +21,7 @@ import (
 	"code.gitea.io/tea/modules/httputil"
 	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	"golang.org/x/oauth2"
 )
 

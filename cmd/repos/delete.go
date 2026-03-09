@@ -10,7 +10,7 @@ import (
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	"github.com/urfave/cli/v3"
 )
 

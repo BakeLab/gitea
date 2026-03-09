@@ -4,20 +4,22 @@
 package theme
 
 import (
-	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/compat"
 )
 
-var giteaTheme = func() *huh.Theme {
-	theme := huh.ThemeCharm()
+type myTheme struct {}
 
-	title := lipgloss.AdaptiveColor{Light: "#02BA84", Dark: "#02BF87"}
+func (t myTheme) Theme (isDark bool) *huh.Styles {
+	theme := huh.ThemeCharm(isDark)
+
+	title := compat.AdaptiveColor{Light: lipgloss.Color("#02BA84"), Dark: lipgloss.Color("#02BF87")}
 	theme.Focused.Title = theme.Focused.Title.Foreground(title).Bold(true)
 	theme.Blurred = theme.Focused
 	return theme
-}()
-
-// GetTheme returns the Gitea theme for Huh
-func GetTheme() *huh.Theme {
-	return giteaTheme
+}
+func GetTheme() myTheme {
+	var t myTheme
+	return t
 }

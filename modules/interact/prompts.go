@@ -11,7 +11,7 @@ import (
 
 	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 )
 
 // PromptPassword asks for a password and blocks until input was made.

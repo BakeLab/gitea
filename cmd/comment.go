@@ -19,7 +19,7 @@ import (
 	"code.gitea.io/tea/modules/utils"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	"github.com/urfave/cli/v3"
 )
 

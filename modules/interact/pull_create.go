@@ -9,7 +9,7 @@ import (
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/theme"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 )
 
 // CreatePull interactively creates a PR

@@ -13,7 +13,7 @@ import (
 	"code.gitea.io/tea/modules/print"
 	"code.gitea.io/tea/modules/theme"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	"golang.org/x/term"
 )
 

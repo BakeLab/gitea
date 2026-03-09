@@ -12,7 +12,7 @@ import (
 	"code.gitea.io/tea/modules/theme"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 )
 
 // CreateMilestone interactively creates a milestone

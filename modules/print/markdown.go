@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/charmbracelet/glamour"
+	"charm.land/glamour/v2"
 	"golang.org/x/term"
 )
 
@@ -15,19 +15,23 @@ import (
 // If the input could not be parsed, it is printed unformatted, the error
 // is returned anyway.
 func outputMarkdown(markdown string, baseURL string) error {
-	var styleOption glamour.TermRendererOption
+	var renderer *glamour.TermRenderer
+	var err error
 	if IsInteractive() {
-		styleOption = glamour.WithAutoStyle()
+		renderer, err = glamour.NewTermRenderer(
+			glamour.WithBaseURL(baseURL),
+			glamour.WithPreservedNewLines(),
+			glamour.WithWordWrap(getWordWrap()),
+		)
 	} else {
-		styleOption = glamour.WithStandardStyle("notty")
+		renderer, err = glamour.NewTermRenderer(
+			glamour.WithStandardStyle("notty"),
+			glamour.WithBaseURL(baseURL),
+			glamour.WithPreservedNewLines(),
+			glamour.WithWordWrap(getWordWrap()),
+		)
 	}
 
-	renderer, err := glamour.NewTermRenderer(
-		styleOption,
-		glamour.WithBaseURL(baseURL),
-		glamour.WithPreservedNewLines(),
-		glamour.WithWordWrap(getWordWrap()),
-	)
 	if err != nil {
 		fmt.Print(markdown)
 		return err
