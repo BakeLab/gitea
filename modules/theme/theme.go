@@ -20,6 +20,7 @@ func (t myTheme) Theme(isDark bool) *huh.Styles {
 	return theme
 }
 
+// GetTheme returns default theme
 func GetTheme() myTheme {
 	var t myTheme
 	return t
