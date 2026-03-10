@@ -9,9 +9,9 @@ import (
 	"charm.land/lipgloss/v2/compat"
 )
 
-type myTheme struct {}
+type myTheme struct{}
 
-func (t myTheme) Theme (isDark bool) *huh.Styles {
+func (t myTheme) Theme(isDark bool) *huh.Styles {
 	theme := huh.ThemeCharm(isDark)
 
 	title := compat.AdaptiveColor{Light: lipgloss.Color("#02BA84"), Dark: lipgloss.Color("#02BF87")}
@@ -19,6 +19,7 @@ func (t myTheme) Theme (isDark bool) *huh.Styles {
 	theme.Blurred = theme.Focused
 	return theme
 }
+
 func GetTheme() myTheme {
 	var t myTheme
 	return t

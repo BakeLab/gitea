@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"strings"
 
+	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/utils"
 
-	"code.gitea.io/sdk/gitea"
 	"charm.land/huh/v2"
 )
 

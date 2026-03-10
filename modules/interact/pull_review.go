@@ -8,12 +8,12 @@ import (
 	"os"
 	"strconv"
 
+	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/task"
 	"code.gitea.io/tea/modules/theme"
 
-	"code.gitea.io/sdk/gitea"
 	"charm.land/huh/v2"
 )
 

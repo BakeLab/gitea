@@ -10,6 +10,7 @@ import (
 	"io"
 	"strings"
 
+	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/context"
@@ -18,7 +19,6 @@ import (
 	"code.gitea.io/tea/modules/theme"
 	"code.gitea.io/tea/modules/utils"
 
-	"code.gitea.io/sdk/gitea"
 	"charm.land/huh/v2"
 	"github.com/urfave/cli/v3"
 )
