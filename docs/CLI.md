@@ -1199,6 +1199,32 @@ Delete an existing repository
 
 **--owner, -O**="": owner of the repo
 
+### edit, e
+
+Edit repository properties
+
+**--archived**="": Set archived [true/false]
+
+**--default-branch**="": Set default branch
+
+**--description, --desc**="": New description of the repository
+
+**--login, -l**="": Use a different Gitea Login. Optional
+
+**--name**="": New name of the repository
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--private**="": Set private [true/false]
+
+**--remote, -R**="": Discover Gitea login from remote. Optional
+
+**--repo, -r**="": Override local repository path or gitea repository slug to interact with. Optional
+
+**--template**="": Set template [true/false]
+
+**--website**="": New website URL of the repository
+
 ## branches, branch, b
 
 Consult branches
