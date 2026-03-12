@@ -6,6 +6,7 @@ package repos
 import (
 	stdctx "context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -63,11 +64,10 @@ func runReposSearch(_ stdctx.Context, cmd *cli.Command) error {
 	var ownerID int64
 	if teaCmd.IsSet("owner") {
 		// test if owner is an organization
-		org, _, err := client.GetOrg(teaCmd.String("owner"))
+		org, resp, err := client.GetOrg(teaCmd.String("owner"))
 		if err != nil {
-			// HACK: the client does not return a response on 404, so we can't check res.StatusCode
-			if err.Error() != "404 Not Found" {
-				return fmt.Errorf("Could not find owner: %s", err)
+			if resp == nil || resp.StatusCode != http.StatusNotFound {
+				return fmt.Errorf("Could not find owner: %w", err)
 			}
 
 			// if owner is no org, its a user

@@ -1007,6 +1007,8 @@ Show repository details
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
 
+**--owner, -O**="": List repos of a specific owner (org or user)
+
 **--page, -p**="": specify page (default: 1)
 
 **--starred, -s**: List your starred repos instead
@@ -1028,6 +1030,8 @@ List repositories you have access to
 **--login, -l**="": Use a different Gitea Login. Optional
 
 **--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
+**--owner, -O**="": List repos of a specific owner (org or user)
 
 **--page, -p**="": specify page (default: 1)
 

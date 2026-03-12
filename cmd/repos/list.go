@@ -5,6 +5,8 @@ package repos
 
 import (
 	stdctx "context"
+	"fmt"
+	"net/http"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
@@ -31,6 +33,12 @@ var CmdReposListFlags = append([]cli.Flag{
 		Aliases:  []string{"s"},
 		Required: false,
 		Usage:    "List your starred repos instead",
+	},
+	&cli.StringFlag{
+		Name:     "owner",
+		Aliases:  []string{"O"},
+		Required: false,
+		Usage:    "List repos of a specific owner (org or user)",
 	},
 	repoFieldsFlag,
 	&typeFilterFlag,
@@ -59,7 +67,26 @@ func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	var rps []*gitea.Repository
-	if teaCmd.Bool("starred") {
+	if owner := teaCmd.String("owner"); owner != "" {
+		var err error
+		_, resp, orgErr := client.GetOrg(owner)
+		if orgErr != nil {
+			if resp == nil || resp.StatusCode != http.StatusNotFound {
+				return fmt.Errorf("could not find owner: %w", orgErr)
+			}
+			// not an org, treat as user
+			rps, _, err = client.ListUserRepos(owner, gitea.ListReposOptions{
+				ListOptions: flags.GetListOptions(),
+			})
+		} else {
+			rps, _, err = client.ListOrgRepos(owner, gitea.ListOrgReposOptions{
+				ListOptions: flags.GetListOptions(),
+			})
+		}
+		if err != nil {
+			return err
+		}
+	} else if teaCmd.Bool("starred") {
 		user, _, err := client.GetMyUserInfo()
 		if err != nil {
 			return err
