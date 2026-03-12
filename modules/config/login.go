@@ -33,11 +33,14 @@ const TokenRefreshThreshold = 5 * time.Minute
 // DefaultClientID is the default OAuth2 client ID included in most Gitea instances
 const DefaultClientID = "d57cb8c4-630c-4168-8324-ec79935e18d4"
 
+// AuthMethodOAuth marks a login as using OAuth with secure credential storage.
+const AuthMethodOAuth = "oauth"
+
 // Login represents a login to a gitea server, you even could add multiple logins for one gitea server
 type Login struct {
 	Name    string `yaml:"name"`
 	URL     string `yaml:"url"`
-	Token   string `yaml:"token"`
+	Token   string `yaml:"token,omitempty"`
 	Default bool   `yaml:"default"`
 	SSHHost string `yaml:"ssh_host"`
 	// optional path to the private key
@@ -52,10 +55,66 @@ type Login struct {
 	User string `yaml:"user"`
 	// Created is auto created unix timestamp
 	Created int64 `yaml:"created"`
+	// AuthMethod indicates the authentication method ("oauth" for OAuth with credstore)
+	AuthMethod string `yaml:"auth_method,omitempty"`
 	// RefreshToken is used to renew the access token when it expires
-	RefreshToken string `yaml:"refresh_token"`
+	RefreshToken string `yaml:"refresh_token,omitempty"`
 	// TokenExpiry is when the token expires (unix timestamp)
-	TokenExpiry int64 `yaml:"token_expiry"`
+	TokenExpiry int64 `yaml:"token_expiry,omitempty"`
+}
+
+// IsOAuth returns true if this login uses OAuth with secure credential storage.
+func (l *Login) IsOAuth() bool {
+	return l.AuthMethod == AuthMethodOAuth
+}
+
+// loadOAuthToken loads the OAuth token from credstore, returning nil if
+// this is not an OAuth login or if the load fails (caller should fallback).
+func (l *Login) loadOAuthToken() *OAuthToken {
+	if !l.IsOAuth() {
+		return nil
+	}
+	tok, err := LoadOAuthToken(l.Name)
+	if err != nil {
+		return nil
+	}
+	return &OAuthToken{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: tok.RefreshToken,
+		ExpiresAt:    tok.ExpiresAt,
+	}
+}
+
+// OAuthToken holds the token fields loaded from credstore.
+type OAuthToken struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    time.Time
+}
+
+// GetAccessToken returns the effective access token.
+// For OAuth logins, reads from credstore. For others, returns l.Token directly.
+func (l *Login) GetAccessToken() string {
+	if tok := l.loadOAuthToken(); tok != nil {
+		return tok.AccessToken
+	}
+	return l.Token
+}
+
+// GetRefreshToken returns the refresh token.
+func (l *Login) GetRefreshToken() string {
+	if tok := l.loadOAuthToken(); tok != nil {
+		return tok.RefreshToken
+	}
+	return l.RefreshToken
+}
+
+// GetTokenExpiry returns the token expiry time.
+func (l *Login) GetTokenExpiry() time.Time {
+	if tok := l.loadOAuthToken(); tok != nil {
+		return tok.ExpiresAt
+	}
+	return time.Unix(l.TokenExpiry, 0)
 }
 
 // GetLogins return all login available by config
@@ -180,7 +239,13 @@ func DeleteLogin(name string) error {
 			return fmt.Errorf("can not delete login '%s', does not exist", name)
 		}
 
+		isOAuth := config.Logins[idx].IsOAuth()
 		config.Logins = append(config.Logins[:idx], config.Logins[idx+1:]...)
+
+		// Clean up credstore tokens for OAuth logins
+		if isOAuth {
+			_ = DeleteOAuthToken(name)
+		}
 
 		return saveConfigUnsafe()
 	})
@@ -207,6 +272,9 @@ func AddLogin(login *Login) error {
 // SaveLoginTokens updates the token fields for an existing login.
 // This is used after browser-based re-authentication to save new tokens.
 func SaveLoginTokens(login *Login) error {
+	if login.IsOAuth() {
+		return SaveOAuthToken(login.Name, login.GetAccessToken(), login.GetRefreshToken(), login.GetTokenExpiry())
+	}
 	return withConfigLock(func() error {
 		for i, l := range config.Logins {
 			if strings.EqualFold(l.Name, login.Name) {
@@ -223,11 +291,21 @@ func SaveLoginTokens(login *Login) error {
 // RefreshOAuthTokenIfNeeded refreshes the OAuth token if it's expired or near expiry.
 // Returns nil without doing anything if no refresh is needed.
 func (l *Login) RefreshOAuthTokenIfNeeded() error {
+	// Load once to avoid multiple credstore reads
+	if tok := l.loadOAuthToken(); tok != nil {
+		if tok.RefreshToken == "" || tok.ExpiresAt.IsZero() {
+			return nil
+		}
+		if time.Now().Add(TokenRefreshThreshold).After(tok.ExpiresAt) {
+			return l.RefreshOAuthToken()
+		}
+		return nil
+	}
+	// Non-OAuth path: use YAML fields
 	if l.RefreshToken == "" || l.TokenExpiry == 0 {
 		return nil
 	}
-	expiryTime := time.Unix(l.TokenExpiry, 0)
-	if time.Now().Add(TokenRefreshThreshold).After(expiryTime) {
+	if time.Now().Add(TokenRefreshThreshold).After(time.Unix(l.TokenExpiry, 0)) {
 		return l.RefreshOAuthToken()
 	}
 	return nil
@@ -238,7 +316,7 @@ func (l *Login) RefreshOAuthTokenIfNeeded() error {
 // Uses double-checked locking to avoid unnecessary refresh calls when multiple
 // processes race to refresh the same token.
 func (l *Login) RefreshOAuthToken() error {
-	if l.RefreshToken == "" {
+	if l.GetRefreshToken() == "" {
 		return fmt.Errorf("no refresh token available")
 	}
 
@@ -248,13 +326,17 @@ func (l *Login) RefreshOAuthToken() error {
 		for i, login := range config.Logins {
 			if login.Name == l.Name {
 				// Check if token was refreshed by another process
-				if login.TokenExpiry != l.TokenExpiry && login.TokenExpiry > 0 {
-					expiryTime := time.Unix(login.TokenExpiry, 0)
-					if time.Now().Add(TokenRefreshThreshold).Before(expiryTime) {
+				currentExpiry := login.GetTokenExpiry()
+				ourExpiry := l.GetTokenExpiry()
+				if currentExpiry != ourExpiry && !currentExpiry.IsZero() {
+					if time.Now().Add(TokenRefreshThreshold).Before(currentExpiry) {
 						// Token was refreshed by another process, update our copy
-						l.Token = login.Token
-						l.RefreshToken = login.RefreshToken
-						l.TokenExpiry = login.TokenExpiry
+						if !login.IsOAuth() {
+							l.Token = login.Token
+							l.RefreshToken = login.RefreshToken
+							l.TokenExpiry = login.TokenExpiry
+						}
+						// For OAuth logins, credstore already has the latest tokens
 						return nil
 					}
 				}
@@ -265,7 +347,12 @@ func (l *Login) RefreshOAuthToken() error {
 					return err
 				}
 
-				// Update login with new token information
+				if l.IsOAuth() {
+					// Save tokens to credstore; no YAML changes needed
+					return SaveOAuthTokenFromOAuth2(l.Name, newToken, l)
+				}
+
+				// Update login with new token information (legacy path)
 				l.Token = newToken.AccessToken
 				if newToken.RefreshToken != "" {
 					l.RefreshToken = newToken.RefreshToken
@@ -273,8 +360,6 @@ func (l *Login) RefreshOAuthToken() error {
 				if !newToken.Expiry.IsZero() {
 					l.TokenExpiry = newToken.Expiry.Unix()
 				}
-
-				// Update in config slice and save
 				config.Logins[i] = *l
 				return saveConfigUnsafe()
 			}
@@ -286,10 +371,22 @@ func (l *Login) RefreshOAuthToken() error {
 
 // doOAuthRefresh performs the actual OAuth token refresh API call.
 func doOAuthRefresh(l *Login) (*oauth2.Token, error) {
+	// Build current token from credstore (single load) or YAML fields
+	var accessToken, refreshToken string
+	var expiry time.Time
+	if tok := l.loadOAuthToken(); tok != nil {
+		accessToken = tok.AccessToken
+		refreshToken = tok.RefreshToken
+		expiry = tok.ExpiresAt
+	} else {
+		accessToken = l.Token
+		refreshToken = l.RefreshToken
+		expiry = time.Unix(l.TokenExpiry, 0)
+	}
 	currentToken := &oauth2.Token{
-		AccessToken:  l.Token,
-		RefreshToken: l.RefreshToken,
-		Expiry:       time.Unix(l.TokenExpiry, 0),
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		Expiry:       expiry,
 	}
 
 	ctx := context.Background()
@@ -341,7 +438,7 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 		options = append([]gitea.ClientOption{gitea.SetGiteaVersion("")}, options...)
 	}
 
-	options = append(options, gitea.SetToken(l.Token), gitea.SetHTTPClient(httpClient), gitea.SetUserAgent(httputil.UserAgent()))
+	options = append(options, gitea.SetToken(l.GetAccessToken()), gitea.SetHTTPClient(httpClient), gitea.SetUserAgent(httputil.UserAgent()))
 	if debug.IsDebug() {
 		options = append(options, gitea.SetDebugMode())
 	}

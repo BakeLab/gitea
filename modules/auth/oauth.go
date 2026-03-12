@@ -377,20 +377,15 @@ func createLoginFromToken(name, serverURL string, token *oauth2.Token, insecure 
 		}
 	}
 
-	// Create login object
+	// Create login object with OAuth auth method
 	login := config.Login{
 		Name:         name,
 		URL:          serverURL,
-		Token:        token.AccessToken,
-		RefreshToken: token.RefreshToken,
+		Token:        token.AccessToken, // temporarily set for Client() validation
+		AuthMethod:   config.AuthMethodOAuth,
 		Insecure:     insecure,
 		VersionCheck: true,
 		Created:      time.Now().Unix(),
-	}
-
-	// Set token expiry if available
-	if !token.Expiry.IsZero() {
-		login.TokenExpiry = token.Expiry.Unix()
 	}
 
 	// Validate token by getting user info
@@ -399,6 +394,9 @@ func createLoginFromToken(name, serverURL string, token *oauth2.Token, insecure 
 	if err != nil {
 		return fmt.Errorf("failed to validate token: %s", err)
 	}
+
+	// Clear token from YAML fields (will be stored in credstore)
+	login.Token = ""
 
 	// Set user info
 	login.User = u.UserName
@@ -413,6 +411,11 @@ func createLoginFromToken(name, serverURL string, token *oauth2.Token, insecure 
 	// Add login to config
 	if err := config.AddLogin(&login); err != nil {
 		return err
+	}
+
+	// Save tokens to credstore
+	if err := config.SaveOAuthToken(login.Name, token.AccessToken, token.RefreshToken, token.Expiry); err != nil {
+		return fmt.Errorf("failed to save token to secure store: %s", err)
 	}
 
 	fmt.Printf("Login as %s on %s successful. Added this login as %s\n", login.User, login.URL, login.Name)
@@ -443,7 +446,11 @@ func ReauthenticateLogin(login *config.Login) error {
 		return err
 	}
 
-	// Update the existing login with new token data
+	if login.IsOAuth() {
+		return config.SaveOAuthTokenFromOAuth2(login.Name, token, login)
+	}
+
+	// Legacy path for non-OAuth logins
 	login.Token = token.AccessToken
 	if token.RefreshToken != "" {
 		login.RefreshToken = token.RefreshToken
@@ -451,7 +458,5 @@ func ReauthenticateLogin(login *config.Login) error {
 	if !token.Expiry.IsZero() {
 		login.TokenExpiry = token.Expiry.Unix()
 	}
-
-	// Save updated login
 	return config.SaveLoginTokens(login)
 }

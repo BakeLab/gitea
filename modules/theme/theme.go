@@ -9,9 +9,11 @@ import (
 	"charm.land/lipgloss/v2/compat"
 )
 
-type myTheme struct{}
+// TeaTheme implements the huh.Theme interface with tea-cli styling.
+type TeaTheme struct{}
 
-func (t myTheme) Theme(isDark bool) *huh.Styles {
+// Theme implements the huh.Theme interface.
+func (t TeaTheme) Theme(isDark bool) *huh.Styles {
 	theme := huh.ThemeCharm(isDark)
 
 	title := compat.AdaptiveColor{Light: lipgloss.Color("#02BA84"), Dark: lipgloss.Color("#02BF87")}
@@ -20,8 +22,8 @@ func (t myTheme) Theme(isDark bool) *huh.Styles {
 	return theme
 }
 
-// GetTheme returns default theme
-func GetTheme() myTheme {
-	var t myTheme
+// GetTheme returns the default theme for huh prompts.
+func GetTheme() TeaTheme {
+	var t TeaTheme
 	return t
 }

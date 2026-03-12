@@ -44,7 +44,7 @@ func runLoginOAuthRefresh(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Check if the login has a refresh token
-	if login.RefreshToken == "" {
+	if login.GetRefreshToken() == "" {
 		return fmt.Errorf("login '%s' does not have a refresh token. It may have been created using a different authentication method", loginName)
 	}
 

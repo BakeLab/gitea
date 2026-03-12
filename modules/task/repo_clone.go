@@ -35,7 +35,7 @@ func RepoClone(
 		return nil, err
 	}
 
-	auth, err := local_git.GetAuthForURL(originURL, login.Token, login.SSHKey, callback)
+	auth, err := local_git.GetAuthForURL(originURL, login.GetAccessToken(), login.SSHKey, callback)
 	if err != nil {
 		return nil, err
 	}

@@ -38,7 +38,7 @@ func NewClient(login *config.Login) *Client {
 
 	return &Client{
 		baseURL:    strings.TrimSuffix(login.URL, "/"),
-		token:      login.Token,
+		token:      login.GetAccessToken(),
 		httpClient: httpClient,
 	}
 }

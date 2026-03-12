@@ -112,7 +112,7 @@ var CmdLoginHelper = cli.Command{
 					}
 				}
 
-				if len(userConfig.Token) == 0 {
+				if len(userConfig.GetAccessToken()) == 0 {
 					log.Fatal("User not set")
 				}
 
@@ -126,7 +126,7 @@ var CmdLoginHelper = cli.Command{
 					return err
 				}
 
-				_, err = fmt.Fprintf(os.Stdout, "protocol=%s\nhost=%s\nusername=%s\npassword=%s\n", host.Scheme, host.Host, userConfig.User, userConfig.Token)
+				_, err = fmt.Fprintf(os.Stdout, "protocol=%s\nhost=%s\nusername=%s\npassword=%s\n", host.Scheme, host.Host, userConfig.User, userConfig.GetAccessToken())
 				if err != nil {
 					return err
 				}

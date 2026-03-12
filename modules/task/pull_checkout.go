@@ -85,7 +85,7 @@ func doPRFetch(
 	if err != nil {
 		return "", err
 	}
-	auth, err := local_git.GetAuthForURL(url, login.Token, login.SSHKey, callback)
+	auth, err := local_git.GetAuthForURL(url, login.GetAccessToken(), login.SSHKey, callback)
 	if err != nil {
 		return "", err
 	}
