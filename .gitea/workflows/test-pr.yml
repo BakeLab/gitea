@@ -39,7 +39,7 @@ jobs:
           make unit-test-coverage
     services:
       gitea:
-        image: docker.gitea.com/gitea:1.25.4
+        image: docker.gitea.com/gitea:1.25.5
         cmd:
           - bash
           - -c
