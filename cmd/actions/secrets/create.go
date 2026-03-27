@@ -62,8 +62,7 @@ func runSecretsCreate(ctx stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	_, err = client.CreateRepoActionSecret(c.Owner, c.Repo, gitea.CreateSecretOption{
-		Name: secretName,
+	_, err = client.CreateRepoActionSecret(c.Owner, c.Repo, secretName, gitea.CreateOrUpdateSecretOption{
 		Data: secretValue,
 	})
 	if err != nil {
