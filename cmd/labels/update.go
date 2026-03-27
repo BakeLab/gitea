@@ -41,8 +41,13 @@ var CmdLabelUpdate = cli.Command{
 }
 
 func runLabelUpdate(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 
 	id := ctx.Int64("id")
 	var pName, pColor, pDescription *string
@@ -61,7 +66,6 @@ func runLabelUpdate(_ stdctx.Context, cmd *cli.Command) error {
 		pDescription = &description
 	}
 
-	var err error
 	_, _, err = ctx.Login.Client().EditLabel(ctx.Owner, ctx.Repo, id, gitea.EditLabelOption{
 		Name:        pName,
 		Color:       pColor,

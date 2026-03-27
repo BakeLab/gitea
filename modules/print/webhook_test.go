@@ -51,10 +51,7 @@ func TestWebhooksList(t *testing.T) {
 
 	for _, format := range outputFormats {
 		t.Run("Format_"+format, func(t *testing.T) {
-			// Should not panic
-			assert.NotPanics(t, func() {
-				WebhooksList(hooks, format)
-			})
+			assert.NoError(t, WebhooksList(hooks, format))
 		})
 	}
 }
@@ -63,16 +60,12 @@ func TestWebhooksListEmpty(t *testing.T) {
 	// Test with empty hook list
 	hooks := []*gitea.Hook{}
 
-	assert.NotPanics(t, func() {
-		WebhooksList(hooks, "table")
-	})
+	assert.NoError(t, WebhooksList(hooks, "table"))
 }
 
 func TestWebhooksListNil(t *testing.T) {
 	// Test with nil hook list
-	assert.NotPanics(t, func() {
-		WebhooksList(nil, "table")
-	})
+	assert.NoError(t, WebhooksList(nil, "table"))
 }
 
 func TestWebhookDetails(t *testing.T) {

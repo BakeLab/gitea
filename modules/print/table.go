@@ -4,6 +4,8 @@
 package print
 
 import (
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/olekukonko/tablewriter"
+	"gopkg.in/yaml.v3"
 )
 
 // table provides infrastructure to easily print (sorted) lists in different formats
@@ -72,34 +75,26 @@ func (t table) Less(i, j int) bool {
 	return t.values[i][t.sortColumn] < t.values[j][t.sortColumn]
 }
 
-func (t *table) print(output string) {
-	t.fprint(os.Stdout, output)
+func (t *table) print(output string) error {
+	return t.fprint(os.Stdout, output)
 }
 
-func (t *table) fprint(f io.Writer, output string) {
+func (t *table) fprint(f io.Writer, output string) error {
 	switch output {
 	case "", "table":
-		outputTable(f, t.headers, t.values)
+		return outputTable(f, t.headers, t.values)
 	case "csv":
-		outputDsv(f, t.headers, t.values, ",")
+		return outputDsv(f, t.headers, t.values, ',')
 	case "simple":
-		outputSimple(f, t.headers, t.values)
+		return outputSimple(f, t.headers, t.values)
 	case "tsv":
-		outputDsv(f, t.headers, t.values, "\t")
+		return outputDsv(f, t.headers, t.values, '\t')
 	case "yml", "yaml":
-		outputYaml(f, t.headers, t.values)
+		return outputYaml(f, t.headers, t.values)
 	case "json":
-		outputJSON(f, t.headers, t.values)
+		return outputJSON(f, t.headers, t.values)
 	default:
-		fmt.Fprintf(f, `"unknown output type '%s', available types are:
-- csv: comma-separated values
-- simple: space-separated values
-- table: auto-aligned table format (default)
-- tsv: tab-separated values
-- yaml: YAML format
-- json: JSON format
-`, output)
-		os.Exit(1)
+		return fmt.Errorf("unknown output type %q, available types are: csv, simple, table, tsv, yaml, json", output)
 	}
 }
 
@@ -118,41 +113,59 @@ func outputTable(f io.Writer, headers []string, values [][]string) error {
 }
 
 // outputSimple prints structured data as space delimited value
-func outputSimple(f io.Writer, headers []string, values [][]string) {
+func outputSimple(f io.Writer, headers []string, values [][]string) error {
 	for _, value := range values {
-		fmt.Fprint(f, strings.Join(value, " "))
-		fmt.Fprintf(f, "\n")
+		if _, err := fmt.Fprintln(f, strings.Join(value, " ")); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-// outputDsv prints structured data as delimiter separated value format
-func outputDsv(f io.Writer, headers []string, values [][]string, delimiterOpt ...string) {
-	delimiter := ","
-	if len(delimiterOpt) > 0 {
-		delimiter = delimiterOpt[0]
+// outputDsv prints structured data as delimiter separated value format.
+func outputDsv(f io.Writer, headers []string, values [][]string, delimiter rune) error {
+	writer := csv.NewWriter(f)
+	writer.Comma = delimiter
+	if err := writer.Write(headers); err != nil {
+		return err
 	}
-	fmt.Fprintln(f, "\""+strings.Join(headers, "\""+delimiter+"\"")+"\"")
 	for _, value := range values {
-		fmt.Fprintf(f, "\"")
-		fmt.Fprint(f, strings.Join(value, "\""+delimiter+"\""))
-		fmt.Fprintf(f, "\"")
-		fmt.Fprintf(f, "\n")
+		if err := writer.Write(value); err != nil {
+			return err
+		}
 	}
+	writer.Flush()
+	return writer.Error()
 }
 
 // outputYaml prints structured data as yaml
-func outputYaml(f io.Writer, headers []string, values [][]string) {
+func outputYaml(f io.Writer, headers []string, values [][]string) error {
+	root := &yaml.Node{Kind: yaml.SequenceNode}
 	for _, value := range values {
-		fmt.Fprintln(f, "-")
+		row := &yaml.Node{Kind: yaml.MappingNode}
 		for j, val := range value {
+			row.Content = append(row.Content, &yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Value: headers[j],
+			})
+
+			valueNode := &yaml.Node{Kind: yaml.ScalarNode, Value: val}
 			intVal, _ := strconv.Atoi(val)
 			if strconv.Itoa(intVal) == val {
-				fmt.Fprintf(f, "  %s: %s\n", headers[j], val)
+				valueNode.Tag = "!!int"
 			} else {
-				fmt.Fprintf(f, "  %s: '%s'\n", headers[j], strings.ReplaceAll(val, "'", "''"))
+				valueNode.Tag = "!!str"
 			}
+			row.Content = append(row.Content, valueNode)
 		}
+		root.Content = append(root.Content, row)
 	}
+	encoder := yaml.NewEncoder(f)
+	if err := encoder.Encode(root); err != nil {
+		_ = encoder.Close()
+		return err
+	}
+	return encoder.Close()
 }
 
 var (
@@ -166,42 +179,52 @@ func toSnakeCase(str string) string {
 	return strings.ToLower(snake)
 }
 
-// outputJSON prints structured data as json
-// Since golang's map is unordered, we need to ensure consistent ordering, we have
-// to output the JSON ourselves.
-func outputJSON(f io.Writer, headers []string, values [][]string) {
-	fmt.Fprintln(f, "[")
-	itemCount := len(values)
-	headersCount := len(headers)
-	const space = "  "
-	for i, value := range values {
-		fmt.Fprintf(f, "%s{\n", space)
-		for j, val := range value {
-			v, err := json.Marshal(val)
-			if err != nil {
-				fmt.Printf("Failed to format JSON for value '%s': %v\n", val, err)
-				return
-			}
-			key, err := json.Marshal(toSnakeCase(headers[j]))
-			if err != nil {
-				fmt.Printf("Failed to format JSON for header '%s': %v\n", headers[j], err)
-				return
-			}
-			fmt.Fprintf(f, "%s:%s", key, v)
-			if j != headersCount-1 {
-				fmt.Fprintln(f, ",")
-			} else {
-				fmt.Fprintln(f)
-			}
-		}
+// orderedRow preserves header insertion order when marshaled to JSON.
+type orderedRow struct {
+	keys   []string
+	values map[string]string
+}
 
-		if i != itemCount-1 {
-			fmt.Fprintf(f, "%s},\n", space)
-		} else {
-			fmt.Fprintf(f, "%s}\n", space)
+func (o orderedRow) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteByte('{')
+	for i, k := range o.keys {
+		if i > 0 {
+			buf.WriteByte(',')
 		}
+		key, err := json.Marshal(k)
+		if err != nil {
+			return nil, err
+		}
+		val, err := json.Marshal(o.values[k])
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(key)
+		buf.WriteByte(':')
+		buf.Write(val)
 	}
-	fmt.Fprintln(f, "]")
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
+}
+
+// outputJSON prints structured data as json, preserving header field order.
+func outputJSON(f io.Writer, headers []string, values [][]string) error {
+	snakeHeaders := make([]string, len(headers))
+	for i, h := range headers {
+		snakeHeaders[i] = toSnakeCase(h)
+	}
+	rows := make([]orderedRow, 0, len(values))
+	for _, value := range values {
+		row := orderedRow{keys: snakeHeaders, values: make(map[string]string, len(headers))}
+		for j, val := range value {
+			row.values[snakeHeaders[j]] = val
+		}
+		rows = append(rows, row)
+	}
+	encoder := json.NewEncoder(f)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(rows)
 }
 
 func isMachineReadable(outputFormat string) bool {

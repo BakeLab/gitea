@@ -40,12 +40,21 @@ type LocalConfig struct {
 
 var (
 	// config contain if loaded local tea config
-	config         LocalConfig
-	loadConfigOnce sync.Once
+	config                 LocalConfig
+	loadConfigOnce         sync.Once
+	configPathMu           sync.Mutex
+	configPathTestOverride string
 )
 
 // GetConfigPath return path to tea config file
 func GetConfigPath() string {
+	configPathMu.Lock()
+	override := configPathTestOverride
+	configPathMu.Unlock()
+	if override != "" {
+		return override
+	}
+
 	configFilePath, err := xdg.ConfigFile("tea/config.yml")
 
 	var exists bool
@@ -69,6 +78,13 @@ func GetConfigPath() string {
 	}
 
 	return configFilePath
+}
+
+// SetConfigPathForTesting overrides the config path used by helpers in tests.
+func SetConfigPathForTesting(path string) {
+	configPathMu.Lock()
+	configPathTestOverride = path
+	configPathMu.Unlock()
 }
 
 // GetPreferences returns preferences based on the config file

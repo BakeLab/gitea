@@ -17,8 +17,13 @@ import (
 
 // editPullState abstracts the arg parsing to edit the given pull request
 func editPullState(_ stdctx.Context, cmd *cli.Command, opts gitea.EditPullRequestOption) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	if ctx.Args().Len() == 0 {
 		return fmt.Errorf("pull request index is required")
 	}

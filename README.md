@@ -169,7 +169,7 @@ tea man --out ./tea.man
 
 ## Compilation
 
-Make sure you have a current go version installed (1.13 or newer).
+Make sure you have a current Go version installed (1.26 or newer).
 
 - To compile the source yourself with the recommended flags & tags:
   ```sh

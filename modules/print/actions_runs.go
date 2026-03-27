@@ -42,7 +42,7 @@ func getWorkflowDisplayName(run *gitea.ActionWorkflowRun) string {
 }
 
 // ActionRunsList prints a list of workflow runs
-func ActionRunsList(runs []*gitea.ActionWorkflowRun, output string) {
+func ActionRunsList(runs []*gitea.ActionWorkflowRun, output string) error {
 	t := table{
 		headers: []string{
 			"ID",
@@ -74,11 +74,11 @@ func ActionRunsList(runs []*gitea.ActionWorkflowRun, output string) {
 
 	if len(runs) == 0 {
 		fmt.Printf("No workflow runs found\n")
-		return
+		return nil
 	}
 
 	t.sort(0, true)
-	t.print(output)
+	return t.print(output)
 }
 
 // ActionRunDetails prints detailed information about a workflow run
@@ -114,7 +114,7 @@ func ActionRunDetails(run *gitea.ActionWorkflowRun) {
 }
 
 // ActionWorkflowJobsList prints a list of workflow jobs
-func ActionWorkflowJobsList(jobs []*gitea.ActionWorkflowJob, output string) {
+func ActionWorkflowJobsList(jobs []*gitea.ActionWorkflowJob, output string) error {
 	t := table{
 		headers: []string{
 			"ID",
@@ -147,15 +147,15 @@ func ActionWorkflowJobsList(jobs []*gitea.ActionWorkflowJob, output string) {
 
 	if len(jobs) == 0 {
 		fmt.Printf("No jobs found\n")
-		return
+		return nil
 	}
 
 	t.sort(0, true)
-	t.print(output)
+	return t.print(output)
 }
 
 // WorkflowsList prints a list of workflow files with active status
-func WorkflowsList(workflows []*gitea.ContentsResponse, activeStatus map[string]bool, output string) {
+func WorkflowsList(workflows []*gitea.ContentsResponse, activeStatus map[string]bool, output string) error {
 	t := table{
 		headers: []string{
 			"Active",
@@ -180,9 +180,9 @@ func WorkflowsList(workflows []*gitea.ContentsResponse, activeStatus map[string]
 
 	if len(workflows) == 0 {
 		fmt.Printf("No workflows found\n")
-		return
+		return nil
 	}
 
 	t.sort(1, true) // Sort by name column
-	t.print(output)
+	return t.print(output)
 }

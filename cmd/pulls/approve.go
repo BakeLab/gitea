@@ -20,7 +20,10 @@ var CmdPullsApprove = cli.Command{
 	Description: "Approve a pull request",
 	ArgsUsage:   "<pull index> [<comment>]",
 	Action: func(_ stdctx.Context, cmd *cli.Command) error {
-		ctx := context.InitCommand(cmd)
+		ctx, err := context.InitCommand(cmd)
+		if err != nil {
+			return err
+		}
 		return runPullReview(ctx, gitea.ReviewStateApproved, false)
 	},
 	Flags: flags.AllDefaultFlags,

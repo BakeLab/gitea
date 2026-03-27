@@ -83,7 +83,10 @@ var CmdRepoCreateFromTemplate = cli.Command{
 }
 
 func runRepoCreateFromTemplate(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 
 	templateOwner, templateRepo := utils.GetOwnerAndRepo(ctx.String("template"), ctx.Login.User)

@@ -71,8 +71,13 @@ var CmdMilestoneRemoveIssue = cli.Command{
 }
 
 func runMilestoneIssueList(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 
 	state, err := flags.ParseState(ctx.String("state"))
@@ -97,7 +102,7 @@ func runMilestoneIssueList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	issues, _, err := client.ListRepoIssues(ctx.Owner, ctx.Repo, gitea.ListIssueOption{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 		Milestones:  []string{milestone},
 		Type:        kind,
 		State:       state,
@@ -110,13 +115,17 @@ func runMilestoneIssueList(_ stdctx.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	print.IssuesPullsList(issues, ctx.Output, fields)
-	return nil
+	return print.IssuesPullsList(issues, ctx.Output, fields)
 }
 
 func runMilestoneIssueAdd(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 	if ctx.Args().Len() != 2 {
 		return fmt.Errorf("need two arguments")
@@ -145,8 +154,13 @@ func runMilestoneIssueAdd(_ stdctx.Context, cmd *cli.Command) error {
 }
 
 func runMilestoneIssueRemove(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 	if ctx.Args().Len() != 2 {
 		return fmt.Errorf("need two arguments")

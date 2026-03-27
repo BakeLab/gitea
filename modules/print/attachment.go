@@ -17,7 +17,7 @@ func formatByteSize(size int64) string {
 }
 
 // ReleaseAttachmentsList prints a listing of release attachments
-func ReleaseAttachmentsList(attachments []*gitea.Attachment, output string) {
+func ReleaseAttachmentsList(attachments []*gitea.Attachment, output string) error {
 	t := tableWithHeader(
 		"Name",
 		"Size",
@@ -30,5 +30,5 @@ func ReleaseAttachmentsList(attachments []*gitea.Attachment, output string) {
 		)
 	}
 
-	t.print(output)
+	return t.print(output)
 }

@@ -59,7 +59,10 @@ func runWebhooksCreate(ctx stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("webhook URL is required")
 	}
 
-	c := context.InitCommand(cmd)
+	c, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := c.Login.Client()
 
 	webhookType := gitea.HookType(cmd.String("type"))
@@ -95,7 +98,6 @@ func runWebhooksCreate(ctx stdctx.Context, cmd *cli.Command) error {
 	}
 
 	var hook *gitea.Hook
-	var err error
 	if c.IsGlobal {
 		return fmt.Errorf("global webhooks not yet supported in this version")
 	} else if len(c.Org) > 0 {

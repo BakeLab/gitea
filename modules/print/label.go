@@ -10,7 +10,7 @@ import (
 )
 
 // LabelsList prints a listing of labels
-func LabelsList(labels []*gitea.Label, output string) {
+func LabelsList(labels []*gitea.Label, output string) error {
 	t := tableWithHeader(
 		"Index",
 		"Color",
@@ -26,5 +26,5 @@ func LabelsList(labels []*gitea.Label, output string) {
 			label.Description,
 		)
 	}
-	t.print(output)
+	return t.print(output)
 }

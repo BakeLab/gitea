@@ -4,7 +4,13 @@
 package variables
 
 import (
+	stdctx "context"
+	"os"
 	"testing"
+
+	"code.gitea.io/tea/modules/config"
+	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 )
 
 func TestVariablesListFlags(t *testing.T) {
@@ -60,4 +66,33 @@ func TestVariablesListValidation(t *testing.T) {
 	if len(extraArgs) > 0 {
 		// This is fine - list commands typically ignore extra args
 	}
+}
+
+func TestRunVariablesListRequiresRepoContext(t *testing.T) {
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+
+	require.NoError(t, os.Chdir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(oldWd))
+	})
+
+	config.SetConfigForTesting(config.LocalConfig{
+		Logins: []config.Login{{
+			Name:    "test",
+			URL:     "https://gitea.example.com",
+			Token:   "token",
+			User:    "tester",
+			Default: true,
+		}},
+	})
+
+	cmd := &cli.Command{
+		Name:  CmdVariablesList.Name,
+		Flags: CmdVariablesList.Flags,
+	}
+	require.NoError(t, cmd.Set("login", "test"))
+
+	err = RunVariablesList(stdctx.Background(), cmd)
+	require.ErrorContains(t, err, "remote repository required")
 }

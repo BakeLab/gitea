@@ -42,7 +42,10 @@ func runLogins(ctx context.Context, cmd *cli.Command) error {
 }
 
 func runLoginDetail(name string) error {
-	l := config.GetLoginByName(name)
+	l, err := config.GetLoginByName(name)
+	if err != nil {
+		return err
+	}
 	if l == nil {
 		fmt.Printf("Login '%s' do not exist\n\n", name)
 		return nil

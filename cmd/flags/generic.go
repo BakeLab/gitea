@@ -39,16 +39,33 @@ var OutputFlag = cli.StringFlag{
 }
 
 var (
-	paging gitea.ListOptions
 	// ErrPage indicates that the provided page value is invalid (less than -1 or equal to 0).
 	ErrPage = errors.New("page cannot be smaller than 1")
 	// ErrLimit indicates that the provided limit value is invalid (negative).
 	ErrLimit = errors.New("limit cannot be negative")
 )
 
-// GetListOptions returns configured paging struct
-func GetListOptions() gitea.ListOptions {
-	return paging
+const (
+	defaultPageValue  = 1
+	defaultLimitValue = 30
+)
+
+// GetListOptions returns list options derived from the active command.
+func GetListOptions(cmd *cli.Command) gitea.ListOptions {
+	page := cmd.Int("page")
+	if page == 0 {
+		page = defaultPageValue
+	}
+
+	pageSize := cmd.Int("limit")
+	if pageSize == 0 {
+		pageSize = defaultLimitValue
+	}
+
+	return gitea.ListOptions{
+		Page:     page,
+		PageSize: pageSize,
+	}
 }
 
 // PaginationFlags provides all pagination related flags
@@ -62,14 +79,13 @@ var PaginationPageFlag = cli.IntFlag{
 	Name:    "page",
 	Aliases: []string{"p"},
 	Usage:   "specify page",
-	Value:   1,
+	Value:   defaultPageValue,
 	Validator: func(i int) error {
 		if i < 1 && i != -1 {
 			return ErrPage
 		}
 		return nil
 	},
-	Destination: &paging.Page,
 }
 
 // PaginationLimitFlag provides flag for pagination options
@@ -77,14 +93,13 @@ var PaginationLimitFlag = cli.IntFlag{
 	Name:    "limit",
 	Aliases: []string{"lm"},
 	Usage:   "specify limit of items per page",
-	Value:   30,
+	Value:   defaultLimitValue,
 	Validator: func(i int) error {
 		if i < 0 {
 			return ErrLimit
 		}
 		return nil
 	},
-	Destination: &paging.PageSize,
 }
 
 // LoginOutputFlags defines login and output flags that should

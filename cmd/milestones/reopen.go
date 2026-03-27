@@ -29,8 +29,13 @@ var CmdMilestonesReopen = cli.Command{
 }
 
 func editMilestoneStatus(_ stdctx.Context, cmd *cli.Command, close bool) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	if ctx.Args().Len() == 0 {
 		return fmt.Errorf("missing required argument: %s", ctx.Command.ArgsUsage)
 	}
@@ -41,6 +46,13 @@ func editMilestoneStatus(_ stdctx.Context, cmd *cli.Command, close bool) error {
 	}
 
 	client := ctx.Login.Client()
+	repoURL := ""
+	if ctx.Args().Len() > 1 {
+		repoURL, err = ctx.GetRemoteRepoHTMLURL()
+		if err != nil {
+			return err
+		}
+	}
 	for _, ms := range ctx.Args().Slice() {
 		opts := gitea.EditMilestoneOption{
 			State: &state,
@@ -52,7 +64,7 @@ func editMilestoneStatus(_ stdctx.Context, cmd *cli.Command, close bool) error {
 		}
 
 		if ctx.Args().Len() > 1 {
-			fmt.Printf("%s/milestone/%d\n", ctx.GetRemoteRepoHTMLURL(), milestone.ID)
+			fmt.Printf("%s/milestone/%d\n", repoURL, milestone.ID)
 		} else {
 			print.MilestoneDetails(milestone)
 		}

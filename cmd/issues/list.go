@@ -33,7 +33,10 @@ var CmdIssuesList = cli.Command{
 
 // RunIssuesList list issues
 func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 
 	state, err := flags.ParseState(ctx.String("state"))
 	if err != nil {
@@ -69,7 +72,7 @@ func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
 	var issues []*gitea.Issue
 	if ctx.Repo != "" {
 		issues, _, err = ctx.Login.Client().ListRepoIssues(owner, ctx.Repo, gitea.ListIssueOption{
-			ListOptions: flags.GetListOptions(),
+			ListOptions: flags.GetListOptions(cmd),
 			State:       state,
 			Type:        kind,
 			KeyWord:     ctx.String("keyword"),
@@ -86,7 +89,7 @@ func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
 		}
 	} else {
 		issues, _, err = ctx.Login.Client().ListIssues(gitea.ListIssueOption{
-			ListOptions: flags.GetListOptions(),
+			ListOptions: flags.GetListOptions(cmd),
 			State:       state,
 			Type:        kind,
 			KeyWord:     ctx.String("keyword"),
@@ -109,6 +112,5 @@ func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	print.IssuesPullsList(issues, ctx.Output, fields)
-	return nil
+	return print.IssuesPullsList(issues, ctx.Output, fields)
 }

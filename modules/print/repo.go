@@ -12,13 +12,13 @@ import (
 )
 
 // ReposList prints a listing of the repos
-func ReposList(repos []*gitea.Repository, output string, fields []string) {
+func ReposList(repos []*gitea.Repository, output string, fields []string) error {
 	printables := make([]printable, len(repos))
 	for i, r := range repos {
 		printables[i] = &printableRepo{r}
 	}
 	t := tableFromItems(fields, printables, isMachineReadable(output))
-	t.print(output)
+	return t.print(output)
 }
 
 // RepoDetails print an repo formatted to stdout
@@ -113,7 +113,7 @@ func (x printableRepo) FormatField(field string, machineReadable bool) string {
 	case "forks":
 		return fmt.Sprintf("%d", x.Forks)
 	case "id":
-		return x.FullName
+		return fmt.Sprintf("%d", x.ID)
 	case "name":
 		return x.Name
 	case "owner":

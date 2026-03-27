@@ -52,13 +52,13 @@ func UserDetails(user *gitea.User) {
 }
 
 // UserList prints a listing of the users
-func UserList(user []*gitea.User, output string, fields []string) {
+func UserList(user []*gitea.User, output string, fields []string) error {
 	printables := make([]printable, len(user))
 	for i, u := range user {
 		printables[i] = &printableUser{u}
 	}
 	t := tableFromItems(fields, printables, isMachineReadable(output))
-	t.print(output)
+	return t.print(output)
 }
 
 // UserFields are the available fields to print with UserList()

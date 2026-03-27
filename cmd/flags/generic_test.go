@@ -8,6 +8,7 @@ import (
 	"io"
 	"testing"
 
+	"code.gitea.io/sdk/gitea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
@@ -122,4 +123,30 @@ func TestPaginationFailures(t *testing.T) {
 			// require.ErrorIs(t, err, tc.expectedError)
 		})
 	}
+}
+
+func TestGetListOptionsDoesNotLeakBetweenCommands(t *testing.T) {
+	var results []gitea.ListOptions
+
+	run := func(args []string) {
+		t.Helper()
+
+		cmd := cli.Command{
+			Name: "test-paging",
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				results = append(results, GetListOptions(cmd))
+				return nil
+			},
+			Flags: PaginationFlags,
+		}
+
+		require.NoError(t, cmd.Run(context.Background(), args))
+	}
+
+	run([]string{"test", "--page", "5", "--limit", "10"})
+	run([]string{"test"})
+
+	require.Len(t, results, 2)
+	assert.Equal(t, gitea.ListOptions{Page: 5, PageSize: 10}, results[0])
+	assert.Equal(t, gitea.ListOptions{Page: defaultPageValue, PageSize: defaultLimitValue}, results[1])
 }

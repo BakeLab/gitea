@@ -32,8 +32,13 @@ var CmdTrackedTimesAdd = cli.Command{
 }
 
 func runTrackedTimesAdd(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 
 	if ctx.Args().Len() < 2 {
 		return fmt.Errorf("No issue or duration specified.\nUsage:\t%s", ctx.Command.UsageText)

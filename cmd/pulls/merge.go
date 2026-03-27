@@ -41,8 +41,13 @@ var CmdPullsMerge = cli.Command{
 		},
 	}, flags.AllDefaultFlags...),
 	Action: func(_ stdctx.Context, cmd *cli.Command) error {
-		ctx := context.InitCommand(cmd)
-		ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+		ctx, err := context.InitCommand(cmd)
+		if err != nil {
+			return err
+		}
+		if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+			return err
+		}
 
 		if ctx.Args().Len() != 1 {
 			// If no PR index is provided, try interactive mode

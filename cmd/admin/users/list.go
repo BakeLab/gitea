@@ -34,7 +34,10 @@ var CmdUserList = cli.Command{
 
 // RunUserList list users
 func RunUserList(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 
 	fields, err := userFieldsFlag.GetValues(cmd)
 	if err != nil {
@@ -43,13 +46,11 @@ func RunUserList(_ stdctx.Context, cmd *cli.Command) error {
 
 	client := ctx.Login.Client()
 	users, _, err := client.AdminListUsers(gitea.AdminListUsersOptions{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {
 		return err
 	}
 
-	print.UserList(users, ctx.Output, fields)
-
-	return nil
+	return print.UserList(users, ctx.Output, fields)
 }

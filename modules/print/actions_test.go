@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
+	"github.com/stretchr/testify/require"
 )
 
 func TestActionSecretsListEmpty(t *testing.T) {
@@ -21,7 +22,7 @@ func TestActionSecretsListEmpty(t *testing.T) {
 		}
 	}()
 
-	ActionSecretsList([]*gitea.Secret{}, "")
+	require.NoError(t, ActionSecretsList([]*gitea.Secret{}, ""))
 }
 
 func TestActionSecretsListWithData(t *testing.T) {
@@ -43,7 +44,7 @@ func TestActionSecretsListWithData(t *testing.T) {
 		}
 	}()
 
-	ActionSecretsList(secrets, "")
+	require.NoError(t, ActionSecretsList(secrets, ""))
 
 	// Test JSON output format to verify structure
 	var buf bytes.Buffer
@@ -55,7 +56,7 @@ func TestActionSecretsListWithData(t *testing.T) {
 		testTable.addRow(secret.Name, FormatTime(secret.Created, true))
 	}
 
-	testTable.fprint(&buf, "json")
+	require.NoError(t, testTable.fprint(&buf, "json"))
 	output := buf.String()
 
 	if !strings.Contains(output, "TEST_SECRET_1") {
@@ -92,7 +93,7 @@ func TestActionVariablesListEmpty(t *testing.T) {
 		}
 	}()
 
-	ActionVariablesList([]*gitea.RepoActionVariable{}, "")
+	require.NoError(t, ActionVariablesList([]*gitea.RepoActionVariable{}, ""))
 }
 
 func TestActionVariablesListWithData(t *testing.T) {
@@ -118,7 +119,7 @@ func TestActionVariablesListWithData(t *testing.T) {
 		}
 	}()
 
-	ActionVariablesList(variables, "")
+	require.NoError(t, ActionVariablesList(variables, ""))
 
 	// Test JSON output format to verify structure and truncation
 	var buf bytes.Buffer
@@ -134,7 +135,7 @@ func TestActionVariablesListWithData(t *testing.T) {
 		testTable.addRow(variable.Name, value, strconv.Itoa(int(variable.RepoID)))
 	}
 
-	testTable.fprint(&buf, "json")
+	require.NoError(t, testTable.fprint(&buf, "json"))
 	output := buf.String()
 
 	if !strings.Contains(output, "TEST_VARIABLE_1") {
@@ -165,7 +166,7 @@ func TestActionVariablesListValueTruncation(t *testing.T) {
 		}
 	}()
 
-	ActionVariablesList([]*gitea.RepoActionVariable{variable}, "")
+	require.NoError(t, ActionVariablesList([]*gitea.RepoActionVariable{variable}, ""))
 
 	// Test the truncation logic directly
 	value := variable.Value

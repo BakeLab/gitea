@@ -46,7 +46,10 @@ var CmdRepoRm = cli.Command{
 }
 
 func runRepoDelete(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 
 	client := ctx.Login.Client()
 
@@ -76,7 +79,7 @@ func runRepoDelete(_ stdctx.Context, cmd *cli.Command) error {
 		}
 	}
 
-	_, err := client.DeleteRepo(owner, repoName)
+	_, err = client.DeleteRepo(owner, repoName)
 	if err != nil {
 		return err
 	}

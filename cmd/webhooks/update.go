@@ -61,7 +61,10 @@ func runWebhooksUpdate(ctx stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("webhook ID is required")
 	}
 
-	c := context.InitCommand(cmd)
+	c, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := c.Login.Client()
 
 	webhookID, err := utils.ArgToIndex(cmd.Args().First())

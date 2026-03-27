@@ -53,7 +53,10 @@ var CmdOrganizationCreate = cli.Command{
 
 // RunOrganizationCreate sets up a new organization
 func RunOrganizationCreate(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 
 	if ctx.Args().Len() < 1 {
 		return fmt.Errorf("organization name is required")

@@ -42,7 +42,13 @@ func runRunsLogs(ctx stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("run ID is required")
 	}
 
-	c := context.InitCommand(cmd)
+	c, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := c.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := c.Login.Client()
 
 	runIDStr := cmd.Args().First()
@@ -78,7 +84,7 @@ func runRunsLogs(ctx stdctx.Context, cmd *cli.Command) error {
 
 	// Otherwise, fetch all jobs and their logs
 	jobs, _, err := client.ListRepoActionRunJobs(c.Owner, c.Repo, runID, gitea.ListRepoActionJobsOptions{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to get jobs: %w", err)

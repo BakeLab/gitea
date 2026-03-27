@@ -40,8 +40,13 @@ var CmdMilestonesList = cli.Command{
 
 // RunMilestonesList list milestones
 func RunMilestonesList(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 
 	fields, err := fieldsFlag.GetValues(cmd)
 	if err != nil {
@@ -58,13 +63,12 @@ func RunMilestonesList(_ stdctx.Context, cmd *cli.Command) error {
 
 	client := ctx.Login.Client()
 	milestones, _, err := client.ListRepoMilestones(ctx.Owner, ctx.Repo, gitea.ListMilestoneOption{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 		State:       state,
 	})
 	if err != nil {
 		return err
 	}
 
-	print.MilestonesList(milestones, ctx.Output, fields)
-	return nil
+	return print.MilestonesList(milestones, ctx.Output, fields)
 }

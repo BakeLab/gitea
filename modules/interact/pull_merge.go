@@ -44,7 +44,7 @@ func getPullIndex(ctx *context.TeaContext, branch string) (int64, error) {
 	c := ctx.Login.Client()
 	opts := gitea.ListPullRequestsOptions{
 		State:       gitea.StateOpen,
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(ctx.Command),
 	}
 	selected := ""
 	loadMoreOption := "PR not found? Load more PRs..."

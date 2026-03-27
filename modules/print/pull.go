@@ -138,8 +138,8 @@ func formatReviews(pr *gitea.PullRequest, reviews []*gitea.PullReview) string {
 }
 
 // PullsList prints a listing of pulls
-func PullsList(prs []*gitea.PullRequest, output string, fields []string) {
-	printPulls(prs, output, fields)
+func PullsList(prs []*gitea.PullRequest, output string, fields []string) error {
+	return printPulls(prs, output, fields)
 }
 
 // PullFields are all available fields to print with PullsList()
@@ -170,7 +170,7 @@ var PullFields = []string{
 	"comments",
 }
 
-func printPulls(pulls []*gitea.PullRequest, output string, fields []string) {
+func printPulls(pulls []*gitea.PullRequest, output string, fields []string) error {
 	labelMap := map[int64]string{}
 	printables := make([]printable, len(pulls))
 	machineReadable := isMachineReadable(output)
@@ -187,7 +187,7 @@ func printPulls(pulls []*gitea.PullRequest, output string, fields []string) {
 	}
 
 	t := tableFromItems(fields, printables, machineReadable)
-	t.print(output)
+	return t.print(output)
 }
 
 type printablePull struct {

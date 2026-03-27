@@ -38,7 +38,10 @@ func runLoginOAuthRefresh(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Get the login from config
-	login := config.GetLoginByName(loginName)
+	login, err := config.GetLoginByName(loginName)
+	if err != nil {
+		return err
+	}
 	if login == nil {
 		return fmt.Errorf("login '%s' not found", loginName)
 	}
@@ -49,7 +52,7 @@ func runLoginOAuthRefresh(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Try to refresh the token
-	err := auth.RefreshAccessToken(login)
+	err = auth.RefreshAccessToken(login)
 	if err == nil {
 		fmt.Printf("Successfully refreshed OAuth token for %s\n", loginName)
 		return nil

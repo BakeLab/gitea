@@ -45,8 +45,8 @@ func formatReactions(reactions []*gitea.Reaction) string {
 }
 
 // IssuesPullsList prints a listing of issues & pulls
-func IssuesPullsList(issues []*gitea.Issue, output string, fields []string) {
-	printIssues(issues, output, fields)
+func IssuesPullsList(issues []*gitea.Issue, output string, fields []string) error {
+	return printIssues(issues, output, fields)
 }
 
 // IssueFields are all available fields to print with IssuesList()
@@ -73,7 +73,7 @@ var IssueFields = []string{
 	"repo",
 }
 
-func printIssues(issues []*gitea.Issue, output string, fields []string) {
+func printIssues(issues []*gitea.Issue, output string, fields []string) error {
 	labelMap := map[int64]string{}
 	printables := make([]printable, len(issues))
 	machineReadable := isMachineReadable(output)
@@ -90,7 +90,7 @@ func printIssues(issues []*gitea.Issue, output string, fields []string) {
 	}
 
 	t := tableFromItems(fields, printables, machineReadable)
-	t.print(output)
+	return t.print(output)
 }
 
 type printableIssue struct {

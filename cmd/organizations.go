@@ -31,7 +31,10 @@ var CmdOrgs = cli.Command{
 }
 
 func runOrganizations(ctx stdctx.Context, cmd *cli.Command) error {
-	teaCtx := context.InitCommand(cmd)
+	teaCtx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	if teaCtx.Args().Len() == 1 {
 		return runOrganizationDetail(teaCtx)
 	}

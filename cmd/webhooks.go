@@ -64,7 +64,10 @@ func runWebhooksDefault(ctx stdctx.Context, cmd *cli.Command) error {
 }
 
 func runWebhookDetail(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 
 	webhookID, err := utils.ArgToIndex(cmd.Args().First())

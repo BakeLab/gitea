@@ -7,11 +7,8 @@ import (
 	stdctx "context"
 	"encoding/json"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"code.gitea.io/tea/modules/config"
@@ -254,35 +251,18 @@ func TestParseTypedValue(t *testing.T) {
 	})
 }
 
-// runApiWithArgs sets up a test server that captures requests, configures the
-// login to point at it, and runs the api command with the given CLI args.
-// Returns the captured HTTP method, body bytes, and any error from the command.
+// runApiWithArgs configures a test login, parses the command line, and captures
+// the prepared request without opening sockets or making HTTP requests.
 func runApiWithArgs(t *testing.T, args []string) (method string, body []byte, err error) {
 	t.Helper()
 
-	var mu sync.Mutex
 	var capturedMethod string
 	var capturedBody []byte
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, readErr := io.ReadAll(r.Body)
-		if readErr != nil {
-			t.Fatalf("failed to read request body: %v", readErr)
-		}
-		mu.Lock()
-		capturedMethod = r.Method
-		capturedBody = b
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	t.Cleanup(server.Close)
 
 	config.SetConfigForTesting(config.LocalConfig{
 		Logins: []config.Login{{
 			Name:    "testLogin",
-			URL:     server.URL,
+			URL:     "https://gitea.example.com",
 			Token:   "test-token",
 			User:    "testUser",
 			Default: true,
@@ -295,7 +275,19 @@ func runApiWithArgs(t *testing.T, args []string) (method string, body []byte, er
 	cmd := cli.Command{
 		Name:                      "api",
 		DisableSliceFlagSeparator: true,
-		Action:                    runApi,
+		Action: func(_ stdctx.Context, cmd *cli.Command) error {
+			ctx, err := context.InitCommand(cmd)
+			if err != nil {
+				return err
+			}
+			request, err := prepareAPIRequest(cmd, ctx)
+			if err != nil {
+				return err
+			}
+			capturedMethod = request.Method
+			capturedBody = append([]byte(nil), request.Body...)
+			return nil
+		},
 		Flags: append(apiFlags(), []cli.Flag{
 			&cli.StringFlag{Name: "login", Aliases: []string{"l"}},
 			&cli.StringFlag{Name: "repo", Aliases: []string{"r"}},
@@ -308,8 +300,6 @@ func runApiWithArgs(t *testing.T, args []string) (method string, body []byte, er
 	fullArgs := append([]string{"api", "--login", "testLogin"}, args...)
 	runErr := cmd.Run(stdctx.Background(), fullArgs)
 
-	mu.Lock()
-	defer mu.Unlock()
 	return capturedMethod, capturedBody, runErr
 }
 

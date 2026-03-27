@@ -38,7 +38,13 @@ func runRunsView(ctx stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("run ID is required")
 	}
 
-	c := context.InitCommand(cmd)
+	c, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := c.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := c.Login.Client()
 
 	runIDStr := cmd.Args().First()
@@ -59,7 +65,7 @@ func runRunsView(ctx stdctx.Context, cmd *cli.Command) error {
 	// Fetch and print jobs if requested
 	if cmd.Bool("jobs") {
 		jobs, _, err := client.ListRepoActionRunJobs(c.Owner, c.Repo, runID, gitea.ListRepoActionJobsOptions{
-			ListOptions: flags.GetListOptions(),
+			ListOptions: flags.GetListOptions(cmd),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to get jobs: %w", err)
@@ -67,7 +73,9 @@ func runRunsView(ctx stdctx.Context, cmd *cli.Command) error {
 
 		if jobs != nil && len(jobs.Jobs) > 0 {
 			fmt.Printf("\nJobs:\n\n")
-			print.ActionWorkflowJobsList(jobs.Jobs, c.Output)
+			if err := print.ActionWorkflowJobsList(jobs.Jobs, c.Output); err != nil {
+				return err
+			}
 		}
 	}
 

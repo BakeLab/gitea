@@ -31,8 +31,13 @@ var CmdIssuesClose = cli.Command{
 
 // editIssueState abstracts the arg parsing to edit the given issue
 func editIssueState(_ stdctx.Context, cmd *cli.Command, opts gitea.EditIssueOption) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	if ctx.Args().Len() == 0 {
 		return fmt.Errorf("missing required argument: %s", ctx.Command.ArgsUsage)
 	}

@@ -38,8 +38,13 @@ var CmdBranchesList = cli.Command{
 
 // RunBranchesList list branches
 func RunBranchesList(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 
 	owner := ctx.Owner
 	if ctx.IsSet("owner") {
@@ -48,16 +53,15 @@ func RunBranchesList(_ stdctx.Context, cmd *cli.Command) error {
 
 	var branches []*gitea.Branch
 	var protections []*gitea.BranchProtection
-	var err error
 	branches, _, err = ctx.Login.Client().ListRepoBranches(owner, ctx.Repo, gitea.ListRepoBranchesOptions{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {
 		return err
 	}
 
 	protections, _, err = ctx.Login.Client().ListBranchProtections(owner, ctx.Repo, gitea.ListBranchProtectionsOptions{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {
 		return err
@@ -68,6 +72,5 @@ func RunBranchesList(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	print.BranchesList(branches, protections, ctx.Output, fields)
-	return nil
+	return print.BranchesList(branches, protections, ctx.Output, fields)
 }

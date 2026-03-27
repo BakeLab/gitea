@@ -5,7 +5,6 @@ package cmd
 
 import (
 	stdctx "context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -20,26 +19,11 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-type pullLabelData struct {
-	Name        string `json:"name"`
-	Color       string `json:"color"`
-	Description string `json:"description"`
-}
+type pullLabelData = detailLabelData
 
-type pullReviewData struct {
-	ID       int64                 `json:"id"`
-	Reviewer string                `json:"reviewer"`
-	State    gitea.ReviewStateType `json:"state"`
-	Body     string                `json:"body"`
-	Created  time.Time             `json:"created"`
-}
+type pullReviewData = detailReviewData
 
-type pullCommentData struct {
-	ID      int64     `json:"id"`
-	Author  string    `json:"author"`
-	Created time.Time `json:"created"`
-	Body    string    `json:"body"`
-}
+type pullCommentData = detailCommentData
 
 type pullData struct {
 	ID        int64             `json:"id"`
@@ -103,8 +87,13 @@ func runPulls(ctx stdctx.Context, cmd *cli.Command) error {
 }
 
 func runPullDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	idx, err := utils.ArgToIndex(index)
 	if err != nil {
 		return err
@@ -149,28 +138,7 @@ func runPullDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
 
 func runPullDetailAsJSON(ctx *context.TeaContext, pr *gitea.PullRequest, reviews []*gitea.PullReview) error {
 	c := ctx.Login.Client()
-	opts := gitea.ListIssueCommentOptions{ListOptions: flags.GetListOptions()}
-
-	labelSlice := make([]pullLabelData, 0, len(pr.Labels))
-	for _, label := range pr.Labels {
-		labelSlice = append(labelSlice, pullLabelData{label.Name, label.Color, label.Description})
-	}
-
-	assigneesSlice := make([]string, 0, len(pr.Assignees))
-	for _, assignee := range pr.Assignees {
-		assigneesSlice = append(assigneesSlice, assignee.UserName)
-	}
-
-	reviewsSlice := make([]pullReviewData, 0, len(reviews))
-	for _, review := range reviews {
-		reviewsSlice = append(reviewsSlice, pullReviewData{
-			ID:       review.ID,
-			Reviewer: review.Reviewer.UserName,
-			State:    review.State,
-			Body:     review.Body,
-			Created:  review.Submitted,
-		})
-	}
+	opts := gitea.ListIssueCommentOptions{ListOptions: flags.GetListOptions(ctx.Command)}
 
 	mergedBy := ""
 	if pr.MergedBy != nil {
@@ -184,10 +152,10 @@ func runPullDetailAsJSON(ctx *context.TeaContext, pr *gitea.PullRequest, reviews
 		State:     pr.State,
 		Created:   pr.Created,
 		Updated:   pr.Updated,
-		User:      pr.Poster.UserName,
+		User:      username(pr.Poster),
 		Body:      pr.Body,
-		Labels:    labelSlice,
-		Assignees: assigneesSlice,
+		Labels:    buildDetailLabels(pr.Labels),
+		Assignees: buildDetailAssignees(pr.Assignees),
 		URL:       pr.HTMLURL,
 		Base:      pr.Base.Ref,
 		Head:      pr.Head.Ref,
@@ -198,7 +166,7 @@ func runPullDetailAsJSON(ctx *context.TeaContext, pr *gitea.PullRequest, reviews
 		MergedAt:  pr.Merged,
 		MergedBy:  mergedBy,
 		ClosedAt:  pr.Closed,
-		Reviews:   reviewsSlice,
+		Reviews:   buildDetailReviews(reviews),
 		Comments:  make([]pullCommentData, 0),
 	}
 
@@ -208,23 +176,8 @@ func runPullDetailAsJSON(ctx *context.TeaContext, pr *gitea.PullRequest, reviews
 			return err
 		}
 
-		pullSlice.Comments = make([]pullCommentData, 0, len(comments))
-		for _, comment := range comments {
-			pullSlice.Comments = append(pullSlice.Comments, pullCommentData{
-				ID:      comment.ID,
-				Author:  comment.Poster.UserName,
-				Body:    comment.Body,
-				Created: comment.Created,
-			})
-		}
+		pullSlice.Comments = buildDetailComments(comments)
 	}
 
-	jsonData, err := json.MarshalIndent(pullSlice, "", "\t")
-	if err != nil {
-		return err
-	}
-
-	_, err = fmt.Fprintf(ctx.Writer, "%s\n", jsonData)
-
-	return err
+	return writeIndentedJSON(ctx.Writer, pullSlice)
 }

@@ -83,7 +83,13 @@ func parseTimeFlag(value string) (time.Time, error) {
 
 // RunRunsList lists workflow runs
 func RunRunsList(ctx stdctx.Context, cmd *cli.Command) error {
-	c := context.InitCommand(cmd)
+	c, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := c.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := c.Login.Client()
 
 	// Parse time filters
@@ -98,7 +104,7 @@ func RunRunsList(ctx stdctx.Context, cmd *cli.Command) error {
 	}
 
 	// Build list options
-	listOpts := flags.GetListOptions()
+	listOpts := flags.GetListOptions(cmd)
 
 	runs, _, err := client.ListRepoActionRuns(c.Owner, c.Repo, gitea.ListRepoActionRunsOptions{
 		ListOptions: listOpts,
@@ -112,15 +118,13 @@ func RunRunsList(ctx stdctx.Context, cmd *cli.Command) error {
 	}
 
 	if runs == nil {
-		print.ActionRunsList(nil, c.Output)
-		return nil
+		return print.ActionRunsList(nil, c.Output)
 	}
 
 	// Filter by time if specified
 	filteredRuns := filterRunsByTime(runs.WorkflowRuns, since, until)
 
-	print.ActionRunsList(filteredRuns, c.Output)
-	return nil
+	return print.ActionRunsList(filteredRuns, c.Output)
 }
 
 // filterRunsByTime filters runs based on time range

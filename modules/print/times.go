@@ -10,7 +10,7 @@ import (
 )
 
 // TrackedTimesList print list of tracked times to stdout
-func TrackedTimesList(times []*gitea.TrackedTime, outputType string, fields []string, printTotal bool) {
+func TrackedTimesList(times []*gitea.TrackedTime, outputType string, fields []string, printTotal bool) error {
 	printables := make([]printable, len(times))
 	var totalDuration int64
 	for i, t := range times {
@@ -26,7 +26,7 @@ func TrackedTimesList(times []*gitea.TrackedTime, outputType string, fields []st
 		t.addRowSlice(total)
 	}
 
-	t.print(outputType)
+	return t.print(outputType)
 }
 
 // TrackedTimeFields contains all available fields for printing of tracked times.

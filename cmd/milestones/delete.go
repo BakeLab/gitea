@@ -24,10 +24,15 @@ var CmdMilestonesDelete = cli.Command{
 }
 
 func deleteMilestone(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 
-	_, err := client.DeleteMilestoneByName(ctx.Owner, ctx.Repo, ctx.Args().First())
+	_, err = client.DeleteMilestoneByName(ctx.Owner, ctx.Repo, ctx.Args().First())
 	return err
 }

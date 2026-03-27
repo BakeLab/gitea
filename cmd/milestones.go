@@ -40,8 +40,13 @@ func runMilestones(ctx stdctx.Context, cmd *cli.Command) error {
 }
 
 func runMilestoneDetail(_ stdctx.Context, cmd *cli.Command, name string) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 
 	milestone, _, err := client.GetMilestoneByName(ctx.Owner, ctx.Repo, name)

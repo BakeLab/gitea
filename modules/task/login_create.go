@@ -55,7 +55,9 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 	}
 
 	// ... if there already exist a login with same name
-	if login := config.GetLoginByName(name); login != nil {
+	if login, err := config.GetLoginByName(name); err != nil {
+		return err
+	} else if login != nil {
 		return fmt.Errorf("login name '%s' has already been used", login.Name)
 	}
 	// ... if we already use this token
@@ -202,7 +204,9 @@ func GenerateLoginName(url, user string) (string, error) {
 
 	// append user name if login name already exists
 	if len(user) != 0 {
-		if login := config.GetLoginByName(name); login != nil {
+		if login, err := config.GetLoginByName(name); err != nil {
+			return "", err
+		} else if login != nil {
 			return name + "_" + user, nil
 		}
 	}

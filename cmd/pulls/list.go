@@ -30,8 +30,13 @@ var CmdPullsList = cli.Command{
 
 // RunPullsList return list of pulls
 func RunPullsList(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 
 	state, err := flags.ParseState(ctx.String("state"))
 	if err != nil {
@@ -39,7 +44,7 @@ func RunPullsList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	prs, _, err := ctx.Login.Client().ListRepoPullRequests(ctx.Owner, ctx.Repo, gitea.ListPullRequestsOptions{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 		State:       state,
 	})
 	if err != nil {
@@ -51,6 +56,5 @@ func RunPullsList(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	print.PullsList(prs, ctx.Output, fields)
-	return nil
+	return print.PullsList(prs, ctx.Output, fields)
 }

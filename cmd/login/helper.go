@@ -101,7 +101,11 @@ var CmdLoginHelper = cli.Command{
 				// Use --login flag if provided, otherwise fall back to host lookup
 				var userConfig *config.Login
 				if loginName := cmd.String("login"); loginName != "" {
-					userConfig = config.GetLoginByName(loginName)
+					var lookupErr error
+					userConfig, lookupErr = config.GetLoginByName(loginName)
+					if lookupErr != nil {
+						log.Fatal(lookupErr)
+					}
 					if userConfig == nil {
 						log.Fatalf("Login '%s' not found", loginName)
 					}

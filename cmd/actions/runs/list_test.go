@@ -4,10 +4,15 @@
 package runs
 
 import (
+	stdctx "context"
+	"os"
 	"testing"
 	"time"
 
 	"code.gitea.io/sdk/gitea"
+	"code.gitea.io/tea/modules/config"
+	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 )
 
 func TestFilterRunsByTime(t *testing.T) {
@@ -74,4 +79,33 @@ func TestFilterRunsByTime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunRunsListRequiresRepoContext(t *testing.T) {
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+
+	require.NoError(t, os.Chdir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(oldWd))
+	})
+
+	config.SetConfigForTesting(config.LocalConfig{
+		Logins: []config.Login{{
+			Name:    "test",
+			URL:     "https://gitea.example.com",
+			Token:   "token",
+			User:    "tester",
+			Default: true,
+		}},
+	})
+
+	cmd := &cli.Command{
+		Name:  CmdRunsList.Name,
+		Flags: CmdRunsList.Flags,
+	}
+	require.NoError(t, cmd.Set("login", "test"))
+
+	err = RunRunsList(stdctx.Background(), cmd)
+	require.ErrorContains(t, err, "remote repository required")
 }

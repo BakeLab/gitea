@@ -32,7 +32,13 @@ var CmdWorkflowsList = cli.Command{
 
 // RunWorkflowsList lists workflow files in the repository
 func RunWorkflowsList(ctx stdctx.Context, cmd *cli.Command) error {
-	c := context.InitCommand(cmd)
+	c, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := c.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := c.Login.Client()
 
 	// Try to list workflow files from .gitea/workflows directory
@@ -71,7 +77,7 @@ func RunWorkflowsList(ctx stdctx.Context, cmd *cli.Command) error {
 
 	// Get recent runs to check activity
 	runs, _, err := client.ListRepoActionRuns(c.Owner, c.Repo, gitea.ListRepoActionRunsOptions{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err == nil && runs != nil {
 		for _, run := range runs.WorkflowRuns {
@@ -81,6 +87,5 @@ func RunWorkflowsList(ctx stdctx.Context, cmd *cli.Command) error {
 		}
 	}
 
-	print.WorkflowsList(workflows, workflowStatus, c.Output)
-	return nil
+	return print.WorkflowsList(workflows, workflowStatus, c.Output)
 }

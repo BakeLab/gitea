@@ -97,128 +97,39 @@ Note: if your endpoint contains ? or &, quote it to prevent shell expansion
 	Flags:     append(apiFlags(), flags.LoginRepoFlags...),
 }
 
+type preparedAPIRequest struct {
+	Method   string
+	Endpoint string
+	Headers  map[string]string
+	Body     []byte
+}
+
 func runApi(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-
-	// Get the endpoint argument
-	if cmd.NArg() < 1 {
-		return fmt.Errorf("endpoint argument required")
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
 	}
-	endpoint := cmd.Args().First()
-
-	// Expand placeholders in endpoint
-	endpoint = expandPlaceholders(endpoint, ctx)
-
-	// Parse headers
-	headers := make(map[string]string)
-	for _, h := range cmd.StringSlice("header") {
-		parts := strings.SplitN(h, ":", 2)
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid header format: %q (expected key:value)", h)
-		}
-		headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+	request, err := prepareAPIRequest(cmd, ctx)
+	if err != nil {
+		return err
 	}
 
-	// Build request body from fields
 	var body io.Reader
-	stringFields := cmd.StringSlice("field")
-	typedFields := cmd.StringSlice("Field")
-	dataRaw := cmd.String("data")
-
-	if dataRaw != "" && (len(stringFields) > 0 || len(typedFields) > 0) {
-		return fmt.Errorf("--data/-d cannot be combined with --field/-f or --Field/-F")
-	}
-
-	if dataRaw != "" {
-		var dataBytes []byte
-		var dataSource string
-		if strings.HasPrefix(dataRaw, "@") {
-			filename := dataRaw[1:]
-			var err error
-			if filename == "-" {
-				dataBytes, err = io.ReadAll(os.Stdin)
-				dataSource = "stdin"
-			} else {
-				dataBytes, err = os.ReadFile(filename)
-				dataSource = filename
-			}
-			if err != nil {
-				return fmt.Errorf("failed to read %q: %w", dataRaw, err)
-			}
-		} else {
-			dataBytes = []byte(dataRaw)
-		}
-		if !json.Valid(dataBytes) {
-			if dataSource != "" {
-				return fmt.Errorf("--data/-d value from %s is not valid JSON", dataSource)
-			}
-			return fmt.Errorf("--data/-d value is not valid JSON")
-		}
-		body = bytes.NewReader(dataBytes)
-	} else if len(stringFields) > 0 || len(typedFields) > 0 {
-		bodyMap := make(map[string]any)
-
-		// Process string fields (-f)
-		for _, f := range stringFields {
-			parts := strings.SplitN(f, "=", 2)
-			if len(parts) != 2 {
-				return fmt.Errorf("invalid field format: %q (expected key=value)", f)
-			}
-			key := parts[0]
-			if key == "" {
-				return fmt.Errorf("field key cannot be empty in %q", f)
-			}
-			if _, exists := bodyMap[key]; exists {
-				return fmt.Errorf("duplicate field key %q", key)
-			}
-			bodyMap[key] = parts[1]
-		}
-
-		// Process typed fields (-F)
-		for _, f := range typedFields {
-			parts := strings.SplitN(f, "=", 2)
-			if len(parts) != 2 {
-				return fmt.Errorf("invalid field format: %q (expected key=value)", f)
-			}
-			key := parts[0]
-			if key == "" {
-				return fmt.Errorf("field key cannot be empty in %q", f)
-			}
-			if _, exists := bodyMap[key]; exists {
-				return fmt.Errorf("duplicate field key %q", key)
-			}
-			value := parts[1]
-
-			parsedValue, err := parseTypedValue(value)
-			if err != nil {
-				return fmt.Errorf("failed to parse field %q: %w", key, err)
-			}
-			bodyMap[key] = parsedValue
-		}
-
-		bodyBytes, err := json.Marshal(bodyMap)
-		if err != nil {
-			return fmt.Errorf("failed to encode request body: %w", err)
-		}
-		body = bytes.NewReader(bodyBytes)
+	if request.Body != nil {
+		body = bytes.NewReader(request.Body)
 	}
 
 	// Create API client and make request
 	client := api.NewClient(ctx.Login)
-	method := strings.ToUpper(cmd.String("method"))
-	if !cmd.IsSet("method") {
-		if body != nil {
-			method = "POST"
-		} else {
-			method = "GET"
-		}
-	}
-
-	resp, err := client.Do(method, endpoint, body, headers)
+	resp, err := client.Do(request.Method, request.Endpoint, body, request.Headers)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to close response body: %v\n", closeErr)
+		}
+	}()
 
 	// Print headers to stderr if requested (so redirects/pipes work correctly)
 	if cmd.Bool("include") {
@@ -249,7 +160,11 @@ func runApi(_ stdctx.Context, cmd *cli.Command) error {
 		if err != nil {
 			return fmt.Errorf("failed to create output file: %w", err)
 		}
-		defer file.Close()
+		defer func() {
+			if closeErr := file.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to close output file: %v\n", closeErr)
+			}
+		}()
 		output = file
 	}
 
@@ -265,6 +180,126 @@ func runApi(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	return nil
+}
+
+func prepareAPIRequest(cmd *cli.Command, ctx *context.TeaContext) (*preparedAPIRequest, error) {
+	var err error
+
+	// Get the endpoint argument
+	if cmd.NArg() < 1 {
+		return nil, fmt.Errorf("endpoint argument required")
+	}
+	endpoint := cmd.Args().First()
+
+	// Expand placeholders in endpoint
+	endpoint = expandPlaceholders(endpoint, ctx)
+
+	// Parse headers
+	headers := make(map[string]string)
+	for _, h := range cmd.StringSlice("header") {
+		parts := strings.SplitN(h, ":", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid header format: %q (expected key:value)", h)
+		}
+		headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+	}
+
+	// Build request body from fields
+	var bodyBytes []byte
+	stringFields := cmd.StringSlice("field")
+	typedFields := cmd.StringSlice("Field")
+	dataRaw := cmd.String("data")
+
+	if dataRaw != "" && (len(stringFields) > 0 || len(typedFields) > 0) {
+		return nil, fmt.Errorf("--data/-d cannot be combined with --field/-f or --Field/-F")
+	}
+
+	if dataRaw != "" {
+		var dataBytes []byte
+		var dataSource string
+		if strings.HasPrefix(dataRaw, "@") {
+			filename := dataRaw[1:]
+			if filename == "-" {
+				dataBytes, err = io.ReadAll(os.Stdin)
+				dataSource = "stdin"
+			} else {
+				dataBytes, err = os.ReadFile(filename)
+				dataSource = filename
+			}
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %q: %w", dataRaw, err)
+			}
+		} else {
+			dataBytes = []byte(dataRaw)
+		}
+		if !json.Valid(dataBytes) {
+			if dataSource != "" {
+				return nil, fmt.Errorf("--data/-d value from %s is not valid JSON", dataSource)
+			}
+			return nil, fmt.Errorf("--data/-d value is not valid JSON")
+		}
+		bodyBytes = dataBytes
+	} else if len(stringFields) > 0 || len(typedFields) > 0 {
+		bodyMap := make(map[string]any)
+
+		// Process string fields (-f)
+		for _, f := range stringFields {
+			parts := strings.SplitN(f, "=", 2)
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid field format: %q (expected key=value)", f)
+			}
+			key := parts[0]
+			if key == "" {
+				return nil, fmt.Errorf("field key cannot be empty in %q", f)
+			}
+			if _, exists := bodyMap[key]; exists {
+				return nil, fmt.Errorf("duplicate field key %q", key)
+			}
+			bodyMap[key] = parts[1]
+		}
+
+		// Process typed fields (-F)
+		for _, f := range typedFields {
+			parts := strings.SplitN(f, "=", 2)
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid field format: %q (expected key=value)", f)
+			}
+			key := parts[0]
+			if key == "" {
+				return nil, fmt.Errorf("field key cannot be empty in %q", f)
+			}
+			if _, exists := bodyMap[key]; exists {
+				return nil, fmt.Errorf("duplicate field key %q", key)
+			}
+			value := parts[1]
+
+			parsedValue, err := parseTypedValue(value)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse field %q: %w", key, err)
+			}
+			bodyMap[key] = parsedValue
+		}
+
+		bodyBytes, err = json.Marshal(bodyMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode request body: %w", err)
+		}
+	}
+	method := strings.ToUpper(cmd.String("method"))
+	if !cmd.IsSet("method") {
+		if bodyBytes != nil {
+			method = "POST"
+		} else {
+			method = "GET"
+		}
+	}
+
+	return &preparedAPIRequest{
+		Method:   method,
+		Endpoint: endpoint,
+		Headers:  headers,
+		Body:     bodyBytes,
+	}, nil
 }
 
 // parseTypedValue parses a value for -F flag, handling:

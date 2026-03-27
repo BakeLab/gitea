@@ -6,9 +6,8 @@ package context
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
-	"path"
+	"strings"
 
 	"code.gitea.io/tea/modules/config"
 	"code.gitea.io/tea/modules/git"
@@ -22,6 +21,9 @@ import (
 )
 
 var errNotAGiteaRepo = errors.New("No Gitea login found. You might want to specify --repo (and --login) to work outside of a repository")
+
+// ErrCommandCanceled is returned when the user explicitly cancels an interactive prompt.
+var ErrCommandCanceled = errors.New("command canceled")
 
 // TeaContext contains all context derived during command initialization and wraps cli.Context
 type TeaContext struct {
@@ -38,9 +40,11 @@ type TeaContext struct {
 
 // GetRemoteRepoHTMLURL returns the web-ui url of the remote repo,
 // after ensuring a remote repo is present in the context.
-func (ctx *TeaContext) GetRemoteRepoHTMLURL() string {
-	ctx.Ensure(CtxRequirement{RemoteRepo: true})
-	return path.Join(ctx.Login.URL, ctx.Owner, ctx.Repo)
+func (ctx *TeaContext) GetRemoteRepoHTMLURL() (string, error) {
+	if err := ctx.Ensure(CtxRequirement{RemoteRepo: true}); err != nil {
+		return "", err
+	}
+	return strings.TrimRight(ctx.Login.URL, "/") + "/" + ctx.Owner + "/" + ctx.Repo, nil
 }
 
 // IsInteractiveMode returns true if the command is running in interactive mode
@@ -57,7 +61,7 @@ func shouldPromptFallbackLogin(login *config.Login, canPrompt bool) bool {
 // available the repo slug. It does this by reading the config file for logins, parsing
 // the remotes of the .git repo specified in repoFlag or $PWD, and using overrides from
 // command flags. If a local git repo can't be found, repo slug values are unset.
-func InitCommand(cmd *cli.Command) *TeaContext {
+func InitCommand(cmd *cli.Command) (*TeaContext, error) {
 	// these flags are used as overrides to the context detection via local git repo
 	repoFlag := cmd.String("repo")
 	loginFlag := cmd.String("login")
@@ -75,7 +79,7 @@ func InitCommand(cmd *cli.Command) *TeaContext {
 	// check if repoFlag can be interpreted as path to local repo.
 	if len(repoFlag) != 0 {
 		if repoFlagPathExists, err = utils.DirExists(repoFlag); err != nil {
-			log.Fatal(err.Error())
+			return nil, err
 		}
 		if repoFlagPathExists {
 			repoPath = repoFlag
@@ -88,7 +92,7 @@ func InitCommand(cmd *cli.Command) *TeaContext {
 
 	if repoPath == "" {
 		if repoPath, err = os.Getwd(); err != nil {
-			log.Fatal(err.Error())
+			return nil, err
 		}
 	}
 
@@ -97,7 +101,7 @@ func InitCommand(cmd *cli.Command) *TeaContext {
 	envLogin := GetLoginByEnvVar()
 	if envLogin != nil {
 		if _, err := utils.ValidateAuthenticationMethod(envLogin.URL, envLogin.Token, "", "", false, "", ""); err != nil {
-			log.Fatal(err.Error())
+			return nil, err
 		}
 		extraLogins = append(extraLogins, *envLogin)
 	}
@@ -108,7 +112,7 @@ func InitCommand(cmd *cli.Command) *TeaContext {
 		if err == errNotAGiteaRepo || err == gogit.ErrRepositoryNotExists {
 			// we can deal with that, commands needing the optional values use ctx.Ensure()
 		} else {
-			log.Fatal(err.Error())
+			return nil, err
 		}
 	}
 
@@ -125,20 +129,20 @@ func InitCommand(cmd *cli.Command) *TeaContext {
 
 	// override login from flag, or use default login if repo based detection failed
 	if len(loginFlag) != 0 {
-		c.Login = config.GetLoginByName(loginFlag)
+		if c.Login, err = config.GetLoginByName(loginFlag); err != nil {
+			return nil, err
+		}
 		if c.Login == nil {
-			log.Fatalf("Login name '%s' does not exist", loginFlag)
+			return nil, fmt.Errorf("login name '%s' does not exist", loginFlag)
 		}
 	} else if c.Login == nil {
 		if c.Login, err = config.GetDefaultLogin(); err != nil {
 			if err.Error() == "No available login" {
-				// TODO: maybe we can directly start interact.CreateLogin() (only if
-				// we're sure we can interactively!), as gh cli does.
-				fmt.Println(`No gitea login configured. To start using tea, first run
+				return nil, fmt.Errorf(`no gitea login configured. To start using tea, first run
   tea login add
-and then run your command again.`)
+and then run your command again`)
 			}
-			os.Exit(1)
+			return nil, err
 		}
 
 		// Only prompt for confirmation if the fallback login is not explicitly set as default
@@ -150,10 +154,10 @@ and then run your command again.`)
 				Value(&fallback).
 				WithTheme(theme.GetTheme()).
 				Run(); err != nil {
-				log.Fatalf("Get confirm failed: %v", err)
+				return nil, fmt.Errorf("get confirm failed: %w", err)
 			}
 			if !fallback {
-				os.Exit(1)
+				return nil, ErrCommandCanceled
 			}
 		} else if !c.Login.Default {
 			fmt.Fprintf(os.Stderr, "NOTE: no gitea login detected, falling back to login '%s' in non-interactive mode.\n", c.Login.Name)
@@ -166,5 +170,5 @@ and then run your command again.`)
 	c.IsGlobal = globalFlag
 	c.Command = cmd
 	c.Output = cmd.String("output")
-	return &c
+	return &c, nil
 }

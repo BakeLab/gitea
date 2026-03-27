@@ -40,7 +40,13 @@ func runSecretsCreate(ctx stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("secret name is required")
 	}
 
-	c := context.InitCommand(cmd)
+	c, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := c.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := c.Login.Client()
 
 	secretName := cmd.Args().First()

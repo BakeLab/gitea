@@ -58,7 +58,10 @@ var CmdReposList = cli.Command{
 
 // RunReposList list repositories
 func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
-	teaCmd := context.InitCommand(cmd)
+	teaCmd, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := teaCmd.Login.Client()
 
 	typeFilter, err := getTypeFilter(cmd)
@@ -76,11 +79,11 @@ func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
 			}
 			// not an org, treat as user
 			rps, _, err = client.ListUserRepos(owner, gitea.ListReposOptions{
-				ListOptions: flags.GetListOptions(),
+				ListOptions: flags.GetListOptions(cmd),
 			})
 		} else {
 			rps, _, err = client.ListOrgRepos(owner, gitea.ListOrgReposOptions{
-				ListOptions: flags.GetListOptions(),
+				ListOptions: flags.GetListOptions(cmd),
 			})
 		}
 		if err != nil {
@@ -92,7 +95,7 @@ func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
 			return err
 		}
 		rps, _, err = client.SearchRepos(gitea.SearchRepoOptions{
-			ListOptions:     flags.GetListOptions(),
+			ListOptions:     flags.GetListOptions(cmd),
 			StarredByUserID: user.ID,
 		})
 		if err != nil {
@@ -105,11 +108,11 @@ func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
 		if err != nil {
 			return err
 		}
-		rps = paginateRepos(allRepos, flags.GetListOptions())
+		rps = paginateRepos(allRepos, flags.GetListOptions(cmd))
 	} else {
 		var err error
 		rps, _, err = client.ListMyRepos(gitea.ListReposOptions{
-			ListOptions: flags.GetListOptions(),
+			ListOptions: flags.GetListOptions(cmd),
 		})
 		if err != nil {
 			return err
@@ -126,8 +129,7 @@ func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	print.ReposList(reposFiltered, teaCmd.Output, fields)
-	return nil
+	return print.ReposList(reposFiltered, teaCmd.Output, fields)
 }
 
 func filterReposByType(repos []*gitea.Repository, t gitea.RepoType) []*gitea.Repository {

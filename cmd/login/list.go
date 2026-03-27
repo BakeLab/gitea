@@ -30,6 +30,5 @@ func RunLoginList(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	print.LoginsList(logins, cmd.String("output"))
-	return nil
+	return print.LoginsList(logins, cmd.String("output"))
 }

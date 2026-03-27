@@ -58,7 +58,10 @@ var CmdReposSearch = cli.Command{
 }
 
 func runReposSearch(_ stdctx.Context, cmd *cli.Command) error {
-	teaCmd := context.InitCommand(cmd)
+	teaCmd, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := teaCmd.Login.Client()
 
 	var ownerID int64
@@ -109,7 +112,7 @@ func runReposSearch(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	rps, _, err := client.SearchRepos(gitea.SearchRepoOptions{
-		ListOptions:          flags.GetListOptions(),
+		ListOptions:          flags.GetListOptions(cmd),
 		OwnerID:              ownerID,
 		IsPrivate:            isPrivate,
 		IsArchived:           isArchived,
@@ -127,6 +130,5 @@ func runReposSearch(_ stdctx.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	print.ReposList(rps, teaCmd.Output, fields)
-	return nil
+	return print.ReposList(rps, teaCmd.Output, fields)
 }

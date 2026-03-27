@@ -4,31 +4,28 @@
 package context
 
 import (
-	"fmt"
-	"os"
+	"errors"
 )
 
-// Ensure checks if requirements on the context are set, and terminates otherwise.
-func (ctx *TeaContext) Ensure(req CtxRequirement) {
+// Ensure checks if requirements on the context are set.
+func (ctx *TeaContext) Ensure(req CtxRequirement) error {
 	if req.LocalRepo && ctx.LocalRepo == nil {
-		fmt.Println("Local repository required: Execute from a repo dir, or specify a path with --repo.")
-		os.Exit(1)
+		return errors.New("local repository required: execute from a repo dir, or specify a path with --repo")
 	}
 
 	if req.RemoteRepo && len(ctx.RepoSlug) == 0 {
-		fmt.Println("Remote repository required: Specify ID via --repo or execute from a local git repo.")
-		os.Exit(1)
+		return errors.New("remote repository required: specify id via --repo or execute from a local git repo")
 	}
 
 	if req.Org && len(ctx.Org) == 0 {
-		fmt.Println("Organization required: Specify organization via --org.")
-		os.Exit(1)
+		return errors.New("organization required: specify organization via --org")
 	}
 
 	if req.Global && !ctx.IsGlobal {
-		fmt.Println("Global scope required: Specify --global.")
-		os.Exit(1)
+		return errors.New("global scope required: specify --global")
 	}
+
+	return nil
 }
 
 // CtxRequirement specifies context needed for operation

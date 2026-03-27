@@ -45,7 +45,10 @@ func runRepos(ctx stdctx.Context, cmd *cli.Command) error {
 }
 
 func runRepoDetail(_ stdctx.Context, cmd *cli.Command, path string) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 	repoOwner, repoName := utils.GetOwnerAndRepo(path, ctx.Owner)
 	repo, _, err := client.GetRepo(repoOwner, repoName)

@@ -50,7 +50,10 @@ var CmdMilestonesCreate = cli.Command{
 }
 
 func runMilestonesCreate(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 
 	date := ctx.String("deadline")
 	deadline := &time.Time{}

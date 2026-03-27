@@ -30,26 +30,27 @@ var CmdWebhooksList = cli.Command{
 
 // RunWebhooksList list webhooks
 func RunWebhooksList(ctx stdctx.Context, cmd *cli.Command) error {
-	c := context.InitCommand(cmd)
+	c, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := c.Login.Client()
 
 	var hooks []*gitea.Hook
-	var err error
 	if c.IsGlobal {
 		return fmt.Errorf("global webhooks not yet supported in this version")
 	} else if len(c.Org) > 0 {
 		hooks, _, err = client.ListOrgHooks(c.Org, gitea.ListHooksOptions{
-			ListOptions: flags.GetListOptions(),
+			ListOptions: flags.GetListOptions(cmd),
 		})
 	} else {
 		hooks, _, err = client.ListRepoHooks(c.Owner, c.Repo, gitea.ListHooksOptions{
-			ListOptions: flags.GetListOptions(),
+			ListOptions: flags.GetListOptions(cmd),
 		})
 	}
 	if err != nil {
 		return err
 	}
 
-	print.WebhooksList(hooks, c.Output)
-	return nil
+	return print.WebhooksList(hooks, c.Output)
 }

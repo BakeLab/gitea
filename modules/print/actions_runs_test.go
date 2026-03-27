@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
+	"github.com/stretchr/testify/require"
 )
 
 func TestActionRunsListEmpty(t *testing.T) {
@@ -18,7 +19,7 @@ func TestActionRunsListEmpty(t *testing.T) {
 		}
 	}()
 
-	ActionRunsList([]*gitea.ActionWorkflowRun{}, "")
+	require.NoError(t, ActionRunsList([]*gitea.ActionWorkflowRun{}, ""))
 }
 
 func TestActionRunsListWithData(t *testing.T) {
@@ -49,7 +50,7 @@ func TestActionRunsListWithData(t *testing.T) {
 		}
 	}()
 
-	ActionRunsList(runs, "")
+	require.NoError(t, ActionRunsList(runs, ""))
 }
 
 func TestActionRunDetails(t *testing.T) {
@@ -90,7 +91,7 @@ func TestActionWorkflowJobsListEmpty(t *testing.T) {
 		}
 	}()
 
-	ActionWorkflowJobsList([]*gitea.ActionWorkflowJob{}, "")
+	require.NoError(t, ActionWorkflowJobsList([]*gitea.ActionWorkflowJob{}, ""))
 }
 
 func TestActionWorkflowJobsListWithData(t *testing.T) {
@@ -119,7 +120,7 @@ func TestActionWorkflowJobsListWithData(t *testing.T) {
 		}
 	}()
 
-	ActionWorkflowJobsList(jobs, "")
+	require.NoError(t, ActionWorkflowJobsList(jobs, ""))
 }
 
 func TestFormatDurationMinutes(t *testing.T) {

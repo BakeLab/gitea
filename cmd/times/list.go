@@ -72,12 +72,16 @@ Depending on your permissions on the repository, only your own tracked times mig
 
 // RunTimesList list repositories
 func RunTimesList(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 
 	var times []*gitea.TrackedTime
-	var err error
 	var from, until time.Time
 	var fields []string
 
@@ -95,7 +99,7 @@ func RunTimesList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	opts := gitea.ListTrackedTimesOptions{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 		Since:       from,
 		Before:      until,
 	}
@@ -133,6 +137,5 @@ func RunTimesList(_ stdctx.Context, cmd *cli.Command) error {
 		}
 	}
 
-	print.TrackedTimesList(times, ctx.Output, fields, ctx.Bool("total"))
-	return nil
+	return print.TrackedTimesList(times, ctx.Output, fields, ctx.Bool("total"))
 }

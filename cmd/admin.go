@@ -44,7 +44,10 @@ var cmdAdminUsers = cli.Command{
 }
 
 func runAdminUserDetail(_ stdctx.Context, cmd *cli.Command, u string) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 	user, _, err := client.GetUserInfo(u)
 	if err != nil {

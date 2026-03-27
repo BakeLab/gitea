@@ -72,28 +72,36 @@ func TestConfigLock_MutexProtection(t *testing.T) {
 	}
 }
 
+func useTempConfigPath(t *testing.T) string {
+	t.Helper()
+
+	configPath := filepath.Join(t.TempDir(), "config.yml")
+	SetConfigPathForTesting(configPath)
+	t.Cleanup(func() {
+		SetConfigPathForTesting("")
+	})
+
+	return configPath
+}
+
 func TestReloadConfigFromDisk(t *testing.T) {
+	configPath := useTempConfigPath(t)
+
 	// Save original config state
 	originalConfig := config
 
-	// Create a temp config file
-	tmpDir, err := os.MkdirTemp("", "tea-reload-test")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
+	config = LocalConfig{Logins: []Login{{Name: "stale"}}}
+	if err := os.WriteFile(configPath, []byte("logins:\n  - name: test\n"), 0o600); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
 
-	// We can't easily change GetConfigPath, so we test that reloadConfigFromDisk
-	// handles a missing file gracefully (returns nil and resets config)
-	config = LocalConfig{Logins: []Login{{Name: "test"}}}
-
-	// Call reload - since the actual config path likely exists or doesn't,
-	// we just verify it doesn't panic and returns without error or with expected error
-	err = reloadConfigFromDisk()
-	// The function should either succeed or return an error, not panic
+	err := reloadConfigFromDisk()
 	if err != nil {
-		// This is acceptable - config file might not exist in test environment
-		t.Logf("reloadConfigFromDisk returned error (expected in test env): %v", err)
+		t.Fatalf("reloadConfigFromDisk returned error: %v", err)
+	}
+
+	if len(config.Logins) != 1 || config.Logins[0].Name != "test" {
+		t.Fatalf("expected config to reload test login, got %+v", config.Logins)
 	}
 
 	// Restore original config
@@ -101,6 +109,8 @@ func TestReloadConfigFromDisk(t *testing.T) {
 }
 
 func TestWithConfigLock(t *testing.T) {
+	useTempConfigPath(t)
+
 	executed := false
 	err := withConfigLock(func() error {
 		executed = true
@@ -115,6 +125,8 @@ func TestWithConfigLock(t *testing.T) {
 }
 
 func TestWithConfigLock_PropagatesError(t *testing.T) {
+	useTempConfigPath(t)
+
 	expectedErr := fmt.Errorf("test error")
 	err := withConfigLock(func() error {
 		return expectedErr
@@ -126,6 +138,8 @@ func TestWithConfigLock_PropagatesError(t *testing.T) {
 }
 
 func TestDoubleCheckedLocking_SimulatedRefresh(t *testing.T) {
+	useTempConfigPath(t)
+
 	// This test simulates the double-checked locking pattern
 	// by having multiple goroutines try to "refresh" simultaneously
 

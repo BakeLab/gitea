@@ -28,7 +28,10 @@ var CmdOrganizationDelete = cli.Command{
 
 // RunOrganizationDelete delete user organization
 func RunOrganizationDelete(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 
 	client := ctx.Login.Client()
 

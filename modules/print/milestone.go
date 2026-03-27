@@ -23,14 +23,14 @@ func MilestoneDetails(milestone *gitea.Milestone) {
 }
 
 // MilestonesList prints a listing of milestones
-func MilestonesList(news []*gitea.Milestone, output string, fields []string) {
+func MilestonesList(news []*gitea.Milestone, output string, fields []string) error {
 	printables := make([]printable, len(news))
 	for i, x := range news {
 		printables[i] = &printableMilestone{x}
 	}
 	t := tableFromItems(fields, printables, isMachineReadable(output))
 	t.sort(0, true)
-	t.print(output)
+	return t.print(output)
 }
 
 // MilestoneFields are all available fields to print with MilestonesList

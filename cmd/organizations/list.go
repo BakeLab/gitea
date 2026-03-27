@@ -29,17 +29,18 @@ var CmdOrganizationList = cli.Command{
 
 // RunOrganizationList list user organizations
 func RunOrganizationList(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 
 	userOrganizations, _, err := client.ListUserOrgs(ctx.Login.User, gitea.ListOrgsOptions{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {
 		return err
 	}
 
-	print.OrganizationsList(userOrganizations, ctx.Output)
-
-	return nil
+	return print.OrganizationsList(userOrganizations, ctx.Output)
 }

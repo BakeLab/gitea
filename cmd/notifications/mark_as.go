@@ -23,7 +23,10 @@ var CmdNotificationsMarkRead = cli.Command{
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
 	Action: func(_ stdctx.Context, cmd *cli.Command) error {
-		ctx := context.InitCommand(cmd)
+		ctx, err := context.InitCommand(cmd)
+		if err != nil {
+			return err
+		}
 		filter, err := flags.NotificationStateFlag.GetValues(cmd)
 		if err != nil {
 			return err
@@ -44,7 +47,10 @@ var CmdNotificationsMarkUnread = cli.Command{
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
 	Action: func(_ stdctx.Context, cmd *cli.Command) error {
-		ctx := context.InitCommand(cmd)
+		ctx, err := context.InitCommand(cmd)
+		if err != nil {
+			return err
+		}
 		filter, err := flags.NotificationStateFlag.GetValues(cmd)
 		if err != nil {
 			return err
@@ -65,7 +71,10 @@ var CmdNotificationsMarkPinned = cli.Command{
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
 	Action: func(_ stdctx.Context, cmd *cli.Command) error {
-		ctx := context.InitCommand(cmd)
+		ctx, err := context.InitCommand(cmd)
+		if err != nil {
+			return err
+		}
 		filter, err := flags.NotificationStateFlag.GetValues(cmd)
 		if err != nil {
 			return err
@@ -85,7 +94,10 @@ var CmdNotificationsUnpin = cli.Command{
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
 	Action: func(_ stdctx.Context, cmd *cli.Command) error {
-		ctx := context.InitCommand(cmd)
+		ctx, err := context.InitCommand(cmd)
+		if err != nil {
+			return err
+		}
 		filter := []string{string(gitea.NotifyStatusPinned)}
 		// NOTE: we implicitly mark it as read, to match web UI semantics. marking as unread might be more useful?
 		return markNotificationAs(ctx, filter, gitea.NotifyStatusRead)
@@ -109,7 +121,9 @@ func markNotificationAs(cmd *context.TeaContext, filterStates []string, targetSt
 		if allRepos {
 			_, _, err = client.ReadNotifications(opts)
 		} else {
-			cmd.Ensure(context.CtxRequirement{RemoteRepo: true})
+			if err := cmd.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+				return err
+			}
 			_, _, err = client.ReadRepoNotifications(cmd.Owner, cmd.Repo, opts)
 		}
 

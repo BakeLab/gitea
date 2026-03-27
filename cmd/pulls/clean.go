@@ -32,8 +32,13 @@ var CmdPullsClean = cli.Command{
 }
 
 func runPullsClean(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{LocalRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{LocalRepo: true}); err != nil {
+		return err
+	}
 	if ctx.Args().Len() != 1 {
 		return fmt.Errorf("pull request index is required")
 	}

@@ -10,7 +10,7 @@ import (
 )
 
 // ActionSecretsList prints a list of action secrets
-func ActionSecretsList(secrets []*gitea.Secret, output string) {
+func ActionSecretsList(secrets []*gitea.Secret, output string) error {
 	t := table{
 		headers: []string{
 			"Name",
@@ -27,11 +27,11 @@ func ActionSecretsList(secrets []*gitea.Secret, output string) {
 
 	if len(secrets) == 0 {
 		fmt.Printf("No secrets found\n")
-		return
+		return nil
 	}
 
 	t.sort(0, true)
-	t.print(output)
+	return t.print(output)
 }
 
 // ActionVariableDetails prints details of a specific action variable
@@ -43,7 +43,7 @@ func ActionVariableDetails(variable *gitea.RepoActionVariable) {
 }
 
 // ActionVariablesList prints a list of action variables
-func ActionVariablesList(variables []*gitea.RepoActionVariable, output string) {
+func ActionVariablesList(variables []*gitea.RepoActionVariable, output string) error {
 	t := table{
 		headers: []string{
 			"Name",
@@ -68,9 +68,9 @@ func ActionVariablesList(variables []*gitea.RepoActionVariable, output string) {
 
 	if len(variables) == 0 {
 		fmt.Printf("No variables found\n")
-		return
+		return nil
 	}
 
 	t.sort(0, true)
-	t.print(output)
+	return t.print(output)
 }

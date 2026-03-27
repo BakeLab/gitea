@@ -5,7 +5,6 @@ package notifications
 
 import (
 	stdctx "context"
-	"log"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
@@ -64,12 +63,15 @@ func listNotifications(_ stdctx.Context, cmd *cli.Command, status []gitea.Notify
 	var news []*gitea.NotificationThread
 	var err error
 
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 	all := ctx.Bool("mine")
 
 	// This enforces pagination (see https://github.com/go-gitea/gitea/issues/16733)
-	listOpts := flags.GetListOptions()
+	listOpts := flags.GetListOptions(cmd)
 	if listOpts.Page == 0 {
 		listOpts.Page = 1
 	}
@@ -91,7 +93,9 @@ func listNotifications(_ stdctx.Context, cmd *cli.Command, status []gitea.Notify
 			SubjectTypes: subjects,
 		})
 	} else {
-		ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+		if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+			return err
+		}
 		news, _, err = client.ListRepoNotifications(ctx.Owner, ctx.Repo, gitea.ListNotificationOptions{
 			ListOptions:  listOpts,
 			Status:       status,
@@ -99,9 +103,8 @@ func listNotifications(_ stdctx.Context, cmd *cli.Command, status []gitea.Notify
 		})
 	}
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
-	print.NotificationsList(news, ctx.Output, fields)
-	return nil
+	return print.NotificationsList(news, ctx.Output, fields)
 }

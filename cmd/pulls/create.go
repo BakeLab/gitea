@@ -49,11 +49,16 @@ var CmdPullsCreate = cli.Command{
 }
 
 func runPullsCreate(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{
 		LocalRepo:  true,
 		RemoteRepo: true,
-	})
+	}); err != nil {
+		return err
+	}
 
 	// no args -> interactive mode
 	if ctx.IsInteractiveMode() {

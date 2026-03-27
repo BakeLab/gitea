@@ -31,8 +31,13 @@ var CmdReleaseAttachmentList = cli.Command{
 
 // RunReleaseAttachmentList list release attachments
 func RunReleaseAttachmentList(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 
 	tag := ctx.Args().First()
@@ -46,14 +51,13 @@ func RunReleaseAttachmentList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	attachments, _, err := ctx.Login.Client().ListReleaseAttachments(ctx.Owner, ctx.Repo, release.ID, gitea.ListReleaseAttachmentsOptions{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {
 		return err
 	}
 
-	print.ReleaseAttachmentsList(attachments, ctx.Output)
-	return nil
+	return print.ReleaseAttachmentsList(attachments, ctx.Output)
 }
 
 func getReleaseByTag(owner, repo, tag string, client *gitea.Client) (*gitea.Release, error) {

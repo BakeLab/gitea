@@ -19,7 +19,10 @@ var CmdWhoami = cli.Command{
 	Usage:       "Show current logged in user",
 	ArgsUsage:   " ", // command does not accept arguments
 	Action: func(_ stdctx.Context, cmd *cli.Command) error {
-		ctx := context.InitCommand(cmd)
+		ctx, err := context.InitCommand(cmd)
+		if err != nil {
+			return err
+		}
 		client := ctx.Login.Client()
 		user, _, _ := client.GetMyUserInfo()
 		print.UserDetails(user)

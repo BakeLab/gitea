@@ -30,8 +30,13 @@ use an empty string (eg. --milestone "").`,
 }
 
 func runIssuesEdit(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 
 	if !cmd.Args().Present() {
 		return fmt.Errorf("must specify at least one issue index")

@@ -5,11 +5,8 @@ package cmd
 
 import (
 	"bytes"
-	stdctx "context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -26,6 +23,51 @@ const (
 	testOwner = "testOwner"
 	testRepo  = "testRepo"
 )
+
+type fakeIssueCommentClient struct {
+	owner    string
+	repo     string
+	index    int64
+	comments []*gitea.Comment
+}
+
+func (f *fakeIssueCommentClient) ListIssueComments(owner, repo string, index int64, _ gitea.ListIssueCommentOptions) ([]*gitea.Comment, *gitea.Response, error) {
+	f.owner = owner
+	f.repo = repo
+	f.index = index
+	return f.comments, nil, nil
+}
+
+type fakeIssueDetailClient struct {
+	owner     string
+	repo      string
+	index     int64
+	issue     *gitea.Issue
+	reactions []*gitea.Reaction
+}
+
+func (f *fakeIssueDetailClient) GetIssue(owner, repo string, index int64) (*gitea.Issue, *gitea.Response, error) {
+	f.owner = owner
+	f.repo = repo
+	f.index = index
+	return f.issue, nil, nil
+}
+
+func (f *fakeIssueDetailClient) GetIssueReactions(owner, repo string, index int64) ([]*gitea.Reaction, *gitea.Response, error) {
+	f.owner = owner
+	f.repo = repo
+	f.index = index
+	return f.reactions, nil, nil
+}
+
+func toCommentPointers(comments []gitea.Comment) []*gitea.Comment {
+	result := make([]*gitea.Comment, 0, len(comments))
+	for i := range comments {
+		comment := comments[i]
+		result = append(result, &comment)
+	}
+	return result
+}
 
 func createTestIssue(comments int, isClosed bool) gitea.Issue {
 	issue := gitea.Issue{
@@ -160,25 +202,11 @@ func TestRunIssueDetailAsJSON(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				path := r.URL.Path
-				if path == fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/comments", testOwner, testRepo, testCase.issue.Index) {
-					jsonComments, err := json.Marshal(testCase.comments)
-					if err != nil {
-						require.NoError(t, err, "Testing setup failed: failed to marshal comments")
-					}
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					_, err = w.Write(jsonComments)
-					require.NoError(t, err, "Testing setup failed: failed to write out comments")
-				} else {
-					http.NotFound(w, r)
-				}
-			})
+			client := &fakeIssueCommentClient{
+				comments: toCommentPointers(testCase.comments),
+			}
 
-			server := httptest.NewServer(handler)
-
-			testContext.Login.URL = server.URL
+			testContext.Login.URL = "https://gitea.example.com"
 			testCase.issue.HTMLURL = fmt.Sprintf("%s/%s/%s/issues/%d/", testContext.Login.URL, testOwner, testRepo, testCase.issue.Index)
 
 			var outBuffer bytes.Buffer
@@ -187,16 +215,19 @@ func TestRunIssueDetailAsJSON(t *testing.T) {
 			testContext.ErrWriter = &errBuffer
 
 			if testCase.flagComments {
-				_ = testContext.Command.Set("comments", "true")
+				require.NoError(t, testContext.Set("comments", "true"))
 			} else {
-				_ = testContext.Command.Set("comments", "false")
+				require.NoError(t, testContext.Set("comments", "false"))
 			}
 
-			err := runIssueDetailAsJSON(&testContext, &testCase.issue)
-
-			server.Close()
+			err := runIssueDetailAsJSONWithClient(&testContext, &testCase.issue, client)
 
 			require.NoError(t, err, "Failed to run issue detail as JSON")
+			if testCase.flagComments {
+				assert.Equal(t, testOwner, client.owner)
+				assert.Equal(t, testRepo, client.repo)
+				assert.Equal(t, testCase.issue.Index, client.index)
+			}
 
 			out := outBuffer.String()
 
@@ -269,7 +300,7 @@ func TestRunIssueDetailUsesOwnerFlag(t *testing.T) {
 	issueIndex := int64(12)
 	expectedOwner := "overrideOwner"
 	expectedRepo := "overrideRepo"
-	issue := gitea.Issue{
+	issue := &gitea.Issue{
 		ID:      99,
 		Index:   issueIndex,
 		Title:   "Owner override test",
@@ -281,34 +312,10 @@ func TestRunIssueDetailUsesOwnerFlag(t *testing.T) {
 		HTMLURL: "https://example.test/issues/12",
 	}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", expectedOwner, expectedRepo, issueIndex):
-			jsonIssue, err := json.Marshal(issue)
-			require.NoError(t, err, "Testing setup failed: failed to marshal issue")
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, err = w.Write(jsonIssue)
-			require.NoError(t, err, "Testing setup failed: failed to write issue")
-		case fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/reactions", expectedOwner, expectedRepo, issueIndex):
-			jsonReactions, err := json.Marshal([]gitea.Reaction{})
-			require.NoError(t, err, "Testing setup failed: failed to marshal reactions")
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, err = w.Write(jsonReactions)
-			require.NoError(t, err, "Testing setup failed: failed to write reactions")
-		default:
-			http.NotFound(w, r)
-		}
-	})
-
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
 	config.SetConfigForTesting(config.LocalConfig{
 		Logins: []config.Login{{
 			Name:    "testLogin",
-			URL:     server.URL,
+			URL:     "https://gitea.example.com",
 			Token:   "token",
 			User:    "loginUser",
 			Default: true,
@@ -333,9 +340,19 @@ func TestRunIssueDetailUsesOwnerFlag(t *testing.T) {
 	require.NoError(t, cmd.Set("login", "testLogin"))
 	require.NoError(t, cmd.Set("repo", expectedRepo))
 	require.NoError(t, cmd.Set("owner", expectedOwner))
-	require.NoError(t, cmd.Set("output", "json"))
 	require.NoError(t, cmd.Set("comments", "false"))
 
-	err := runIssueDetail(stdctx.Background(), &cmd, fmt.Sprintf("%d", issueIndex))
+	teaCtx, idx, err := resolveIssueDetailContext(&cmd, fmt.Sprintf("%d", issueIndex))
+	require.NoError(t, err)
+
+	client := &fakeIssueDetailClient{
+		issue:     issue,
+		reactions: []*gitea.Reaction{},
+	}
+
+	err = runIssueDetailWithClient(teaCtx, idx, client)
 	require.NoError(t, err, "Expected runIssueDetail to succeed")
+	assert.Equal(t, expectedOwner, client.owner)
+	assert.Equal(t, expectedRepo, client.repo)
+	assert.Equal(t, issueIndex, client.index)
 }

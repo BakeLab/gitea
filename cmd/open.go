@@ -28,8 +28,13 @@ var CmdOpen = cli.Command{
 }
 
 func runOpen(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 
 	var suffix string
 	number := ctx.Args().Get(0)
@@ -74,5 +79,10 @@ func runOpen(_ stdctx.Context, cmd *cli.Command) error {
 		suffix = number
 	}
 
-	return open.Run(path.Join(ctx.GetRemoteRepoHTMLURL(), suffix))
+	repoURL, err := ctx.GetRemoteRepoHTMLURL()
+	if err != nil {
+		return err
+	}
+
+	return open.Run(path.Join(repoURL, suffix))
 }

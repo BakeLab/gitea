@@ -109,11 +109,13 @@ var CmdRepoMigrate = cli.Command{
 }
 
 func runRepoMigrate(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 	var (
 		repo    *gitea.Repository
-		err     error
 		service gitea.GitServiceType
 	)
 

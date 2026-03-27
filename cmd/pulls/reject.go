@@ -19,7 +19,10 @@ var CmdPullsReject = cli.Command{
 	Description: "Request changes to a pull request",
 	ArgsUsage:   "<pull index> <reason>",
 	Action: func(_ stdctx.Context, cmd *cli.Command) error {
-		ctx := context.InitCommand(cmd)
+		ctx, err := context.InitCommand(cmd)
+		if err != nil {
+			return err
+		}
 		return runPullReview(ctx, gitea.ReviewStateRequestChanges, true)
 	},
 	Flags: flags.AllDefaultFlags,

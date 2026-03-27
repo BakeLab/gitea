@@ -29,16 +29,21 @@ var CmdSecretsList = cli.Command{
 
 // RunSecretsList list action secrets
 func RunSecretsList(ctx stdctx.Context, cmd *cli.Command) error {
-	c := context.InitCommand(cmd)
+	c, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := c.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := c.Login.Client()
 
 	secrets, _, err := client.ListRepoActionSecret(c.Owner, c.Repo, gitea.ListRepoActionSecretOption{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {
 		return err
 	}
 
-	print.ActionSecretsList(secrets, c.Output)
-	return nil
+	return print.ActionSecretsList(secrets, c.Output)
 }

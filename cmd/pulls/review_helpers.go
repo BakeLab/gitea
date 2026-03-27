@@ -15,7 +15,9 @@ import (
 
 // runPullReview handles the common logic for approving/rejecting pull requests
 func runPullReview(ctx *context.TeaContext, state gitea.ReviewStateType, requireComment bool) error {
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 
 	minArgs := 1
 	if requireComment {

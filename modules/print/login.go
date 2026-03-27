@@ -31,7 +31,7 @@ func LoginDetails(login *config.Login) {
 }
 
 // LoginsList prints a listing of logins
-func LoginsList(logins []config.Login, output string) {
+func LoginsList(logins []config.Login, output string) error {
 	t := tableWithHeader(
 		"Name",
 		"URL",
@@ -50,5 +50,5 @@ func LoginsList(logins []config.Login, output string) {
 		)
 	}
 
-	t.print(output)
+	return t.print(output)
 }

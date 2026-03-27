@@ -36,12 +36,17 @@ var CmdLabelsList = cli.Command{
 
 // RunLabelsList list labels.
 func RunLabelsList(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 
 	client := ctx.Login.Client()
 	labels, _, err := client.ListRepoLabels(ctx.Owner, ctx.Repo, gitea.ListLabelsOptions{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {
 		return err
@@ -51,6 +56,5 @@ func RunLabelsList(_ stdctx.Context, cmd *cli.Command) error {
 		return task.LabelsExport(labels, ctx.String("save"))
 	}
 
-	print.LabelsList(labels, ctx.Output)
-	return nil
+	return print.LabelsList(labels, ctx.Output)
 }

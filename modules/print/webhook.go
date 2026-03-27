@@ -12,7 +12,7 @@ import (
 )
 
 // WebhooksList prints a listing of webhooks
-func WebhooksList(hooks []*gitea.Hook, output string) {
+func WebhooksList(hooks []*gitea.Hook, output string) error {
 	t := tableWithHeader(
 		"ID",
 		"Type",
@@ -48,7 +48,7 @@ func WebhooksList(hooks []*gitea.Hook, output string) {
 		)
 	}
 
-	t.print(output)
+	return t.print(output)
 }
 
 // WebhookDetails prints detailed information about a webhook

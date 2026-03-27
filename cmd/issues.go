@@ -5,7 +5,6 @@ package cmd
 
 import (
 	stdctx "context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -20,11 +19,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-type labelData struct {
-	Name        string `json:"name"`
-	Color       string `json:"color"`
-	Description string `json:"description"`
-}
+type labelData = detailLabelData
 
 type issueData struct {
 	ID        int64           `json:"id"`
@@ -41,12 +36,16 @@ type issueData struct {
 	Comments  []commentData   `json:"comments"`
 }
 
-type commentData struct {
-	ID      int64     `json:"id"`
-	Author  string    `json:"author"`
-	Created time.Time `json:"created"`
-	Body    string    `json:"body"`
+type issueDetailClient interface {
+	GetIssue(owner, repo string, index int64) (*gitea.Issue, *gitea.Response, error)
+	GetIssueReactions(owner, repo string, index int64) ([]*gitea.Reaction, *gitea.Response, error)
 }
+
+type issueCommentClient interface {
+	ListIssueComments(owner, repo string, index int64, opt gitea.ListIssueCommentOptions) ([]*gitea.Comment, *gitea.Response, error)
+}
+
+type commentData = detailCommentData
 
 // CmdIssues represents to login a gitea server.
 var CmdIssues = cli.Command{
@@ -80,17 +79,35 @@ func runIssues(ctx stdctx.Context, cmd *cli.Command) error {
 }
 
 func runIssueDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
-	ctx := context.InitCommand(cmd)
-	if ctx.IsSet("owner") {
-		ctx.Owner = ctx.String("owner")
-	}
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
-
-	idx, err := utils.ArgToIndex(index)
+	ctx, idx, err := resolveIssueDetailContext(cmd, index)
 	if err != nil {
 		return err
 	}
-	client := ctx.Login.Client()
+
+	return runIssueDetailWithClient(ctx, idx, ctx.Login.Client())
+}
+
+func resolveIssueDetailContext(cmd *cli.Command, index string) (*context.TeaContext, int64, error) {
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return nil, 0, err
+	}
+	if ctx.IsSet("owner") {
+		ctx.Owner = ctx.String("owner")
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return nil, 0, err
+	}
+
+	idx, err := utils.ArgToIndex(index)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return ctx, idx, nil
+}
+
+func runIssueDetailWithClient(ctx *context.TeaContext, idx int64, client issueDetailClient) error {
 	issue, _, err := client.GetIssue(ctx.Owner, ctx.Repo, idx)
 	if err != nil {
 		return err
@@ -120,59 +137,37 @@ func runIssueDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
 }
 
 func runIssueDetailAsJSON(ctx *context.TeaContext, issue *gitea.Issue) error {
-	c := ctx.Login.Client()
-	opts := gitea.ListIssueCommentOptions{ListOptions: flags.GetListOptions()}
+	return runIssueDetailAsJSONWithClient(ctx, issue, ctx.Login.Client())
+}
 
-	labelSlice := make([]labelData, 0, len(issue.Labels))
-	for _, label := range issue.Labels {
-		labelSlice = append(labelSlice, labelData{label.Name, label.Color, label.Description})
+func runIssueDetailAsJSONWithClient(ctx *context.TeaContext, issue *gitea.Issue, c issueCommentClient) error {
+	opts := gitea.ListIssueCommentOptions{ListOptions: flags.GetListOptions(ctx.Command)}
+	comments := []*gitea.Comment{}
+
+	if ctx.Bool("comments") {
+		var err error
+		comments, _, err = c.ListIssueComments(ctx.Owner, ctx.Repo, issue.Index, opts)
+		if err != nil {
+			return err
+		}
 	}
 
-	assigneesSlice := make([]string, 0, len(issue.Assignees))
-	for _, assignee := range issue.Assignees {
-		assigneesSlice = append(assigneesSlice, assignee.UserName)
-	}
+	return writeIndentedJSON(ctx.Writer, buildIssueData(issue, comments))
+}
 
-	issueSlice := issueData{
+func buildIssueData(issue *gitea.Issue, comments []*gitea.Comment) issueData {
+	return issueData{
 		ID:        issue.ID,
 		Index:     issue.Index,
 		Title:     issue.Title,
 		State:     issue.State,
 		Created:   issue.Created,
-		User:      issue.Poster.UserName,
+		User:      username(issue.Poster),
 		Body:      issue.Body,
-		Labels:    labelSlice,
-		Assignees: assigneesSlice,
+		Labels:    buildDetailLabels(issue.Labels),
+		Assignees: buildDetailAssignees(issue.Assignees),
 		URL:       issue.HTMLURL,
 		ClosedAt:  issue.Closed,
-		Comments:  make([]commentData, 0),
+		Comments:  buildDetailComments(comments),
 	}
-
-	if ctx.Bool("comments") {
-		comments, _, err := c.ListIssueComments(ctx.Owner, ctx.Repo, issue.Index, opts)
-		issueSlice.Comments = make([]commentData, 0, len(comments))
-
-		if err != nil {
-			return err
-		}
-
-		for _, comment := range comments {
-			issueSlice.Comments = append(issueSlice.Comments, commentData{
-				ID:      comment.ID,
-				Author:  comment.Poster.UserName,
-				Body:    comment.Body, // Selected Field
-				Created: comment.Created,
-			})
-		}
-
-	}
-
-	jsonData, err := json.MarshalIndent(issueSlice, "", "\t")
-	if err != nil {
-		return err
-	}
-
-	_, err = fmt.Fprintf(ctx.Writer, "%s\n", jsonData)
-
-	return err
 }

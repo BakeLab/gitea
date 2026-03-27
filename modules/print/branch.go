@@ -10,8 +10,7 @@ import (
 )
 
 // BranchesList prints a listing of the branches
-func BranchesList(branches []*gitea.Branch, protections []*gitea.BranchProtection, output string, fields []string) {
-	fmt.Println(fields)
+func BranchesList(branches []*gitea.Branch, protections []*gitea.BranchProtection, output string, fields []string) error {
 	printables := make([]printable, len(branches))
 
 	for i, branch := range branches {
@@ -25,7 +24,7 @@ func BranchesList(branches []*gitea.Branch, protections []*gitea.BranchProtectio
 	}
 
 	t := tableFromItems(fields, printables, isMachineReadable(output))
-	t.print(output)
+	return t.print(output)
 }
 
 type printableBranch struct {
@@ -54,17 +53,17 @@ func (x printableBranch) FormatField(field string, machineReadable bool) string 
 			}
 			merging := ""
 			for _, entry := range x.protection.MergeWhitelistTeams {
-				approving += entry + "/"
+				merging += entry + "/"
 			}
 			for _, entry := range x.protection.MergeWhitelistUsernames {
-				approving += entry + "/"
+				merging += entry + "/"
 			}
 			pushing := ""
 			for _, entry := range x.protection.PushWhitelistTeams {
-				approving += entry + "/"
+				pushing += entry + "/"
 			}
 			for _, entry := range x.protection.PushWhitelistUsernames {
-				approving += entry + "/"
+				pushing += entry + "/"
 			}
 			return fmt.Sprintf(
 				"- enable-push: %t\n- approving: %s\n- merging: %s\n- pushing: %s\n",

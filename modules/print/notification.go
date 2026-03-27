@@ -11,13 +11,13 @@ import (
 )
 
 // NotificationsList prints a listing of notification threads
-func NotificationsList(news []*gitea.NotificationThread, output string, fields []string) {
+func NotificationsList(news []*gitea.NotificationThread, output string, fields []string) error {
 	printables := make([]printable, len(news))
 	for i, x := range news {
 		printables[i] = &printableNotification{x}
 	}
 	t := tableFromItems(fields, printables, isMachineReadable(output))
-	t.print(output)
+	return t.print(output)
 }
 
 // NotificationFields are all available fields to print with NotificationsList

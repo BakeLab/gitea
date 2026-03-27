@@ -31,18 +31,22 @@ var CmdReleaseList = cli.Command{
 
 // RunReleasesList list releases
 func RunReleasesList(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 
 	releases, _, err := ctx.Login.Client().ListReleases(ctx.Owner, ctx.Repo, gitea.ListReleasesOptions{
-		ListOptions: flags.GetListOptions(),
+		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {
 		return err
 	}
 
-	print.ReleasesList(releases, ctx.Output)
-	return nil
+	return print.ReleasesList(releases, ctx.Output)
 }
 
 func getReleaseByTag(owner, repo, tag string, client *gitea.Client) (*gitea.Release, error) {

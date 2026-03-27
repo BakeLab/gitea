@@ -22,10 +22,10 @@ func OrganizationDetails(org *gitea.Organization) {
 }
 
 // OrganizationsList prints a listing of the organizations
-func OrganizationsList(organizations []*gitea.Organization, output string) {
+func OrganizationsList(organizations []*gitea.Organization, output string) error {
 	if len(organizations) == 0 {
 		fmt.Println("No organizations found")
-		return
+		return nil
 	}
 
 	t := tableWithHeader(
@@ -46,5 +46,5 @@ func OrganizationsList(organizations []*gitea.Organization, output string) {
 		)
 	}
 
-	t.print(output)
+	return t.print(output)
 }

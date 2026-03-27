@@ -164,18 +164,17 @@ func SetDefaultLogin(name string) error {
 }
 
 // GetLoginByName get login by name (case insensitive)
-func GetLoginByName(name string) *Login {
-	err := loadConfig()
-	if err != nil {
-		log.Fatal(err)
+func GetLoginByName(name string) (*Login, error) {
+	if err := loadConfig(); err != nil {
+		return nil, err
 	}
 
-	for _, l := range config.Logins {
-		if strings.EqualFold(l.Name, name) {
-			return &l
+	for i := range config.Logins {
+		if strings.EqualFold(config.Logins[i].Name, name) {
+			return &config.Logins[i], nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // GetLoginByToken get login by token

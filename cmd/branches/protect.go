@@ -45,8 +45,13 @@ var CmdBranchesUnprotect = cli.Command{
 
 // RunBranchesProtect function to protect/unprotect a list of branches
 func RunBranchesProtect(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
-	ctx.Ensure(context.CtxRequirement{RemoteRepo: true})
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 
 	if !cmd.Args().Present() {
 		return fmt.Errorf("must specify at least one branch")

@@ -40,7 +40,13 @@ func runVariablesSet(ctx stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("variable name is required")
 	}
 
-	c := context.InitCommand(cmd)
+	c, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := c.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
 	client := c.Login.Client()
 
 	variableName := cmd.Args().First()

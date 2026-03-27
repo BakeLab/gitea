@@ -8,7 +8,7 @@ import (
 )
 
 // ReleasesList prints a listing of releases
-func ReleasesList(releases []*gitea.Release, output string) {
+func ReleasesList(releases []*gitea.Release, output string) error {
 	t := tableWithHeader(
 		"Tag-Name",
 		"Title",
@@ -33,5 +33,5 @@ func ReleasesList(releases []*gitea.Release, output string) {
 		)
 	}
 
-	t.print(output)
+	return t.print(output)
 }

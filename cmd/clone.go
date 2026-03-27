@@ -48,7 +48,10 @@ When a host is specified in the repo-slug, it will override the login specified 
 }
 
 func runRepoClone(ctx stdctx.Context, cmd *cli.Command) error {
-	teaCmd := context.InitCommand(cmd)
+	teaCmd, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 
 	args := teaCmd.Args()
 	if args.Len() < 1 {

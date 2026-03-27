@@ -6,10 +6,12 @@ package main // import "code.gitea.io/tea"
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
 	"code.gitea.io/tea/cmd"
+	teacontext "code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/debug"
 )
 
@@ -18,6 +20,9 @@ func main() {
 	app.Flags = append(app.Flags, debug.CliFlag())
 	err := app.Run(context.Background(), preprocessArgs(os.Args))
 	if err != nil {
+		if errors.Is(err, teacontext.ErrCommandCanceled) {
+			os.Exit(0)
+		}
 		// app.Run already exits for errors implementing ErrorCoder,
 		// so we only handle generic errors with code 1 here.
 		fmt.Fprintf(app.ErrWriter, "Error: %v\n", err)

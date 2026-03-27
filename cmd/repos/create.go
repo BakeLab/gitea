@@ -103,11 +103,13 @@ var CmdRepoCreate = cli.Command{
 }
 
 func runRepoCreate(_ stdctx.Context, cmd *cli.Command) error {
-	ctx := context.InitCommand(cmd)
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
 	client := ctx.Login.Client()
 	var (
 		repo       *gitea.Repository
-		err        error
 		trustmodel gitea.TrustModel
 	)
 
