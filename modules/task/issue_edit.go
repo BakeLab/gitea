@@ -13,37 +13,30 @@ import (
 
 // EditIssueOption wraps around gitea.EditIssueOption which has bad & incosistent semantics.
 type EditIssueOption struct {
-	Index        int64
-	Title        *string
-	Body         *string
-	Ref          *string
-	Milestone    *string
-	Deadline     *time.Time
-	AddLabels    []string
-	RemoveLabels []string
-	AddAssignees []string
+	Index           int64
+	Title           *string
+	Body            *string
+	Ref             *string
+	Milestone       *string
+	Deadline        *time.Time
+	AddLabels       []string
+	RemoveLabels    []string
+	AddAssignees    []string
+	AddReviewers    []string
+	RemoveReviewers []string
 	// RemoveAssignees []string // NOTE: with the current go-sdk, clearing assignees is not possible.
 }
 
 // Normalizes the options into parameters that can be passed to the sdk.
 // the returned value will be nil, when no change to this part of the issue is requested.
 func (o EditIssueOption) toSdkOptions(ctx *context.TeaContext, client *gitea.Client) (*gitea.EditIssueOption, *gitea.IssueLabelsOption, *gitea.IssueLabelsOption, error) {
-	// labels have a separate API call, so they get their own options.
-	var addLabelOpts, rmLabelOpts *gitea.IssueLabelsOption
-	if o.AddLabels != nil && len(o.AddLabels) != 0 {
-		ids, err := ResolveLabelNames(client, ctx.Owner, ctx.Repo, o.AddLabels)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		addLabelOpts = &gitea.IssueLabelsOption{Labels: ids}
+	addLabelOpts, err := ResolveLabelOpts(client, ctx.Owner, ctx.Repo, o.AddLabels)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-
-	if o.RemoveLabels != nil && len(o.RemoveLabels) != 0 {
-		ids, err := ResolveLabelNames(client, ctx.Owner, ctx.Repo, o.RemoveLabels)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		rmLabelOpts = &gitea.IssueLabelsOption{Labels: ids}
+	rmLabelOpts, err := ResolveLabelOpts(client, ctx.Owner, ctx.Repo, o.RemoveLabels)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	issueOpts := gitea.EditIssueOption{}
@@ -61,15 +54,11 @@ func (o EditIssueOption) toSdkOptions(ctx *context.TeaContext, client *gitea.Cli
 		issueOptsDirty = true
 	}
 	if o.Milestone != nil {
-		if *o.Milestone == "" {
-			issueOpts.Milestone = gitea.OptionalInt64(0)
-		} else {
-			ms, _, err := client.GetMilestoneByName(ctx.Owner, ctx.Repo, *o.Milestone)
-			if err != nil {
-				return nil, nil, nil, fmt.Errorf("Milestone '%s' not found", *o.Milestone)
-			}
-			issueOpts.Milestone = &ms.ID
+		id, err := ResolveMilestoneID(client, ctx.Owner, ctx.Repo, *o.Milestone)
+		if err != nil {
+			return nil, nil, nil, err
 		}
+		issueOpts.Milestone = gitea.OptionalInt64(id)
 		issueOptsDirty = true
 	}
 	if o.Deadline != nil {
@@ -79,7 +68,7 @@ func (o EditIssueOption) toSdkOptions(ctx *context.TeaContext, client *gitea.Cli
 			issueOpts.RemoveDeadline = gitea.OptionalBool(true)
 		}
 	}
-	if o.AddAssignees != nil && len(o.AddAssignees) != 0 {
+	if len(o.AddAssignees) != 0 {
 		issueOpts.Assignees = o.AddAssignees
 		issueOptsDirty = true
 	}
@@ -101,21 +90,8 @@ func EditIssue(ctx *context.TeaContext, client *gitea.Client, opts EditIssueOpti
 		return nil, err
 	}
 
-	if rmLabelOpts != nil {
-		// NOTE: as of 1.17, there is no API to remove multiple labels at once.
-		for _, id := range rmLabelOpts.Labels {
-			_, err := client.DeleteIssueLabel(ctx.Owner, ctx.Repo, opts.Index, id)
-			if err != nil {
-				return nil, fmt.Errorf("could not remove labels: %s", err)
-			}
-		}
-	}
-
-	if addLabelOpts != nil {
-		_, _, err := client.AddIssueLabels(ctx.Owner, ctx.Repo, opts.Index, *addLabelOpts)
-		if err != nil {
-			return nil, fmt.Errorf("could not add labels: %s", err)
-		}
+	if err := ApplyLabelChanges(client, ctx.Owner, ctx.Repo, opts.Index, addLabelOpts, rmLabelOpts); err != nil {
+		return nil, err
 	}
 
 	var issue *gitea.Issue

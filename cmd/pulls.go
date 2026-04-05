@@ -72,6 +72,7 @@ var CmdPulls = cli.Command{
 		&pulls.CmdPullsCreate,
 		&pulls.CmdPullsClose,
 		&pulls.CmdPullsReopen,
+		&pulls.CmdPullsEdit,
 		&pulls.CmdPullsReview,
 		&pulls.CmdPullsApprove,
 		&pulls.CmdPullsReject,
