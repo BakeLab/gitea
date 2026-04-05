@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.13.0](https://gitea.com/gitea/tea/releases/tag/v0.13.0) - 2026-04-05
+
+* FEATURES
+  * Add `tea pr edit` subcommand for pull requests (#944)
+  * Add `tea repo edit` subcommand (#928)
+  * Support owner-based repository listing in `tea repo ls` (#931)
+  * Store OAuth tokens in OS keyring via credstore (#926)
+  * Support parsing multiple values in `tea api` subcommand (#911)
+* ENHANCEMENTS
+  * Replace log.Fatal/os.Exit with proper error returns (#941)
+  * Update to charm libraries v2 (#923)
+* MISC
+  * Bump Go version to 1.26
+  * Update dependencies: go-git/v5 v5.17.2, gitea SDK v0.24.1, urfave/cli/v3 v3.8.0, oauth2 v0.36.0, tablewriter v1.1.4, go-authgate/sdk-go v0.6.1
+
 ## [v0.9.1](https://gitea.com/gitea/tea/releases/tag/v0.9.1) - 2023-02-15
 
 * BUGFIXES
