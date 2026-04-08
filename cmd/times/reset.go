@@ -35,7 +35,7 @@ func runTrackedTimesReset(_ stdctx.Context, cmd *cli.Command) error {
 	client := ctx.Login.Client()
 
 	if ctx.Args().Len() != 1 {
-		return fmt.Errorf("No issue specified.\nUsage:\t%s", ctx.Command.UsageText)
+		return fmt.Errorf("no issue specified.\nUsage:\t%s", ctx.Command.UsageText)
 	}
 
 	issue, err := utils.ArgToIndex(ctx.Args().First())

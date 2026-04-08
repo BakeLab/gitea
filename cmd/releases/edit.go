@@ -81,7 +81,7 @@ func runReleaseEdit(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	for _, tag := range ctx.Args().Slice() {
-		release, err := getReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
+		release, err := GetReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
 		if err != nil {
 			return err
 		}

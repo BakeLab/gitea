@@ -8,7 +8,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -132,7 +131,7 @@ func GetDefaultLogin() (*Login, error) {
 	}
 
 	if len(config.Logins) == 0 {
-		return nil, errors.New("No available login")
+		return nil, errors.New("no available login")
 	}
 	for _, l := range config.Logins {
 		if l.Default {
@@ -178,50 +177,51 @@ func GetLoginByName(name string) (*Login, error) {
 }
 
 // GetLoginByToken get login by token
-func GetLoginByToken(token string) *Login {
+func GetLoginByToken(token string) (*Login, error) {
 	if token == "" {
-		return nil
+		return nil, nil
 	}
-	err := loadConfig()
-	if err != nil {
-		log.Fatal(err)
+	if err := loadConfig(); err != nil {
+		return nil, err
 	}
 
 	for _, l := range config.Logins {
 		if l.Token == token {
-			return &l
+			return &l, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
-// GetLoginByHost finds a login by it's server URL
-func GetLoginByHost(host string) *Login {
-	logins := GetLoginsByHost(host)
-	if len(logins) > 0 {
-		return logins[0]
+// GetLoginByHost finds a login by its server URL
+func GetLoginByHost(host string) (*Login, error) {
+	logins, err := GetLoginsByHost(host)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	if len(logins) > 0 {
+		return logins[0], nil
+	}
+	return nil, nil
 }
 
 // GetLoginsByHost returns all logins matching a host
-func GetLoginsByHost(host string) []*Login {
-	err := loadConfig()
-	if err != nil {
-		log.Fatal(err)
+func GetLoginsByHost(host string) ([]*Login, error) {
+	if err := loadConfig(); err != nil {
+		return nil, err
 	}
 
 	var matches []*Login
 	for i := range config.Logins {
 		loginURL, err := url.Parse(config.Logins[i].URL)
 		if err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
 		if loginURL.Host == host {
 			matches = append(matches, &config.Logins[i])
 		}
 	}
-	return matches
+	return matches, nil
 }
 
 // DeleteLogin delete a login by name from config
@@ -417,12 +417,13 @@ func doOAuthRefresh(l *Login) (*oauth2.Token, error) {
 func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 	// Refresh OAuth token if expired or near expiry
 	if err := l.RefreshOAuthTokenIfNeeded(); err != nil {
-		log.Fatalf("Failed to refresh token: %s\nPlease use 'tea login oauth-refresh %s' to manually refresh the token.\n", err, l.Name)
+		fmt.Fprintf(os.Stderr, "Failed to refresh token: %s\nPlease use 'tea login oauth-refresh %s' to manually refresh the token.\n", err, l.Name)
+		os.Exit(1)
 	}
 
 	httpClient := &http.Client{}
 	if l.Insecure {
-		cookieJar, _ := cookiejar.New(nil)
+		cookieJar, _ := cookiejar.New(nil) // New with nil options never returns an error
 
 		httpClient = &http.Client{
 			Jar: cookieJar,
@@ -443,12 +444,18 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 	}
 
 	if l.SSHCertPrincipal != "" {
-		l.askForSSHPassphrase()
+		if err := l.askForSSHPassphrase(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to read SSH passphrase: %s\n", err)
+			os.Exit(1)
+		}
 		options = append(options, gitea.UseSSHCert(l.SSHCertPrincipal, l.SSHKey, l.SSHPassphrase))
 	}
 
 	if l.SSHKeyFingerprint != "" {
-		l.askForSSHPassphrase()
+		if err := l.askForSSHPassphrase(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to read SSH passphrase: %s\n", err)
+			os.Exit(1)
+		}
 		options = append(options, gitea.UseSSHPubkey(l.SSHKeyFingerprint, l.SSHKey, l.SSHPassphrase))
 	}
 
@@ -456,25 +463,25 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 	if err != nil {
 		var versionError *gitea.ErrUnknownVersion
 		if !errors.As(err, &versionError) {
-			log.Fatal(err)
+			fmt.Fprintf(os.Stderr, "Failed to create Gitea client: %s\n", err)
+			os.Exit(1)
 		}
 		fmt.Fprintf(os.Stderr, "WARNING: could not detect gitea version: %s\nINFO: set gitea version: to last supported one\n", versionError)
 	}
 	return client
 }
 
-func (l *Login) askForSSHPassphrase() {
+func (l *Login) askForSSHPassphrase() error {
 	if ok, err := utils.IsKeyEncrypted(l.SSHKey); ok && err == nil && l.SSHPassphrase == "" {
-		if err := huh.NewInput().
+		return huh.NewInput().
 			Title("ssh-key is encrypted please enter the passphrase: ").
 			Validate(huh.ValidateNotEmpty()).
 			EchoMode(huh.EchoModePassword).
 			Value(&l.SSHPassphrase).
 			WithTheme(theme.GetTheme()).
-			Run(); err != nil {
-			log.Fatal(err)
-		}
+			Run()
 	}
+	return nil
 }
 
 // GetSSHHost returns SSH host name

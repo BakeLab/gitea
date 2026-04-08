@@ -20,7 +20,7 @@ import (
 	"golang.org/x/term"
 )
 
-var errNotAGiteaRepo = errors.New("No Gitea login found. You might want to specify --repo (and --login) to work outside of a repository")
+var errNotAGiteaRepo = errors.New("no Gitea login found; you might want to specify --repo (and --login) to work outside of a repository")
 
 // ErrCommandCanceled is returned when the user explicitly cancels an interactive prompt.
 var ErrCommandCanceled = errors.New("command canceled")

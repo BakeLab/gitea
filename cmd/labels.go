@@ -37,5 +37,5 @@ func runLabels(ctx context.Context, cmd *cli.Command) error {
 }
 
 func runLabelsDetails(cmd *cli.Command) error {
-	return fmt.Errorf("Not yet implemented")
+	return fmt.Errorf("not yet implemented")
 }

@@ -5,8 +5,7 @@ package login
 
 import (
 	"context"
-	"errors"
-	"log"
+	"fmt"
 
 	"code.gitea.io/tea/modules/config"
 
@@ -27,7 +26,7 @@ var CmdLoginDelete = cli.Command{
 func RunLoginDelete(_ context.Context, cmd *cli.Command) error {
 	logins, err := config.GetLogins()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	var name string
@@ -37,7 +36,7 @@ func RunLoginDelete(_ context.Context, cmd *cli.Command) error {
 	} else if len(logins) == 1 {
 		name = logins[0].Name
 	} else {
-		return errors.New("Please specify a login name")
+		return fmt.Errorf("please specify a login name")
 	}
 
 	return config.DeleteLogin(name)

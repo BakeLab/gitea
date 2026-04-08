@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
 	"net/url"
 	"os"
 	"strings"
@@ -93,7 +92,7 @@ var CmdLoginHelper = cli.Command{
 				}
 
 				if len(wants["host"]) == 0 {
-					log.Fatal("Hostname is required")
+					return fmt.Errorf("hostname is required")
 				} else if len(wants["protocol"]) == 0 {
 					wants["protocol"] = "http"
 				}
@@ -104,20 +103,24 @@ var CmdLoginHelper = cli.Command{
 					var lookupErr error
 					userConfig, lookupErr = config.GetLoginByName(loginName)
 					if lookupErr != nil {
-						log.Fatal(lookupErr)
+						return lookupErr
 					}
 					if userConfig == nil {
-						log.Fatalf("Login '%s' not found", loginName)
+						return fmt.Errorf("login '%s' not found", loginName)
 					}
 				} else {
-					userConfig = config.GetLoginByHost(wants["host"])
+					var lookupErr error
+					userConfig, lookupErr = config.GetLoginByHost(wants["host"])
+					if lookupErr != nil {
+						return lookupErr
+					}
 					if userConfig == nil {
-						log.Fatalf("No login found for host '%s'", wants["host"])
+						return fmt.Errorf("no login found for host '%s'", wants["host"])
 					}
 				}
 
 				if len(userConfig.GetAccessToken()) == 0 {
-					log.Fatal("User not set")
+					return fmt.Errorf("user not set")
 				}
 
 				host, err := url.Parse(userConfig.URL)

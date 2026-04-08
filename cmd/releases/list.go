@@ -5,7 +5,6 @@ package releases
 
 import (
 	stdctx "context"
-	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
@@ -47,22 +46,4 @@ func RunReleasesList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	return print.ReleasesList(releases, ctx.Output)
-}
-
-func getReleaseByTag(owner, repo, tag string, client *gitea.Client) (*gitea.Release, error) {
-	rl, _, err := client.ListReleases(owner, repo, gitea.ListReleasesOptions{
-		ListOptions: gitea.ListOptions{Page: -1},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(rl) == 0 {
-		return nil, fmt.Errorf("Repo does not have any release")
-	}
-	for _, r := range rl {
-		if r.TagName == tag {
-			return r, nil
-		}
-	}
-	return nil, fmt.Errorf("Release tag does not exist")
 }

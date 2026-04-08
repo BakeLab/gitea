@@ -165,7 +165,7 @@ func GetIssuePRCreateFlags(ctx *context.TeaContext) (*gitea.CreateIssueOption, e
 		}
 		ms, _, err := client.GetMilestoneByName(ctx.Owner, ctx.Repo, milestoneName)
 		if err != nil {
-			return nil, fmt.Errorf("Milestone '%s' not found", milestoneName)
+			return nil, fmt.Errorf("milestone '%s' not found", milestoneName)
 		}
 		opts.Milestone = ms.ID
 	}

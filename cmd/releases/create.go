@@ -104,7 +104,7 @@ func runReleaseCreate(_ stdctx.Context, cmd *cli.Command) error {
 	})
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusConflict {
-			return fmt.Errorf("There already is a release for this tag")
+			return fmt.Errorf("there is already a release for this tag")
 		}
 		return err
 	}

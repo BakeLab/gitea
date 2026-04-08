@@ -70,7 +70,7 @@ func runReposSearch(_ stdctx.Context, cmd *cli.Command) error {
 		org, resp, err := client.GetOrg(teaCmd.String("owner"))
 		if err != nil {
 			if resp == nil || resp.StatusCode != http.StatusNotFound {
-				return fmt.Errorf("Could not find owner: %w", err)
+				return fmt.Errorf("could not find owner: %w", err)
 			}
 
 			// if owner is no org, its a user

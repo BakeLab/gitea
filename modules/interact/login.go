@@ -41,7 +41,7 @@ func CreateLogin() error {
 			}
 			_, err := url.Parse(s)
 			if err != nil {
-				return fmt.Errorf("Invalid URL: %v", err)
+				return fmt.Errorf("invalid URL: %v", err)
 			}
 			return nil
 		}).
@@ -69,7 +69,7 @@ func CreateLogin() error {
 		}
 		for _, login := range logins {
 			if login.Name == name {
-				return fmt.Errorf("Login with name '%s' already exists", name)
+				return fmt.Errorf("login with name '%s' already exists", name)
 			}
 		}
 		return nil
@@ -154,7 +154,7 @@ func CreateLogin() error {
 				Value(&tokenScopes).
 				Validate(func(s []string) error {
 					if len(s) == 0 {
-						return errors.New("At least one scope is required")
+						return errors.New("at least one scope is required")
 					}
 					return nil
 				}).

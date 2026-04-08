@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
+	"code.gitea.io/tea/cmd/releases"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
 
@@ -42,10 +43,10 @@ func RunReleaseAttachmentList(_ stdctx.Context, cmd *cli.Command) error {
 
 	tag := ctx.Args().First()
 	if len(tag) == 0 {
-		return fmt.Errorf("Release tag needed to list attachments")
+		return fmt.Errorf("release tag needed to list attachments")
 	}
 
-	release, err := getReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
+	release, err := releases.GetReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
 	if err != nil {
 		return err
 	}
@@ -58,22 +59,4 @@ func RunReleaseAttachmentList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	return print.ReleaseAttachmentsList(attachments, ctx.Output)
-}
-
-func getReleaseByTag(owner, repo, tag string, client *gitea.Client) (*gitea.Release, error) {
-	rl, _, err := client.ListReleases(owner, repo, gitea.ListReleasesOptions{
-		ListOptions: gitea.ListOptions{Page: -1},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(rl) == 0 {
-		return nil, fmt.Errorf("Repo does not have any release")
-	}
-	for _, r := range rl {
-		if r.TagName == tag {
-			return r, nil
-		}
-	}
-	return nil, fmt.Errorf("Release tag does not exist")
 }

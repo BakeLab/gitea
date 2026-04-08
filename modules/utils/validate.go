@@ -21,17 +21,17 @@ func ValidateAuthenticationMethod(
 	// Normalize URL
 	serverURL, err := NormalizeURL(giteaURL)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to parse URL: %s", err)
+		return nil, fmt.Errorf("unable to parse URL: %s", err)
 	}
 
 	if !sshAgent && sshCertPrincipal == "" && sshKey == "" {
 		// .. if we have enough information to authenticate
 		if len(token) == 0 && (len(user)+len(passwd)) == 0 {
-			return nil, fmt.Errorf("No token set")
+			return nil, fmt.Errorf("no token set")
 		} else if len(user) != 0 && len(passwd) == 0 {
-			return nil, fmt.Errorf("No password set")
+			return nil, fmt.Errorf("no password set")
 		} else if len(user) == 0 && len(passwd) != 0 {
-			return nil, fmt.Errorf("No user set")
+			return nil, fmt.Errorf("no user set")
 		}
 	}
 	return serverURL, nil

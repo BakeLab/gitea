@@ -39,7 +39,7 @@ func PullClean(login *config.Login, repoOwner, repoName string, index int64, ign
 
 	// if remote head branch is already deleted, pr.Head.Ref points to "pulls/<idx>/head"
 	remoteBranch := pr.Head.Ref
-	remoteDeleted := remoteBranch == fmt.Sprintf("refs/pull/%d/head", pr.Index)
+	remoteDeleted := isRemoteDeleted(pr)
 	if remoteDeleted {
 		remoteBranch = pr.Head.Name // this still holds the original branch name
 		fmt.Printf("Remote branch '%s' already deleted.\n", remoteBranch)
@@ -62,9 +62,9 @@ func PullClean(login *config.Login, repoOwner, repoName string, index int64, ign
 	}
 	if branch == nil {
 		if ignoreSHA {
-			return fmt.Errorf("Remote branch %s not found in local repo", remoteBranch)
+			return fmt.Errorf("remote branch %s not found in local repo", remoteBranch)
 		}
-		return fmt.Errorf(`Remote branch %s not found in local repo.
+		return fmt.Errorf(`remote branch %s not found in local repo.
 Either you don't track this PR, or the local branch has diverged from the remote.
 If you still want to continue & are sure you don't loose any important commits,
 call me again with the --ignore-sha flag`, remoteBranch)

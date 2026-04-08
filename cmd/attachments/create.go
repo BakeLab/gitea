@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"code.gitea.io/tea/cmd/flags"
+	"code.gitea.io/tea/cmd/releases"
 	"code.gitea.io/tea/modules/context"
 
 	"github.com/urfave/cli/v3"
@@ -37,15 +38,15 @@ func runReleaseAttachmentCreate(_ stdctx.Context, cmd *cli.Command) error {
 	client := ctx.Login.Client()
 
 	if ctx.Args().Len() < 2 {
-		return fmt.Errorf("No release tag or assets specified.\nUsage:\t%s", ctx.Command.UsageText)
+		return fmt.Errorf("no release tag or assets specified.\nUsage:\t%s", ctx.Command.UsageText)
 	}
 
 	tag := ctx.Args().First()
 	if len(tag) == 0 {
-		return fmt.Errorf("Release tag needed to create attachment")
+		return fmt.Errorf("release tag needed to create attachment")
 	}
 
-	release, err := getReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
+	release, err := releases.GetReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
 	if err != nil {
 		return err
 	}

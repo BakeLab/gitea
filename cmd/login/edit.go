@@ -5,7 +5,6 @@ package login
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/exec"
 
@@ -34,7 +33,7 @@ func runLoginEdit(_ context.Context, _ *cli.Command) error {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			log.Fatal(err.Error())
+			return err
 		}
 	}
 	return open.Start(config.GetConfigPath())

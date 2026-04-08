@@ -15,7 +15,7 @@ import (
 func CreateIssue(login *config.Login, repoOwner, repoName string, opts gitea.CreateIssueOption) error {
 	// title is required
 	if len(opts.Title) == 0 {
-		return fmt.Errorf("Title is required")
+		return fmt.Errorf("title is required")
 	}
 
 	issue, _, err := login.Client().CreateIssue(repoOwner, repoName, opts)

@@ -20,12 +20,13 @@ import (
 func SetupHelper(login config.Login) (ok bool, err error) {
 	// Check that the URL is not blank
 	if login.URL == "" {
-		return false, fmt.Errorf("Invalid gitea url")
+		return false, fmt.Errorf("invalid Gitea URL")
 	}
 
 	// get all helper to URL in git config
+	helperKey := fmt.Sprintf("credential.%s.helper", login.URL)
 	var currentHelpers []byte
-	if currentHelpers, err = exec.Command("git", "config", "--global", "--get-all", fmt.Sprintf("credential.%s.helper", login.URL)).Output(); err != nil {
+	if currentHelpers, err = exec.Command("git", "config", "--global", "--get-all", helperKey).Output(); err != nil {
 		currentHelpers = []byte{}
 	}
 
@@ -37,10 +38,10 @@ func SetupHelper(login config.Login) (ok bool, err error) {
 	}
 
 	// Add tea helper
-	if _, err = exec.Command("git", "config", "--global", fmt.Sprintf("credential.%s.helper", login.URL), "").Output(); err != nil {
-		return false, fmt.Errorf("git config --global %s, error: %s", fmt.Sprintf("credential.%s.helper", login.URL), err)
-	} else if _, err = exec.Command("git", "config", "--global", "--add", fmt.Sprintf("credential.%s.helper", login.URL), "!tea login helper").Output(); err != nil {
-		return false, fmt.Errorf("git config --global --add %s %s, error: %s", fmt.Sprintf("credential.%s.helper", login.URL), "!tea login helper", err)
+	if _, err = exec.Command("git", "config", "--global", helperKey, "").Output(); err != nil {
+		return false, fmt.Errorf("git config --global %s, error: %s", helperKey, err)
+	} else if _, err = exec.Command("git", "config", "--global", "--add", helperKey, "!tea login helper").Output(); err != nil {
+		return false, fmt.Errorf("git config --global --add %s %s, error: %s", helperKey, "!tea login helper", err)
 	}
 
 	return true, nil
@@ -62,7 +63,11 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 	}
 	// ... if we already use this token
 	if shouldCheckTokenUniqueness(token, sshAgent, sshKey, sshCertPrincipal, sshKeyFingerprint) {
-		if login := config.GetLoginByToken(token); login != nil {
+		login, err := config.GetLoginByToken(token)
+		if err != nil {
+			return err
+		}
+		if login != nil {
 			return fmt.Errorf("token already been used, delete login '%s' first", login.Name)
 		}
 	}

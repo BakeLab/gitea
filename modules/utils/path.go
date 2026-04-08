@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // PathExists returns whether the given file or directory exists or not
@@ -38,18 +39,19 @@ func exists(path string, expectDir bool) (bool, error) {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
-		} else if err.(*os.PathError).Err.Error() == "not a directory" {
-			// some middle segment of path is a file, cannot traverse
-			// FIXME: catches error on linux; go does not provide a way to catch this properly..
+		}
+		var pathErr *os.PathError
+		if errors.As(err, &pathErr) && errors.Is(pathErr.Err, syscall.ENOTDIR) {
+			// a middle segment of path is a file, cannot traverse
 			return false, nil
 		}
 		return false, err
 	}
 	isDir := f.IsDir()
 	if isDir && !expectDir {
-		return false, errors.New("A directory with the same name exists")
+		return false, errors.New("a directory with the same name exists")
 	} else if !isDir && expectDir {
-		return false, errors.New("A file with the same name exists")
+		return false, errors.New("a file with the same name exists")
 	}
 	return true, nil
 }

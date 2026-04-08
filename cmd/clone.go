@@ -76,9 +76,13 @@ func runRepoClone(ctx stdctx.Context, cmd *cli.Command) error {
 
 	owner, repo = utils.GetOwnerAndRepo(url.Path, login.User)
 	if url.Host != "" {
-		login = config.GetLoginByHost(url.Host)
+		var lookupErr error
+		login, lookupErr = config.GetLoginByHost(url.Host)
+		if lookupErr != nil {
+			return lookupErr
+		}
 		if login == nil {
-			return fmt.Errorf("No login configured matching host '%s', run `tea login add` first", url.Host)
+			return fmt.Errorf("no login configured matching host '%s', run 'tea login add' first", url.Host)
 		}
 		debug.Printf("Matched login '%s' for host '%s'", login.Name, url.Host)
 	}

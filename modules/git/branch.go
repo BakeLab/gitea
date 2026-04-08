@@ -80,7 +80,7 @@ func (r TeaRepo) TeaFindBranchBySha(sha, repoURL string) (b *git_config.Branch, 
 		return nil, err
 	}
 	if remote == nil {
-		return nil, fmt.Errorf("No remote found for '%s'", repoURL)
+		return nil, fmt.Errorf("no remote found for '%s'", repoURL)
 	}
 	remoteName := remote.Config().Name
 
@@ -133,7 +133,7 @@ func (r TeaRepo) TeaFindBranchByName(branchName, repoURL string) (b *git_config.
 		return nil, err
 	}
 	if remote == nil {
-		return nil, fmt.Errorf("No remote found for '%s'", repoURL)
+		return nil, fmt.Errorf("no remote found for '%s'", repoURL)
 	}
 	remoteName := remote.Config().Name
 

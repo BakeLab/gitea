@@ -5,7 +5,6 @@ package config
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -74,7 +73,8 @@ func GetConfigPath() string {
 	}
 
 	if err != nil {
-		log.Fatal("unable to get or create config file")
+		fmt.Fprintln(os.Stderr, "unable to get or create config file")
+		os.Exit(1)
 	}
 
 	return configFilePath

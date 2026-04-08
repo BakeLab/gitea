@@ -41,7 +41,7 @@ func runTrackedTimesAdd(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	if ctx.Args().Len() < 2 {
-		return fmt.Errorf("No issue or duration specified.\nUsage:\t%s", ctx.Command.UsageText)
+		return fmt.Errorf("no issue or duration specified.\nUsage:\t%s", ctx.Command.UsageText)
 	}
 
 	issue, err := utils.ArgToIndex(ctx.Args().First())

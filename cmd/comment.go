@@ -46,7 +46,7 @@ func runAddComment(_ stdctx.Context, cmd *cli.Command) error {
 
 	args := ctx.Args()
 	if args.Len() == 0 {
-		return fmt.Errorf("Please specify issue / pr index")
+		return fmt.Errorf("please specify issue / pr index")
 	}
 
 	idx, err := utils.ArgToIndex(ctx.Args().First())

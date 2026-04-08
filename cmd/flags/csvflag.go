@@ -44,7 +44,7 @@ func (f CsvFlag) GetValues(cmd *cli.Command) ([]string, error) {
 	if f.AvailableFields != nil && val != "" {
 		for _, field := range selection {
 			if !utils.Contains(f.AvailableFields, field) {
-				return nil, fmt.Errorf("Invalid field '%s'", field)
+				return nil, fmt.Errorf("invalid field '%s'", field)
 			}
 		}
 	}

@@ -226,7 +226,6 @@ func startLocalServerAndOpenBrowser(authURL, expectedState string, opts OAuthOpt
 	codeChan := make(chan string, 1)
 	stateChan := make(chan string, 1)
 	errChan := make(chan error, 1)
-	portChan := make(chan int, 1)
 
 	// Parse the redirect URL to get the path
 	parsedURL, err := url.Parse(opts.RedirectURL)
@@ -311,7 +310,6 @@ func startLocalServerAndOpenBrowser(authURL, expectedState string, opts OAuthOpt
 	if port == 0 {
 		addr := listener.Addr().(*net.TCPAddr)
 		port = addr.Port
-		portChan <- port
 
 		// Update redirect URL with actual port
 		parsedURL.Host = fmt.Sprintf("%s:%d", hostname, port)

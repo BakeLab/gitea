@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"code.gitea.io/tea/cmd/flags"
+	"code.gitea.io/tea/cmd/releases"
 	"code.gitea.io/tea/modules/context"
 
 	"code.gitea.io/sdk/gitea"
@@ -42,12 +43,12 @@ func runReleaseAttachmentDelete(_ stdctx.Context, cmd *cli.Command) error {
 	client := ctx.Login.Client()
 
 	if ctx.Args().Len() < 2 {
-		return fmt.Errorf("No release tag or attachment names specified.\nUsage:\t%s", ctx.Command.UsageText)
+		return fmt.Errorf("no release tag or attachment names specified.\nUsage:\t%s", ctx.Command.UsageText)
 	}
 
 	tag := ctx.Args().First()
 	if len(tag) == 0 {
-		return fmt.Errorf("Release tag needed to delete attachment")
+		return fmt.Errorf("release tag needed to delete attachment")
 	}
 
 	if !ctx.Bool("confirm") {
@@ -55,7 +56,7 @@ func runReleaseAttachmentDelete(_ stdctx.Context, cmd *cli.Command) error {
 		return nil
 	}
 
-	release, err := getReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
+	release, err := releases.GetReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
 	if err != nil {
 		return err
 	}
@@ -75,7 +76,7 @@ func runReleaseAttachmentDelete(_ stdctx.Context, cmd *cli.Command) error {
 			}
 		}
 		if attachment == nil {
-			return fmt.Errorf("Release does not have attachment named '%s'", name)
+			return fmt.Errorf("release does not have attachment named '%s'", name)
 		}
 
 		_, err = client.DeleteReleaseAttachment(ctx.Owner, ctx.Repo, release.ID, attachment.ID)

@@ -5,6 +5,7 @@ package flags
 
 import (
 	"errors"
+	"fmt"
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/urfave/cli/v3"
@@ -167,7 +168,7 @@ func ParseState(stateStr string) (gitea.StateType, error) {
 	case "closed":
 		return gitea.StateClosed, nil
 	default:
-		return "", errors.New("unknown state '" + stateStr + "'")
+		return "", fmt.Errorf("unknown state '%s'", stateStr)
 	}
 }
 
@@ -184,6 +185,6 @@ func ParseIssueKind(kindStr string, defaultKind gitea.IssueType) (gitea.IssueTyp
 	case "pull", "pulls", "pr":
 		return gitea.IssueTypePull, nil
 	default:
-		return "", errors.New("unknown kind '" + kindStr + "'")
+		return "", fmt.Errorf("unknown kind '%s'", kindStr)
 	}
 }

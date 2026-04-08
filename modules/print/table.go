@@ -150,8 +150,7 @@ func outputYaml(f io.Writer, headers []string, values [][]string) error {
 			})
 
 			valueNode := &yaml.Node{Kind: yaml.ScalarNode, Value: val}
-			intVal, _ := strconv.Atoi(val)
-			if strconv.Itoa(intVal) == val {
+			if _, err := strconv.ParseInt(val, 10, 64); err == nil {
 				valueNode.Tag = "!!int"
 			} else {
 				valueNode.Tag = "!!str"

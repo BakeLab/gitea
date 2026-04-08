@@ -17,7 +17,7 @@ import (
 func CreateMilestone(login *config.Login, repoOwner, repoName, title, description string, deadline *time.Time, state gitea.StateType) error {
 	// title is required
 	if len(title) == 0 {
-		return fmt.Errorf("Title is required")
+		return fmt.Errorf("title is required")
 	}
 
 	mile, _, err := login.Client().CreateMilestone(repoOwner, repoName, gitea.CreateMilestoneOption{

@@ -58,7 +58,7 @@ func getPullIndex(ctx *context.TeaContext, branch string) (int64, error) {
 			return 0, err
 		}
 		if len(prs) == 0 {
-			return 0, fmt.Errorf("No open PRs found")
+			return 0, fmt.Errorf("no open PRs found")
 		}
 		opts.ListOptions.Page++
 		prOptions := make([]string, 0)

@@ -18,7 +18,7 @@ func PullMerge(login *config.Login, repoOwner, repoName string, index int64, opt
 		return err
 	}
 	if !success {
-		return fmt.Errorf("Failed to merge PR. Is it still open?")
+		return fmt.Errorf("failed to merge PR, is it still open?")
 	}
 	return nil
 }
