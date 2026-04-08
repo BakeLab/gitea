@@ -40,3 +40,21 @@ func runPullReview(ctx *context.TeaContext, state gitea.ReviewStateType, require
 
 	return task.CreatePullReview(ctx, idx, state, comment, nil)
 }
+
+// runResolveComment handles the common logic for resolving/unresolving review comments
+func runResolveComment(ctx *context.TeaContext, action func(*context.TeaContext, int64) error) error {
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
+
+	if ctx.Args().Len() < 1 {
+		return fmt.Errorf("comment ID is required")
+	}
+
+	commentID, err := utils.ArgToIndex(ctx.Args().First())
+	if err != nil {
+		return err
+	}
+
+	return action(ctx, commentID)
+}
