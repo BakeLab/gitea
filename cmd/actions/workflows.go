@@ -20,6 +20,10 @@ var CmdActionsWorkflows = cli.Command{
 	Action:      runWorkflowsDefault,
 	Commands: []*cli.Command{
 		&workflows.CmdWorkflowsList,
+		&workflows.CmdWorkflowsView,
+		&workflows.CmdWorkflowsDispatch,
+		&workflows.CmdWorkflowsEnable,
+		&workflows.CmdWorkflowsDisable,
 	},
 }
 

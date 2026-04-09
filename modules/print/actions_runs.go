@@ -154,27 +154,23 @@ func ActionWorkflowJobsList(jobs []*gitea.ActionWorkflowJob, output string) erro
 	return t.print(output)
 }
 
-// WorkflowsList prints a list of workflow files with active status
-func WorkflowsList(workflows []*gitea.ContentsResponse, activeStatus map[string]bool, output string) error {
+// ActionWorkflowsList prints a list of workflows from the workflow API
+func ActionWorkflowsList(workflows []*gitea.ActionWorkflow, output string) error {
 	t := table{
 		headers: []string{
-			"Active",
+			"ID",
 			"Name",
 			"Path",
+			"State",
 		},
 	}
 
-	machineReadable := isMachineReadable(output)
-
-	for _, workflow := range workflows {
-		// Check if this workflow file is active (has runs)
-		isActive := activeStatus[workflow.Name]
-		activeIndicator := formatBoolean(isActive, !machineReadable)
-
+	for _, wf := range workflows {
 		t.addRow(
-			activeIndicator,
-			workflow.Name,
-			workflow.Path,
+			wf.ID,
+			wf.Name,
+			wf.Path,
+			wf.State,
 		)
 	}
 
@@ -185,4 +181,35 @@ func WorkflowsList(workflows []*gitea.ContentsResponse, activeStatus map[string]
 
 	t.sort(1, true) // Sort by name column
 	return t.print(output)
+}
+
+// ActionWorkflowDetails prints detailed information about a workflow
+func ActionWorkflowDetails(wf *gitea.ActionWorkflow) {
+	fmt.Printf("ID: %s\n", wf.ID)
+	fmt.Printf("Name: %s\n", wf.Name)
+	fmt.Printf("Path: %s\n", wf.Path)
+	fmt.Printf("State: %s\n", wf.State)
+	if wf.HTMLURL != "" {
+		fmt.Printf("URL: %s\n", wf.HTMLURL)
+	}
+	if wf.BadgeURL != "" {
+		fmt.Printf("Badge: %s\n", wf.BadgeURL)
+	}
+	if !wf.CreatedAt.IsZero() {
+		fmt.Printf("Created: %s\n", FormatTime(wf.CreatedAt, false))
+	}
+	if !wf.UpdatedAt.IsZero() {
+		fmt.Printf("Updated: %s\n", FormatTime(wf.UpdatedAt, false))
+	}
+}
+
+// ActionWorkflowDispatchResult prints the result of a workflow dispatch
+func ActionWorkflowDispatchResult(details *gitea.RunDetails) {
+	fmt.Printf("Workflow dispatched successfully\n")
+	if details != nil {
+		fmt.Printf("Run ID: %d\n", details.WorkflowRunID)
+		if details.HTMLURL != "" {
+			fmt.Printf("URL: %s\n", details.HTMLURL)
+		}
+	}
 }

@@ -123,6 +123,87 @@ func TestActionWorkflowJobsListWithData(t *testing.T) {
 	require.NoError(t, ActionWorkflowJobsList(jobs, ""))
 }
 
+func TestActionWorkflowsListEmpty(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("ActionWorkflowsList panicked with empty list: %v", r)
+		}
+	}()
+
+	require.NoError(t, ActionWorkflowsList([]*gitea.ActionWorkflow{}, ""))
+}
+
+func TestActionWorkflowsListWithData(t *testing.T) {
+	workflows := []*gitea.ActionWorkflow{
+		{
+			ID:    "1",
+			Name:  "CI",
+			Path:  ".gitea/workflows/ci.yml",
+			State: "active",
+		},
+		{
+			ID:    "2",
+			Name:  "Deploy",
+			Path:  ".gitea/workflows/deploy.yml",
+			State: "disabled_manually",
+		},
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("ActionWorkflowsList panicked with data: %v", r)
+		}
+	}()
+
+	require.NoError(t, ActionWorkflowsList(workflows, ""))
+}
+
+func TestActionWorkflowDetails(t *testing.T) {
+	wf := &gitea.ActionWorkflow{
+		ID:        "1",
+		Name:      "CI Pipeline",
+		Path:      ".gitea/workflows/ci.yml",
+		State:     "active",
+		HTMLURL:   "https://gitea.example.com/owner/repo/actions/workflows/ci.yml",
+		BadgeURL:  "https://gitea.example.com/owner/repo/actions/workflows/ci.yml/badge.svg",
+		CreatedAt: time.Now().Add(-24 * time.Hour),
+		UpdatedAt: time.Now().Add(-1 * time.Hour),
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("ActionWorkflowDetails panicked: %v", r)
+		}
+	}()
+
+	ActionWorkflowDetails(wf)
+}
+
+func TestActionWorkflowDispatchResult(t *testing.T) {
+	details := &gitea.RunDetails{
+		WorkflowRunID: 42,
+		HTMLURL:       "https://gitea.example.com/owner/repo/actions/runs/42",
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("ActionWorkflowDispatchResult panicked: %v", r)
+		}
+	}()
+
+	ActionWorkflowDispatchResult(details)
+}
+
+func TestActionWorkflowDispatchResultNil(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("ActionWorkflowDispatchResult panicked with nil: %v", r)
+		}
+	}()
+
+	ActionWorkflowDispatchResult(nil)
+}
+
 func TestFormatDurationMinutes(t *testing.T) {
 	now := time.Now()
 

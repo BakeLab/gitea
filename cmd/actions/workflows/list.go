@@ -6,8 +6,6 @@ package workflows
 import (
 	stdctx "context"
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
@@ -22,15 +20,12 @@ var CmdWorkflowsList = cli.Command{
 	Name:        "list",
 	Aliases:     []string{"ls"},
 	Usage:       "List repository workflows",
-	Description: "List workflow files in the repository with active/inactive status",
+	Description: "List workflows in the repository with their status",
 	Action:      RunWorkflowsList,
-	Flags: append([]cli.Flag{
-		&flags.PaginationPageFlag,
-		&flags.PaginationLimitFlag,
-	}, flags.AllDefaultFlags...),
+	Flags:       flags.AllDefaultFlags,
 }
 
-// RunWorkflowsList lists workflow files in the repository
+// RunWorkflowsList lists workflows in the repository using the workflow API
 func RunWorkflowsList(ctx stdctx.Context, cmd *cli.Command) error {
 	c, err := context.InitCommand(cmd)
 	if err != nil {
@@ -41,51 +36,15 @@ func RunWorkflowsList(ctx stdctx.Context, cmd *cli.Command) error {
 	}
 	client := c.Login.Client()
 
-	// Try to list workflow files from .gitea/workflows directory
-	var workflows []*gitea.ContentsResponse
-
-	// Try .gitea/workflows first, then .github/workflows
-	workflowDir := ".gitea/workflows"
-	contents, _, err := client.ListContents(c.Owner, c.Repo, "", workflowDir)
+	resp, _, err := client.ListRepoActionWorkflows(c.Owner, c.Repo)
 	if err != nil {
-		workflowDir = ".github/workflows"
-		contents, _, err = client.ListContents(c.Owner, c.Repo, "", workflowDir)
-		if err != nil {
-			fmt.Printf("No workflow files found\n")
-			return nil
-		}
+		return fmt.Errorf("failed to list workflows: %w", err)
 	}
 
-	// Filter for workflow files (.yml and .yaml)
-	for _, content := range contents {
-		if content.Type == "file" {
-			ext := strings.ToLower(filepath.Ext(content.Name))
-			if ext == ".yml" || ext == ".yaml" {
-				content.Path = workflowDir + "/" + content.Name
-				workflows = append(workflows, content)
-			}
-		}
+	var workflows []*gitea.ActionWorkflow
+	if resp != nil {
+		workflows = resp.Workflows
 	}
 
-	if len(workflows) == 0 {
-		fmt.Printf("No workflow files found\n")
-		return nil
-	}
-
-	// Check which workflows have runs to determine active status
-	workflowStatus := make(map[string]bool)
-
-	// Get recent runs to check activity
-	runs, _, err := client.ListRepoActionRuns(c.Owner, c.Repo, gitea.ListRepoActionRunsOptions{
-		ListOptions: flags.GetListOptions(cmd),
-	})
-	if err == nil && runs != nil {
-		for _, run := range runs.WorkflowRuns {
-			// Extract workflow file name from path
-			workflowFile := filepath.Base(run.Path)
-			workflowStatus[workflowFile] = true
-		}
-	}
-
-	return print.WorkflowsList(workflows, workflowStatus, c.Output)
+	return print.ActionWorkflowsList(workflows, c.Output)
 }
