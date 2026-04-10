@@ -5,6 +5,8 @@ package pulls
 
 import (
 	stdctx "context"
+	"fmt"
+	"slices"
 
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
@@ -43,7 +45,8 @@ func RunPullsList(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	prs, _, err := ctx.Login.Client().ListRepoPullRequests(ctx.Owner, ctx.Repo, gitea.ListPullRequestsOptions{
+	client := ctx.Login.Client()
+	prs, _, err := client.ListRepoPullRequests(ctx.Owner, ctx.Repo, gitea.ListPullRequestsOptions{
 		ListOptions: flags.GetListOptions(cmd),
 		State:       state,
 	})
@@ -56,5 +59,21 @@ func RunPullsList(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return print.PullsList(prs, ctx.Output, fields)
+	var ciStatuses map[int64]*gitea.CombinedStatus
+	if slices.Contains(fields, "ci") {
+		ciStatuses = map[int64]*gitea.CombinedStatus{}
+		for _, pr := range prs {
+			if pr.Head == nil || pr.Head.Sha == "" {
+				continue
+			}
+			ci, _, err := client.GetCombinedStatus(ctx.Owner, ctx.Repo, pr.Head.Sha)
+			if err != nil {
+				fmt.Printf("error fetching CI status for PR #%d: %v\n", pr.Index, err)
+				continue
+			}
+			ciStatuses[pr.Index] = ci
+		}
+	}
+
+	return print.PullsList(prs, ctx.Output, fields, ciStatuses)
 }

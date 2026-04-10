@@ -12,7 +12,7 @@ import (
 
 var ciStatusSymbols = map[gitea.StatusState]string{
 	gitea.StatusSuccess: "✓ ",
-	gitea.StatusPending: "⭮ ",
+	gitea.StatusPending: "⏳ ",
 	gitea.StatusWarning: "⚠ ",
 	gitea.StatusError:   "✘ ",
 	gitea.StatusFailure: "❌ ",
@@ -42,16 +42,19 @@ func PullDetails(pr *gitea.PullRequest, reviews []*gitea.PullReview, ciStatus *g
 
 	out += formatReviews(pr, reviews)
 
-	if ciStatus != nil {
-		var summary, errors string
+	if ciStatus != nil && len(ciStatus.Statuses) != 0 {
+		out += "- CI:\n"
 		for _, s := range ciStatus.Statuses {
-			summary += ciStatusSymbols[s.State]
-			if s.State != gitea.StatusSuccess {
-				errors += fmt.Sprintf("  - [**%s**:\t%s](%s)\n", s.Context, s.Description, s.TargetURL)
+			symbol := ciStatusSymbols[s.State]
+			if s.TargetURL != "" {
+				out += fmt.Sprintf("  - %s[**%s**](%s)", symbol, s.Context, s.TargetURL)
+			} else {
+				out += fmt.Sprintf("  - %s**%s**", symbol, s.Context)
 			}
-		}
-		if len(ciStatus.Statuses) != 0 {
-			out += fmt.Sprintf("- CI: %s\n%s", summary, errors)
+			if s.Description != "" {
+				out += fmt.Sprintf(": %s", s.Description)
+			}
+			out += "\n"
 		}
 	}
 
@@ -87,6 +90,20 @@ func formatPRState(pr *gitea.PullRequest) string {
 		return "merged"
 	}
 	return string(pr.State)
+}
+
+func formatCIStatus(ci *gitea.CombinedStatus, machineReadable bool) string {
+	if ci == nil || len(ci.Statuses) == 0 {
+		return ""
+	}
+	if machineReadable {
+		return string(ci.State)
+	}
+	items := make([]string, 0, len(ci.Statuses))
+	for _, s := range ci.Statuses {
+		items = append(items, fmt.Sprintf("%s%s", ciStatusSymbols[s.State], s.Context))
+	}
+	return strings.Join(items, ", ")
 }
 
 func formatReviews(pr *gitea.PullRequest, reviews []*gitea.PullReview) string {
@@ -138,8 +155,8 @@ func formatReviews(pr *gitea.PullRequest, reviews []*gitea.PullReview) string {
 }
 
 // PullsList prints a listing of pulls
-func PullsList(prs []*gitea.PullRequest, output string, fields []string) error {
-	return printPulls(prs, output, fields)
+func PullsList(prs []*gitea.PullRequest, output string, fields []string, ciStatuses map[int64]*gitea.CombinedStatus) error {
+	return printPulls(prs, output, fields, ciStatuses)
 }
 
 // PullFields are all available fields to print with PullsList()
@@ -168,9 +185,10 @@ var PullFields = []string{
 	"milestone",
 	"labels",
 	"comments",
+	"ci",
 }
 
-func printPulls(pulls []*gitea.PullRequest, output string, fields []string) error {
+func printPulls(pulls []*gitea.PullRequest, output string, fields []string, ciStatuses map[int64]*gitea.CombinedStatus) error {
 	labelMap := map[int64]string{}
 	printables := make([]printable, len(pulls))
 	machineReadable := isMachineReadable(output)
@@ -183,7 +201,7 @@ func printPulls(pulls []*gitea.PullRequest, output string, fields []string) erro
 			}
 		}
 		// store items with printable interface
-		printables[i] = &printablePull{x, &labelMap}
+		printables[i] = &printablePull{x, &labelMap, &ciStatuses}
 	}
 
 	t := tableFromItems(fields, printables, machineReadable)
@@ -193,6 +211,7 @@ func printPulls(pulls []*gitea.PullRequest, output string, fields []string) erro
 type printablePull struct {
 	*gitea.PullRequest
 	formattedLabels *map[int64]string
+	ciStatuses      *map[int64]*gitea.CombinedStatus
 }
 
 func (x printablePull) FormatField(field string, machineReadable bool) string {
@@ -252,6 +271,13 @@ func (x printablePull) FormatField(field string, machineReadable bool) string {
 		return x.DiffURL
 	case "patch":
 		return x.PatchURL
+	case "ci":
+		if x.ciStatuses != nil {
+			if ci, ok := (*x.ciStatuses)[x.Index]; ok {
+				return formatCIStatus(ci, machineReadable)
+			}
+		}
+		return ""
 	}
 	return ""
 }
