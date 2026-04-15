@@ -24,6 +24,7 @@ var CmdBranches = cli.Command{
 		&branches.CmdBranchesList,
 		&branches.CmdBranchesProtect,
 		&branches.CmdBranchesUnprotect,
+		&branches.CmdBranchesRename,
 	},
 	Flags: append([]cli.Flag{
 		&cli.BoolFlag{
