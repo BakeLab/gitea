@@ -1065,7 +1065,7 @@ Delete users Organizations
 
 ## repos, repo
 
-Show repository details
+Manage repositories
 
 **--fields, -f**="": Comma-separated list of fields to print. Available values:
 			description,forks,id,name,owner,stars,ssh,updated,url,permission,type

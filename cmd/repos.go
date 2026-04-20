@@ -15,13 +15,13 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// CmdRepos represents to login a gitea server.
+// CmdRepos represents the command to manage repositories.
 var CmdRepos = cli.Command{
 	Name:        "repos",
 	Aliases:     []string{"repo"},
 	Category:    catEntities,
-	Usage:       "Show repository details",
-	Description: "Show repository details",
+	Usage:       "Manage repositories",
+	Description: "Manage repositories",
 	ArgsUsage:   "[<repo owner>/<repo name>]",
 	Action:      runRepos,
 	Commands: []*cli.Command{

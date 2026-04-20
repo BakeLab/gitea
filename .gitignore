@@ -17,3 +17,5 @@ dist/
 .direnv/
 result
 result-*
+
+.DS_Store
