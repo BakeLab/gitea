@@ -83,17 +83,13 @@ func InitCommand(cmd *cli.Command) (*TeaContext, error) {
 		}
 		if repoFlagPathExists {
 			repoPath = repoFlag
+		} else {
+			c.RepoSlug = repoFlag
 		}
 	}
 
 	if len(remoteFlag) == 0 {
 		remoteFlag = config.GetPreferences().FlagDefaults.Remote
-	}
-
-	if repoPath == "" {
-		if repoPath, err = os.Getwd(); err != nil {
-			return nil, err
-		}
 	}
 
 	// Create env login before repo context detection so it participates in remote URL matching
@@ -108,17 +104,20 @@ func InitCommand(cmd *cli.Command) (*TeaContext, error) {
 
 	// try to read local git repo & extract context: if repoFlag specifies a valid path, read repo in that dir,
 	// otherwise attempt PWD. if no repo is found, continue with default login
-	if c.LocalRepo, c.Login, c.RepoSlug, err = contextFromLocalRepo(repoPath, remoteFlag, extraLogins); err != nil {
-		if err == errNotAGiteaRepo || err == gogit.ErrRepositoryNotExists {
-			// we can deal with that, commands needing the optional values use ctx.Ensure()
-		} else {
-			return nil, err
+	if c.RepoSlug == "" {
+		if repoPath == "" {
+			if repoPath, err = os.Getwd(); err != nil {
+				return nil, err
+			}
 		}
-	}
 
-	if len(repoFlag) != 0 && !repoFlagPathExists {
-		// if repoFlag is not a valid path, use it to override repoSlug
-		c.RepoSlug = repoFlag
+		if c.LocalRepo, c.Login, c.RepoSlug, err = contextFromLocalRepo(repoPath, remoteFlag, extraLogins); err != nil {
+			if err == errNotAGiteaRepo || err == gogit.ErrRepositoryNotExists {
+				// we can deal with that, commands needing the optional values use ctx.Ensure()
+			} else {
+				return nil, err
+			}
+		}
 	}
 
 	// If env vars are set, always use the env login (but repo slug was already
