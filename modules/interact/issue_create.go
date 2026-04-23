@@ -180,19 +180,25 @@ func fetchIssueSelectables(login *config.Login, owner, repo string, done chan is
 		r.MilestoneList[i] = m.Title
 	}
 
-	labels, _, err := c.ListRepoLabels(owner, repo, gitea.ListLabelsOptions{
-		ListOptions: gitea.ListOptions{Page: -1},
-	})
-	if err != nil {
-		r.Err = err
-		done <- r
-		return
-	}
 	r.LabelMap = make(map[string]int64)
-	r.LabelList = make([]string, len(labels))
-	for i, l := range labels {
-		r.LabelMap[l.Name] = l.ID
-		r.LabelList[i] = l.Name
+	r.LabelList = make([]string, 0)
+	for page := 1; ; {
+		labels, resp, err := c.ListRepoLabels(owner, repo, gitea.ListLabelsOptions{
+			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
+		})
+		if err != nil {
+			r.Err = err
+			done <- r
+			return
+		}
+		for _, l := range labels {
+			r.LabelMap[l.Name] = l.ID
+			r.LabelList = append(r.LabelList, l.Name)
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		page = resp.NextPage
 	}
 
 	done <- r

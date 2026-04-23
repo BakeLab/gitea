@@ -166,11 +166,19 @@ func generateToken(login config.Login, user, pass, otp, scopes string) (string, 
 	}
 	client := login.Client(opts...)
 
-	tl, _, err := client.ListAccessTokens(gitea.ListAccessTokensOptions{
-		ListOptions: gitea.ListOptions{Page: -1},
-	})
-	if err != nil {
-		return "", err
+	var tl []*gitea.AccessToken
+	for page := 1; ; {
+		page_tokens, resp, err := client.ListAccessTokens(gitea.ListAccessTokensOptions{
+			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
+		})
+		if err != nil {
+			return "", err
+		}
+		tl = append(tl, page_tokens...)
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		page = resp.NextPage
 	}
 	host, _ := os.Hostname()
 	tokenName := host + "-tea"

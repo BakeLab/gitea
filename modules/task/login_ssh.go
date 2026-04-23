@@ -19,11 +19,22 @@ import (
 // a matching private key in ~/.ssh/. If no match is found, path is empty.
 func findSSHKey(client *gitea.Client) (string, error) {
 	// get keys registered on gitea instance
-	keys, _, err := client.ListMyPublicKeys(gitea.ListPublicKeysOptions{
-		ListOptions: gitea.ListOptions{Page: -1},
-	})
-	if err != nil || len(keys) == 0 {
-		return "", err
+	var keys []*gitea.PublicKey
+	for page := 1; ; {
+		page_keys, resp, err := client.ListMyPublicKeys(gitea.ListPublicKeysOptions{
+			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
+		})
+		if err != nil {
+			return "", err
+		}
+		keys = append(keys, page_keys...)
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		page = resp.NextPage
+	}
+	if len(keys) == 0 {
+		return "", nil
 	}
 
 	// enumerate ~/.ssh/*.pub files

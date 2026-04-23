@@ -61,11 +61,19 @@ func runReleaseAttachmentDelete(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	existing, _, err := client.ListReleaseAttachments(ctx.Owner, ctx.Repo, release.ID, gitea.ListReleaseAttachmentsOptions{
-		ListOptions: gitea.ListOptions{Page: -1},
-	})
-	if err != nil {
-		return err
+	var existing []*gitea.Attachment
+	for page := 1; ; {
+		page_attachments, resp, err := client.ListReleaseAttachments(ctx.Owner, ctx.Repo, release.ID, gitea.ListReleaseAttachmentsOptions{
+			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
+		})
+		if err != nil {
+			return err
+		}
+		existing = append(existing, page_attachments...)
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		page = resp.NextPage
 	}
 
 	for _, name := range ctx.Args().Slice()[1:] {

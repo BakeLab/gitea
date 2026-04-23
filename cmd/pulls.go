@@ -109,11 +109,20 @@ func runPullDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
 		return err
 	}
 
-	reviews, _, err := client.ListPullReviews(ctx.Owner, ctx.Repo, idx, gitea.ListPullReviewsOptions{
-		ListOptions: gitea.ListOptions{Page: -1},
-	})
-	if err != nil {
-		fmt.Printf("error while loading reviews: %v\n", err)
+	var reviews []*gitea.PullReview
+	for page := 1; ; {
+		page_reviews, resp, err := client.ListPullReviews(ctx.Owner, ctx.Repo, idx, gitea.ListPullReviewsOptions{
+			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
+		})
+		if err != nil {
+			fmt.Printf("error while loading reviews: %v\n", err)
+			break
+		}
+		reviews = append(reviews, page_reviews...)
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		page = resp.NextPage
 	}
 
 	if ctx.IsSet("output") {

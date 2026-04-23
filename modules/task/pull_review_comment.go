@@ -14,11 +14,19 @@ import (
 func ListPullReviewComments(ctx *context.TeaContext, idx int64) ([]*gitea.PullReviewComment, error) {
 	c := ctx.Login.Client()
 
-	reviews, _, err := c.ListPullReviews(ctx.Owner, ctx.Repo, idx, gitea.ListPullReviewsOptions{
-		ListOptions: gitea.ListOptions{Page: -1},
-	})
-	if err != nil {
-		return nil, err
+	var reviews []*gitea.PullReview
+	for page := 1; ; {
+		page_reviews, resp, err := c.ListPullReviews(ctx.Owner, ctx.Repo, idx, gitea.ListPullReviewsOptions{
+			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
+		})
+		if err != nil {
+			return nil, err
+		}
+		reviews = append(reviews, page_reviews...)
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		page = resp.NextPage
 	}
 
 	var allComments []*gitea.PullReviewComment
