@@ -29,7 +29,9 @@ var CmdGenerateManPage = cli.Command{
 	Hidden: true,
 	Flags:  DocRenderFlags,
 	Action: func(ctx context.Context, cmd *cli.Command) error {
-		return RenderDocs(cmd, cmd.Root(), docs.ToMan)
+		return RenderDocs(cmd, cmd.Root(), func(cmd *cli.Command) (string, error) {
+			return docs.ToManWithSection(cmd, 1)
+		})
 	},
 }
 
