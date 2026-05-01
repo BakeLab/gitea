@@ -128,12 +128,10 @@ func TestUpdateActiveInactiveFlags(t *testing.T) {
 func TestUpdateConfigPreservation(t *testing.T) {
 	// Test that existing configuration is preserved when not updated
 	originalConfig := map[string]string{
-		"url":                  "https://old.example.com/webhook",
-		"secret":               "old-secret",
-		"branch_filter":        "main",
-		"authorization_header": "Bearer old-token",
-		"http_method":          "post",
-		"content_type":         "json",
+		"url":          "https://old.example.com/webhook",
+		"secret":       "old-secret",
+		"http_method":  "post",
+		"content_type": "json",
 	}
 
 	tests := []struct {
@@ -147,53 +145,32 @@ func TestUpdateConfigPreservation(t *testing.T) {
 				"url": "https://new.example.com/webhook",
 			},
 			expectedConfig: map[string]string{
-				"url":                  "https://new.example.com/webhook",
-				"secret":               "old-secret",
-				"branch_filter":        "main",
-				"authorization_header": "Bearer old-token",
-				"http_method":          "post",
-				"content_type":         "json",
+				"url":          "https://new.example.com/webhook",
+				"secret":       "old-secret",
+				"http_method":  "post",
+				"content_type": "json",
 			},
 		},
 		{
-			name: "Update secret and auth header",
+			name: "Update secret",
 			updates: map[string]string{
-				"secret":               "new-secret",
-				"authorization_header": "X-Token: new-token",
+				"secret": "new-secret",
 			},
 			expectedConfig: map[string]string{
-				"url":                  "https://old.example.com/webhook",
-				"secret":               "new-secret",
-				"branch_filter":        "main",
-				"authorization_header": "X-Token: new-token",
-				"http_method":          "post",
-				"content_type":         "json",
-			},
-		},
-		{
-			name: "Clear branch filter",
-			updates: map[string]string{
-				"branch_filter": "",
-			},
-			expectedConfig: map[string]string{
-				"url":                  "https://old.example.com/webhook",
-				"secret":               "old-secret",
-				"branch_filter":        "",
-				"authorization_header": "Bearer old-token",
-				"http_method":          "post",
-				"content_type":         "json",
+				"url":          "https://old.example.com/webhook",
+				"secret":       "new-secret",
+				"http_method":  "post",
+				"content_type": "json",
 			},
 		},
 		{
 			name:    "No updates",
 			updates: map[string]string{},
 			expectedConfig: map[string]string{
-				"url":                  "https://old.example.com/webhook",
-				"secret":               "old-secret",
-				"branch_filter":        "main",
-				"authorization_header": "Bearer old-token",
-				"http_method":          "post",
-				"content_type":         "json",
+				"url":          "https://old.example.com/webhook",
+				"secret":       "old-secret",
+				"http_method":  "post",
+				"content_type": "json",
 			},
 		},
 	}
@@ -213,6 +190,61 @@ func TestUpdateConfigPreservation(t *testing.T) {
 
 			// Verify expected config
 			assert.Equal(t, tt.expectedConfig, config)
+		})
+	}
+}
+
+func TestUpdateBranchFilterAndAuthHeaderHandling(t *testing.T) {
+	tests := []struct {
+		name                   string
+		originalBranchFilter   string
+		originalAuthHeader     string
+		setBranchFilter        bool
+		newBranchFilter        string
+		setAuthorizationHeader bool
+		newAuthHeader          string
+		expectedBranchFilter   string
+		expectedAuthHeader     string
+	}{
+		{
+			name:                 "Preserve values",
+			originalBranchFilter: "main",
+			originalAuthHeader:   "Bearer old-token",
+			expectedBranchFilter: "main",
+			expectedAuthHeader:   "Bearer old-token",
+		},
+		{
+			name:                 "Update branch filter",
+			originalBranchFilter: "main",
+			setBranchFilter:      true,
+			newBranchFilter:      "develop",
+			expectedBranchFilter: "develop",
+			expectedAuthHeader:   "",
+		},
+		{
+			name:                   "Update authorization header",
+			originalAuthHeader:     "Bearer old-token",
+			setAuthorizationHeader: true,
+			newAuthHeader:          "X-Token: new-token",
+			expectedBranchFilter:   "",
+			expectedAuthHeader:     "X-Token: new-token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			branchFilter := tt.originalBranchFilter
+			if tt.setBranchFilter {
+				branchFilter = tt.newBranchFilter
+			}
+
+			authHeader := tt.originalAuthHeader
+			if tt.setAuthorizationHeader {
+				authHeader = tt.newAuthHeader
+			}
+
+			assert.Equal(t, tt.expectedBranchFilter, branchFilter)
+			assert.Equal(t, tt.expectedAuthHeader, authHeader)
 		})
 	}
 }

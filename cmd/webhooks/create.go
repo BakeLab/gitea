@@ -89,30 +89,26 @@ func runWebhooksCreate(ctx stdctx.Context, cmd *cli.Command) error {
 		config["secret"] = secret
 	}
 
-	if branchFilter != "" {
-		config["branch_filter"] = branchFilter
-	}
-
-	if authHeader != "" {
-		config["authorization_header"] = authHeader
-	}
-
 	var hook *gitea.Hook
 	if c.IsGlobal {
 		return fmt.Errorf("global webhooks not yet supported in this version")
 	} else if len(c.Org) > 0 {
 		hook, _, err = client.CreateOrgHook(c.Org, gitea.CreateHookOption{
-			Type:   webhookType,
-			Config: config,
-			Events: events,
-			Active: active,
+			Type:                webhookType,
+			Config:              config,
+			Events:              events,
+			Active:              active,
+			BranchFilter:        branchFilter,
+			AuthorizationHeader: authHeader,
 		})
 	} else {
 		hook, _, err = client.CreateRepoHook(c.Owner, c.Repo, gitea.CreateHookOption{
-			Type:   webhookType,
-			Config: config,
-			Events: events,
-			Active: active,
+			Type:                webhookType,
+			Config:              config,
+			Events:              events,
+			Active:              active,
+			BranchFilter:        branchFilter,
+			AuthorizationHeader: authHeader,
 		})
 	}
 	if err != nil {

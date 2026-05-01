@@ -97,11 +97,14 @@ func runWebhooksUpdate(ctx stdctx.Context, cmd *cli.Command) error {
 	if cmd.IsSet("secret") {
 		config["secret"] = cmd.String("secret")
 	}
+	branchFilter := hook.BranchFilter
 	if cmd.IsSet("branch-filter") {
-		config["branch_filter"] = cmd.String("branch-filter")
+		branchFilter = cmd.String("branch-filter")
 	}
+
+	authHeader := hook.AuthorizationHeader
 	if cmd.IsSet("authorization-header") {
-		config["authorization_header"] = cmd.String("authorization-header")
+		authHeader = cmd.String("authorization-header")
 	}
 
 	// Update events if specified
@@ -126,15 +129,19 @@ func runWebhooksUpdate(ctx stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("global webhooks not yet supported in this version")
 	} else if len(c.Org) > 0 {
 		_, err = client.EditOrgHook(c.Org, int64(webhookID), gitea.EditHookOption{
-			Config: config,
-			Events: events,
-			Active: &active,
+			Config:              config,
+			Events:              events,
+			Active:              &active,
+			BranchFilter:        branchFilter,
+			AuthorizationHeader: authHeader,
 		})
 	} else {
 		_, err = client.EditRepoHook(c.Owner, c.Repo, int64(webhookID), gitea.EditHookOption{
-			Config: config,
-			Events: events,
-			Active: &active,
+			Config:              config,
+			Events:              events,
+			Active:              &active,
+			BranchFilter:        branchFilter,
+			AuthorizationHeader: authHeader,
 		})
 	}
 	if err != nil {

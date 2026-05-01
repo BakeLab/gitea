@@ -79,8 +79,6 @@ func TestWebhookConfigConstruction(t *testing.T) {
 		name           string
 		url            string
 		secret         string
-		branchFilter   string
-		authHeader     string
 		expectedKeys   []string
 		expectedValues map[string]string
 	}{
@@ -107,43 +105,15 @@ func TestWebhookConfigConstruction(t *testing.T) {
 			},
 		},
 		{
-			name:         "Config with branch filter",
-			url:          "https://example.com/webhook",
-			branchFilter: "main,develop",
-			expectedKeys: []string{"url", "http_method", "content_type", "branch_filter"},
-			expectedValues: map[string]string{
-				"url":           "https://example.com/webhook",
-				"http_method":   "post",
-				"content_type":  "json",
-				"branch_filter": "main,develop",
-			},
-		},
-		{
-			name:         "Config with auth header",
-			url:          "https://example.com/webhook",
-			authHeader:   "Bearer token123",
-			expectedKeys: []string{"url", "http_method", "content_type", "authorization_header"},
-			expectedValues: map[string]string{
-				"url":                  "https://example.com/webhook",
-				"http_method":          "post",
-				"content_type":         "json",
-				"authorization_header": "Bearer token123",
-			},
-		},
-		{
 			name:         "Complete config",
 			url:          "https://example.com/webhook",
 			secret:       "secret123",
-			branchFilter: "main",
-			authHeader:   "X-Token: abc",
-			expectedKeys: []string{"url", "http_method", "content_type", "secret", "branch_filter", "authorization_header"},
+			expectedKeys: []string{"url", "http_method", "content_type", "secret"},
 			expectedValues: map[string]string{
-				"url":                  "https://example.com/webhook",
-				"http_method":          "post",
-				"content_type":         "json",
-				"secret":               "secret123",
-				"branch_filter":        "main",
-				"authorization_header": "X-Token: abc",
+				"url":          "https://example.com/webhook",
+				"http_method":  "post",
+				"content_type": "json",
+				"secret":       "secret123",
 			},
 		},
 	}
@@ -158,12 +128,6 @@ func TestWebhookConfigConstruction(t *testing.T) {
 
 			if tt.secret != "" {
 				config["secret"] = tt.secret
-			}
-			if tt.branchFilter != "" {
-				config["branch_filter"] = tt.branchFilter
-			}
-			if tt.authHeader != "" {
-				config["authorization_header"] = tt.authHeader
 			}
 
 			// Check all expected keys exist
@@ -184,11 +148,13 @@ func TestWebhookConfigConstruction(t *testing.T) {
 
 func TestWebhookCreateOptions(t *testing.T) {
 	tests := []struct {
-		name        string
-		webhookType string
-		events      []string
-		active      bool
-		config      map[string]string
+		name         string
+		webhookType  string
+		events       []string
+		active       bool
+		config       map[string]string
+		branchFilter string
+		authHeader   string
 	}{
 		{
 			name:        "Gitea webhook",
@@ -200,6 +166,8 @@ func TestWebhookCreateOptions(t *testing.T) {
 				"http_method":  "post",
 				"content_type": "json",
 			},
+			branchFilter: "main",
+			authHeader:   "X-Token: abc",
 		},
 		{
 			name:        "Slack webhook",
@@ -228,16 +196,20 @@ func TestWebhookCreateOptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			option := gitea.CreateHookOption{
-				Type:   gitea.HookType(tt.webhookType),
-				Config: tt.config,
-				Events: tt.events,
-				Active: tt.active,
+				Type:                gitea.HookType(tt.webhookType),
+				Config:              tt.config,
+				Events:              tt.events,
+				Active:              tt.active,
+				BranchFilter:        tt.branchFilter,
+				AuthorizationHeader: tt.authHeader,
 			}
 
 			assert.Equal(t, gitea.HookType(tt.webhookType), option.Type)
 			assert.Equal(t, tt.events, option.Events)
 			assert.Equal(t, tt.active, option.Active)
 			assert.Equal(t, tt.config, option.Config)
+			assert.Equal(t, tt.branchFilter, option.BranchFilter)
+			assert.Equal(t, tt.authHeader, option.AuthorizationHeader)
 		})
 	}
 }

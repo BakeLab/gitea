@@ -81,17 +81,17 @@ func TestWebhookDetails(t *testing.T) {
 				ID:   123,
 				Type: "gitea",
 				Config: map[string]string{
-					"url":                  "https://example.com/webhook",
-					"content_type":         "json",
-					"http_method":          "post",
-					"branch_filter":        "main,develop",
-					"secret":               "secret-value",
-					"authorization_header": "Bearer token123",
+					"url":          "https://example.com/webhook",
+					"content_type": "json",
+					"http_method":  "post",
+					"secret":       "secret-value",
 				},
-				Events:  []string{"push", "pull_request", "issues"},
-				Active:  true,
-				Created: now.Add(-24 * time.Hour),
-				Updated: now,
+				BranchFilter:        "main,develop",
+				AuthorizationHeader: "Bearer token123",
+				Events:              []string{"push", "pull_request", "issues"},
+				Active:              true,
+				Created:             now.Add(-24 * time.Hour),
+				Updated:             now,
 			},
 		},
 		{
@@ -238,16 +238,14 @@ func TestWebhookConfigHandling(t *testing.T) {
 		{
 			name: "Config with all fields",
 			config: map[string]string{
-				"url":                  "https://example.com/webhook",
-				"secret":               "my-secret",
-				"authorization_header": "Bearer token",
-				"content_type":         "json",
-				"http_method":          "post",
-				"branch_filter":        "main",
+				"url":          "https://example.com/webhook",
+				"secret":       "my-secret",
+				"content_type": "json",
+				"http_method":  "post",
 			},
 			expectedURL:   "https://example.com/webhook",
 			hasSecret:     true,
-			hasAuthHeader: true,
+			hasAuthHeader: false,
 		},
 		{
 			name: "Config with minimal fields",
@@ -341,17 +339,17 @@ func TestWebhookDetailsFormatting(t *testing.T) {
 		ID:   123,
 		Type: "gitea",
 		Config: map[string]string{
-			"url":                  "https://example.com/webhook",
-			"content_type":         "json",
-			"http_method":          "post",
-			"branch_filter":        "main,develop",
-			"secret":               "secret-value",
-			"authorization_header": "Bearer token123",
+			"url":          "https://example.com/webhook",
+			"content_type": "json",
+			"http_method":  "post",
+			"secret":       "secret-value",
 		},
-		Events:  []string{"push", "pull_request", "issues"},
-		Active:  true,
-		Created: now.Add(-24 * time.Hour),
-		Updated: now,
+		BranchFilter:        "main,develop",
+		AuthorizationHeader: "Bearer token123",
+		Events:              []string{"push", "pull_request", "issues"},
+		Active:              true,
+		Created:             now.Add(-24 * time.Hour),
+		Updated:             now,
 	}
 
 	// Test that all expected fields are included in details
@@ -379,8 +377,8 @@ func TestWebhookDetailsFormatting(t *testing.T) {
 	assert.Equal(t, "https://example.com/webhook", hook.Config["url"])
 	assert.Equal(t, "json", hook.Config["content_type"])
 	assert.Equal(t, "post", hook.Config["http_method"])
-	assert.Equal(t, "main,develop", hook.Config["branch_filter"])
+	assert.Equal(t, "main,develop", hook.BranchFilter)
 	assert.Contains(t, hook.Config, "secret")
-	assert.Contains(t, hook.Config, "authorization_header")
+	assert.Equal(t, "Bearer token123", hook.AuthorizationHeader)
 	assert.Equal(t, []string{"push", "pull_request", "issues"}, hook.Events)
 }

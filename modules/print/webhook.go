@@ -67,13 +67,21 @@ func WebhookDetails(hook *gitea.Hook) {
 		if method, ok := hook.Config["http_method"]; ok {
 			fmt.Printf("- **HTTP Method**: %s\n", method)
 		}
-		if branchFilter, ok := hook.Config["branch_filter"]; ok && branchFilter != "" {
+		branchFilter := hook.BranchFilter
+		if branchFilter == "" {
+			branchFilter = hook.Config["branch_filter"]
+		}
+		if branchFilter != "" {
 			fmt.Printf("- **Branch Filter**: %s\n", branchFilter)
 		}
 		if _, hasSecret := hook.Config["secret"]; hasSecret {
 			fmt.Printf("- **Secret**: (configured)\n")
 		}
-		if _, hasAuth := hook.Config["authorization_header"]; hasAuth {
+		hasAuth := hook.AuthorizationHeader != ""
+		if !hasAuth {
+			_, hasAuth = hook.Config["authorization_header"]
+		}
+		if hasAuth {
 			fmt.Printf("- **Authorization Header**: (configured)\n")
 		}
 	}
