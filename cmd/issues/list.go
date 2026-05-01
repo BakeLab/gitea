@@ -5,6 +5,7 @@ package issues
 
 import (
 	stdctx "context"
+	"errors"
 	"time"
 
 	"code.gitea.io/tea/cmd/flags"
@@ -77,7 +78,7 @@ func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
 			Type:        kind,
 			KeyWord:     ctx.String("keyword"),
 			CreatedBy:   ctx.String("author"),
-			AssignedBy:  ctx.String("assigned-to"),
+			AssignedBy:  ctx.String("assignee"),
 			MentionedBy: ctx.String("mentions"),
 			Labels:      labels,
 			Milestones:  milestones,
@@ -88,13 +89,15 @@ func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
 			return err
 		}
 	} else {
+		if ctx.IsSet("assignee") {
+			return errors.New("--assignee requires --repo (global issue search does not support assignee filter)")
+		}
 		issues, _, err = ctx.Login.Client().ListIssues(gitea.ListIssueOption{
 			ListOptions: flags.GetListOptions(cmd),
 			State:       state,
 			Type:        kind,
 			KeyWord:     ctx.String("keyword"),
 			CreatedBy:   ctx.String("author"),
-			AssignedBy:  ctx.String("assigned-to"),
 			MentionedBy: ctx.String("mentions"),
 			Labels:      labels,
 			Milestones:  milestones,
