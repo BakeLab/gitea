@@ -45,6 +45,8 @@ func App() *cli.Command {
 			&CmdNotifications,
 			&CmdRepoClone,
 
+			&CmdSSHKeys,
+
 			&CmdAdmin,
 
 			&CmdApi,

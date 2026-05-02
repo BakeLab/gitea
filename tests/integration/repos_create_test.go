@@ -6,58 +6,18 @@ package integration
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/repos"
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/task"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 )
 
-func useTempConfigPath(t *testing.T) string {
-	t.Helper()
-
-	configPath := filepath.Join(t.TempDir(), "config.yml")
-	config.SetConfigPathForTesting(configPath)
-	t.Cleanup(func() {
-		config.SetConfigPathForTesting("")
-	})
-
-	return configPath
-}
-
-func createIntegrationLogin(t *testing.T, giteaURL string) *config.Login {
-	t.Helper()
-
-	_ = useTempConfigPath(t)
-
-	username := os.Getenv("GITEA_TEA_TEST_USERNAME")
-	password := os.Getenv("GITEA_TEA_TEST_PASSWORD")
-	require.NotEmpty(t, username, "GITEA_TEA_TEST_USERNAME is required for integration tests")
-	require.NotEmpty(t, password, "GITEA_TEA_TEST_PASSWORD is required for integration tests")
-
-	require.NoError(t, task.CreateLogin("integration", "", username, password, "", "", "", giteaURL, "", "", true, false, false, false))
-
-	login, err := config.GetLoginByName("integration")
-	require.NoError(t, err)
-	require.NotNil(t, login)
-
-	return login
-}
-
 func TestCreateRepoObjectFormat(t *testing.T) {
-	giteaURL := os.Getenv("GITEA_TEA_TEST_URL")
-	if giteaURL == "" {
-		t.Skip("GITEA_TEA_TEST_URL is not set, skipping test")
-	}
-
-	login := createIntegrationLogin(t, giteaURL)
+	login := createIntegrationLogin(t)
 	client := login.Client()
 	timestamp := time.Now().Unix()
 
