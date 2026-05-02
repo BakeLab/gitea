@@ -39,6 +39,9 @@ var cmdAdminUsers = cli.Command{
 	},
 	Commands: []*cli.Command{
 		&users.CmdUserList,
+		&users.CmdUserCreate,
+		&users.CmdUserEdit,
+		&users.CmdUserDelete,
 	},
 	Flags: users.CmdUserList.Flags,
 }
