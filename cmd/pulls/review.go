@@ -6,10 +6,12 @@ package pulls
 import (
 	stdctx "context"
 	"fmt"
+	"os"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/interact"
+	"code.gitea.io/tea/modules/print"
 	"code.gitea.io/tea/modules/utils"
 
 	"github.com/urfave/cli/v3"
@@ -30,18 +32,27 @@ var CmdPullsReview = cli.Command{
 			return err
 		}
 
-		if ctx.Args().Len() != 1 {
-			return fmt.Errorf("must specify a PR index")
+		if !ctx.Args().Present() {
+			return fmt.Errorf("must specify at least one PR index")
 		}
 
-		idx, err := utils.ArgToIndex(ctx.Args().First())
-		if err != nil {
-			return err
+		// This command is intentionally interactive. Fail early in CI / non-TTY
+		// contexts rather than hanging on prompts.
+		if os.Getenv("CI") != "" || !print.IsInteractive() || interact.IsStdinPiped() {
+			return fmt.Errorf("pull review requires an interactive terminal")
 		}
 
-		if err := interact.ReviewPull(ctx, idx); err != nil && !interact.IsQuitting(err) {
-			return err
+		for _, arg := range ctx.Args().Slice() {
+			idx, err := utils.ArgToIndex(arg)
+			if err != nil {
+				return err
+			}
+
+			if err := interact.ReviewPull(ctx, idx); err != nil && !interact.IsQuitting(err) {
+				return err
+			}
 		}
+
 		return nil
 	},
 	Flags: flags.AllDefaultFlags,
