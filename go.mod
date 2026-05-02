@@ -12,7 +12,7 @@ require (
 	github.com/adrg/xdg v0.5.3
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/enescakir/emoji v1.0.0
-	github.com/go-authgate/sdk-go v0.8.0
+	github.com/go-authgate/sdk-go v0.9.0
 	github.com/go-git/go-git/v5 v5.18.0
 	github.com/muesli/termenv v0.16.0
 	github.com/olekukonko/tablewriter v1.1.4
