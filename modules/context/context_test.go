@@ -4,14 +4,9 @@
 package context
 
 import (
-	"os"
-	"os/exec"
 	"testing"
 
 	"code.gitea.io/tea/modules/config"
-
-	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v3"
 )
 
 func Test_MatchLogins(t *testing.T) {
@@ -69,48 +64,4 @@ func Test_MatchLogins(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestInitCommand_WithRepoSlugSkipsLocalRepoDetection(t *testing.T) {
-	tmpDir := t.TempDir()
-	config.SetConfigForTesting(config.LocalConfig{
-		Logins: []config.Login{{
-			Name:    "test-login",
-			URL:     "https://gitea.example.com",
-			Token:   "token",
-			User:    "login-user",
-			Default: true,
-		}},
-	})
-
-	cmd := exec.Command("git", "init", "--object-format=sha256", tmpDir)
-	cmd.Env = os.Environ()
-	require.NoError(t, cmd.Run())
-
-	oldWd, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(tmpDir))
-	t.Cleanup(func() {
-		require.NoError(t, os.Chdir(oldWd))
-	})
-
-	cliCmd := cli.Command{
-		Name: "branches",
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "login"},
-			&cli.StringFlag{Name: "repo"},
-			&cli.StringFlag{Name: "remote"},
-			&cli.StringFlag{Name: "output"},
-		},
-	}
-	require.NoError(t, cliCmd.Set("repo", "owner/repo"))
-
-	ctx, err := InitCommand(&cliCmd)
-	require.NoError(t, err)
-	require.Equal(t, "owner", ctx.Owner)
-	require.Equal(t, "repo", ctx.Repo)
-	require.Equal(t, "owner/repo", ctx.RepoSlug)
-	require.Nil(t, ctx.LocalRepo)
-	require.NotNil(t, ctx.Login)
-	require.Equal(t, "test-login", ctx.Login.Name)
 }

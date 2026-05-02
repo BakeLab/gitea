@@ -30,7 +30,10 @@ LDFLAGS := -X "code.gitea.io/tea/modules/version.Version=$(TEA_VERSION)" -X "cod
 # override to allow passing additional goflags via make CLI
 override GOFLAGS := $(GOFLAGS) -tags '$(TAGS)' -ldflags '$(LDFLAGS)'
 
-PACKAGES ?= $(shell $(GO) list ./...)
+PACKAGES ?= $(shell $(GO) list ./... | grep -v '^code.gitea.io/tea/tests')
+UNIT_PACKAGES ?= $(PACKAGES)
+INTEGRATION_PACKAGES ?= $(shell $(GO) list ./tests/... 2>/dev/null)
+INTEGRATION_TEST_TAGS ?= testtools
 SOURCES ?= $(shell find . -name "*.go" -type f)
 
 # OS specific vars.
@@ -64,11 +67,11 @@ vet:
 
 .PHONY: lint
 lint:
-	$(GO) run $(GOLANGCI_LINT_PACKAGE) run
+	$(GO) run $(GOLANGCI_LINT_PACKAGE) run --build-tags testtools
 
 .PHONY: lint-fix
 lint-fix:
-	$(GO) run $(GOLANGCI_LINT_PACKAGE) run --fix
+	$(GO) run $(GOLANGCI_LINT_PACKAGE) run --build-tags testtools --fix
 
 .PHONY: fmt-check
 fmt-check:
@@ -93,13 +96,24 @@ docs-check:
 		exit 1; \
 	fi;
 
+.PHONY: unit-test
+unit-test:
+	$(GO) test $(UNIT_PACKAGES)
+
+.PHONY: integration-test
+integration-test:
+	@if [ -n "$(INTEGRATION_PACKAGES)" ]; then \
+		$(GO) test -tags='$(INTEGRATION_TEST_TAGS)' $(INTEGRATION_PACKAGES); \
+	else \
+		echo "No integration test packages found"; \
+	fi
+
 .PHONY: test
-test:
-	$(GO) test -tags='sqlite sqlite_unlock_notify' $(PACKAGES)
+test: unit-test integration-test
 
 .PHONY: unit-test-coverage
 unit-test-coverage:
-	$(GO) test -tags='sqlite sqlite_unlock_notify' -cover -coverprofile coverage.out $(PACKAGES) && echo "\n==>\033[32m Ok\033[m\n" || exit 1
+	$(GO) test -cover -coverprofile coverage.out $(UNIT_PACKAGES) && echo "\n==>\033[32m Ok\033[m\n" || exit 1
 
 .PHONY: tidy
 tidy:
@@ -122,4 +136,3 @@ $(EXECUTABLE): $(SOURCES)
 .PHONY: build-image
 build-image:
 	docker build --build-arg VERSION=$(TEA_VERSION) -t gitea/tea:$(TEA_VERSION_TAG) .
-
