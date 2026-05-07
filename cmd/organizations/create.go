@@ -4,14 +4,14 @@
 package organizations
 
 import (
-	"fmt"
-
 	stdctx "context"
+	"fmt"
 
 	"code.gitea.io/sdk/gitea"
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/context"
 	"code.gitea.io/tea/modules/print"
+
 	"github.com/urfave/cli/v3"
 )
 
@@ -25,7 +25,7 @@ var CmdOrganizationCreate = cli.Command{
 	ArgsUsage:   "<organization name>",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:    "name",
+			Name:    "full-name",
 			Aliases: []string{"n"},
 		},
 		&cli.StringFlag{
@@ -75,8 +75,8 @@ func RunOrganizationCreate(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	org, _, err := ctx.Login.Client().CreateOrg(gitea.CreateOrgOption{
-		Name: ctx.Args().First(),
-		// FullName: , // not really meaningful for orgs (not displayed in webui, use description instead?)
+		Name:                      ctx.Args().First(),
+		FullName:                  ctx.String("full-name"),
 		Description:               ctx.String("description"),
 		Website:                   ctx.String("website"),
 		Location:                  ctx.String("location"),
