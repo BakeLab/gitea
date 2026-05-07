@@ -32,9 +32,7 @@ func runLoginEdit(_ context.Context, _ *cli.Command) error {
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return err
-		}
+		return cmd.Run()
 	}
 	return open.Start(config.GetConfigPath())
 }
