@@ -5,11 +5,13 @@ package login
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 
 	"code.gitea.io/tea/cmd/flags"
 	"code.gitea.io/tea/modules/config"
+	"code.gitea.io/tea/modules/utils"
 
 	"github.com/skratchdot/open-golang/open"
 	"github.com/urfave/cli/v3"
@@ -27,12 +29,17 @@ var CmdLoginEdit = cli.Command{
 }
 
 func runLoginEdit(_ context.Context, _ *cli.Command) error {
+	ymlPath := config.GetConfigPath()
 	if e, ok := os.LookupEnv("EDITOR"); ok && e != "" {
-		cmd := exec.Command(e, config.GetConfigPath())
+		cmd := exec.Command(e, ymlPath)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
 	}
-	return open.Start(config.GetConfigPath())
+	if exist, _ := utils.FileExist(ymlPath); !exist {
+		fmt.Printf("Config file does not exist, please run login add first\n")
+		return nil
+	}
+	return open.Start(ymlPath)
 }
