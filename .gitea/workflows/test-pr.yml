@@ -51,7 +51,7 @@ jobs:
           make integration-test
     services:
       gitea:
-        image: docker.gitea.com/gitea:1.26.1
+        image: docker.gitea.com/gitea:1.26.2
         cmd:
           - bash
           - -c
