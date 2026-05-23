@@ -8,73 +8,31 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
-
-	"github.com/go-git/go-git/v5"
-	git_config "github.com/go-git/go-git/v5/config"
-	git_plumbing "github.com/go-git/go-git/v5/plumbing"
-	git_transport "github.com/go-git/go-git/v5/plumbing/transport"
 )
 
 // TeaCreateBranch creates a new branch in the repo, tracking from another branch.
 func (r TeaRepo) TeaCreateBranch(localBranchName, remoteBranchName, remoteName string) error {
-	// save in .git/config to assign remote for future pulls
-	localBranchRefName := git_plumbing.NewBranchReferenceName(localBranchName)
-	err := r.CreateBranch(&git_config.Branch{
-		Name:   localBranchName,
-		Merge:  git_plumbing.NewBranchReferenceName(remoteBranchName),
-		Remote: remoteName,
-	})
-	if err != nil {
-		return err
-	}
-
-	// serialize the branch to .git/refs/heads
-	remoteBranchRefName := git_plumbing.NewRemoteReferenceName(remoteName, remoteBranchName)
-	remoteBranchRef, err := r.Storer.Reference(remoteBranchRefName)
-	if err != nil {
-		return err
-	}
-	localHashRef := git_plumbing.NewHashReference(localBranchRefName, remoteBranchRef.Hash())
-	return r.Storer.SetReference(localHashRef)
+	return r.backend.CreateTrackingBranch(localBranchName, remoteBranchName, remoteName)
 }
 
 // TeaCheckout checks out the given branch in the worktree.
-func (r TeaRepo) TeaCheckout(ref git_plumbing.ReferenceName) error {
-	tree, err := r.Worktree()
-	if err != nil {
-		return err
-	}
-	return tree.Checkout(&git.CheckoutOptions{Branch: ref})
+func (r TeaRepo) TeaCheckout(ref ReferenceName) error {
+	return r.backend.Checkout(ref)
 }
 
-// TeaDeleteLocalBranch removes the given branch locally
-func (r TeaRepo) TeaDeleteLocalBranch(branch *git_config.Branch) error {
-	err := r.DeleteBranch(branch.Name)
-	// if the branch is not found that's ok, as .git/config may have no entry if
-	// no remote tracking branch is configured for it (eg push without -u flag)
-	if err != nil && err.Error() != "branch not found" {
-		return err
-	}
-	return r.Storer.RemoveReference(git_plumbing.NewBranchReferenceName(branch.Name))
+// TeaDeleteLocalBranch removes the given branch locally.
+func (r TeaRepo) TeaDeleteLocalBranch(branch *Branch) error {
+	return r.backend.DeleteLocalBranch(branch.Name)
 }
 
-// TeaDeleteRemoteBranch removes the given branch on the given remote via git protocol
-func (r TeaRepo) TeaDeleteRemoteBranch(remoteName, remoteBranch string, auth git_transport.AuthMethod) error {
-	// delete remote branch via git protocol:
-	// an empty source in the refspec means remote deletion to git 🙃
-	refspec := fmt.Sprintf(":%s", git_plumbing.NewBranchReferenceName(remoteBranch))
-	return r.Push(&git.PushOptions{
-		RemoteName: remoteName,
-		RefSpecs:   []git_config.RefSpec{git_config.RefSpec(refspec)},
-		Prune:      true,
-		Auth:       auth,
-	})
+// TeaDeleteRemoteBranch removes the given branch on the given remote via git protocol.
+func (r TeaRepo) TeaDeleteRemoteBranch(remoteName, remoteBranch string, auth *AuthMethod) error {
+	return r.backend.DeleteRemoteBranch(remoteName, remoteBranch, auth)
 }
 
 // TeaFindBranchBySha returns a branch that is at the the given SHA and syncs to the
 // given remote repo.
-func (r TeaRepo) TeaFindBranchBySha(sha, repoURL string) (b *git_config.Branch, err error) {
-	// find remote matching our repoURL
+func (r TeaRepo) TeaFindBranchBySha(sha, repoURL string) (b *Branch, err error) {
 	remote, err := r.GetRemote(repoURL)
 	if err != nil {
 		return nil, err
@@ -84,41 +42,26 @@ func (r TeaRepo) TeaFindBranchBySha(sha, repoURL string) (b *git_config.Branch, 
 	}
 	remoteName := remote.Config().Name
 
-	// check if the given remote has our branch (.git/refs/remotes/<remoteName>/*)
-	iter, err := r.References()
+	refs, err := r.backend.ListReferences("refs/heads", "refs/remotes/"+remoteName)
 	if err != nil {
 		return nil, err
 	}
-	defer iter.Close()
-	var remoteRefName git_plumbing.ReferenceName
-	var localRefName git_plumbing.ReferenceName
-	err = iter.ForEach(func(ref *git_plumbing.Reference) error {
-		if ref.Name().IsRemote() {
-			name := ref.Name().Short()
-			if ref.Hash().String() == sha && strings.HasPrefix(name, remoteName) {
-				remoteRefName = ref.Name()
-			}
-		}
 
+	var remoteRefName ReferenceName
+	var localRefName ReferenceName
+	for _, ref := range refs {
+		if ref.Name().IsRemote() && ref.Hash().String() == sha {
+			remoteRefName = ref.Name()
+		}
 		if ref.Name().IsBranch() && ref.Hash().String() == sha {
 			localRefName = ref.Name()
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	if remoteRefName == "" || localRefName == "" {
-		// no remote tracking branch found, so a potential local branch
-		// can't be a match either
 		return nil, nil
 	}
 
-	b = &git_config.Branch{
-		Remote: remoteName,
-		Name:   localRefName.Short(),
-		Merge:  localRefName,
-	}
+	b = &Branch{Remote: remoteName, Name: localRefName.Short(), Merge: localRefName}
 	return b, b.Validate()
 }
 
@@ -126,8 +69,7 @@ func (r TeaRepo) TeaFindBranchBySha(sha, repoURL string) (b *git_config.Branch, 
 // remote names and syncs to the given remote repo. This method is less precise
 // than TeaFindBranchBySha(), but may be desirable if local and remote branch
 // have diverged.
-func (r TeaRepo) TeaFindBranchByName(branchName, repoURL string) (b *git_config.Branch, err error) {
-	// find remote matching our repoURL
+func (r TeaRepo) TeaFindBranchByName(branchName, repoURL string) (b *Branch, err error) {
 	remote, err := r.GetRemote(repoURL)
 	if err != nil {
 		return nil, err
@@ -137,45 +79,35 @@ func (r TeaRepo) TeaFindBranchByName(branchName, repoURL string) (b *git_config.
 	}
 	remoteName := remote.Config().Name
 
-	// check if the given remote has our branch (.git/refs/remotes/<remoteName>/*)
-	iter, err := r.References()
+	refs, err := r.backend.ListReferences("refs/heads", "refs/remotes/"+remoteName)
 	if err != nil {
 		return nil, err
 	}
-	defer iter.Close()
-	var remoteRefName git_plumbing.ReferenceName
-	var localRefName git_plumbing.ReferenceName
+
+	var remoteRefName ReferenceName
+	var localRefName ReferenceName
 	remoteSearchingName := fmt.Sprintf("%s/%s", remoteName, branchName)
-	err = iter.ForEach(func(ref *git_plumbing.Reference) error {
+	for _, ref := range refs {
 		if ref.Name().IsRemote() && ref.Name().Short() == remoteSearchingName {
 			remoteRefName = ref.Name()
 		}
-		n := ref.Name()
-		if n.IsBranch() && n.Short() == branchName {
-			localRefName = n
+		if ref.Name().IsBranch() && ref.Name().Short() == branchName {
+			localRefName = ref.Name()
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	if remoteRefName == "" || localRefName == "" {
 		return nil, nil
 	}
 
-	b = &git_config.Branch{
-		Remote: remoteName,
-		Name:   localRefName.Short(),
-		Merge:  localRefName,
-	}
+	b = &Branch{Remote: remoteName, Name: localRefName.Short(), Merge: localRefName}
 	return b, b.Validate()
 }
 
 // TeaFindBranchRemote gives the first remote that has a branch with the same name or sha,
 // depending on what is passed in.
 // This function is needed, as git does not always define branches in .git/config with remote entries.
-// Priority order is: first match of sha and branch -> first match of branch -> first match of sha
-func (r TeaRepo) TeaFindBranchRemote(branchName, hash string) (*git.Remote, error) {
+// Priority order is: first match of sha and branch -> first match of branch -> first match of sha.
+func (r TeaRepo) TeaFindBranchRemote(branchName, hash string) (*Remote, error) {
 	remotes, err := r.Remotes()
 	if err != nil {
 		return nil, err
@@ -188,55 +120,53 @@ func (r TeaRepo) TeaFindBranchRemote(branchName, hash string) (*git.Remote, erro
 		return remotes[0], nil
 	}
 
-	// check if the given remote has our branch (.git/refs/remotes/<remoteName>/*)
-	iter, err := r.References()
+	refs, err := r.backend.ListReferences("refs/remotes")
 	if err != nil {
 		return nil, err
 	}
-	defer iter.Close()
 
-	var shaMatch *git.Remote
-	var branchMatch *git.Remote
-	var fullMatch *git.Remote
-	if err := iter.ForEach(func(ref *git_plumbing.Reference) error {
-		if ref.Name().IsRemote() {
-			names := strings.SplitN(ref.Name().Short(), "/", 2)
-			remote := names[0]
-			branch := names[1]
-			if branchMatch == nil && branchName != "" && branchName == branch {
-				if branchMatch, err = r.Remote(remote); err != nil {
-					return err
-				}
-			}
-			if shaMatch == nil && hash != "" && hash == ref.Hash().String() {
-				if shaMatch, err = r.Remote(remote); err != nil {
-					return err
-				}
-			}
-			if fullMatch == nil && branchName != "" && branchName == branch && hash != "" && hash == ref.Hash().String() {
-				if fullMatch, err = r.Remote(remote); err != nil {
-					return err
-				}
-				// stop asap you have a full match
-				return nil
-			}
+	remoteByName := make(map[string]*Remote, len(remotes))
+	for _, remote := range remotes {
+		remoteByName[remote.Config().Name] = remote
+	}
+
+	var shaMatch *Remote
+	var branchMatch *Remote
+	var fullMatch *Remote
+	for _, ref := range refs {
+		remoteName, remoteBranch, ok := splitRemoteRef(ref.Name())
+		if !ok {
+			continue
 		}
-		return nil
-	}); err != nil {
-		return nil, err
+		remote := remoteByName[remoteName]
+		if remote == nil {
+			continue
+		}
+		if branchMatch == nil && branchName != "" && branchName == remoteBranch {
+			branchMatch = remote
+		}
+		if shaMatch == nil && hash != "" && hash == ref.Hash().String() {
+			shaMatch = remote
+		}
+		if fullMatch == nil && branchName != "" && branchName == remoteBranch && hash != "" && hash == ref.Hash().String() {
+			fullMatch = remote
+			break
+		}
 	}
 
-	if fullMatch != nil {
+	switch {
+	case fullMatch != nil:
 		return fullMatch, nil
-	} else if branchMatch != nil {
+	case branchMatch != nil:
 		return branchMatch, nil
-	} else if shaMatch != nil {
+	case shaMatch != nil:
 		return shaMatch, nil
+	default:
+		return nil, nil
 	}
-	return nil, nil
 }
 
-// TeaGetCurrentBranchNameAndSHA return the name and sha of the branch witch is currently active
+// TeaGetCurrentBranchNameAndSHA return the name and sha of the branch witch is currently active.
 func (r TeaRepo) TeaGetCurrentBranchNameAndSHA() (string, string, error) {
 	localHead, err := r.Head()
 	if err != nil {
@@ -251,12 +181,10 @@ func (r TeaRepo) TeaGetCurrentBranchNameAndSHA() (string, string, error) {
 }
 
 // PushToCreatAgitFlowPR pushes the given head to the refs/for/<base>/<topic> ref on the remote to create an agit flow PR.
-func (r TeaRepo) PushToCreatAgitFlowPR(remoteName, head, base, topic, title, description string, auth git_transport.AuthMethod) error {
+func (r TeaRepo) PushToCreatAgitFlowPR(remoteName, head, base, topic, title, description string, auth *AuthMethod) error {
 	if !strings.HasPrefix(head, "refs/") {
 		head = "refs/heads/" + head
 	}
-
-	ref := fmt.Sprintf("%s:refs/for/%s/%s", head, base, topic)
 
 	pushOptions := make(map[string]string)
 	if len(title) > 0 {
@@ -265,15 +193,18 @@ func (r TeaRepo) PushToCreatAgitFlowPR(remoteName, head, base, topic, title, des
 	if len(description) > 0 {
 		pushOptions["description"] = b64Encode(description)
 	}
+	return r.backend.PushToAgitFlowPR(remoteName, head, base, topic, pushOptions, auth)
+}
 
-	opts := &git.PushOptions{
-		RemoteName: remoteName,
-		RefSpecs:   []git_config.RefSpec{git_config.RefSpec(ref)},
-		Options:    pushOptions,
-		Auth:       auth,
+func splitRemoteRef(ref ReferenceName) (remoteName, branchName string, ok bool) {
+	if !ref.IsRemote() {
+		return "", "", false
 	}
-
-	return r.Push(opts)
+	parts := strings.SplitN(ref.Short(), "/", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 // b64Encode implements base64 encode for string if necessary.

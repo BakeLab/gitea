@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -15,9 +16,6 @@ import (
 	"gitea.dev/tea/modules/context"
 	tea_git "gitea.dev/tea/modules/git"
 
-	gogit "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
@@ -572,33 +570,32 @@ func TestExpandPlaceholders(t *testing.T) {
 
 	t.Run("replaces branch from local repo HEAD", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		repo, err := gogit.PlainInit(tmpDir, false)
-		require.NoError(t, err)
+		runGit := func(args ...string) {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = tmpDir
+			require.NoError(t, cmd.Run())
+		}
+
+		runGit("init")
+		runGit("config", "user.email", "test@test.com")
+		runGit("config", "user.name", "test")
 
 		// Create an initial commit so HEAD points to a branch.
-		wt, err := repo.Worktree()
-		require.NoError(t, err)
 		tmpFile := filepath.Join(tmpDir, "init.txt")
 		require.NoError(t, os.WriteFile(tmpFile, []byte("init"), 0o644))
-		_, err = wt.Add("init.txt")
-		require.NoError(t, err)
-		_, err = wt.Commit("initial commit", &gogit.CommitOptions{
-			Author: &object.Signature{Name: "test", Email: "test@test.com"},
-		})
-		require.NoError(t, err)
+		runGit("add", "init.txt")
+		runGit("commit", "-m", "initial commit")
 
 		// Create and checkout a feature branch.
-		headRef, err := repo.Head()
+		runGit("checkout", "-b", "feature/my-branch")
+
+		repo, err := tea_git.RepoFromPath(tmpDir)
 		require.NoError(t, err)
-		branchRef := plumbing.NewBranchReferenceName("feature/my-branch")
-		ref := plumbing.NewHashReference(branchRef, headRef.Hash())
-		require.NoError(t, repo.Storer.SetReference(ref))
-		require.NoError(t, wt.Checkout(&gogit.CheckoutOptions{Branch: branchRef}))
 
 		ctx := &context.TeaContext{
 			Owner:     "alice",
 			Repo:      "proj",
-			LocalRepo: &tea_git.TeaRepo{Repository: repo},
+			LocalRepo: repo,
 		}
 		result := expandPlaceholders("/repos/{owner}/{repo}/branches/{branch}", ctx)
 		assert.Equal(t, "/repos/alice/proj/branches/feature/my-branch", result)

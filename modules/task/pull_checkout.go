@@ -10,10 +10,6 @@ import (
 
 	"gitea.dev/tea/modules/config"
 	local_git "gitea.dev/tea/modules/git"
-
-	"github.com/go-git/go-git/v5"
-	git_config "github.com/go-git/go-git/v5/config"
-	git_plumbing "github.com/go-git/go-git/v5/plumbing"
 )
 
 // PullCheckout checkout current workdir to the head branch of specified pull request
@@ -76,7 +72,7 @@ func doPRFetch(
 	login *config.Login,
 	pr *gitea.PullRequest,
 	localRepo *local_git.TeaRepo,
-	localRemote *git.Remote,
+	localRemote *local_git.Remote,
 	callback func(string) (string, error),
 ) (string, error) {
 	localRemoteName := localRemote.Config().Name
@@ -90,25 +86,23 @@ func doPRFetch(
 	if err != nil {
 		return "", err
 	}
-	fetchOpts := &git.FetchOptions{Auth: auth}
+	refspecs := []string{}
 	if isRemoteDeleted(pr) {
 		// When the head branch is already deleted, pr.Head.Ref points to
 		// `refs/pull/<idx>/head`, where the commits stay available.
 		// This ref must be fetched explicitly, and does not allow pushing, so we use it
 		// only in this case as fallback.
 		localBranchName = fmt.Sprintf("pulls/%d", pr.Index)
-		fetchOpts.RefSpecs = []git_config.RefSpec{git_config.RefSpec(fmt.Sprintf("%s:refs/remotes/%s/%s",
+		refspecs = []string{fmt.Sprintf("%s:refs/remotes/%s/%s",
 			pr.Head.Ref,
 			localRemoteName,
 			localBranchName,
-		))}
+		)}
 	}
 	fmt.Printf("Fetching PR %v (head %s:%s) from remote '%s'\n", pr.Index, url, pr.Head.Ref, localRemoteName)
 
-	err = localRemote.Fetch(fetchOpts)
-	if err == git.NoErrAlreadyUpToDate {
-		fmt.Println(err)
-	} else if err != nil {
+	err = localRepo.Fetch(localRemoteName, refspecs, auth)
+	if err != nil {
 		return "", err
 	}
 	return localBranchName, nil
@@ -124,12 +118,12 @@ func doPRCheckout(
 ) error {
 	// determine the ref to checkout, depending on existence of a matching commit on a local branch
 	var info string
-	var checkoutRef git_plumbing.ReferenceName
+	var checkoutRef local_git.ReferenceName
 
 	if b, _ := localRepo.TeaFindBranchBySha(pr.Head.Sha, remoteURL); b != nil {
 
 		// if a matching branch exists, use that
-		checkoutRef = git_plumbing.NewBranchReferenceName(b.Name)
+		checkoutRef = local_git.NewBranchReferenceName(b.Name)
 		info = fmt.Sprintf("Found matching local branch %s, checking it out", checkoutRef.Short())
 
 	} else if forceCreateBranch {
@@ -139,10 +133,10 @@ func doPRCheckout(
 		if isRemoteDeleted(pr) {
 			localBranchName += "-" + pr.Head.Ref
 		}
-		checkoutRef = git_plumbing.NewBranchReferenceName(localBranchName)
+		checkoutRef = local_git.NewBranchReferenceName(localBranchName)
 		if err := localRepo.TeaCreateBranch(localBranchName, localRemoteBranchName, localRemoteName); err == nil {
 			info = fmt.Sprintf("Created branch '%s'\n", localBranchName)
-		} else if err == git.ErrBranchExists {
+		} else if err == local_git.ErrBranchExists {
 			info = "There may be changes since you last checked out, run `git pull` to get them."
 		} else {
 			return err
@@ -151,7 +145,7 @@ func doPRCheckout(
 	} else {
 
 		// use the remote tracking branch
-		checkoutRef = git_plumbing.NewRemoteReferenceName(localRemoteName, localRemoteBranchName)
+		checkoutRef = local_git.NewRemoteReferenceName(localRemoteName, localRemoteBranchName)
 		info = fmt.Sprintf(
 			"Checking out remote tracking branch %s. To make changes, create a new branch:\n  git checkout %s",
 			checkoutRef.String(), localRemoteBranchName)

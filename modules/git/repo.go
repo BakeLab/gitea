@@ -4,14 +4,18 @@
 package git
 
 import (
+	"fmt"
 	"net/url"
-
-	"github.com/go-git/go-git/v5"
+	"sort"
 )
 
-// TeaRepo is a go-git Repository, with an extended high level interface.
+// TeaRepo wraps a local git repository behind a swappable backend.
 type TeaRepo struct {
-	*git.Repository
+	backend RepositoryBackend
+}
+
+func newTeaRepo(backend RepositoryBackend) *TeaRepo {
+	return &TeaRepo{backend: backend}
 }
 
 // RepoForWorkdir tries to open the git repository in the local directory
@@ -20,28 +24,71 @@ func RepoForWorkdir() (*TeaRepo, error) {
 	return RepoFromPath("")
 }
 
-// RepoFromPath tries to open the git repository by path
+// RepoFromPath tries to open the git repository by path.
 func RepoFromPath(path string) (*TeaRepo, error) {
-	if len(path) == 0 {
-		path = "./"
+	backend, err := currentBackend().Open(path)
+	if err != nil {
+		return nil, err
 	}
-	repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{
-		DetectDotGit:          true,
-		EnableDotGitCommonDir: true, // Enable commondir support for worktrees
-	})
+	return newTeaRepo(backend), nil
+}
+
+// WorkTree returns the repository work tree path.
+func (r TeaRepo) WorkTree() string {
+	return r.backend.WorkTree()
+}
+
+// Config returns the repository config values tea needs.
+func (r TeaRepo) Config() (*Config, error) {
+	return r.backend.Config()
+}
+
+// Remote returns the configured remote by name.
+func (r TeaRepo) Remote(remoteName string) (*Remote, error) {
+	cfg, err := r.Config()
+	if err != nil {
+		return nil, err
+	}
+	remoteCfg, ok := cfg.Remotes[remoteName]
+	if !ok {
+		return nil, fmt.Errorf("remote %s not found", remoteName)
+	}
+	return &Remote{repo: &r, config: remoteCfg}, nil
+}
+
+// Remotes returns all configured remotes sorted by name.
+func (r TeaRepo) Remotes() ([]*Remote, error) {
+	cfg, err := r.Config()
 	if err != nil {
 		return nil, err
 	}
 
-	return &TeaRepo{repo}, nil
+	remoteNames := make([]string, 0, len(cfg.Remotes))
+	for name := range cfg.Remotes {
+		remoteNames = append(remoteNames, name)
+	}
+	sort.Strings(remoteNames)
+
+	remotes := make([]*Remote, 0, len(remoteNames))
+	for _, name := range remoteNames {
+		remotes = append(remotes, &Remote{repo: &r, config: cfg.Remotes[name]})
+	}
+	return remotes, nil
 }
 
-// RemoteURL returns the URL of the given remote
+// Head returns the currently checked out ref.
+func (r TeaRepo) Head() (*Reference, error) {
+	return r.backend.Head()
+}
+
+// RemoteURL returns the URL of the given remote.
 func (r TeaRepo) RemoteURL(remoteName string) (*url.URL, error) {
 	remote, err := r.Remote(remoteName)
 	if err != nil {
 		return nil, err
 	}
-
-	return url.Parse(remote.Config().URLs[0])
+	if len(remote.Config().URLs) == 0 {
+		return nil, fmt.Errorf("remote %s has no URL configured", remoteName)
+	}
+	return ParseURL(remote.Config().URLs[0])
 }

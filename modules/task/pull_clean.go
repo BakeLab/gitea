@@ -10,8 +10,6 @@ import (
 
 	"gitea.dev/tea/modules/config"
 	local_git "gitea.dev/tea/modules/git"
-	git_config "github.com/go-git/go-git/v5/config"
-	git_plumbing "github.com/go-git/go-git/v5/plumbing"
 )
 
 // PullClean deletes local & remote feature-branches for a closed pull
@@ -51,7 +49,7 @@ func PullClean(login *config.Login, repoOwner, repoName string, index int64, ign
 	}
 
 	// find a branch with matching sha or name, that has a remote matching the repo url
-	var branch *git_config.Branch
+	var branch *local_git.Branch
 	if ignoreSHA {
 		branch, err = r.TeaFindBranchByName(remoteBranch, pr.Head.Repository.CloneURL)
 	} else {
@@ -77,7 +75,7 @@ call me again with the --ignore-sha flag`, remoteBranch)
 	}
 	if headRef.Name().Short() == branch.Name {
 		fmt.Printf("Checking out '%s' to delete local branch '%s'\n", defaultBranch, branch.Name)
-		ref := git_plumbing.NewBranchReferenceName(defaultBranch)
+		ref := local_git.NewBranchReferenceName(defaultBranch)
 		if err = r.TeaCheckout(ref); err != nil {
 			return err
 		}

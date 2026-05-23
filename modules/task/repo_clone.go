@@ -4,17 +4,12 @@
 package task
 
 import (
-	"fmt"
 	"net/url"
 
 	"code.gitea.io/sdk/gitea"
 
 	"gitea.dev/tea/modules/config"
 	local_git "gitea.dev/tea/modules/git"
-
-	"github.com/go-git/go-git/v5"
-	git_config "github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing"
 )
 
 // RepoClone creates a local git clone in the given path, and sets up upstream remote
@@ -46,12 +41,7 @@ func RepoClone(
 		path = repoName
 	}
 
-	repo, err := git.PlainClone(path, false, &git.CloneOptions{
-		URL:             originURL.String(),
-		Auth:            auth,
-		Depth:           depth,
-		InsecureSkipTLS: login.Insecure,
-	})
+	repo, err := local_git.Clone(path, originURL.String(), auth, depth, login.Insecure)
 	if err != nil {
 		return nil, err
 	}
@@ -63,28 +53,15 @@ func RepoClone(
 			return nil, err
 		}
 		upstreamBranch := repoMeta.Parent.DefaultBranch
-		_, err = repo.CreateRemote(&git_config.RemoteConfig{
-			Name: "upstream",
-			URLs: []string{upstreamURL.String()},
-		})
-		if err != nil {
+		if err = repo.AddRemote("upstream", upstreamURL.String()); err != nil {
 			return nil, err
 		}
-
-		repoConf, err := repo.Config()
-		if err != nil {
-			return nil, err
-		}
-		if b, ok := repoConf.Branches[upstreamBranch]; ok {
-			b.Remote = "upstream"
-			b.Merge = plumbing.ReferenceName(fmt.Sprintf("refs/heads/%s", upstreamBranch))
-		}
-		if err = repo.SetConfig(repoConf); err != nil {
+		if err = repo.SetBranchUpstream(upstreamBranch, "upstream", upstreamBranch); err != nil {
 			return nil, err
 		}
 	}
 
-	return &local_git.TeaRepo{Repository: repo}, nil
+	return repo, nil
 }
 
 func cloneURL(repo *gitea.Repository, login *config.Login) (*url.URL, error) {

@@ -34,6 +34,7 @@ PACKAGES ?= $(shell $(GO) list ./... | grep -v '^gitea.dev/tea/tests')
 UNIT_PACKAGES ?= $(PACKAGES)
 INTEGRATION_PACKAGES ?= $(shell $(GO) list ./tests/... 2>/dev/null)
 INTEGRATION_TEST_TAGS ?= testtools
+INTEGRATION_TEST_GOFLAGS ?= -v
 SOURCES ?= $(shell find . -name "*.go" -type f)
 
 # OS specific vars.
@@ -103,7 +104,7 @@ unit-test:
 .PHONY: integration-test
 integration-test:
 	@if [ -n "$(INTEGRATION_PACKAGES)" ]; then \
-		$(GO) test -tags='$(INTEGRATION_TEST_TAGS)' $(INTEGRATION_PACKAGES); \
+		$(GO) test $(INTEGRATION_TEST_GOFLAGS) -tags='$(INTEGRATION_TEST_TAGS)' $(INTEGRATION_PACKAGES); \
 	else \
 		echo "No integration test packages found"; \
 	fi

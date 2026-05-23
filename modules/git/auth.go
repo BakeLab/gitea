@@ -7,69 +7,64 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 
 	"gitea.dev/tea/modules/utils"
-
-	git_transport "github.com/go-git/go-git/v5/plumbing/transport"
-	gogit_http "github.com/go-git/go-git/v5/plumbing/transport/http"
-	gogit_ssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"golang.org/x/crypto/ssh"
 )
 
 type pwCallback = func(string) (string, error)
 
-// GetAuthForURL returns the appropriate AuthMethod to be used in Push() / Pull()
-// operations depending on the protocol, and prompts the user for credentials if
-// necessary.
-func GetAuthForURL(remoteURL *url.URL, authToken, keyFile string, passwordCallback pwCallback) (git_transport.AuthMethod, error) {
+// GetAuthForURL returns backend-agnostic auth settings for git network operations.
+func GetAuthForURL(remoteURL *url.URL, authToken, keyFile string, passwordCallback pwCallback) (*AuthMethod, error) {
 	switch remoteURL.Scheme {
 	case "http", "https":
-		// gitea supports push/pull via app token as username.
-		return &gogit_http.BasicAuth{Password: "", Username: authToken}, nil
-
+		return &AuthMethod{Scheme: remoteURL.Scheme, Username: authToken}, nil
 	case "ssh":
-		// try to select right key via ssh-agent. if it fails, try to read a key manually
-		user := remoteURL.User.Username()
-		auth, err := gogit_ssh.DefaultAuthBuilder(user)
-		if err != nil {
-			signer, err2 := readSSHPrivKey(keyFile, passwordCallback)
-			if err2 != nil {
-				return nil, err2
-			}
-			auth = &gogit_ssh.PublicKeys{User: user, Signer: signer}
+		if keyFile == "" {
+			return &AuthMethod{Scheme: remoteURL.Scheme, Username: remoteURL.User.Username()}, nil
 		}
-		return auth, nil
-	}
-	return nil, fmt.Errorf("don't know how to handle url scheme %v", remoteURL.Scheme)
-}
+		expandedKeyFile, err := utils.AbsPathWithExpansion(keyFile)
+		if err != nil {
+			return nil, err
+		}
+		sshKey, err := os.ReadFile(expandedKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("can not read ssh key '%s'", expandedKeyFile)
+		}
 
-func readSSHPrivKey(keyFile string, passwordCallback pwCallback) (sig ssh.Signer, err error) {
-	if keyFile != "" {
-		keyFile, err = utils.AbsPathWithExpansion(keyFile)
-	} else {
-		keyFile, err = utils.AbsPathWithExpansion("~/.ssh/id_rsa")
-	}
-	if err != nil {
-		return nil, err
-	}
-	sshKey, err := os.ReadFile(keyFile)
-	if err != nil {
-		return nil, fmt.Errorf("can not read ssh key '%s'", keyFile)
-	}
-	sig, err = ssh.ParsePrivateKey(sshKey)
-	if _, ok := err.(*ssh.PassphraseMissingError); ok && passwordCallback != nil {
-		// allow for up to 3 password attempts
-		for i := 0; i < 3; i++ {
-			var pass string
-			pass, err = passwordCallback(keyFile)
-			if err != nil {
+		auth := &AuthMethod{
+			Scheme:   remoteURL.Scheme,
+			Username: remoteURL.User.Username(),
+			KeyFile:  expandedKeyFile,
+		}
+		if _, err := ssh.ParsePrivateKey(sshKey); err == nil {
+			return auth, nil
+		}
+
+		if _, ok := err.(*ssh.PassphraseMissingError); ok {
+			if passwordCallback == nil {
 				return nil, err
 			}
-			sig, err = ssh.ParsePrivateKeyWithPassphrase(sshKey, []byte(pass))
-			if err == nil {
-				break
+			for i := 0; i < 3; i++ {
+				pass, err := passwordCallback(expandedKeyFile)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := ssh.ParsePrivateKeyWithPassphrase(sshKey, []byte(pass)); err == nil {
+					auth.KeyPassphrase = pass
+					return auth, nil
+				}
 			}
+			return nil, err
 		}
+
+		return nil, err
+	default:
+		return nil, fmt.Errorf("don't know how to handle url scheme %v", remoteURL.Scheme)
 	}
-	return sig, err
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }

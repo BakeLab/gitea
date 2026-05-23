@@ -15,7 +15,6 @@ import (
 	"gitea.dev/tea/modules/utils"
 
 	"charm.land/huh/v2"
-	gogit "github.com/go-git/go-git/v5"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/term"
 )
@@ -112,7 +111,7 @@ func InitCommand(cmd *cli.Command) (*TeaContext, error) {
 		}
 
 		if c.LocalRepo, c.Login, c.RepoSlug, err = contextFromLocalRepo(repoPath, remoteFlag, extraLogins); err != nil {
-			if err == errNotAGiteaRepo || err == gogit.ErrRepositoryNotExists {
+			if err == errNotAGiteaRepo || err == git.ErrRepositoryNotExists {
 				// we can deal with that, commands needing the optional values use ctx.Ensure()
 			} else {
 				return nil, err
