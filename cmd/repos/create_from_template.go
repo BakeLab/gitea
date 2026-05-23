@@ -9,11 +9,12 @@ import (
 	stdctx "context"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/print"
-	"code.gitea.io/tea/modules/utils"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
+	"gitea.dev/tea/modules/utils"
 )
 
 // CmdRepoCreateFromTemplate represents a sub command of repos to generate one from a template repo

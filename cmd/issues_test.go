@@ -11,12 +11,13 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/context"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/context"
 )
 
 const (

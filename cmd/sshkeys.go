@@ -6,8 +6,9 @@ package cmd
 import (
 	stdctx "context"
 
-	"code.gitea.io/tea/cmd/sshkeys"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/sshkeys"
 )
 
 // CmdSSHKeys represents the ssh-keys command group

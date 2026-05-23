@@ -6,7 +6,7 @@ package context
 import (
 	"testing"
 
-	"code.gitea.io/tea/modules/config"
+	"gitea.dev/tea/modules/config"
 )
 
 func TestShouldPromptFallbackLogin(t *testing.T) {

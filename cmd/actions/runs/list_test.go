@@ -10,9 +10,10 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/config"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/modules/config"
 )
 
 func TestFilterRunsByTime(t *testing.T) {

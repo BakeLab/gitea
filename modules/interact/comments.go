@@ -8,10 +8,11 @@ import (
 	"os"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/print"
-	"code.gitea.io/tea/modules/theme"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
+	"gitea.dev/tea/modules/theme"
 
 	"charm.land/huh/v2"
 	"golang.org/x/term"

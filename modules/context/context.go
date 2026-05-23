@@ -9,10 +9,10 @@ import (
 	"os"
 	"strings"
 
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/git"
-	"code.gitea.io/tea/modules/theme"
-	"code.gitea.io/tea/modules/utils"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/git"
+	"gitea.dev/tea/modules/theme"
+	"gitea.dev/tea/modules/utils"
 
 	"charm.land/huh/v2"
 	gogit "github.com/go-git/go-git/v5"

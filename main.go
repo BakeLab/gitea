@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Tea is command line tool for Gitea.
-package main // import "code.gitea.io/tea"
+package main // import "gitea.dev/tea"
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 	"fmt"
 	"os"
 
-	"code.gitea.io/tea/cmd"
-	teacontext "code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/debug"
+	"gitea.dev/tea/cmd"
+	teacontext "gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/debug"
 )
 
 func main() {

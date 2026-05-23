@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"code.gitea.io/tea/modules/filelock"
+	"gitea.dev/tea/modules/filelock"
 )
 
 const (

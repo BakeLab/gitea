@@ -12,8 +12,8 @@ import (
 	"net/url"
 	"strings"
 
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/httputil"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/httputil"
 )
 
 // Client provides direct HTTP access to Gitea API

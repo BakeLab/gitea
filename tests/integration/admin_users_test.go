@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	teacmd "code.gitea.io/tea/cmd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	teacmd "gitea.dev/tea/cmd"
 )
 
 func runAdminCommand(t *testing.T, args []string) error {

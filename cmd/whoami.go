@@ -6,9 +6,10 @@ package cmd
 import (
 	stdctx "context"
 
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/print"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
 )
 
 // CmdWhoami represents the command to show current logged in user

@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"code.gitea.io/tea/modules/utils"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/modules/utils"
 )
 
 // CsvFlag is a wrapper around cli.StringFlag, with an added GetValues() method

@@ -9,8 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	teagit "code.gitea.io/tea/modules/git"
 	"github.com/stretchr/testify/assert"
+
+	teagit "gitea.dev/tea/modules/git"
 )
 
 func TestRepoFromPath_Worktree(t *testing.T) {

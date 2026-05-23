@@ -6,7 +6,7 @@ package context
 import (
 	"testing"
 
-	"code.gitea.io/tea/modules/config"
+	"gitea.dev/tea/modules/config"
 )
 
 func Test_MatchLogins(t *testing.T) {

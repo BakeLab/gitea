@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"code.gitea.io/tea/modules/config"
+	"gitea.dev/tea/modules/config"
 )
 
 // LoginDetails print login entry to stdout

@@ -1,4 +1,4 @@
-module code.gitea.io/tea
+module gitea.dev/tea
 
 go 1.26
 

@@ -8,9 +8,10 @@ import (
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/task"
-	"code.gitea.io/tea/modules/utils"
+
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/task"
+	"gitea.dev/tea/modules/utils"
 )
 
 // runPullReview handles the common logic for approving/rejecting pull requests

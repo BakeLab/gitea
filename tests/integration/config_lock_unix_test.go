@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"code.gitea.io/tea/modules/config"
+	"gitea.dev/tea/modules/config"
 )
 
 func TestConfigLock_CrossProcess(t *testing.T) {

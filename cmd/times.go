@@ -4,8 +4,9 @@
 package cmd
 
 import (
-	"code.gitea.io/tea/cmd/times"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/times"
 )
 
 // CmdTrackedTimes represents the command to operate repositories' times.

@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/context"
+
+	"gitea.dev/tea/modules/context"
 )
 
 // EditIssueOption wraps around gitea.EditIssueOption which has bad & incosistent semantics.

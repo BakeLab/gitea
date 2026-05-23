@@ -9,8 +9,9 @@ import (
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/utils"
 	"golang.org/x/crypto/ssh"
+
+	"gitea.dev/tea/modules/utils"
 )
 
 // ListSSHPubkey lists all the ssh keys in the ssh agent and the ~/.ssh/*.pub files

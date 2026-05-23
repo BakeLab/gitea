@@ -7,9 +7,9 @@ import (
 	"context"
 	"fmt"
 
-	"code.gitea.io/tea/modules/auth"
-	"code.gitea.io/tea/modules/interact"
-	"code.gitea.io/tea/modules/task"
+	"gitea.dev/tea/modules/auth"
+	"gitea.dev/tea/modules/interact"
+	"gitea.dev/tea/modules/task"
 
 	"github.com/urfave/cli/v3"
 )

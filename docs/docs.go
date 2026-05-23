@@ -8,9 +8,10 @@ import (
 	"context"
 	"os"
 
-	"code.gitea.io/tea/cmd"
 	docs "github.com/urfave/cli-docs/v3"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd"
 )
 
 // CmdDocs generates markdown for tea

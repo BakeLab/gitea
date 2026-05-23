@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/task"
 	"github.com/stretchr/testify/require"
+
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/task"
 )
 
 var (

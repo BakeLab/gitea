@@ -8,9 +8,9 @@ import (
 	"path"
 	"strings"
 
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
-	local_git "code.gitea.io/tea/modules/git"
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/context"
+	local_git "gitea.dev/tea/modules/git"
 
 	"github.com/skratchdot/open-golang/open"
 	"github.com/urfave/cli/v3"

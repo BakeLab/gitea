@@ -6,12 +6,12 @@ package labels
 import (
 	stdctx "context"
 
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/print"
-	"code.gitea.io/tea/modules/task"
-
 	"code.gitea.io/sdk/gitea"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
+	"gitea.dev/tea/modules/task"
 	"github.com/urfave/cli/v3"
 )
 

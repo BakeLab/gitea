@@ -9,10 +9,10 @@ import (
 	"os/exec"
 	"strings"
 
-	"code.gitea.io/tea/modules/context"
-
 	"code.gitea.io/sdk/gitea"
+
 	unidiff "gitea.com/noerw/unidiff-comments"
+	"gitea.dev/tea/modules/context"
 )
 
 var diffReviewHelp = `# This is the current diff of PR #%d on %s.

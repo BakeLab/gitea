@@ -9,11 +9,12 @@ import (
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/context"
-	local_git "code.gitea.io/tea/modules/git"
-	"code.gitea.io/tea/modules/print"
-	"code.gitea.io/tea/modules/utils"
+
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/context"
+	local_git "gitea.dev/tea/modules/git"
+	"gitea.dev/tea/modules/print"
+	"gitea.dev/tea/modules/utils"
 )
 
 var (

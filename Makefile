@@ -25,12 +25,12 @@ TEA_VERSION_TAG ?= $(shell sed 's/+/_/' <<< $(TEA_VERSION))
 
 TAGS ?=
 SDK ?= $(shell $(GO) list -f '{{.Version}}' -m code.gitea.io/sdk/gitea)
-LDFLAGS := -X "code.gitea.io/tea/modules/version.Version=$(TEA_VERSION)" -X "code.gitea.io/tea/modules/version.Tags=$(TAGS)" -X "code.gitea.io/tea/modules/version.SDK=$(SDK)" -s -w
+LDFLAGS := -X "gitea.dev/tea/modules/version.Version=$(TEA_VERSION)" -X "gitea.dev/tea/modules/version.Tags=$(TAGS)" -X "gitea.dev/tea/modules/version.SDK=$(SDK)" -s -w
 
 # override to allow passing additional goflags via make CLI
 override GOFLAGS := $(GOFLAGS) -tags '$(TAGS)' -ldflags '$(LDFLAGS)'
 
-PACKAGES ?= $(shell $(GO) list ./... | grep -v '^code.gitea.io/tea/tests')
+PACKAGES ?= $(shell $(GO) list ./... | grep -v '^gitea.dev/tea/tests')
 UNIT_PACKAGES ?= $(PACKAGES)
 INTEGRATION_PACKAGES ?= $(shell $(GO) list ./tests/... 2>/dev/null)
 INTEGRATION_TEST_TAGS ?= testtools

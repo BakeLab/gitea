@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/context"
-	tea_git "code.gitea.io/tea/modules/git"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/context"
+	tea_git "gitea.dev/tea/modules/git"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"

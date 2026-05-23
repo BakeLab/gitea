@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/cmd/pulls"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/interact"
-	"code.gitea.io/tea/modules/print"
-	"code.gitea.io/tea/modules/utils"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/cmd/pulls"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/interact"
+	"gitea.dev/tea/modules/print"
+	"gitea.dev/tea/modules/utils"
 
 	"github.com/urfave/cli/v3"
 )

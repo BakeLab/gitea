@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/print"
-	"code.gitea.io/tea/modules/utils"
-
 	"code.gitea.io/sdk/gitea"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
+	"gitea.dev/tea/modules/utils"
 	"github.com/araddon/dateparse"
 	"github.com/urfave/cli/v3"
 )

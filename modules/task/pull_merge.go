@@ -7,7 +7,8 @@ import (
 	"fmt"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/config"
+
+	"gitea.dev/tea/modules/config"
 )
 
 // PullMerge merges a PR

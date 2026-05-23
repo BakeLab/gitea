@@ -8,9 +8,10 @@ import (
 	"os"
 	"testing"
 
-	"code.gitea.io/tea/modules/config"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/modules/config"
 )
 
 func TestVariablesListFlags(t *testing.T) {

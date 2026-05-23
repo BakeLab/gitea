@@ -7,8 +7,9 @@ import (
 	"context"
 	"fmt"
 
-	"code.gitea.io/tea/cmd/labels"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/labels"
 )
 
 // CmdLabels represents to operate repositories' labels.

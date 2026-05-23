@@ -8,10 +8,11 @@ import (
 	"fmt"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/utils"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/utils"
 )
 
 // CmdNotificationsMarkRead represents a sub command of notifications to list read notifications

@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"os"
 
-	"code.gitea.io/tea/modules/utils"
+	"gitea.dev/tea/modules/utils"
 
 	git_transport "github.com/go-git/go-git/v5/plumbing/transport"
 	gogit_http "github.com/go-git/go-git/v5/plumbing/transport/http"

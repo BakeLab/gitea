@@ -7,12 +7,12 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/tea/cmd/webhooks"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/print"
-	"code.gitea.io/tea/modules/utils"
-
 	"code.gitea.io/sdk/gitea"
+
+	"gitea.dev/tea/cmd/webhooks"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
+	"gitea.dev/tea/modules/utils"
 	"github.com/urfave/cli/v3"
 )
 

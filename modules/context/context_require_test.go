@@ -6,10 +6,11 @@ package context
 import (
 	"testing"
 
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/git"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/git"
 )
 
 func TestEnsureReturnsRequirementErrors(t *testing.T) {

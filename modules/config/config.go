@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"code.gitea.io/tea/modules/utils"
+	"gitea.dev/tea/modules/utils"
 
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"

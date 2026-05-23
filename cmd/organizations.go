@@ -6,9 +6,9 @@ package cmd
 import (
 	stdctx "context"
 
-	"code.gitea.io/tea/cmd/organizations"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/print"
+	"gitea.dev/tea/cmd/organizations"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
 
 	"github.com/urfave/cli/v3"
 )

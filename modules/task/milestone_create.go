@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/print"
-
 	"code.gitea.io/sdk/gitea"
+
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/print"
 )
 
 // CreateMilestone creates a milestone in the given repo and prints the result

@@ -15,7 +15,8 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	sshkeyscmd "code.gitea.io/tea/cmd/sshkeys"
+
+	sshkeyscmd "gitea.dev/tea/cmd/sshkeys"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

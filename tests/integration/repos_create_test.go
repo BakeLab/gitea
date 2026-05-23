@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/cmd/repos"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/repos"
 )
 
 func TestCreateRepoObjectFormat(t *testing.T) {

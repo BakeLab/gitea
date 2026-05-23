@@ -6,9 +6,9 @@ package context
 import (
 	"fmt"
 
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/debug"
-	"code.gitea.io/tea/modules/git"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/debug"
+	"gitea.dev/tea/modules/git"
 )
 
 // contextFromLocalRepo discovers login & repo slug from the default branch remote of the given local repo

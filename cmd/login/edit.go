@@ -9,9 +9,9 @@ import (
 	"os"
 	"os/exec"
 
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/utils"
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/utils"
 
 	"github.com/skratchdot/open-golang/open"
 	"github.com/urfave/cli/v3"

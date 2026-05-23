@@ -7,7 +7,8 @@ import (
 	"fmt"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/context"
+
+	"gitea.dev/tea/modules/context"
 )
 
 // ListPullReviewComments lists all review comments across all reviews for a PR

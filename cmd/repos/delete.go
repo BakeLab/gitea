@@ -7,8 +7,8 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/context"
 
 	"charm.land/huh/v2"
 	"github.com/urfave/cli/v3"

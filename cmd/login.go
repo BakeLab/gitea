@@ -7,9 +7,9 @@ import (
 	"context"
 	"fmt"
 
-	"code.gitea.io/tea/cmd/login"
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/print"
+	"gitea.dev/tea/cmd/login"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/print"
 
 	"github.com/urfave/cli/v3"
 )

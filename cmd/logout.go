@@ -4,7 +4,7 @@
 package cmd
 
 import (
-	"code.gitea.io/tea/cmd/login"
+	"gitea.dev/tea/cmd/login"
 
 	"github.com/urfave/cli/v3"
 )

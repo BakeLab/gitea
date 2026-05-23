@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/task"
-	"code.gitea.io/tea/modules/theme"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/task"
+	"gitea.dev/tea/modules/theme"
 
 	"charm.land/huh/v2"
 )

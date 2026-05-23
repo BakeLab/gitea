@@ -7,7 +7,8 @@ import (
 	"fmt"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/context"
+
+	"gitea.dev/tea/modules/context"
 )
 
 // EditPull edits a pull request and returns the updated pull request.

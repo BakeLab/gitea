@@ -7,10 +7,11 @@ import (
 	stdctx "context"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/print"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
 )
 
 // CmdOrganizationList represents a sub command of organizations to list users organizations

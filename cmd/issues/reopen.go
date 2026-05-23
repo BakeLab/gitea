@@ -6,9 +6,9 @@ package issues
 import (
 	"context"
 
-	"code.gitea.io/tea/cmd/flags"
-
 	"code.gitea.io/sdk/gitea"
+
+	"gitea.dev/tea/cmd/flags"
 	"github.com/urfave/cli/v3"
 )
 

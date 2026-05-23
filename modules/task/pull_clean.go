@@ -6,10 +6,10 @@ package task
 import (
 	"fmt"
 
-	"code.gitea.io/tea/modules/config"
-	local_git "code.gitea.io/tea/modules/git"
-
 	"code.gitea.io/sdk/gitea"
+
+	"gitea.dev/tea/modules/config"
+	local_git "gitea.dev/tea/modules/git"
 	git_config "github.com/go-git/go-git/v5/config"
 	git_plumbing "github.com/go-git/go-git/v5/plumbing"
 )

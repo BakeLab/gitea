@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/task"
+
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/task"
 
 	"github.com/araddon/dateparse"
 	"github.com/urfave/cli/v3"

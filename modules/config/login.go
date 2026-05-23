@@ -16,10 +16,11 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/debug"
-	"code.gitea.io/tea/modules/httputil"
-	"code.gitea.io/tea/modules/theme"
-	"code.gitea.io/tea/modules/utils"
+
+	"gitea.dev/tea/modules/debug"
+	"gitea.dev/tea/modules/httputil"
+	"gitea.dev/tea/modules/theme"
+	"gitea.dev/tea/modules/utils"
 
 	"charm.land/huh/v2"
 	"golang.org/x/oauth2"

@@ -6,7 +6,7 @@ package cmd
 import (
 	"context"
 
-	"code.gitea.io/tea/cmd/branches"
+	"gitea.dev/tea/cmd/branches"
 
 	"github.com/urfave/cli/v3"
 )

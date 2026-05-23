@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"runtime"
 
-	"code.gitea.io/tea/modules/version"
+	"gitea.dev/tea/modules/version"
 )
 
 // UserAgent returns the standard User-Agent string for tea.

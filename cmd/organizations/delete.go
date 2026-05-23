@@ -7,9 +7,10 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/context"
 )
 
 // CmdOrganizationDelete represents a sub command of organizations to delete a given user organization

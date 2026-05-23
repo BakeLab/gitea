@@ -6,10 +6,11 @@ package cmd
 import (
 	stdctx "context"
 
-	"code.gitea.io/tea/cmd/admin/users"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/print"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/admin/users"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
 )
 
 // CmdAdmin represents the namespace of admin commands.

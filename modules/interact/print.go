@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"code.gitea.io/tea/modules/theme"
+	"gitea.dev/tea/modules/theme"
 
 	"charm.land/lipgloss/v2"
 )

@@ -7,14 +7,14 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/debug"
-	"code.gitea.io/tea/modules/git"
-	"code.gitea.io/tea/modules/interact"
-	"code.gitea.io/tea/modules/task"
-	"code.gitea.io/tea/modules/utils"
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/debug"
+	"gitea.dev/tea/modules/git"
+	"gitea.dev/tea/modules/interact"
+	"gitea.dev/tea/modules/task"
+	"gitea.dev/tea/modules/utils"
 
 	"github.com/urfave/cli/v3"
 )

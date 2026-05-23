@@ -6,10 +6,11 @@ package cmd
 import (
 	stdctx "context"
 
-	"code.gitea.io/tea/cmd/milestones"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/print"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/milestones"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
 )
 
 // CmdMilestones represents to operate repositories milestones.

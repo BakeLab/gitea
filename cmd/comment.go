@@ -11,13 +11,14 @@ import (
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/interact"
-	"code.gitea.io/tea/modules/print"
-	"code.gitea.io/tea/modules/theme"
-	"code.gitea.io/tea/modules/utils"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/interact"
+	"gitea.dev/tea/modules/print"
+	"gitea.dev/tea/modules/theme"
+	"gitea.dev/tea/modules/utils"
 
 	"charm.land/huh/v2"
 	"github.com/urfave/cli/v3"

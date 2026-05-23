@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"strings"
 
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/api"
-	"code.gitea.io/tea/modules/context"
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/api"
+	"gitea.dev/tea/modules/context"
 
 	"github.com/urfave/cli/v3"
 	"golang.org/x/term"

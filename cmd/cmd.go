@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 // Tea is command line tool for Gitea.
-package cmd // import "code.gitea.io/tea"
+package cmd // import "gitea.dev/tea"
 
 import (
 	"fmt"
 
-	"code.gitea.io/tea/modules/version"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/modules/version"
 )
 
 // App creates and returns a tea Command with all subcommands set

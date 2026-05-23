@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/utils"
-
 	"code.gitea.io/sdk/gitea"
+
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/utils"
 )
 
 // SetupHelper add tea helper to config global

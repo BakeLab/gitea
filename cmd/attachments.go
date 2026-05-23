@@ -4,8 +4,8 @@
 package cmd
 
 import (
-	"code.gitea.io/tea/cmd/attachments"
-	"code.gitea.io/tea/cmd/flags"
+	"gitea.dev/tea/cmd/attachments"
+	"gitea.dev/tea/cmd/flags"
 
 	"github.com/urfave/cli/v3"
 )

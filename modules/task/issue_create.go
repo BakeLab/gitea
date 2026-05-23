@@ -7,8 +7,9 @@ import (
 	"fmt"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/print"
+
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/print"
 )
 
 // CreateIssue creates an issue in the given repo and prints the result

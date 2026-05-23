@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"code.gitea.io/tea/modules/config"
+	"gitea.dev/tea/modules/config"
 )
 
 // GetLoginByEnvVar returns a login based on environment variables, or nil if no login can be created

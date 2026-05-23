@@ -9,12 +9,13 @@ import (
 	stdctx "context"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/interact"
-	"code.gitea.io/tea/modules/task"
 	"github.com/araddon/dateparse"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/interact"
+	"gitea.dev/tea/modules/task"
 )
 
 // CmdMilestonesCreate represents a sub command of milestones to create milestone

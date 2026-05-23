@@ -4,7 +4,7 @@
 package cmd
 
 import (
-	"code.gitea.io/tea/cmd/notifications"
+	"gitea.dev/tea/cmd/notifications"
 
 	"github.com/urfave/cli/v3"
 )

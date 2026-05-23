@@ -6,8 +6,9 @@ package milestones
 import (
 	"context"
 
-	"code.gitea.io/tea/cmd/flags"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/cmd/flags"
 )
 
 // CmdMilestonesClose represents a sub command of milestones to close an milestone

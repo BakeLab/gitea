@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/debug"
-	"code.gitea.io/tea/modules/git"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/debug"
+	"gitea.dev/tea/modules/git"
 )
 
 // MatchLogins matches the given remoteURL against the provided logins and returns

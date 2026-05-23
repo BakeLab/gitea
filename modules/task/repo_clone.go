@@ -8,8 +8,9 @@ import (
 	"net/url"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/config"
-	local_git "code.gitea.io/tea/modules/git"
+
+	"gitea.dev/tea/modules/config"
+	local_git "gitea.dev/tea/modules/git"
 
 	"github.com/go-git/go-git/v5"
 	git_config "github.com/go-git/go-git/v5/config"

@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/httputil"
-	"code.gitea.io/tea/modules/task"
-	"code.gitea.io/tea/modules/utils"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/httputil"
+	"gitea.dev/tea/modules/task"
+	"gitea.dev/tea/modules/utils"
 
 	"github.com/skratchdot/open-golang/open"
 	"golang.org/x/oauth2"

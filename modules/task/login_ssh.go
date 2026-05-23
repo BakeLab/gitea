@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"code.gitea.io/tea/modules/utils"
-
 	"code.gitea.io/sdk/gitea"
+
+	"gitea.dev/tea/modules/utils"
 	"golang.org/x/crypto/ssh"
 )
 

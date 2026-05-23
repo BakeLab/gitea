@@ -11,9 +11,10 @@ import (
 	"os"
 	"strings"
 
-	"code.gitea.io/tea/modules/config"
-	"code.gitea.io/tea/modules/task"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/task"
 )
 
 // CmdLoginHelper represents to login a gitea helper.

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"code.gitea.io/tea/modules/theme"
-	"code.gitea.io/tea/modules/utils"
+	"gitea.dev/tea/modules/theme"
+	"gitea.dev/tea/modules/utils"
 
 	"charm.land/huh/v2"
 )

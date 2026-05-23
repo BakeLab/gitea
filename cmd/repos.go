@@ -6,12 +6,12 @@ package cmd
 import (
 	stdctx "context"
 
-	"code.gitea.io/tea/cmd/repos"
-	"code.gitea.io/tea/modules/context"
-	"code.gitea.io/tea/modules/print"
-	"code.gitea.io/tea/modules/utils"
-
 	"code.gitea.io/sdk/gitea"
+
+	"gitea.dev/tea/cmd/repos"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
+	"gitea.dev/tea/modules/utils"
 	"github.com/urfave/cli/v3"
 )
 

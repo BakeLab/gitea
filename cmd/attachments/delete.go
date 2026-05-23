@@ -7,11 +7,11 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/tea/cmd/flags"
-	"code.gitea.io/tea/cmd/releases"
-	"code.gitea.io/tea/modules/context"
-
 	"code.gitea.io/sdk/gitea"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/cmd/releases"
+	"gitea.dev/tea/modules/context"
 	"github.com/urfave/cli/v3"
 )
 

@@ -6,7 +6,7 @@ package actions
 import (
 	stdctx "context"
 
-	"code.gitea.io/tea/cmd/actions/secrets"
+	"gitea.dev/tea/cmd/actions/secrets"
 
 	"github.com/urfave/cli/v3"
 )

@@ -8,10 +8,11 @@ import (
 	"os/exec"
 	"testing"
 
-	"code.gitea.io/tea/modules/config"
-	teacontext "code.gitea.io/tea/modules/context"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"gitea.dev/tea/modules/config"
+	teacontext "gitea.dev/tea/modules/context"
 )
 
 func TestInitCommand_WithRepoSlugSkipsLocalRepoDetection(t *testing.T) {

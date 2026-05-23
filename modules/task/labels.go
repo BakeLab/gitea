@@ -7,7 +7,8 @@ import (
 	"fmt"
 
 	"code.gitea.io/sdk/gitea"
-	"code.gitea.io/tea/modules/utils"
+
+	"gitea.dev/tea/modules/utils"
 )
 
 // ResolveLabelNames returns a list of label IDs for a given list of label names
