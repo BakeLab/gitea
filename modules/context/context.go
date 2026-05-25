@@ -103,20 +103,22 @@ func InitCommand(cmd *cli.Command) (*TeaContext, error) {
 
 	// try to read local git repo & extract context: if repoFlag specifies a valid path, read repo in that dir,
 	// otherwise attempt PWD. if no repo is found, continue with default login
-	if c.RepoSlug == "" {
-		if repoPath == "" {
-			if repoPath, err = os.Getwd(); err != nil {
-				return nil, err
-			}
+	if repoPath == "" {
+		if repoPath, err = os.Getwd(); err != nil {
+			return nil, err
 		}
+	}
 
-		if c.LocalRepo, c.Login, c.RepoSlug, err = contextFromLocalRepo(repoPath, remoteFlag, extraLogins); err != nil {
-			if err == errNotAGiteaRepo || err == git.ErrRepositoryNotExists {
-				// we can deal with that, commands needing the optional values use ctx.Ensure()
-			} else {
-				return nil, err
-			}
+	var localSlug string
+	if c.LocalRepo, c.Login, localSlug, err = contextFromLocalRepo(repoPath, remoteFlag, extraLogins); err != nil {
+		if err == errNotAGiteaRepo || err == git.ErrRepositoryNotExists {
+			// we can deal with that, commands needing the optional values use ctx.Ensure()
+		} else {
+			return nil, err
 		}
+	}
+	if c.RepoSlug == "" && localSlug != "" {
+		c.RepoSlug = localSlug
 	}
 
 	// If env vars are set, always use the env login (but repo slug was already

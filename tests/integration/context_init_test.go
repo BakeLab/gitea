@@ -15,7 +15,7 @@ import (
 	teacontext "gitea.dev/tea/modules/context"
 )
 
-func TestInitCommand_WithRepoSlugSkipsLocalRepoDetection(t *testing.T) {
+func TestInitCommand_WithRepoSlugKeepsLocalRepoDetection(t *testing.T) {
 	tmpDir := t.TempDir()
 	config.SetConfigForTesting(config.LocalConfig{
 		Logins: []config.Login{{
@@ -54,7 +54,26 @@ func TestInitCommand_WithRepoSlugSkipsLocalRepoDetection(t *testing.T) {
 	require.Equal(t, "owner", ctx.Owner)
 	require.Equal(t, "repo", ctx.Repo)
 	require.Equal(t, "owner/repo", ctx.RepoSlug)
-	require.Nil(t, ctx.LocalRepo)
+	require.NotNil(t, ctx.LocalRepo)
+	require.NotNil(t, ctx.Login)
+	require.Equal(t, "test-login", ctx.Login.Name)
+
+	cliCmd = cli.Command{
+		Name: "pr",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "repo"},
+			&cli.StringFlag{Name: "base"},
+		},
+	}
+	require.NoError(t, cliCmd.Set("repo", "owner/repo"))
+	require.NoError(t, cliCmd.Set("base", "main"))
+
+	ctx, err = teacontext.InitCommand(&cliCmd)
+	require.NoError(t, err)
+	require.Equal(t, "repo", ctx.Repo)
+	require.Equal(t, "owner/repo", ctx.RepoSlug)
+	require.Equal(t, "main", ctx.String("base"))
+	require.NotNil(t, ctx.LocalRepo)
 	require.NotNil(t, ctx.Login)
 	require.Equal(t, "test-login", ctx.Login.Name)
 }
