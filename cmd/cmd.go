@@ -39,6 +39,7 @@ func App() *cli.Command {
 			&CmdRepos,
 			&CmdBranches,
 			&CmdActions,
+			&CmdWiki,
 			&CmdWebhooks,
 			&CmdAddComment,
 
