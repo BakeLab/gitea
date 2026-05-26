@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 )
 
 // Comments renders a list of comments to stdout

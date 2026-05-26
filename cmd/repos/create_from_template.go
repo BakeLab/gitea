@@ -8,7 +8,7 @@ import (
 
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
 
 	"gitea.dev/tea/cmd/flags"
@@ -83,7 +83,7 @@ var CmdRepoCreateFromTemplate = cli.Command{
 	}, flags.LoginOutputFlags...),
 }
 
-func runRepoCreateFromTemplate(_ stdctx.Context, cmd *cli.Command) error {
+func runRepoCreateFromTemplate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -109,12 +109,12 @@ func runRepoCreateFromTemplate(_ stdctx.Context, cmd *cli.Command) error {
 		Webhooks:    ctx.Bool("webhooks"),
 	}
 
-	repo, _, err := client.CreateRepoFromTemplate(templateOwner, templateRepo, opts)
+	repo, _, err := client.Repositories.CreateRepoFromTemplate(requestCtx, templateOwner, templateRepo, opts)
 	if err != nil {
 		return err
 	}
 
-	topics, _, err := client.ListRepoTopics(repo.Owner.UserName, repo.Name, gitea.ListRepoTopicsOptions{})
+	topics, _, err := client.Repositories.ListRepoTopics(requestCtx, repo.Owner.UserName, repo.Name, gitea.ListRepoTopicsOptions{})
 	if err != nil {
 		return err
 	}

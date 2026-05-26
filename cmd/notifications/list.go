@@ -6,7 +6,7 @@ package notifications
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -59,7 +59,7 @@ func RunNotificationsList(ctx stdctx.Context, cmd *cli.Command) error {
 }
 
 // listNotifications will get the notifications based on status and subject type
-func listNotifications(_ stdctx.Context, cmd *cli.Command, status []gitea.NotifyStatus, subjects []gitea.NotifySubjectType) error {
+func listNotifications(requestCtx stdctx.Context, cmd *cli.Command, status []gitea.NotifyStatus, subjects []gitea.NotifySubjectType) error {
 	var news []*gitea.NotificationThread
 	var err error
 
@@ -87,7 +87,7 @@ func listNotifications(_ stdctx.Context, cmd *cli.Command, status []gitea.Notify
 			fields = append(fields, "repository")
 		}
 
-		news, _, err = client.ListNotifications(gitea.ListNotificationOptions{
+		news, _, err = client.Notifications.List(requestCtx, gitea.ListNotificationOptions{
 			ListOptions:  listOpts,
 			Status:       status,
 			SubjectTypes: subjects,
@@ -96,7 +96,7 @@ func listNotifications(_ stdctx.Context, cmd *cli.Command, status []gitea.Notify
 		if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
 			return err
 		}
-		news, _, err = client.ListRepoNotifications(ctx.Owner, ctx.Repo, gitea.ListNotificationOptions{
+		news, _, err = client.Notifications.ListByRepo(requestCtx, ctx.Owner, ctx.Repo, gitea.ListNotificationOptions{
 			ListOptions:  listOpts,
 			Status:       status,
 			SubjectTypes: subjects,

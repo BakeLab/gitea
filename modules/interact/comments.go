@@ -4,10 +4,11 @@
 package interact
 
 import (
+	stdctx "context"
 	"fmt"
 	"os"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -20,18 +21,18 @@ import (
 
 // ShowCommentsMaybeInteractive fetches & prints comments, depending on the --comments flag.
 // If that flag is unset, and output is not piped, prompts the user first.
-func ShowCommentsMaybeInteractive(ctx *context.TeaContext, idx int64, totalComments int) error {
+func ShowCommentsMaybeInteractive(requestCtx stdctx.Context, ctx *context.TeaContext, idx int64, totalComments int) error {
 	if ctx.Bool("comments") {
 		opts := gitea.ListIssueCommentOptions{ListOptions: flags.GetListOptions(ctx.Command)}
 		c := ctx.Login.Client()
-		comments, _, err := c.ListIssueComments(ctx.Owner, ctx.Repo, idx, opts)
+		comments, _, err := c.Issues.ListIssueComments(requestCtx, ctx.Owner, ctx.Repo, idx, opts)
 		if err != nil {
 			return err
 		}
 		print.Comments(comments)
 	} else if print.IsInteractive() && !ctx.IsSet("comments") {
 		// if we're interactive, but --comments hasn't been explicitly set to false
-		if err := ShowCommentsPaginated(ctx, idx, totalComments); err != nil {
+		if err := ShowCommentsPaginated(requestCtx, ctx, idx, totalComments); err != nil {
 			fmt.Printf("error while loading comments: %v\n", err)
 		}
 	}
@@ -39,7 +40,7 @@ func ShowCommentsMaybeInteractive(ctx *context.TeaContext, idx int64, totalComme
 }
 
 // ShowCommentsPaginated prompts if issue/pr comments should be shown and continues to do so.
-func ShowCommentsPaginated(ctx *context.TeaContext, idx int64, totalComments int) error {
+func ShowCommentsPaginated(requestCtx stdctx.Context, ctx *context.TeaContext, idx int64, totalComments int) error {
 	c := ctx.Login.Client()
 	opts := gitea.ListIssueCommentOptions{ListOptions: flags.GetListOptions(ctx.Command)}
 	prompt := "show comments?"
@@ -59,7 +60,7 @@ func ShowCommentsPaginated(ctx *context.TeaContext, idx int64, totalComments int
 		} else if !loadComments {
 			break
 		} else {
-			if comments, _, err := c.ListIssueComments(ctx.Owner, ctx.Repo, idx, opts); err != nil {
+			if comments, _, err := c.Issues.ListIssueComments(requestCtx, ctx.Owner, ctx.Repo, idx, opts); err != nil {
 				return err
 			} else if len(comments) != 0 {
 				print.Comments(comments)

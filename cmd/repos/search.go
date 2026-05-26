@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -57,7 +57,7 @@ var CmdReposSearch = cli.Command{
 	}, flags.LoginOutputFlags...),
 }
 
-func runReposSearch(_ stdctx.Context, cmd *cli.Command) error {
+func runReposSearch(requestCtx stdctx.Context, cmd *cli.Command) error {
 	teaCmd, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -67,14 +67,14 @@ func runReposSearch(_ stdctx.Context, cmd *cli.Command) error {
 	var ownerID int64
 	if teaCmd.IsSet("owner") {
 		// test if owner is an organization
-		org, resp, err := client.GetOrg(teaCmd.String("owner"))
+		org, resp, err := client.Organizations.GetOrg(requestCtx, teaCmd.String("owner"))
 		if err != nil {
 			if resp == nil || resp.StatusCode != http.StatusNotFound {
 				return fmt.Errorf("could not find owner: %w", err)
 			}
 
 			// if owner is no org, its a user
-			user, _, err := client.GetUserInfo(teaCmd.String("owner"))
+			user, _, err := client.Users.GetUserInfo(requestCtx, teaCmd.String("owner"))
 			if err != nil {
 				return err
 			}
@@ -106,12 +106,12 @@ func runReposSearch(_ stdctx.Context, cmd *cli.Command) error {
 		keyword = strings.Join(teaCmd.Args().Slice(), " ")
 	}
 
-	user, _, err := client.GetMyUserInfo()
+	user, _, err := client.Users.GetMyUserInfo(requestCtx)
 	if err != nil {
 		return err
 	}
 
-	rps, _, err := client.SearchRepos(gitea.SearchRepoOptions{
+	rps, _, err := client.Repositories.SearchRepos(requestCtx, gitea.SearchRepoOptions{
 		ListOptions:          flags.GetListOptions(cmd),
 		OwnerID:              ownerID,
 		IsPrivate:            isPrivate,

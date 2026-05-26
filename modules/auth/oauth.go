@@ -53,12 +53,12 @@ type OAuthOptions struct {
 }
 
 // OAuthLogin performs an OAuth2 PKCE login flow to authorize the CLI
-func OAuthLogin(name, giteaURL string) error {
-	return OAuthLoginWithOptions(name, giteaURL, false)
+func OAuthLogin(ctx context.Context, name, giteaURL string) error {
+	return OAuthLoginWithOptions(ctx, name, giteaURL, false)
 }
 
 // OAuthLoginWithOptions performs an OAuth2 PKCE login flow with additional options
-func OAuthLoginWithOptions(name, giteaURL string, insecure bool) error {
+func OAuthLoginWithOptions(ctx context.Context, name, giteaURL string, insecure bool) error {
 	opts := OAuthOptions{
 		Name:        name,
 		URL:         giteaURL,
@@ -67,22 +67,22 @@ func OAuthLoginWithOptions(name, giteaURL string, insecure bool) error {
 		RedirectURL: fmt.Sprintf("http://%s:%d", redirectHost, redirectPort),
 		Port:        redirectPort,
 	}
-	return OAuthLoginWithFullOptions(opts)
+	return OAuthLoginWithFullOptions(ctx, opts)
 }
 
 // OAuthLoginWithFullOptions performs an OAuth2 PKCE login flow with full options control
-func OAuthLoginWithFullOptions(opts OAuthOptions) error {
-	serverURL, token, err := performBrowserOAuthFlow(opts)
+func OAuthLoginWithFullOptions(ctx context.Context, opts OAuthOptions) error {
+	serverURL, token, err := performBrowserOAuthFlow(ctx, opts)
 	if err != nil {
 		return err
 	}
 
-	return createLoginFromToken(opts.Name, serverURL, token, opts.Insecure)
+	return createLoginFromToken(ctx, opts.Name, serverURL, token, opts.Insecure)
 }
 
 // performBrowserOAuthFlow performs the browser-based OAuth2 PKCE flow and returns the token.
 // This is the shared implementation used by both new logins and re-authentication.
-func performBrowserOAuthFlow(opts OAuthOptions) (serverURL string, token *oauth2.Token, err error) {
+func performBrowserOAuthFlow(ctx context.Context, opts OAuthOptions) (serverURL string, token *oauth2.Token, err error) {
 	// Normalize URL
 	normalizedURL, err := utils.NormalizeURL(opts.URL)
 	if err != nil {
@@ -127,7 +127,6 @@ func performBrowserOAuthFlow(opts OAuthOptions) (serverURL string, token *oauth2
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
 	// Set up the OAuth2 config
-	ctx := context.Background()
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, createHTTPClient(opts.Insecure))
 
 	// Configure the OAuth2 endpoints
@@ -366,7 +365,7 @@ func openBrowser(url string) error {
 }
 
 // createLoginFromToken creates a login entry using the obtained access token
-func createLoginFromToken(name, serverURL string, token *oauth2.Token, insecure bool) error {
+func createLoginFromToken(ctx context.Context, name, serverURL string, token *oauth2.Token, insecure bool) error {
 	if name == "" {
 		var err error
 		name, err = task.GenerateLoginName(serverURL, "")
@@ -388,7 +387,7 @@ func createLoginFromToken(name, serverURL string, token *oauth2.Token, insecure 
 
 	// Validate token by getting user info
 	client := login.Client()
-	u, _, err := client.GetMyUserInfo()
+	u, _, err := client.Users.GetMyUserInfo(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to validate token: %s", err)
 	}
@@ -429,7 +428,7 @@ func RefreshAccessToken(login *config.Login) error {
 
 // ReauthenticateLogin performs a full browser-based OAuth flow to get new tokens
 // for an existing login. This is used when the refresh token is expired or invalid.
-func ReauthenticateLogin(login *config.Login) error {
+func ReauthenticateLogin(ctx context.Context, login *config.Login) error {
 	opts := OAuthOptions{
 		Name:        login.Name,
 		URL:         login.URL,
@@ -439,7 +438,7 @@ func ReauthenticateLogin(login *config.Login) error {
 		Port:        redirectPort,
 	}
 
-	_, token, err := performBrowserOAuthFlow(opts)
+	_, token, err := performBrowserOAuthFlow(ctx, opts)
 	if err != nil {
 		return err
 	}

@@ -20,7 +20,7 @@ var CmdAdmin = cli.Command{
 	Usage:    "Operations requiring admin access on the Gitea instance",
 	Aliases:  []string{"a"},
 	Category: catMisc,
-	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
 		return cli.ShowSubcommandHelp(cmd)
 	},
 	Commands: []*cli.Command{
@@ -47,13 +47,13 @@ var cmdAdminUsers = cli.Command{
 	Flags: users.CmdUserList.Flags,
 }
 
-func runAdminUserDetail(_ stdctx.Context, cmd *cli.Command, u string) error {
+func runAdminUserDetail(requestCtx stdctx.Context, cmd *cli.Command, u string) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
 	}
 	client := ctx.Login.Client()
-	user, _, err := client.GetUserInfo(u)
+	user, _, err := client.Users.GetUserInfo(requestCtx, u)
 	if err != nil {
 		return err
 	}

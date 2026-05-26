@@ -6,7 +6,7 @@ package pulls
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
 
 	"gitea.dev/tea/cmd/flags"
@@ -41,7 +41,7 @@ var CmdPullsMerge = cli.Command{
 			Usage:   "Merge commit message",
 		},
 	}, flags.AllDefaultFlags...),
-	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
 		ctx, err := context.InitCommand(cmd)
 		if err != nil {
 			return err
@@ -52,7 +52,7 @@ var CmdPullsMerge = cli.Command{
 
 		if ctx.Args().Len() != 1 {
 			// If no PR index is provided, try interactive mode
-			if err := interact.MergePull(ctx); err != nil && !interact.IsQuitting(err) {
+			if err := interact.MergePull(requestCtx, ctx); err != nil && !interact.IsQuitting(err) {
 				return err
 			}
 			return nil
@@ -63,7 +63,7 @@ var CmdPullsMerge = cli.Command{
 			return err
 		}
 
-		return task.PullMerge(ctx.Login, ctx.Owner, ctx.Repo, idx, gitea.MergePullRequestOption{
+		return task.PullMerge(requestCtx, ctx.Login, ctx.Owner, ctx.Repo, idx, gitea.MergePullRequestOption{
 			Style:   gitea.MergeStyle(ctx.String("style")),
 			Title:   ctx.String("title"),
 			Message: ctx.String("message"),

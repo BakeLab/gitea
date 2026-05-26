@@ -32,7 +32,7 @@ var CmdPullsClean = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runPullsClean(_ stdctx.Context, cmd *cli.Command) error {
+func runPullsClean(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -49,7 +49,7 @@ func runPullsClean(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	if err := task.PullClean(ctx.Login, ctx.Owner, ctx.Repo, idx, ctx.Bool("ignore-sha"), interact.PromptPassword); err != nil && !interact.IsQuitting(err) {
+	if err := task.PullClean(requestCtx, ctx.Login, ctx.Owner, ctx.Repo, idx, ctx.Bool("ignore-sha"), interact.PromptPassword); err != nil && !interact.IsQuitting(err) {
 		return err
 	}
 	return nil

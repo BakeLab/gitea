@@ -4,7 +4,6 @@
 package pulls
 
 import (
-	"context"
 	"os"
 	"testing"
 
@@ -44,7 +43,7 @@ func TestReview(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := CmdPullsReview
 			args := append(tt.args, "--repo", "user/repo")
-			err := cmd.Run(context.Background(), args)
+			err := cmd.Run(t.Context(), args)
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {

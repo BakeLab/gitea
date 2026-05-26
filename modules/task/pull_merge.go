@@ -4,17 +4,18 @@
 package task
 
 import (
+	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/config"
 )
 
 // PullMerge merges a PR
-func PullMerge(login *config.Login, repoOwner, repoName string, index int64, opt gitea.MergePullRequestOption) error {
+func PullMerge(requestCtx stdctx.Context, login *config.Login, repoOwner, repoName string, index int64, opt gitea.MergePullRequestOption) error {
 	client := login.Client()
-	success, _, err := client.MergePullRequest(repoOwner, repoName, index, opt)
+	success, _, err := client.PullRequests.MergePullRequest(requestCtx, repoOwner, repoName, index, opt)
 	if err != nil {
 		return err
 	}

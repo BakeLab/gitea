@@ -9,7 +9,7 @@ import (
 
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
 
 	"gitea.dev/tea/cmd/flags"
@@ -58,7 +58,7 @@ var CmdReleaseEdit = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runReleaseEdit(_ stdctx.Context, cmd *cli.Command) error {
+func runReleaseEdit(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -82,12 +82,12 @@ func runReleaseEdit(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	for _, tag := range ctx.Args().Slice() {
-		release, err := GetReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
+		release, err := GetReleaseByTag(requestCtx, ctx.Owner, ctx.Repo, tag, client)
 		if err != nil {
 			return err
 		}
 
-		_, _, err = client.EditRelease(ctx.Owner, ctx.Repo, release.ID, gitea.EditReleaseOption{
+		_, _, err = client.Releases.EditRelease(requestCtx, ctx.Owner, ctx.Repo, release.ID, gitea.EditReleaseOption{
 			TagName:      ctx.String("tag"),
 			Target:       ctx.String("target"),
 			Title:        ctx.String("title"),

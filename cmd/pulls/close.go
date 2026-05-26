@@ -6,7 +6,7 @@ package pulls
 import (
 	"context"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"github.com/urfave/cli/v3"

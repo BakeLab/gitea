@@ -56,7 +56,7 @@ func runSecretsDelete(ctx stdctx.Context, cmd *cli.Command) error {
 		}
 	}
 
-	_, err = client.DeleteRepoActionSecret(c.Owner, c.Repo, secretName)
+	_, err = client.Actions.DeleteRepoSecret(ctx, c.Owner, c.Repo, secretName)
 	if err != nil {
 		return err
 	}

@@ -6,7 +6,7 @@ package print
 import (
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 )
 
 // TrackedTimesList print list of tracked times to stdout

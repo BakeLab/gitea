@@ -110,10 +110,10 @@ var CmdLoginAdd = cli.Command{
 	Action: runLoginAdd,
 }
 
-func runLoginAdd(_ context.Context, cmd *cli.Command) error {
+func runLoginAdd(requestCtx context.Context, cmd *cli.Command) error {
 	// if no args create login interactive
 	if cmd.NumFlags() == 0 {
-		if err := interact.CreateLogin(); err != nil && !interact.IsQuitting(err) {
+		if err := interact.CreateLogin(requestCtx); err != nil && !interact.IsQuitting(err) {
 			return fmt.Errorf("error adding login: %w", err)
 		}
 		return nil
@@ -137,7 +137,7 @@ func runLoginAdd(_ context.Context, cmd *cli.Command) error {
 			opts.RedirectURL = cmd.String("redirect-url")
 		}
 
-		return auth.OAuthLoginWithFullOptions(opts)
+		return auth.OAuthLoginWithFullOptions(requestCtx, opts)
 	}
 
 	sshAgent := false
@@ -147,6 +147,7 @@ func runLoginAdd(_ context.Context, cmd *cli.Command) error {
 
 	// else use args to add login
 	return task.CreateLogin(
+		requestCtx,
 		cmd.String("name"),
 		cmd.String("token"),
 		cmd.String("user"),

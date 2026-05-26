@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -31,7 +31,7 @@ var CmdTrackedTimesAdd = cli.Command{
 	Flags:  flags.LoginRepoFlags,
 }
 
-func runTrackedTimesAdd(_ stdctx.Context, cmd *cli.Command) error {
+func runTrackedTimesAdd(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -54,7 +54,7 @@ func runTrackedTimesAdd(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	_, _, err = ctx.Login.Client().AddTime(ctx.Owner, ctx.Repo, issue, gitea.AddTimeOption{
+	_, _, err = ctx.Login.Client().Issues.AddTime(requestCtx, ctx.Owner, ctx.Repo, issue, gitea.AddTimeOption{
 		Time: int64(duration.Seconds()),
 	})
 	return err

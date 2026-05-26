@@ -24,7 +24,7 @@ jobs:
           passphrase: ${{ secrets.GPGSIGN_PASSPHRASE }}
       - name: get SDK version
         id: sdk_version
-        run: echo "version=$(go list -f '{{.Version}}' -m code.gitea.io/sdk/gitea)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(go list -f '{{.Version}}' -m gitea.dev/sdk)" >> "$GITHUB_OUTPUT"
       - name: goreleaser
         uses: goreleaser/goreleaser-action@v7
         with:

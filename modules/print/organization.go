@@ -6,7 +6,7 @@ package print
 import (
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 )
 
 // OrganizationDetails prints details of an org with formatting

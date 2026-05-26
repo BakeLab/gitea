@@ -19,12 +19,12 @@ var CmdPullsUnresolve = cli.Command{
 	Usage:       "Unresolve a review comment on a pull request",
 	Description: "Unresolve a review comment on a pull request",
 	ArgsUsage:   "<comment id>",
-	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
 		ctx, err := context.InitCommand(cmd)
 		if err != nil {
 			return err
 		}
-		return runResolveComment(ctx, task.UnresolvePullReviewComment)
+		return runResolveComment(requestCtx, ctx, task.UnresolvePullReviewComment)
 	},
 	Flags: flags.AllDefaultFlags,
 }

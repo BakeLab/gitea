@@ -6,7 +6,7 @@ package cmd
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/repos"
 	"gitea.dev/tea/modules/context"
@@ -44,18 +44,18 @@ func runRepos(ctx stdctx.Context, cmd *cli.Command) error {
 	return repos.RunReposList(ctx, cmd)
 }
 
-func runRepoDetail(_ stdctx.Context, cmd *cli.Command, path string) error {
+func runRepoDetail(requestCtx stdctx.Context, cmd *cli.Command, path string) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
 	}
 	client := ctx.Login.Client()
 	repoOwner, repoName := utils.GetOwnerAndRepo(path, ctx.Owner)
-	repo, _, err := client.GetRepo(repoOwner, repoName)
+	repo, _, err := client.Repositories.GetRepo(requestCtx, repoOwner, repoName)
 	if err != nil {
 		return err
 	}
-	topics, _, err := client.ListRepoTopics(repoOwner, repoName, gitea.ListRepoTopicsOptions{})
+	topics, _, err := client.Repositories.ListRepoTopics(requestCtx, repoOwner, repoName, gitea.ListRepoTopicsOptions{})
 	if err != nil {
 		return err
 	}

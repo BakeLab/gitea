@@ -4,11 +4,11 @@
 package interact
 
 import (
+	stdctx "context"
 	"fmt"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
-
+	gitea "gitea.dev/sdk"
 	"gitea.dev/tea/modules/config"
 	"gitea.dev/tea/modules/task"
 	"gitea.dev/tea/modules/theme"
@@ -17,7 +17,7 @@ import (
 )
 
 // CreateMilestone interactively creates a milestone
-func CreateMilestone(login *config.Login, owner, repo string) error {
+func CreateMilestone(requestCtx stdctx.Context, login *config.Login, owner, repo string) error {
 	var title, description, deadline string
 
 	// owner, repo
@@ -60,8 +60,7 @@ func CreateMilestone(login *config.Login, owner, repo string) error {
 		deadlineTM = &tm
 	}
 
-	return task.CreateMilestone(
-		login,
+	return task.CreateMilestone(requestCtx, login,
 		owner,
 		repo,
 		title,

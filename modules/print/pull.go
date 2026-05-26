@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 )
 
 var ciStatusSymbols = map[gitea.StatusState]string{

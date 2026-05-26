@@ -23,7 +23,7 @@ var CmdMilestonesDelete = cli.Command{
 	Flags:       flags.AllDefaultFlags,
 }
 
-func deleteMilestone(_ stdctx.Context, cmd *cli.Command) error {
+func deleteMilestone(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -33,6 +33,6 @@ func deleteMilestone(_ stdctx.Context, cmd *cli.Command) error {
 	}
 	client := ctx.Login.Client()
 
-	_, err = client.DeleteMilestoneByName(ctx.Owner, ctx.Repo, ctx.Args().First())
+	_, err = client.Repositories.DeleteMilestoneByName(requestCtx, ctx.Owner, ctx.Repo, ctx.Args().First())
 	return err
 }

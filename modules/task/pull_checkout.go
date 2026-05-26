@@ -4,9 +4,10 @@
 package task
 
 import (
+	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/config"
 	local_git "gitea.dev/tea/modules/git"
@@ -14,6 +15,7 @@ import (
 
 // PullCheckout checkout current workdir to the head branch of specified pull request
 func PullCheckout(
+	ctx stdctx.Context,
 	login *config.Login,
 	repoOwner, repoName string,
 	forceCreateBranch bool,
@@ -21,7 +23,7 @@ func PullCheckout(
 	callback func(string) (string, error),
 ) error {
 	client := login.Client()
-	pr, _, err := client.GetPullRequest(repoOwner, repoName, index)
+	pr, _, err := client.PullRequests.GetPullRequest(ctx, repoOwner, repoName, index)
 	if err != nil {
 		return fmt.Errorf("couldn't fetch PR: %s", err)
 	}

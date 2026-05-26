@@ -28,7 +28,7 @@ var CmdOrganizationDelete = cli.Command{
 }
 
 // RunOrganizationDelete delete user organization
-func RunOrganizationDelete(_ stdctx.Context, cmd *cli.Command) error {
+func RunOrganizationDelete(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -40,7 +40,7 @@ func RunOrganizationDelete(_ stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("organization name is required")
 	}
 
-	response, err := client.DeleteOrg(ctx.Args().First())
+	response, err := client.Organizations.DeleteOrg(requestCtx, ctx.Args().First())
 	if response != nil && response.StatusCode == 404 {
 		return fmt.Errorf("organization not found: %s", ctx.Args().First())
 	}

@@ -6,7 +6,7 @@ package organizations
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
 
 	"gitea.dev/tea/cmd/flags"
@@ -29,14 +29,14 @@ var CmdOrganizationList = cli.Command{
 }
 
 // RunOrganizationList list user organizations
-func RunOrganizationList(_ stdctx.Context, cmd *cli.Command) error {
+func RunOrganizationList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
 	}
 	client := ctx.Login.Client()
 
-	userOrganizations, _, err := client.ListUserOrgs(ctx.Login.User, gitea.ListOrgsOptions{
+	userOrganizations, _, err := client.Organizations.ListUserOrgs(requestCtx, ctx.Login.User, gitea.ListOrgsOptions{
 		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {

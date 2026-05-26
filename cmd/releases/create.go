@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -67,7 +67,7 @@ var CmdReleaseCreate = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runReleaseCreate(_ stdctx.Context, cmd *cli.Command) error {
+func runReleaseCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -94,7 +94,7 @@ func runReleaseCreate(_ stdctx.Context, cmd *cli.Command) error {
 		notestring = string(notebytes)
 	}
 
-	release, resp, err := ctx.Login.Client().CreateRelease(ctx.Owner, ctx.Repo, gitea.CreateReleaseOption{
+	release, resp, err := ctx.Login.Client().Releases.CreateRelease(requestCtx, ctx.Owner, ctx.Repo, gitea.CreateReleaseOption{
 		TagName:      tag,
 		Target:       ctx.String("target"),
 		Title:        ctx.String("title"),
@@ -118,7 +118,7 @@ func runReleaseCreate(_ stdctx.Context, cmd *cli.Command) error {
 
 		filePath := filepath.Base(asset)
 
-		if _, _, err = ctx.Login.Client().CreateReleaseAttachment(ctx.Owner, ctx.Repo, release.ID, file, filePath); err != nil {
+		if _, _, err = ctx.Login.Client().Releases.CreateReleaseAttachment(requestCtx, ctx.Owner, ctx.Repo, release.ID, file, filePath); err != nil {
 			file.Close()
 			return err
 		}

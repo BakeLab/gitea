@@ -28,7 +28,7 @@ var CmdLoginEdit = cli.Command{
 	Flags:       []cli.Flag{&flags.OutputFlag},
 }
 
-func runLoginEdit(_ context.Context, _ *cli.Command) error {
+func runLoginEdit(requestCtx context.Context, _ *cli.Command) error {
 	ymlPath := config.GetConfigPath()
 	if e, ok := os.LookupEnv("EDITOR"); ok && e != "" {
 		cmd := exec.Command(e, ymlPath)

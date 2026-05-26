@@ -27,7 +27,7 @@ var CmdOpen = cli.Command{
 	Flags:       append([]cli.Flag{}, flags.LoginRepoFlags...),
 }
 
-func runOpen(_ stdctx.Context, cmd *cli.Command) error {
+func runOpen(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err

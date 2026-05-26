@@ -30,7 +30,7 @@ use an empty string (eg. --milestone "").`,
 	Flags:     flags.IssuePREditFlags,
 }
 
-func runIssuesEdit(_ stdctx.Context, cmd *cli.Command) error {
+func runIssuesEdit(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -57,7 +57,7 @@ func runIssuesEdit(_ stdctx.Context, cmd *cli.Command) error {
 	for _, opts.Index = range indices {
 		if ctx.IsInteractiveMode() {
 			var err error
-			opts, err = interact.EditIssue(*ctx, opts.Index)
+			opts, err = interact.EditIssue(requestCtx, *ctx, opts.Index)
 			if err != nil {
 				if interact.IsQuitting(err) {
 					return nil // user quit
@@ -66,7 +66,7 @@ func runIssuesEdit(_ stdctx.Context, cmd *cli.Command) error {
 			}
 		}
 
-		issue, err := task.EditIssue(ctx, client, *opts)
+		issue, err := task.EditIssue(requestCtx, ctx, client, *opts)
 		if err != nil {
 			return err
 		}

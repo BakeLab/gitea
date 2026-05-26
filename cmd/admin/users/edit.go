@@ -11,8 +11,7 @@ import (
 	"strings"
 	"syscall"
 
-	"code.gitea.io/sdk/gitea"
-
+	gitea "gitea.dev/sdk"
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
 	"gitea.dev/tea/modules/print"
@@ -135,7 +134,7 @@ var CmdUserEdit = cli.Command{
 }
 
 // RunUserEdit edits an existing user
-func RunUserEdit(_ stdctx.Context, cmd *cli.Command) error {
+func RunUserEdit(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -149,7 +148,7 @@ func RunUserEdit(_ stdctx.Context, cmd *cli.Command) error {
 	username := ctx.Args().First()
 
 	// Verify the user exists before attempting an update.
-	_, _, err = client.GetUserInfo(username)
+	_, _, err = client.Users.GetUserInfo(requestCtx, username)
 	if err != nil {
 		return fmt.Errorf("failed to get user info: %w", err)
 	}
@@ -358,13 +357,13 @@ func RunUserEdit(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	// Update the user
-	_, err = client.AdminEditUser(username, editOpts)
+	_, err = client.Admin.EditUser(requestCtx, username, editOpts)
 	if err != nil {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
 
 	// Refresh user info to reflect the changes
-	updatedUser, _, err := client.GetUserInfo(username)
+	updatedUser, _, err := client.Users.GetUserInfo(requestCtx, username)
 	if err != nil {
 		return fmt.Errorf("user updated but failed to retrieve updated user info: %w", err)
 	}

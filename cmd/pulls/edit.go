@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -40,7 +40,7 @@ use an empty string (eg. --milestone "").`,
 	),
 }
 
-func runPullsEdit(_ stdctx.Context, cmd *cli.Command) error {
+func runPullsEdit(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -72,7 +72,7 @@ func runPullsEdit(_ stdctx.Context, cmd *cli.Command) error {
 
 	client := ctx.Login.Client()
 	for _, opts.Index = range indices {
-		pr, err := task.EditPull(ctx, client, *opts)
+		pr, err := task.EditPull(requestCtx, ctx, client, *opts)
 		if err != nil {
 			return err
 		}
@@ -87,7 +87,7 @@ func runPullsEdit(_ stdctx.Context, cmd *cli.Command) error {
 }
 
 // editPullState abstracts the arg parsing to edit the given pull request
-func editPullState(_ stdctx.Context, cmd *cli.Command, opts gitea.EditPullRequestOption) error {
+func editPullState(requestCtx stdctx.Context, cmd *cli.Command, opts gitea.EditPullRequestOption) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -106,7 +106,7 @@ func editPullState(_ stdctx.Context, cmd *cli.Command, opts gitea.EditPullReques
 
 	client := ctx.Login.Client()
 	for _, index := range indices {
-		pr, _, err := client.EditPullRequest(ctx.Owner, ctx.Repo, index, opts)
+		pr, _, err := client.PullRequests.EditPullRequest(requestCtx, ctx.Owner, ctx.Repo, index, opts)
 		if err != nil {
 			return err
 		}

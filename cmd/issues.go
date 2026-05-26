@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/cmd/issues"
@@ -38,12 +38,12 @@ type issueData struct {
 }
 
 type issueDetailClient interface {
-	GetIssue(owner, repo string, index int64) (*gitea.Issue, *gitea.Response, error)
-	GetIssueReactions(owner, repo string, index int64) ([]*gitea.Reaction, *gitea.Response, error)
+	GetIssue(ctx stdctx.Context, owner, repo string, index int64) (*gitea.Issue, *gitea.Response, error)
+	ListIssueReactions(ctx stdctx.Context, owner, repo string, index int64, opt gitea.ListIssueReactionsOptions) ([]*gitea.Reaction, *gitea.Response, error)
 }
 
 type issueCommentClient interface {
-	ListIssueComments(owner, repo string, index int64, opt gitea.ListIssueCommentOptions) ([]*gitea.Comment, *gitea.Response, error)
+	ListIssueComments(ctx stdctx.Context, owner, repo string, index int64, opt gitea.ListIssueCommentOptions) ([]*gitea.Comment, *gitea.Response, error)
 }
 
 type commentData = detailCommentData
@@ -79,13 +79,13 @@ func runIssues(ctx stdctx.Context, cmd *cli.Command) error {
 	return issues.RunIssuesList(ctx, cmd)
 }
 
-func runIssueDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
+func runIssueDetail(requestCtx stdctx.Context, cmd *cli.Command, index string) error {
 	ctx, idx, err := resolveIssueDetailContext(cmd, index)
 	if err != nil {
 		return err
 	}
 
-	return runIssueDetailWithClient(ctx, idx, ctx.Login.Client())
+	return runIssueDetailWithClient(requestCtx, ctx, idx, ctx.Login.Client().Issues)
 }
 
 func resolveIssueDetailContext(cmd *cli.Command, index string) (*context.TeaContext, int64, error) {
@@ -108,12 +108,12 @@ func resolveIssueDetailContext(cmd *cli.Command, index string) (*context.TeaCont
 	return ctx, idx, nil
 }
 
-func runIssueDetailWithClient(ctx *context.TeaContext, idx int64, client issueDetailClient) error {
-	issue, _, err := client.GetIssue(ctx.Owner, ctx.Repo, idx)
+func runIssueDetailWithClient(requestCtx stdctx.Context, ctx *context.TeaContext, idx int64, client issueDetailClient) error {
+	issue, _, err := client.GetIssue(requestCtx, ctx.Owner, ctx.Repo, idx)
 	if err != nil {
 		return err
 	}
-	reactions, _, err := client.GetIssueReactions(ctx.Owner, ctx.Repo, idx)
+	reactions, _, err := client.ListIssueReactions(requestCtx, ctx.Owner, ctx.Repo, idx, gitea.ListIssueReactionsOptions{})
 	if err != nil {
 		return err
 	}
@@ -121,14 +121,14 @@ func runIssueDetailWithClient(ctx *context.TeaContext, idx int64, client issueDe
 	if ctx.IsSet("output") {
 		switch ctx.String("output") {
 		case "json":
-			return runIssueDetailAsJSON(ctx, issue)
+			return runIssueDetailAsJSON(requestCtx, ctx, issue)
 		}
 	}
 
 	print.IssueDetails(issue, reactions)
 
 	if issue.Comments > 0 {
-		err = interact.ShowCommentsMaybeInteractive(ctx, idx, issue.Comments)
+		err = interact.ShowCommentsMaybeInteractive(requestCtx, ctx, idx, issue.Comments)
 		if err != nil {
 			return fmt.Errorf("error loading comments: %v", err)
 		}
@@ -137,17 +137,17 @@ func runIssueDetailWithClient(ctx *context.TeaContext, idx int64, client issueDe
 	return nil
 }
 
-func runIssueDetailAsJSON(ctx *context.TeaContext, issue *gitea.Issue) error {
-	return runIssueDetailAsJSONWithClient(ctx, issue, ctx.Login.Client())
+func runIssueDetailAsJSON(requestCtx stdctx.Context, ctx *context.TeaContext, issue *gitea.Issue) error {
+	return runIssueDetailAsJSONWithClient(requestCtx, ctx, issue, ctx.Login.Client().Issues)
 }
 
-func runIssueDetailAsJSONWithClient(ctx *context.TeaContext, issue *gitea.Issue, c issueCommentClient) error {
+func runIssueDetailAsJSONWithClient(requestCtx stdctx.Context, ctx *context.TeaContext, issue *gitea.Issue, c issueCommentClient) error {
 	opts := gitea.ListIssueCommentOptions{ListOptions: flags.GetListOptions(ctx.Command)}
 	comments := []*gitea.Comment{}
 
 	if ctx.Bool("comments") {
 		var err error
-		comments, _, err = c.ListIssueComments(ctx.Owner, ctx.Repo, issue.Index, opts)
+		comments, _, err = c.ListIssueComments(requestCtx, ctx.Owner, ctx.Repo, issue.Index, opts)
 		if err != nil {
 			return err
 		}

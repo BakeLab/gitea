@@ -40,7 +40,7 @@ func runWorkflowsView(ctx stdctx.Context, cmd *cli.Command) error {
 	client := c.Login.Client()
 
 	workflowID := cmd.Args().First()
-	wf, _, err := client.GetRepoActionWorkflow(c.Owner, c.Repo, workflowID)
+	wf, _, err := client.Actions.GetRepoWorkflow(ctx, c.Owner, c.Repo, workflowID)
 	if err != nil {
 		return fmt.Errorf("failed to get workflow: %w", err)
 	}

@@ -4,12 +4,11 @@
 package runs
 
 import (
-	stdctx "context"
 	"os"
 	"testing"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
@@ -107,6 +106,6 @@ func TestRunRunsListRequiresRepoContext(t *testing.T) {
 	}
 	require.NoError(t, cmd.Set("login", "test"))
 
-	err = RunRunsList(stdctx.Background(), cmd)
+	err = RunRunsList(t.Context(), cmd)
 	require.ErrorContains(t, err, "remote repository required")
 }

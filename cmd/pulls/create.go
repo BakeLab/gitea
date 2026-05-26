@@ -6,7 +6,7 @@ package pulls
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
 
 	"gitea.dev/tea/cmd/flags"
@@ -49,7 +49,7 @@ var CmdPullsCreate = cli.Command{
 	}, flags.IssuePRCreateFlags...),
 }
 
-func runPullsCreate(_ stdctx.Context, cmd *cli.Command) error {
+func runPullsCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -63,20 +63,21 @@ func runPullsCreate(_ stdctx.Context, cmd *cli.Command) error {
 
 	// no args -> interactive mode
 	if ctx.IsInteractiveMode() {
-		if err := interact.CreatePull(ctx); err != nil && !interact.IsQuitting(err) {
+		if err := interact.CreatePull(requestCtx, ctx); err != nil && !interact.IsQuitting(err) {
 			return err
 		}
 		return nil
 	}
 
 	// else use args to create PR
-	opts, err := flags.GetIssuePRCreateFlags(ctx)
+	opts, err := flags.GetIssuePRCreateFlags(requestCtx, ctx)
 	if err != nil {
 		return err
 	}
 
 	if ctx.Bool("agit") {
 		return task.CreateAgitFlowPull(
+			requestCtx,
 			ctx,
 			ctx.String("remote"),
 			ctx.String("head"),
@@ -93,6 +94,7 @@ func runPullsCreate(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	return task.CreatePull(
+		requestCtx,
 		ctx,
 		ctx.String("base"),
 		ctx.String("head"),

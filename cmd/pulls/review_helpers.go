@@ -4,10 +4,11 @@
 package pulls
 
 import (
+	stdctx "context"
 	"fmt"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/context"
 	"gitea.dev/tea/modules/task"
@@ -15,7 +16,7 @@ import (
 )
 
 // runPullReview handles the common logic for approving/rejecting pull requests
-func runPullReview(ctx *context.TeaContext, state gitea.ReviewStateType, requireComment bool) error {
+func runPullReview(requestCtx stdctx.Context, ctx *context.TeaContext, state gitea.ReviewStateType, requireComment bool) error {
 	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
 		return err
 	}
@@ -39,11 +40,11 @@ func runPullReview(ctx *context.TeaContext, state gitea.ReviewStateType, require
 
 	comment := strings.Join(ctx.Args().Tail(), " ")
 
-	return task.CreatePullReview(ctx, idx, state, comment, nil)
+	return task.CreatePullReview(requestCtx, ctx, idx, state, comment, nil)
 }
 
 // runResolveComment handles the common logic for resolving/unresolving review comments
-func runResolveComment(ctx *context.TeaContext, action func(*context.TeaContext, int64) error) error {
+func runResolveComment(requestCtx stdctx.Context, ctx *context.TeaContext, action func(stdctx.Context, *context.TeaContext, int64) error) error {
 	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
 		return err
 	}
@@ -57,5 +58,5 @@ func runResolveComment(ctx *context.TeaContext, action func(*context.TeaContext,
 		return err
 	}
 
-	return action(ctx, commentID)
+	return action(requestCtx, ctx, commentID)
 }

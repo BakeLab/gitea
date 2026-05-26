@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -53,7 +53,7 @@ var CmdOrganizationCreate = cli.Command{
 }
 
 // RunOrganizationCreate sets up a new organization
-func RunOrganizationCreate(_ stdctx.Context, cmd *cli.Command) error {
+func RunOrganizationCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -75,7 +75,7 @@ func RunOrganizationCreate(_ stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("unknown visibility '%s'", ctx.String("visibility"))
 	}
 
-	org, _, err := ctx.Login.Client().CreateOrg(gitea.CreateOrgOption{
+	org, _, err := ctx.Login.Client().Organizations.CreateOrg(requestCtx, gitea.CreateOrgOption{
 		Name:                      ctx.Args().First(),
 		FullName:                  ctx.String("full-name"),
 		Description:               ctx.String("description"),

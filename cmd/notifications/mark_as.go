@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
 
 	"gitea.dev/tea/cmd/flags"
@@ -23,7 +23,7 @@ var CmdNotificationsMarkRead = cli.Command{
 	Description: "Mark all filtered or a specific notification as read",
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
-	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
 		ctx, err := context.InitCommand(cmd)
 		if err != nil {
 			return err
@@ -35,7 +35,7 @@ var CmdNotificationsMarkRead = cli.Command{
 		if !ctx.IsSet(flags.NotificationStateFlag.Name) {
 			filter = []string{string(gitea.NotifyStatusUnread)}
 		}
-		return markNotificationAs(ctx, filter, gitea.NotifyStatusRead)
+		return markNotificationAs(requestCtx, ctx, filter, gitea.NotifyStatusRead)
 	},
 }
 
@@ -47,7 +47,7 @@ var CmdNotificationsMarkUnread = cli.Command{
 	Description: "Mark all filtered or a specific notification as unread",
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
-	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
 		ctx, err := context.InitCommand(cmd)
 		if err != nil {
 			return err
@@ -59,7 +59,7 @@ var CmdNotificationsMarkUnread = cli.Command{
 		if !ctx.IsSet(flags.NotificationStateFlag.Name) {
 			filter = []string{string(gitea.NotifyStatusRead)}
 		}
-		return markNotificationAs(ctx, filter, gitea.NotifyStatusUnread)
+		return markNotificationAs(requestCtx, ctx, filter, gitea.NotifyStatusUnread)
 	},
 }
 
@@ -71,7 +71,7 @@ var CmdNotificationsMarkPinned = cli.Command{
 	Description: "Mark all filtered or a specific notification as pinned",
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
-	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
 		ctx, err := context.InitCommand(cmd)
 		if err != nil {
 			return err
@@ -83,7 +83,7 @@ var CmdNotificationsMarkPinned = cli.Command{
 		if !ctx.IsSet(flags.NotificationStateFlag.Name) {
 			filter = []string{string(gitea.NotifyStatusUnread)}
 		}
-		return markNotificationAs(ctx, filter, gitea.NotifyStatusPinned)
+		return markNotificationAs(requestCtx, ctx, filter, gitea.NotifyStatusPinned)
 	},
 }
 
@@ -94,18 +94,18 @@ var CmdNotificationsUnpin = cli.Command{
 	Description: "Marks all pinned or a specific notification as read",
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
-	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
 		ctx, err := context.InitCommand(cmd)
 		if err != nil {
 			return err
 		}
 		filter := []string{string(gitea.NotifyStatusPinned)}
 		// NOTE: we implicitly mark it as read, to match web UI semantics. marking as unread might be more useful?
-		return markNotificationAs(ctx, filter, gitea.NotifyStatusRead)
+		return markNotificationAs(requestCtx, ctx, filter, gitea.NotifyStatusRead)
 	},
 }
 
-func markNotificationAs(cmd *context.TeaContext, filterStates []string, targetState gitea.NotifyStatus) (err error) {
+func markNotificationAs(ctx stdctx.Context, cmd *context.TeaContext, filterStates []string, targetState gitea.NotifyStatus) (err error) {
 	client := cmd.Login.Client()
 	subject := cmd.Args().First()
 	allRepos := cmd.Bool("mine")
@@ -120,12 +120,12 @@ func markNotificationAs(cmd *context.TeaContext, filterStates []string, targetSt
 		opts := gitea.MarkNotificationOptions{Status: states, ToStatus: targetState}
 
 		if allRepos {
-			_, _, err = client.ReadNotifications(opts)
+			_, _, err = client.Notifications.MarkRead(ctx, opts)
 		} else {
 			if err := cmd.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
 				return err
 			}
-			_, _, err = client.ReadRepoNotifications(cmd.Owner, cmd.Repo, opts)
+			_, _, err = client.Notifications.MarkReadByRepo(ctx, cmd.Owner, cmd.Repo, opts)
 		}
 
 		// TODO: print all affected notification subject URLs
@@ -136,12 +136,12 @@ func markNotificationAs(cmd *context.TeaContext, filterStates []string, targetSt
 		if err != nil {
 			return err
 		}
-		_, _, err = client.ReadNotification(id, targetState)
+		_, _, err = client.Notifications.MarkReadByID(ctx, id, targetState)
 		if err != nil {
 			return err
 		}
 
-		n, _, err := client.GetNotification(id)
+		n, _, err := client.Notifications.GetByID(ctx, id)
 		if err != nil {
 			return err
 		}

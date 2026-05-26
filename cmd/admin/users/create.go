@@ -11,7 +11,7 @@ import (
 	"strings"
 	"syscall"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -83,7 +83,7 @@ var CmdUserCreate = cli.Command{
 }
 
 // RunUserCreate creates a new user
-func RunUserCreate(_ stdctx.Context, cmd *cli.Command) error {
+func RunUserCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -177,7 +177,7 @@ func RunUserCreate(_ stdctx.Context, cmd *cli.Command) error {
 	createOpts.Visibility = vis
 
 	// Create the user
-	user, _, err := client.AdminCreateUser(createOpts)
+	user, _, err := client.Admin.CreateUser(requestCtx, createOpts)
 	if err != nil {
 		return err
 	}
@@ -202,13 +202,13 @@ func RunUserCreate(_ stdctx.Context, cmd *cli.Command) error {
 		}
 
 		// Update user with admin/restricted/prohibit-login settings
-		_, err = client.AdminEditUser(username, editOpts)
+		_, err = client.Admin.EditUser(requestCtx, username, editOpts)
 		if err != nil {
 			return fmt.Errorf("user created but failed to update admin/restricted/prohibit-login status: %w", err)
 		}
 
 		// Refresh user info to reflect the changes
-		user, _, err = client.GetUserInfo(username)
+		user, _, err = client.Users.GetUserInfo(requestCtx, username)
 		if err != nil {
 			return fmt.Errorf("user updated but failed to retrieve updated user info: %w", err)
 		}

@@ -4,8 +4,9 @@
 package interact
 
 import (
-	"code.gitea.io/sdk/gitea"
+	stdctx "context"
 
+	gitea "gitea.dev/sdk"
 	"gitea.dev/tea/modules/context"
 	"gitea.dev/tea/modules/task"
 	"gitea.dev/tea/modules/theme"
@@ -14,7 +15,7 @@ import (
 )
 
 // CreatePull interactively creates a PR
-func CreatePull(ctx *context.TeaContext) (err error) {
+func CreatePull(requestCtx stdctx.Context, ctx *context.TeaContext) (err error) {
 	var (
 		base, head           string
 		allowMaintainerEdits = true
@@ -28,7 +29,7 @@ func CreatePull(ctx *context.TeaContext) (err error) {
 	}
 
 	// base
-	if base, err = task.GetDefaultPRBase(ctx.Login, ctx.Owner, ctx.Repo); err != nil {
+	if base, err = task.GetDefaultPRBase(requestCtx, ctx.Login, ctx.Owner, ctx.Repo); err != nil {
 		return err
 	}
 
@@ -86,11 +87,12 @@ func CreatePull(ctx *context.TeaContext) (err error) {
 		}
 
 		opts := gitea.CreateIssueOption{Title: task.GetDefaultPRTitle(head)}
-		if err = promptIssueProperties(ctx.Login, ctx.Owner, ctx.Repo, &opts); err != nil {
+		if err = promptIssueProperties(requestCtx, ctx.Login, ctx.Owner, ctx.Repo, &opts); err != nil {
 			return err
 		}
 
 		return task.CreateAgitFlowPull(
+			requestCtx,
 			ctx,
 			baseRemote,
 			head,
@@ -128,11 +130,12 @@ func CreatePull(ctx *context.TeaContext) (err error) {
 	head = task.GetHeadSpec(headOwner, headBranch, ctx.Owner)
 
 	opts := gitea.CreateIssueOption{Title: task.GetDefaultPRTitle(head)}
-	if err = promptIssueProperties(ctx.Login, ctx.Owner, ctx.Repo, &opts); err != nil {
+	if err = promptIssueProperties(requestCtx, ctx.Login, ctx.Owner, ctx.Repo, &opts); err != nil {
 		return err
 	}
 
 	return task.CreatePull(
+		requestCtx,
 		ctx,
 		base,
 		head,

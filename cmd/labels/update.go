@@ -6,7 +6,7 @@ package labels
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -40,7 +40,7 @@ var CmdLabelUpdate = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runLabelUpdate(_ stdctx.Context, cmd *cli.Command) error {
+func runLabelUpdate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -66,7 +66,7 @@ func runLabelUpdate(_ stdctx.Context, cmd *cli.Command) error {
 		pDescription = &description
 	}
 
-	_, _, err = ctx.Login.Client().EditLabel(ctx.Owner, ctx.Repo, id, gitea.EditLabelOption{
+	_, _, err = ctx.Login.Client().Repositories.EditLabel(requestCtx, ctx.Owner, ctx.Repo, id, gitea.EditLabelOption{
 		Name:        pName,
 		Color:       pColor,
 		Description: pDescription,

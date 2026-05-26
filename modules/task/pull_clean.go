@@ -4,19 +4,20 @@
 package task
 
 import (
+	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/config"
 	local_git "gitea.dev/tea/modules/git"
 )
 
 // PullClean deletes local & remote feature-branches for a closed pull
-func PullClean(login *config.Login, repoOwner, repoName string, index int64, ignoreSHA bool, callback func(string) (string, error)) error {
+func PullClean(ctx stdctx.Context, login *config.Login, repoOwner, repoName string, index int64, ignoreSHA bool, callback func(string) (string, error)) error {
 	client := login.Client()
 
-	repo, _, err := client.GetRepo(repoOwner, repoName)
+	repo, _, err := client.Repositories.GetRepo(ctx, repoOwner, repoName)
 	if err != nil {
 		return err
 	}
@@ -26,7 +27,7 @@ func PullClean(login *config.Login, repoOwner, repoName string, index int64, ign
 	}
 
 	// fetch PR source-repo & -branch from gitea
-	pr, _, err := client.GetPullRequest(repoOwner, repoName, index)
+	pr, _, err := client.PullRequests.GetPullRequest(ctx, repoOwner, repoName, index)
 	if err != nil {
 		return err
 	}

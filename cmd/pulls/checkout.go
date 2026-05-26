@@ -33,7 +33,7 @@ var CmdPullsCheckout = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runPullsCheckout(_ stdctx.Context, cmd *cli.Command) error {
+func runPullsCheckout(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -52,7 +52,7 @@ func runPullsCheckout(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	if err := task.PullCheckout(ctx.Login, ctx.Owner, ctx.Repo, ctx.Bool("branch"), idx, interact.PromptPassword); err != nil && !interact.IsQuitting(err) {
+	if err := task.PullCheckout(requestCtx, ctx.Login, ctx.Owner, ctx.Repo, ctx.Bool("branch"), idx, interact.PromptPassword); err != nil && !interact.IsQuitting(err) {
 		return err
 	}
 	return nil

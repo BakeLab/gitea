@@ -6,7 +6,7 @@ package print
 import (
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 )
 
 // BranchesList prints a listing of the branches

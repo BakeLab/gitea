@@ -27,7 +27,7 @@ var CmdReleaseAttachmentCreate = cli.Command{
 	Flags:       flags.AllDefaultFlags,
 }
 
-func runReleaseAttachmentCreate(_ stdctx.Context, cmd *cli.Command) error {
+func runReleaseAttachmentCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -46,7 +46,7 @@ func runReleaseAttachmentCreate(_ stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("release tag needed to create attachment")
 	}
 
-	release, err := releases.GetReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
+	release, err := releases.GetReleaseByTag(requestCtx, ctx.Owner, ctx.Repo, tag, client)
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func runReleaseAttachmentCreate(_ stdctx.Context, cmd *cli.Command) error {
 
 		filePath := filepath.Base(asset)
 
-		if _, _, err = ctx.Login.Client().CreateReleaseAttachment(ctx.Owner, ctx.Repo, release.ID, file, filePath); err != nil {
+		if _, _, err = ctx.Login.Client().Releases.CreateReleaseAttachment(requestCtx, ctx.Owner, ctx.Repo, release.ID, file, filePath); err != nil {
 			file.Close()
 			return err
 		}

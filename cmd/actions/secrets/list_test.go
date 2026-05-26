@@ -4,7 +4,6 @@
 package secrets
 
 import (
-	stdctx "context"
 	"os"
 	"testing"
 
@@ -94,6 +93,6 @@ func TestRunSecretsListRequiresRepoContext(t *testing.T) {
 	}
 	require.NoError(t, cmd.Set("login", "test"))
 
-	err = RunSecretsList(stdctx.Background(), cmd)
+	err = RunSecretsList(t.Context(), cmd)
 	require.ErrorContains(t, err, "remote repository required")
 }

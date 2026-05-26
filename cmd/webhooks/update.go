@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -77,9 +77,9 @@ func runWebhooksUpdate(ctx stdctx.Context, cmd *cli.Command) error {
 	if c.IsGlobal {
 		return fmt.Errorf("global webhooks not yet supported in this version")
 	} else if len(c.Org) > 0 {
-		hook, _, err = client.GetOrgHook(c.Org, int64(webhookID))
+		hook, _, err = client.Hooks.GetOrgHook(ctx, c.Org, int64(webhookID))
 	} else {
-		hook, _, err = client.GetRepoHook(c.Owner, c.Repo, int64(webhookID))
+		hook, _, err = client.Hooks.GetRepoHook(ctx, c.Owner, c.Repo, int64(webhookID))
 	}
 	if err != nil {
 		return err
@@ -128,7 +128,7 @@ func runWebhooksUpdate(ctx stdctx.Context, cmd *cli.Command) error {
 	if c.IsGlobal {
 		return fmt.Errorf("global webhooks not yet supported in this version")
 	} else if len(c.Org) > 0 {
-		_, err = client.EditOrgHook(c.Org, int64(webhookID), gitea.EditHookOption{
+		_, err = client.Hooks.EditOrgHook(ctx, c.Org, int64(webhookID), gitea.EditHookOption{
 			Config:              config,
 			Events:              events,
 			Active:              &active,
@@ -136,7 +136,7 @@ func runWebhooksUpdate(ctx stdctx.Context, cmd *cli.Command) error {
 			AuthorizationHeader: authHeader,
 		})
 	} else {
-		_, err = client.EditRepoHook(c.Owner, c.Repo, int64(webhookID), gitea.EditHookOption{
+		_, err = client.Hooks.EditRepoHook(ctx, c.Owner, c.Repo, int64(webhookID), gitea.EditHookOption{
 			Config:              config,
 			Events:              events,
 			Active:              &active,

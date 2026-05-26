@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -36,7 +36,7 @@ func RunWorkflowsList(ctx stdctx.Context, cmd *cli.Command) error {
 	}
 	client := c.Login.Client()
 
-	resp, _, err := client.ListRepoActionWorkflows(c.Owner, c.Repo)
+	resp, _, err := client.Actions.ListRepoWorkflows(ctx, c.Owner, c.Repo)
 	if err != nil {
 		return fmt.Errorf("failed to list workflows: %w", err)
 	}

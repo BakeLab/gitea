@@ -4,12 +4,11 @@
 package integration
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
@@ -65,7 +64,7 @@ func TestCreateRepoObjectFormat(t *testing.T) {
 			args := append([]string{"repos", "create"}, tt.args...)
 			args = append(args, "--login", login.Name)
 
-			err := reposCmd.Run(context.Background(), args)
+			err := reposCmd.Run(t.Context(), args)
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -76,7 +75,7 @@ func TestCreateRepoObjectFormat(t *testing.T) {
 
 			require.NoError(t, err)
 			t.Cleanup(func() {
-				if _, delErr := client.DeleteRepo(login.User, tt.wantOpts.Name); delErr != nil {
+				if _, delErr := client.Repositories.DeleteRepo(t.Context(), login.User, tt.wantOpts.Name); delErr != nil {
 					t.Logf("failed to delete integration test repo %q: %v", tt.wantOpts.Name, delErr)
 				}
 			})

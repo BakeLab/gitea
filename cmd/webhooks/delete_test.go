@@ -6,7 +6,7 @@ package webhooks
 import (
 	"testing"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/cli/v3"
 )

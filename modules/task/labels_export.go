@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 )
 
 // LabelsExport save list of labels to disc

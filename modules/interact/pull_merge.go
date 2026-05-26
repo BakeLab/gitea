@@ -4,10 +4,11 @@
 package interact
 
 import (
+	stdctx "context"
 	"fmt"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -18,7 +19,7 @@ import (
 )
 
 // MergePull interactively creates a PR
-func MergePull(ctx *context.TeaContext) error {
+func MergePull(requestCtx stdctx.Context, ctx *context.TeaContext) error {
 	if ctx.LocalRepo == nil {
 		return fmt.Errorf("pull request index is required")
 	}
@@ -28,12 +29,12 @@ func MergePull(ctx *context.TeaContext) error {
 		return err
 	}
 
-	idx, err := getPullIndex(ctx, branch)
+	idx, err := getPullIndex(requestCtx, ctx, branch)
 	if err != nil {
 		return err
 	}
 
-	return task.PullMerge(ctx.Login, ctx.Owner, ctx.Repo, idx, gitea.MergePullRequestOption{
+	return task.PullMerge(requestCtx, ctx.Login, ctx.Owner, ctx.Repo, idx, gitea.MergePullRequestOption{
 		Style:   gitea.MergeStyle(ctx.String("style")),
 		Title:   ctx.String("title"),
 		Message: ctx.String("message"),
@@ -41,7 +42,7 @@ func MergePull(ctx *context.TeaContext) error {
 }
 
 // getPullIndex interactively determines the PR index
-func getPullIndex(ctx *context.TeaContext, branch string) (int64, error) {
+func getPullIndex(requestCtx stdctx.Context, ctx *context.TeaContext, branch string) (int64, error) {
 	c := ctx.Login.Client()
 	opts := gitea.ListPullRequestsOptions{
 		State:       gitea.StateOpen,
@@ -54,7 +55,7 @@ func getPullIndex(ctx *context.TeaContext, branch string) (int64, error) {
 	var prs []*gitea.PullRequest
 	for {
 		var err error
-		prs, _, err = c.ListRepoPullRequests(ctx.Owner, ctx.Repo, opts)
+		prs, _, err = c.PullRequests.ListRepoPullRequests(requestCtx, ctx.Owner, ctx.Repo, opts)
 		if err != nil {
 			return 0, err
 		}

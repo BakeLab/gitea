@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -93,7 +93,7 @@ func runWebhooksCreate(ctx stdctx.Context, cmd *cli.Command) error {
 	if c.IsGlobal {
 		return fmt.Errorf("global webhooks not yet supported in this version")
 	} else if len(c.Org) > 0 {
-		hook, _, err = client.CreateOrgHook(c.Org, gitea.CreateHookOption{
+		hook, _, err = client.Hooks.CreateOrgHook(ctx, c.Org, gitea.CreateHookOption{
 			Type:                webhookType,
 			Config:              config,
 			Events:              events,
@@ -102,7 +102,7 @@ func runWebhooksCreate(ctx stdctx.Context, cmd *cli.Command) error {
 			AuthorizationHeader: authHeader,
 		})
 	} else {
-		hook, _, err = client.CreateRepoHook(c.Owner, c.Repo, gitea.CreateHookOption{
+		hook, _, err = client.Hooks.CreateRepoHook(ctx, c.Owner, c.Repo, gitea.CreateHookOption{
 			Type:                webhookType,
 			Config:              config,
 			Events:              events,

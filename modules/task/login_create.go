@@ -4,13 +4,14 @@
 package task
 
 import (
+	stdctx "context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/config"
 	"gitea.dev/tea/modules/utils"
@@ -48,7 +49,7 @@ func SetupHelper(login config.Login) (ok bool, err error) {
 }
 
 // CreateLogin create a login to be stored in config
-func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string, insecure, sshAgent, versionCheck, addHelper bool) error {
+func CreateLogin(ctx stdctx.Context, name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string, insecure, sshAgent, versionCheck, addHelper bool) error {
 	// checks ...
 	// ... if we have a url
 	if len(giteaURL) == 0 {
@@ -105,7 +106,7 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 	}
 
 	if len(token) == 0 && sshCertPrincipal == "" && !sshAgent && sshKey == "" {
-		if login.Token, err = generateToken(login, user, passwd, otp, scopes); err != nil {
+		if login.Token, err = generateToken(ctx, login, user, passwd, otp, scopes); err != nil {
 			return err
 		}
 	}
@@ -113,7 +114,7 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 	client := login.Client()
 
 	// Verify if authentication works and get user info
-	u, _, err := client.GetMyUserInfo()
+	u, _, err := client.Users.GetMyUserInfo(ctx)
 	if err != nil {
 		return err
 	}
@@ -130,7 +131,7 @@ func CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCe
 	login.SSHHost = serverURL.Host
 
 	if len(sshKey) == 0 {
-		login.SSHKey, err = findSSHKey(client)
+		login.SSHKey, err = findSSHKey(ctx, client)
 		if err != nil {
 			fmt.Printf("Warning: problem while finding a SSH key: %s\n", err)
 		}
@@ -159,7 +160,7 @@ func shouldCheckTokenUniqueness(token string, sshAgent bool, sshKey, sshCertPrin
 }
 
 // generateToken creates a new token when given BasicAuth credentials
-func generateToken(login config.Login, user, pass, otp, scopes string) (string, error) {
+func generateToken(ctx stdctx.Context, login config.Login, user, pass, otp, scopes string) (string, error) {
 	opts := []gitea.ClientOption{gitea.SetBasicAuth(user, pass)}
 	if otp != "" {
 		opts = append(opts, gitea.SetOTP(otp))
@@ -168,7 +169,7 @@ func generateToken(login config.Login, user, pass, otp, scopes string) (string, 
 
 	var tl []*gitea.AccessToken
 	for page := 1; ; {
-		page_tokens, resp, err := client.ListAccessTokens(gitea.ListAccessTokensOptions{
+		page_tokens, resp, err := client.Users.ListAccessTokens(ctx, gitea.ListAccessTokensOptions{
 			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
 		})
 		if err != nil {
@@ -200,7 +201,7 @@ func generateToken(login config.Login, user, pass, otp, scopes string) (string, 
 		}
 	}
 
-	t, _, err := client.CreateAccessToken(gitea.CreateAccessTokenOption{
+	t, _, err := client.Users.CreateAccessToken(ctx, gitea.CreateAccessTokenOption{
 		Name:   tokenName,
 		Scopes: tokenScopes,
 	})

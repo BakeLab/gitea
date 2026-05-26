@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 	"golang.org/x/crypto/ssh"
 
 	"gitea.dev/tea/modules/utils"

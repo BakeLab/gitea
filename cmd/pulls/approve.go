@@ -6,7 +6,7 @@ package pulls
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
 
 	"gitea.dev/tea/cmd/flags"
@@ -20,12 +20,12 @@ var CmdPullsApprove = cli.Command{
 	Usage:       "Approve a pull request",
 	Description: "Approve a pull request",
 	ArgsUsage:   "<pull index> [<comment>]",
-	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
 		ctx, err := context.InitCommand(cmd)
 		if err != nil {
 			return err
 		}
-		return runPullReview(ctx, gitea.ReviewStateApproved, false)
+		return runPullReview(requestCtx, ctx, gitea.ReviewStateApproved, false)
 	},
 	Flags: flags.AllDefaultFlags,
 }

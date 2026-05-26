@@ -69,7 +69,7 @@ func runVariablesSet(ctx stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	_, err = client.CreateRepoActionVariable(c.Owner, c.Repo, variableName, variableValue)
+	_, err = client.Actions.CreateRepoVariable(ctx, c.Owner, c.Repo, variableName, variableValue)
 	if err != nil {
 		return err
 	}

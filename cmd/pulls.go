@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/cmd/pulls"
@@ -91,7 +91,7 @@ func runPulls(ctx stdctx.Context, cmd *cli.Command) error {
 	return pulls.RunPullsList(ctx, cmd)
 }
 
-func runPullDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
+func runPullDetail(requestCtx stdctx.Context, cmd *cli.Command, index string) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -105,14 +105,14 @@ func runPullDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
 	}
 
 	client := ctx.Login.Client()
-	pr, _, err := client.GetPullRequest(ctx.Owner, ctx.Repo, idx)
+	pr, _, err := client.PullRequests.GetPullRequest(requestCtx, ctx.Owner, ctx.Repo, idx)
 	if err != nil {
 		return err
 	}
 
 	var reviews []*gitea.PullReview
 	for page := 1; ; {
-		page_reviews, resp, err := client.ListPullReviews(ctx.Owner, ctx.Repo, idx, gitea.ListPullReviewsOptions{
+		page_reviews, resp, err := client.PullRequests.ListPullReviews(requestCtx, ctx.Owner, ctx.Repo, idx, gitea.ListPullReviewsOptions{
 			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
 		})
 		if err != nil {
@@ -129,11 +129,11 @@ func runPullDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
 	if ctx.IsSet("output") {
 		switch ctx.String("output") {
 		case "json":
-			return runPullDetailAsJSON(ctx, pr, reviews)
+			return runPullDetailAsJSON(requestCtx, ctx, pr, reviews)
 		}
 	}
 
-	ci, _, err := client.GetCombinedStatus(ctx.Owner, ctx.Repo, pr.Head.Sha)
+	ci, _, err := client.Repositories.GetCombinedStatus(requestCtx, ctx.Owner, ctx.Repo, pr.Head.Sha)
 	if err != nil {
 		fmt.Printf("error while loading CI: %v\n", err)
 	}
@@ -141,7 +141,7 @@ func runPullDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
 	print.PullDetails(pr, reviews, ci)
 
 	if pr.Comments > 0 {
-		err = interact.ShowCommentsMaybeInteractive(ctx, idx, pr.Comments)
+		err = interact.ShowCommentsMaybeInteractive(requestCtx, ctx, idx, pr.Comments)
 		if err != nil {
 			fmt.Printf("error loading comments: %v\n", err)
 		}
@@ -150,7 +150,7 @@ func runPullDetail(_ stdctx.Context, cmd *cli.Command, index string) error {
 	return nil
 }
 
-func runPullDetailAsJSON(ctx *context.TeaContext, pr *gitea.PullRequest, reviews []*gitea.PullReview) error {
+func runPullDetailAsJSON(requestCtx stdctx.Context, ctx *context.TeaContext, pr *gitea.PullRequest, reviews []*gitea.PullReview) error {
 	c := ctx.Login.Client()
 	opts := gitea.ListIssueCommentOptions{ListOptions: flags.GetListOptions(ctx.Command)}
 
@@ -185,7 +185,7 @@ func runPullDetailAsJSON(ctx *context.TeaContext, pr *gitea.PullRequest, reviews
 	}
 
 	if ctx.Bool("comments") {
-		comments, _, err := c.ListIssueComments(ctx.Owner, ctx.Repo, pr.Index, opts)
+		comments, _, err := c.Issues.ListIssueComments(requestCtx, ctx.Owner, ctx.Repo, pr.Index, opts)
 		if err != nil {
 			return err
 		}

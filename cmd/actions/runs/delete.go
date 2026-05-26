@@ -61,7 +61,7 @@ func runRunsDelete(ctx stdctx.Context, cmd *cli.Command) error {
 		}
 	}
 
-	_, err = client.DeleteRepoActionRun(c.Owner, c.Repo, runID)
+	_, err = client.Actions.DeleteRepoRun(ctx, c.Owner, c.Repo, runID)
 	if err != nil {
 		return fmt.Errorf("failed to delete run: %w", err)
 	}

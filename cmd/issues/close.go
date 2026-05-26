@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -30,7 +30,7 @@ var CmdIssuesClose = cli.Command{
 }
 
 // editIssueState abstracts the arg parsing to edit the given issue
-func editIssueState(_ stdctx.Context, cmd *cli.Command, opts gitea.EditIssueOption) error {
+func editIssueState(requestCtx stdctx.Context, cmd *cli.Command, opts gitea.EditIssueOption) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -49,7 +49,7 @@ func editIssueState(_ stdctx.Context, cmd *cli.Command, opts gitea.EditIssueOpti
 
 	client := ctx.Login.Client()
 	for _, index := range indices {
-		issue, _, err := client.EditIssue(ctx.Owner, ctx.Repo, index, opts)
+		issue, _, err := client.Issues.EditIssue(requestCtx, ctx.Owner, ctx.Repo, index, opts)
 		if err != nil {
 			return err
 		}

@@ -6,7 +6,7 @@ package users
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -33,7 +33,7 @@ var CmdUserList = cli.Command{
 }
 
 // RunUserList list users
-func RunUserList(_ stdctx.Context, cmd *cli.Command) error {
+func RunUserList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -45,7 +45,7 @@ func RunUserList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	client := ctx.Login.Client()
-	users, _, err := client.AdminListUsers(gitea.AdminListUsersOptions{
+	users, _, err := client.Admin.ListUsers(requestCtx, gitea.AdminListUsersOptions{
 		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {

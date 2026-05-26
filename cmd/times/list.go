@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -71,7 +71,7 @@ Depending on your permissions on the repository, only your own tracked times mig
 }
 
 // RunTimesList list repositories
-func RunTimesList(_ stdctx.Context, cmd *cli.Command) error {
+func RunTimesList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -106,11 +106,11 @@ func RunTimesList(_ stdctx.Context, cmd *cli.Command) error {
 
 	user := ctx.Args().First()
 	if ctx.Bool("mine") {
-		times, _, err = client.ListMyTrackedTimes(opts)
+		times, _, err = client.Issues.ListMyTrackedTimes(requestCtx, opts)
 		fields = []string{"created", "repo", "issue", "duration"}
 	} else if user == "" {
 		// get all tracked times on the repo
-		times, _, err = client.ListRepoTrackedTimes(ctx.Owner, ctx.Repo, opts)
+		times, _, err = client.Issues.ListRepoTrackedTimes(requestCtx, ctx.Owner, ctx.Repo, opts)
 		fields = []string{"created", "issue", "user", "duration"}
 	} else if strings.HasPrefix(user, "#") {
 		// get all tracked times on the specified issue
@@ -118,12 +118,12 @@ func RunTimesList(_ stdctx.Context, cmd *cli.Command) error {
 		if parseErr != nil {
 			return parseErr
 		}
-		times, _, err = client.ListIssueTrackedTimes(ctx.Owner, ctx.Repo, issue, opts)
+		times, _, err = client.Issues.ListIssueTrackedTimes(requestCtx, ctx.Owner, ctx.Repo, issue, opts)
 		fields = []string{"created", "user", "duration"}
 	} else {
 		// get all tracked times by the specified user
 		opts.User = user
-		times, _, err = client.ListRepoTrackedTimes(ctx.Owner, ctx.Repo, opts)
+		times, _, err = client.Issues.ListRepoTrackedTimes(requestCtx, ctx.Owner, ctx.Repo, opts)
 		fields = []string{"created", "issue", "duration"}
 	}
 

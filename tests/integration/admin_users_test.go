@@ -4,14 +4,13 @@
 package integration
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -22,14 +21,14 @@ func runAdminCommand(t *testing.T, args []string) error {
 	t.Helper()
 
 	adminCmd := teacmd.CmdAdmin
-	return adminCmd.Run(context.Background(), args)
+	return adminCmd.Run(t.Context(), args)
 }
 
 func createAdminTestUser(t *testing.T, client *gitea.Client, username, password string) {
 	t.Helper()
 
 	mustChangePassword := false
-	user, _, err := client.AdminCreateUser(gitea.CreateUserOption{
+	user, _, err := client.Admin.CreateUser(t.Context(), gitea.CreateUserOption{
 		LoginName:          username,
 		Username:           username,
 		Email:              username + "@example.com",
@@ -40,7 +39,7 @@ func createAdminTestUser(t *testing.T, client *gitea.Client, username, password 
 	require.Equal(t, username, user.UserName)
 
 	t.Cleanup(func() {
-		if _, err := client.AdminDeleteUser(username); err != nil {
+		if _, err := client.Admin.DeleteUser(t.Context(), username); err != nil {
 			t.Logf("failed to delete integration test user %q: %v", username, err)
 		}
 	})
@@ -76,7 +75,7 @@ func TestAdminUsersCreateAndDelete(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	createdUser, _, err := client.GetUserInfo(username)
+	createdUser, _, err := client.Users.GetUserInfo(t.Context(), username)
 	require.NoError(t, err)
 	assert.Equal(t, username, createdUser.UserName)
 	assert.Equal(t, username+"@example.com", createdUser.Email)
@@ -91,7 +90,7 @@ func TestAdminUsersCreateAndDelete(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, _, err = client.GetUserInfo(username)
+	_, _, err = client.Users.GetUserInfo(t.Context(), username)
 	require.Error(t, err)
 }
 
@@ -118,7 +117,7 @@ func TestAdminUsersEdit(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	updatedUser, _, err := client.GetUserInfo(username)
+	updatedUser, _, err := client.Users.GetUserInfo(t.Context(), username)
 	require.NoError(t, err)
 	assert.Equal(t, username+"+new@example.com", updatedUser.Email)
 	assert.Equal(t, "Tea Integration", updatedUser.FullName)
@@ -134,7 +133,7 @@ func TestAdminUsersEdit(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	me, _, err := passwordClient.GetMyUserInfo()
+	me, _, err := passwordClient.Users.GetMyUserInfo(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, username, me.UserName)
 }

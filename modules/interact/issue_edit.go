@@ -4,6 +4,7 @@
 package interact
 
 import (
+	stdctx "context"
 	"slices"
 	"strings"
 
@@ -16,7 +17,7 @@ import (
 )
 
 // EditIssue interactively edits an issue
-func EditIssue(ctx context.TeaContext, index int64) (*task.EditIssueOption, error) {
+func EditIssue(requestCtx stdctx.Context, ctx context.TeaContext, index int64) (*task.EditIssueOption, error) {
 	opts := task.EditIssueOption{}
 	var err error
 
@@ -27,7 +28,7 @@ func EditIssue(ctx context.TeaContext, index int64) (*task.EditIssueOption, erro
 	printTitleAndContent("Target repo:", ctx.Owner+"/"+ctx.Repo)
 
 	c := ctx.Login.Client()
-	i, _, err := c.GetIssue(ctx.Owner, ctx.Repo, index)
+	i, _, err := c.Issues.GetIssue(requestCtx, ctx.Owner, ctx.Repo, index)
 	if err != nil {
 		return &opts, err
 	}
@@ -55,20 +56,20 @@ func EditIssue(ctx context.TeaContext, index int64) (*task.EditIssueOption, erro
 		opts.Milestone = &i.Milestone.Title
 	}
 
-	if err := promptIssueEditProperties(&ctx, &opts); err != nil {
+	if err := promptIssueEditProperties(requestCtx, &ctx, &opts); err != nil {
 		return &opts, err
 	}
 
 	return &opts, err
 }
 
-func promptIssueEditProperties(ctx *context.TeaContext, o *task.EditIssueOption) error {
+func promptIssueEditProperties(requestCtx stdctx.Context, ctx *context.TeaContext, o *task.EditIssueOption) error {
 	var milestoneName string
 	var labelsSelected []string
 	var err error
 
 	selectableChan := make(chan (issueSelectables), 1)
-	go fetchIssueSelectables(ctx.Login, ctx.Owner, ctx.Repo, selectableChan)
+	go fetchIssueSelectables(requestCtx, ctx.Login, ctx.Owner, ctx.Repo, selectableChan)
 
 	// title
 	if err := huh.NewInput().

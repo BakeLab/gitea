@@ -88,6 +88,7 @@ func runRepoClone(ctx stdctx.Context, cmd *cli.Command) error {
 	}
 
 	_, err = task.RepoClone(
+		ctx,
 		dir,
 		login,
 		owner,

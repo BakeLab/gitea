@@ -55,7 +55,7 @@ func runWorkflowsDisable(ctx stdctx.Context, cmd *cli.Command) error {
 		}
 	}
 
-	_, err = client.DisableRepoActionWorkflow(c.Owner, c.Repo, workflowID)
+	_, err = client.Actions.DisableRepoWorkflow(ctx, c.Owner, c.Repo, workflowID)
 	if err != nil {
 		return fmt.Errorf("failed to disable workflow: %w", err)
 	}

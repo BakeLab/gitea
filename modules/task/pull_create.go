@@ -4,11 +4,12 @@
 package task
 
 import (
+	stdctx "context"
 	"fmt"
 	"regexp"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/config"
 	"gitea.dev/tea/modules/context"
@@ -24,10 +25,10 @@ var (
 )
 
 // CreatePull creates a PR in the given repo and prints the result
-func CreatePull(ctx *context.TeaContext, base, head string, allowMaintainerEdits *bool, opts *gitea.CreateIssueOption) (err error) {
+func CreatePull(requestCtx stdctx.Context, ctx *context.TeaContext, base, head string, allowMaintainerEdits *bool, opts *gitea.CreateIssueOption) (err error) {
 	// default is default branch
 	if len(base) == 0 {
-		base, err = GetDefaultPRBase(ctx.Login, ctx.Owner, ctx.Repo)
+		base, err = GetDefaultPRBase(requestCtx, ctx.Login, ctx.Owner, ctx.Repo)
 		if err != nil {
 			return err
 		}
@@ -62,7 +63,7 @@ func CreatePull(ctx *context.TeaContext, base, head string, allowMaintainerEdits
 
 	client := ctx.Login.Client()
 
-	pr, _, err := client.CreatePullRequest(ctx.Owner, ctx.Repo, gitea.CreatePullRequestOption{
+	pr, _, err := client.PullRequests.CreatePullRequest(requestCtx, ctx.Owner, ctx.Repo, gitea.CreatePullRequestOption{
 		Head:      head,
 		Base:      base,
 		Title:     opts.Title,
@@ -77,7 +78,7 @@ func CreatePull(ctx *context.TeaContext, base, head string, allowMaintainerEdits
 	}
 
 	if allowMaintainerEdits != nil && pr.AllowMaintainerEdit != *allowMaintainerEdits {
-		pr, _, err = client.EditPullRequest(ctx.Owner, ctx.Repo, pr.Index, gitea.EditPullRequestOption{
+		pr, _, err = client.PullRequests.EditPullRequest(requestCtx, ctx.Owner, ctx.Repo, pr.Index, gitea.EditPullRequestOption{
 			AllowMaintainerEdit: allowMaintainerEdits,
 		})
 		if err != nil {
@@ -93,8 +94,8 @@ func CreatePull(ctx *context.TeaContext, base, head string, allowMaintainerEdits
 }
 
 // GetDefaultPRBase retrieves the default base branch for the given repo
-func GetDefaultPRBase(login *config.Login, owner, repo string) (string, error) {
-	meta, _, err := login.Client().GetRepo(owner, repo)
+func GetDefaultPRBase(requestCtx stdctx.Context, login *config.Login, owner, repo string) (string, error) {
+	meta, _, err := login.Client().Repositories.GetRepo(requestCtx, owner, repo)
 	if err != nil {
 		return "", fmt.Errorf("could not fetch repo meta: %s", err)
 	}
@@ -156,13 +157,13 @@ func GetDefaultPRTitle(header string) string {
 }
 
 // CreateAgitFlowPull creates a agit flow PR in the given repo and prints the result
-func CreateAgitFlowPull(ctx *context.TeaContext, remote, head, base, topic string,
+func CreateAgitFlowPull(requestCtx stdctx.Context, ctx *context.TeaContext, remote, head, base, topic string,
 	opts *gitea.CreateIssueOption,
 	callback func(string) (string, error),
 ) (err error) {
 	// default is default branch
 	if len(base) == 0 {
-		base, err = GetDefaultPRBase(ctx.Login, ctx.Owner, ctx.Repo)
+		base, err = GetDefaultPRBase(requestCtx, ctx.Login, ctx.Owner, ctx.Repo)
 		if err != nil {
 			return err
 		}

@@ -31,7 +31,7 @@ var CmdUserDelete = cli.Command{
 }
 
 // RunUserDelete deletes a user
-func RunUserDelete(_ stdctx.Context, cmd *cli.Command) error {
+func RunUserDelete(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -45,7 +45,7 @@ func RunUserDelete(_ stdctx.Context, cmd *cli.Command) error {
 	username := ctx.Args().First()
 
 	// Get user details first to show what we're deleting
-	user, _, err := client.GetUserInfo(username)
+	user, _, err := client.Users.GetUserInfo(requestCtx, username)
 	if err != nil {
 		return fmt.Errorf("failed to get user info: %w", err)
 	}
@@ -67,7 +67,7 @@ func RunUserDelete(_ stdctx.Context, cmd *cli.Command) error {
 		}
 	}
 
-	_, err = client.AdminDeleteUser(username)
+	_, err = client.Admin.DeleteUser(requestCtx, username)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}

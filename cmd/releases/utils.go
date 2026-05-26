@@ -4,15 +4,16 @@
 package releases
 
 import (
+	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 )
 
 // GetReleaseByTag finds a release by its tag name.
-func GetReleaseByTag(owner, repo, tag string, client *gitea.Client) (*gitea.Release, error) {
+func GetReleaseByTag(ctx stdctx.Context, owner, repo, tag string, client *gitea.Client) (*gitea.Release, error) {
 	for page := 1; ; {
-		rl, resp, err := client.ListReleases(owner, repo, gitea.ListReleasesOptions{
+		rl, resp, err := client.Releases.ListReleases(ctx, owner, repo, gitea.ListReleasesOptions{
 			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
 		})
 		if err != nil {

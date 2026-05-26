@@ -36,17 +36,13 @@ func runOrganizations(ctx stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 	if teaCtx.Args().Len() == 1 {
-		return runOrganizationDetail(teaCtx)
+		org, _, err := teaCtx.Login.Client().Organizations.GetOrg(ctx, teaCtx.Args().First())
+		if err != nil {
+			return err
+		}
+
+		print.OrganizationDetails(org)
+		return nil
 	}
 	return organizations.RunOrganizationList(ctx, cmd)
-}
-
-func runOrganizationDetail(ctx *context.TeaContext) error {
-	org, _, err := ctx.Login.Client().GetOrg(ctx.Args().First())
-	if err != nil {
-		return err
-	}
-
-	print.OrganizationDetails(org)
-	return nil
 }

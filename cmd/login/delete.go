@@ -23,7 +23,7 @@ var CmdLoginDelete = cli.Command{
 }
 
 // RunLoginDelete runs the action of a login delete command
-func RunLoginDelete(_ context.Context, cmd *cli.Command) error {
+func RunLoginDelete(requestCtx context.Context, cmd *cli.Command) error {
 	logins, err := config.GetLogins()
 	if err != nil {
 		return err

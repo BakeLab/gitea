@@ -6,7 +6,7 @@ package print
 import (
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 )
 
 func formatByteSize(size int64) string {

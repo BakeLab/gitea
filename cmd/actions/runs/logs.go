@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -69,10 +69,10 @@ func runRunsLogs(ctx stdctx.Context, cmd *cli.Command) error {
 		}
 
 		if follow {
-			return followJobLogs(client, c, jobID, "")
+			return followJobLogs(ctx, client, c, jobID, "")
 		}
 
-		logs, _, err := client.GetRepoActionJobLogs(c.Owner, c.Repo, jobID)
+		logs, _, err := client.Actions.GetRepoRunJobLogs(ctx, c.Owner, c.Repo, jobID)
 		if err != nil {
 			return fmt.Errorf("failed to get logs for job %d: %w", jobID, err)
 		}
@@ -83,7 +83,7 @@ func runRunsLogs(ctx stdctx.Context, cmd *cli.Command) error {
 	}
 
 	// Otherwise, fetch all jobs and their logs
-	jobs, _, err := client.ListRepoActionRunJobs(c.Owner, c.Repo, runID, gitea.ListRepoActionJobsOptions{
+	jobs, _, err := client.Actions.ListRepoJobsByRun(ctx, c.Owner, c.Repo, runID, gitea.ListRepoActionJobsOptions{
 		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {
@@ -102,7 +102,7 @@ func runRunsLogs(ctx stdctx.Context, cmd *cli.Command) error {
 
 	// If following with single job, follow it
 	if follow && len(jobs.Jobs) == 1 {
-		return followJobLogs(client, c, jobs.Jobs[0].ID, jobs.Jobs[0].Name)
+		return followJobLogs(ctx, client, c, jobs.Jobs[0].ID, jobs.Jobs[0].Name)
 	}
 
 	// Fetch logs for each job
@@ -115,7 +115,7 @@ func runRunsLogs(ctx stdctx.Context, cmd *cli.Command) error {
 		fmt.Printf("Status: %s\n", job.Status)
 		fmt.Println("---")
 
-		logs, _, err := client.GetRepoActionJobLogs(c.Owner, c.Repo, job.ID)
+		logs, _, err := client.Actions.GetRepoRunJobLogs(ctx, c.Owner, c.Repo, job.ID)
 		if err != nil {
 			fmt.Printf("Error fetching logs: %v\n", err)
 			continue
@@ -128,7 +128,7 @@ func runRunsLogs(ctx stdctx.Context, cmd *cli.Command) error {
 }
 
 // followJobLogs continuously fetches and displays logs for a running job
-func followJobLogs(client *gitea.Client, c *context.TeaContext, jobID int64, jobName string) error {
+func followJobLogs(requestCtx stdctx.Context, client *gitea.Client, c *context.TeaContext, jobID int64, jobName string) error {
 	var lastLogLength int
 
 	if jobName != "" {
@@ -140,7 +140,7 @@ func followJobLogs(client *gitea.Client, c *context.TeaContext, jobID int64, job
 
 	for {
 		// Fetch job status
-		job, _, err := client.GetRepoActionJob(c.Owner, c.Repo, jobID)
+		job, _, err := client.Actions.GetRepoRunJob(requestCtx, c.Owner, c.Repo, jobID)
 		if err != nil {
 			return fmt.Errorf("failed to get job: %w", err)
 		}
@@ -149,7 +149,7 @@ func followJobLogs(client *gitea.Client, c *context.TeaContext, jobID int64, job
 		isRunning := job.Status == "in_progress" || job.Status == "queued" || job.Status == "pending"
 
 		// Fetch logs
-		logs, _, err := client.GetRepoActionJobLogs(c.Owner, c.Repo, jobID)
+		logs, _, err := client.Actions.GetRepoRunJobLogs(requestCtx, c.Owner, c.Repo, jobID)
 		if err != nil {
 			return fmt.Errorf("failed to get logs: %w", err)
 		}

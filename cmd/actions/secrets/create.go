@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -62,7 +62,7 @@ func runSecretsCreate(ctx stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	_, err = client.CreateRepoActionSecret(c.Owner, c.Repo, secretName, gitea.CreateOrUpdateSecretOption{
+	_, err = client.Actions.CreateRepoSecret(ctx, c.Owner, c.Repo, secretName, gitea.CreateOrUpdateSecretOption{
 		Data: secretValue,
 	})
 	if err != nil {

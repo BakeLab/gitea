@@ -8,7 +8,7 @@ import (
 
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/araddon/dateparse"
 	"github.com/urfave/cli/v3"
 
@@ -50,7 +50,7 @@ var CmdMilestonesCreate = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runMilestonesCreate(_ stdctx.Context, cmd *cli.Command) error {
+func runMilestonesCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -72,14 +72,13 @@ func runMilestonesCreate(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	if ctx.IsInteractiveMode() {
-		if err := interact.CreateMilestone(ctx.Login, ctx.Owner, ctx.Repo); err != nil && !interact.IsQuitting(err) {
+		if err := interact.CreateMilestone(requestCtx, ctx.Login, ctx.Owner, ctx.Repo); err != nil && !interact.IsQuitting(err) {
 			return err
 		}
 		return nil
 	}
 
-	return task.CreateMilestone(
-		ctx.Login,
+	return task.CreateMilestone(requestCtx, ctx.Login,
 		ctx.Owner,
 		ctx.Repo,
 		ctx.String("title"),

@@ -4,10 +4,11 @@
 package task
 
 import (
+	stdctx "context"
 	"fmt"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/context"
 )
@@ -30,12 +31,12 @@ type EditIssueOption struct {
 
 // Normalizes the options into parameters that can be passed to the sdk.
 // the returned value will be nil, when no change to this part of the issue is requested.
-func (o EditIssueOption) toSdkOptions(ctx *context.TeaContext, client *gitea.Client) (*gitea.EditIssueOption, *gitea.IssueLabelsOption, *gitea.IssueLabelsOption, error) {
-	addLabelOpts, err := ResolveLabelOpts(client, ctx.Owner, ctx.Repo, o.AddLabels)
+func (o EditIssueOption) toSdkOptions(requestCtx stdctx.Context, ctx *context.TeaContext, client *gitea.Client) (*gitea.EditIssueOption, *gitea.IssueLabelsOption, *gitea.IssueLabelsOption, error) {
+	addLabelOpts, err := ResolveLabelOpts(requestCtx, client, ctx.Owner, ctx.Repo, o.AddLabels)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	rmLabelOpts, err := ResolveLabelOpts(client, ctx.Owner, ctx.Repo, o.RemoveLabels)
+	rmLabelOpts, err := ResolveLabelOpts(requestCtx, client, ctx.Owner, ctx.Repo, o.RemoveLabels)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -55,7 +56,7 @@ func (o EditIssueOption) toSdkOptions(ctx *context.TeaContext, client *gitea.Cli
 		issueOptsDirty = true
 	}
 	if o.Milestone != nil {
-		id, err := ResolveMilestoneID(client, ctx.Owner, ctx.Repo, *o.Milestone)
+		id, err := ResolveMilestoneID(requestCtx, client, ctx.Owner, ctx.Repo, *o.Milestone)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -81,28 +82,28 @@ func (o EditIssueOption) toSdkOptions(ctx *context.TeaContext, client *gitea.Cli
 }
 
 // EditIssue edits an issue and returns the updated issue.
-func EditIssue(ctx *context.TeaContext, client *gitea.Client, opts EditIssueOption) (*gitea.Issue, error) {
+func EditIssue(requestCtx stdctx.Context, ctx *context.TeaContext, client *gitea.Client, opts EditIssueOption) (*gitea.Issue, error) {
 	if client == nil {
 		client = ctx.Login.Client()
 	}
 
-	issueOpts, addLabelOpts, rmLabelOpts, err := opts.toSdkOptions(ctx, client)
+	issueOpts, addLabelOpts, rmLabelOpts, err := opts.toSdkOptions(requestCtx, ctx, client)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := ApplyLabelChanges(client, ctx.Owner, ctx.Repo, opts.Index, addLabelOpts, rmLabelOpts); err != nil {
+	if err := ApplyLabelChanges(requestCtx, client, ctx.Owner, ctx.Repo, opts.Index, addLabelOpts, rmLabelOpts); err != nil {
 		return nil, err
 	}
 
 	var issue *gitea.Issue
 	if issueOpts != nil {
-		issue, _, err = client.EditIssue(ctx.Owner, ctx.Repo, opts.Index, *issueOpts)
+		issue, _, err = client.Issues.EditIssue(requestCtx, ctx.Owner, ctx.Repo, opts.Index, *issueOpts)
 		if err != nil {
 			return nil, fmt.Errorf("could not edit issue: %s", err)
 		}
 	} else {
-		issue, _, err = client.GetIssue(ctx.Owner, ctx.Repo, opts.Index)
+		issue, _, err = client.Issues.GetIssue(requestCtx, ctx.Owner, ctx.Repo, opts.Index)
 		if err != nil {
 			return nil, fmt.Errorf("could not get issue: %s", err)
 		}

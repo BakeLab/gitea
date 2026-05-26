@@ -10,7 +10,7 @@ import (
 	"io"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/config"
@@ -36,7 +36,7 @@ var CmdAddComment = cli.Command{
 	Flags:       flags.AllDefaultFlags,
 }
 
-func runAddComment(_ stdctx.Context, cmd *cli.Command) error {
+func runAddComment(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -83,7 +83,7 @@ func runAddComment(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	client := ctx.Login.Client()
-	comment, _, err := client.CreateIssueComment(ctx.Owner, ctx.Repo, idx, gitea.CreateIssueCommentOption{
+	comment, _, err := client.Issues.CreateIssueComment(requestCtx, ctx.Owner, ctx.Repo, idx, gitea.CreateIssueCommentOption{
 		Body: body,
 	})
 	if err != nil {

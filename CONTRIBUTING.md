@@ -124,7 +124,7 @@ import (
 
   // local packages
   "code.gitea.io/gitea/models"
-  "code.gitea.io/sdk/gitea"
+  "gitea.dev/sdk"
 
   // external packages
   "github.com/foo/bar"

@@ -32,7 +32,7 @@ var CmdSSHKeyDelete = cli.Command{
 }
 
 // RunSSHKeyDelete removes an SSH key by its numeric ID
-func RunSSHKeyDelete(_ stdctx.Context, cmd *cli.Command) error {
+func RunSSHKeyDelete(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -49,7 +49,7 @@ func RunSSHKeyDelete(_ stdctx.Context, cmd *cli.Command) error {
 
 	client := ctx.Login.Client()
 
-	key, resp, err := client.GetPublicKey(keyID)
+	key, resp, err := client.Users.GetPublicKey(requestCtx, keyID)
 	if err != nil {
 		if resp != nil && resp.StatusCode == 404 {
 			return fmt.Errorf("SSH key with ID %d not found", keyID)
@@ -67,7 +67,7 @@ func RunSSHKeyDelete(_ stdctx.Context, cmd *cli.Command) error {
 		}
 	}
 
-	if _, err = client.DeletePublicKey(keyID); err != nil {
+	if _, err = client.Users.DeletePublicKey(requestCtx, keyID); err != nil {
 		return err
 	}
 

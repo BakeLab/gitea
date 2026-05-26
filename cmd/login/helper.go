@@ -29,14 +29,14 @@ var CmdLoginHelper = cli.Command{
 			Name:        "store",
 			Description: "Command drops",
 			Aliases:     []string{"erase"},
-			Action: func(_ context.Context, _ *cli.Command) error {
+			Action: func(requestCtx context.Context, _ *cli.Command) error {
 				return nil
 			},
 		},
 		{
 			Name:        "setup",
 			Description: "Setup helper to tea authenticate",
-			Action: func(_ context.Context, _ *cli.Command) error {
+			Action: func(requestCtx context.Context, _ *cli.Command) error {
 				logins, err := config.GetLogins()
 				if err != nil {
 					return err
@@ -64,7 +64,7 @@ var CmdLoginHelper = cli.Command{
 					Usage:   "Use a specific login",
 				},
 			},
-			Action: func(_ context.Context, cmd *cli.Command) error {
+			Action: func(requestCtx context.Context, cmd *cli.Command) error {
 				wants := map[string]string{}
 				s := bufio.NewScanner(os.Stdin)
 				for s.Scan() {

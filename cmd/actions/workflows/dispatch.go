@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -87,7 +87,7 @@ func runWorkflowsDispatch(ctx stdctx.Context, cmd *cli.Command) error {
 		Inputs: inputs,
 	}
 
-	details, _, err := client.DispatchRepoActionWorkflow(c.Owner, c.Repo, workflowID, opt, true)
+	details, _, err := client.Actions.DispatchRepoWorkflow(ctx, c.Owner, c.Repo, workflowID, opt, true)
 	if err != nil {
 		return fmt.Errorf("failed to dispatch workflow: %w", err)
 	}
@@ -95,7 +95,7 @@ func runWorkflowsDispatch(ctx stdctx.Context, cmd *cli.Command) error {
 	print.ActionWorkflowDispatchResult(details)
 
 	if cmd.Bool("follow") && details != nil && details.WorkflowRunID > 0 {
-		return followDispatchedRun(client, c, details.WorkflowRunID)
+		return followDispatchedRun(ctx, client, c, details.WorkflowRunID)
 	}
 
 	return nil
@@ -107,7 +107,7 @@ const (
 )
 
 // followDispatchedRun waits for the dispatched run to start, then follows its logs
-func followDispatchedRun(client *gitea.Client, c *context.TeaContext, runID int64) error {
+func followDispatchedRun(ctx stdctx.Context, client *gitea.Client, c *context.TeaContext, runID int64) error {
 	fmt.Printf("\nWaiting for run %d to start...\n", runID)
 
 	var jobs *gitea.ActionWorkflowJobsResponse
@@ -115,7 +115,7 @@ func followDispatchedRun(client *gitea.Client, c *context.TeaContext, runID int6
 		time.Sleep(followPollInterval)
 
 		var err error
-		jobs, _, err = client.ListRepoActionRunJobs(c.Owner, c.Repo, runID, gitea.ListRepoActionJobsOptions{})
+		jobs, _, err = client.Actions.ListRepoJobsByRun(ctx, c.Owner, c.Repo, runID, gitea.ListRepoActionJobsOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to get jobs: %w", err)
 		}
@@ -136,14 +136,14 @@ func followDispatchedRun(client *gitea.Client, c *context.TeaContext, runID int6
 	deadline := time.Now().Add(followMaxDuration)
 	var lastLogLength int
 	for time.Now().Before(deadline) {
-		job, _, err := client.GetRepoActionJob(c.Owner, c.Repo, jobID)
+		job, _, err := client.Actions.GetRepoRunJob(ctx, c.Owner, c.Repo, jobID)
 		if err != nil {
 			return fmt.Errorf("failed to get job: %w", err)
 		}
 
 		isRunning := job.Status == "in_progress" || job.Status == "queued" || job.Status == "pending"
 
-		logs, _, logErr := client.GetRepoActionJobLogs(c.Owner, c.Repo, jobID)
+		logs, _, logErr := client.Actions.GetRepoRunJobLogs(ctx, c.Owner, c.Repo, jobID)
 		if logErr != nil && isRunning {
 			time.Sleep(followPollInterval)
 			continue

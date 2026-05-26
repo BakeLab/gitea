@@ -4,11 +4,12 @@
 package flags
 
 import (
+	stdctx "context"
 	"fmt"
 	"strings"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/context"
 	"gitea.dev/tea/modules/task"
@@ -131,7 +132,7 @@ var IssuePRCreateFlags = append([]cli.Flag{
 }, issuePRFlags...)
 
 // GetIssuePRCreateFlags parses all IssuePREditFlags
-func GetIssuePRCreateFlags(ctx *context.TeaContext) (*gitea.CreateIssueOption, error) {
+func GetIssuePRCreateFlags(requestCtx stdctx.Context, ctx *context.TeaContext) (*gitea.CreateIssueOption, error) {
 	opts := gitea.CreateIssueOption{
 		Title:     ctx.String("title"),
 		Body:      ctx.String("description"),
@@ -155,7 +156,7 @@ func GetIssuePRCreateFlags(ctx *context.TeaContext) (*gitea.CreateIssueOption, e
 		if client == nil {
 			client = ctx.Login.Client()
 		}
-		if opts.Labels, err = task.ResolveLabelNames(client, ctx.Owner, ctx.Repo, labelNames); err != nil {
+		if opts.Labels, err = task.ResolveLabelNames(requestCtx, client, ctx.Owner, ctx.Repo, labelNames); err != nil {
 			return nil, err
 		}
 	}
@@ -164,7 +165,7 @@ func GetIssuePRCreateFlags(ctx *context.TeaContext) (*gitea.CreateIssueOption, e
 		if client == nil {
 			client = ctx.Login.Client()
 		}
-		ms, _, err := client.GetMilestoneByName(ctx.Owner, ctx.Repo, milestoneName)
+		ms, _, err := client.Repositories.GetMilestoneByName(requestCtx, ctx.Owner, ctx.Repo, milestoneName)
 		if err != nil {
 			return nil, fmt.Errorf("milestone '%s' not found", milestoneName)
 		}

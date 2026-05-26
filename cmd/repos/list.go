@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -57,7 +57,7 @@ var CmdReposList = cli.Command{
 }
 
 // RunReposList list repositories
-func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
+func RunReposList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	teaCmd, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -72,17 +72,17 @@ func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
 	var rps []*gitea.Repository
 	if owner := teaCmd.String("owner"); owner != "" {
 		var err error
-		_, resp, orgErr := client.GetOrg(owner)
+		_, resp, orgErr := client.Organizations.GetOrg(requestCtx, owner)
 		if orgErr != nil {
 			if resp == nil || resp.StatusCode != http.StatusNotFound {
 				return fmt.Errorf("could not find owner: %w", orgErr)
 			}
 			// not an org, treat as user
-			rps, _, err = client.ListUserRepos(owner, gitea.ListReposOptions{
+			rps, _, err = client.Repositories.ListUserRepos(requestCtx, owner, gitea.ListReposOptions{
 				ListOptions: flags.GetListOptions(cmd),
 			})
 		} else {
-			rps, _, err = client.ListOrgRepos(owner, gitea.ListOrgReposOptions{
+			rps, _, err = client.Repositories.ListOrgRepos(requestCtx, owner, gitea.ListOrgReposOptions{
 				ListOptions: flags.GetListOptions(cmd),
 			})
 		}
@@ -90,11 +90,11 @@ func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
 			return err
 		}
 	} else if teaCmd.Bool("starred") {
-		user, _, err := client.GetMyUserInfo()
+		user, _, err := client.Users.GetMyUserInfo(requestCtx)
 		if err != nil {
 			return err
 		}
-		rps, _, err = client.SearchRepos(gitea.SearchRepoOptions{
+		rps, _, err = client.Repositories.SearchRepos(requestCtx, gitea.SearchRepoOptions{
 			ListOptions:     flags.GetListOptions(cmd),
 			StarredByUserID: user.ID,
 		})
@@ -104,14 +104,14 @@ func RunReposList(_ stdctx.Context, cmd *cli.Command) error {
 	} else if teaCmd.Bool("watched") {
 		// GetMyWatchedRepos doesn't expose server-side pagination,
 		// so we implement client-side pagination as a workaround
-		allRepos, _, err := client.GetMyWatchedRepos()
+		allRepos, _, err := client.Repositories.GetMyWatchedRepos(requestCtx)
 		if err != nil {
 			return err
 		}
 		rps = paginateRepos(allRepos, flags.GetListOptions(cmd))
 	} else {
 		var err error
-		rps, _, err = client.ListMyRepos(gitea.ListReposOptions{
+		rps, _, err = client.Repositories.ListMyRepos(requestCtx, gitea.ListReposOptions{
 			ListOptions: flags.GetListOptions(cmd),
 		})
 		if err != nil {

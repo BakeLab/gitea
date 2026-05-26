@@ -25,7 +25,7 @@ var CmdLoginList = cli.Command{
 }
 
 // RunLoginList list all logins
-func RunLoginList(_ context.Context, cmd *cli.Command) error {
+func RunLoginList(requestCtx context.Context, cmd *cli.Command) error {
 	logins, err := config.GetLogins()
 	if err != nil {
 		return err

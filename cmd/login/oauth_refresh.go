@@ -22,7 +22,7 @@ var CmdLoginOAuthRefresh = cli.Command{
 	Action:      runLoginOAuthRefresh,
 }
 
-func runLoginOAuthRefresh(_ context.Context, cmd *cli.Command) error {
+func runLoginOAuthRefresh(requestCtx context.Context, cmd *cli.Command) error {
 	var loginName string
 
 	// Get login name from args or use default
@@ -62,7 +62,7 @@ func runLoginOAuthRefresh(_ context.Context, cmd *cli.Command) error {
 	fmt.Printf("Token refresh failed: %s\n", err)
 	fmt.Println("Opening browser for re-authentication...")
 
-	if err := auth.ReauthenticateLogin(login); err != nil {
+	if err := auth.ReauthenticateLogin(requestCtx, login); err != nil {
 		return fmt.Errorf("re-authentication failed: %s", err)
 	}
 

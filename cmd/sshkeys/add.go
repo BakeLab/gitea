@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -35,7 +35,7 @@ var CmdSSHKeyAdd = cli.Command{
 }
 
 // RunSSHKeyAdd reads a public key file and registers it with the Gitea instance
-func RunSSHKeyAdd(_ stdctx.Context, cmd *cli.Command) error {
+func RunSSHKeyAdd(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -62,7 +62,7 @@ func RunSSHKeyAdd(_ stdctx.Context, cmd *cli.Command) error {
 		title = strings.TrimSuffix(base, filepath.Ext(base))
 	}
 
-	key, _, err := ctx.Login.Client().CreatePublicKey(gitea.CreateKeyOption{
+	key, _, err := ctx.Login.Client().Users.CreatePublicKey(requestCtx, gitea.CreateKeyOption{
 		Title: title,
 		Key:   keyContent,
 	})

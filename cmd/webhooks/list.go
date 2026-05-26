@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -40,11 +40,11 @@ func RunWebhooksList(ctx stdctx.Context, cmd *cli.Command) error {
 	if c.IsGlobal {
 		return fmt.Errorf("global webhooks not yet supported in this version")
 	} else if len(c.Org) > 0 {
-		hooks, _, err = client.ListOrgHooks(c.Org, gitea.ListHooksOptions{
+		hooks, _, err = client.Hooks.ListOrgHooks(ctx, c.Org, gitea.ListHooksOptions{
 			ListOptions: flags.GetListOptions(cmd),
 		})
 	} else {
-		hooks, _, err = client.ListRepoHooks(c.Owner, c.Repo, gitea.ListHooksOptions{
+		hooks, _, err = client.Hooks.ListRepoHooks(ctx, c.Owner, c.Repo, gitea.ListHooksOptions{
 			ListOptions: flags.GetListOptions(cmd),
 		})
 	}

@@ -6,7 +6,7 @@ package branches
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -37,7 +37,7 @@ var CmdBranchesList = cli.Command{
 }
 
 // RunBranchesList list branches
-func RunBranchesList(_ stdctx.Context, cmd *cli.Command) error {
+func RunBranchesList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -53,14 +53,14 @@ func RunBranchesList(_ stdctx.Context, cmd *cli.Command) error {
 
 	var branches []*gitea.Branch
 	var protections []*gitea.BranchProtection
-	branches, _, err = ctx.Login.Client().ListRepoBranches(owner, ctx.Repo, gitea.ListRepoBranchesOptions{
+	branches, _, err = ctx.Login.Client().Repositories.ListRepoBranches(requestCtx, owner, ctx.Repo, gitea.ListRepoBranchesOptions{
 		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {
 		return err
 	}
 
-	protections, _, err = ctx.Login.Client().ListBranchProtections(owner, ctx.Repo, gitea.ListBranchProtectionsOptions{
+	protections, _, err = ctx.Login.Client().Repositories.ListBranchProtections(requestCtx, owner, ctx.Repo, gitea.ListBranchProtectionsOptions{
 		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {

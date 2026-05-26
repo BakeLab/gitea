@@ -24,7 +24,7 @@ endif
 TEA_VERSION_TAG ?= $(shell sed 's/+/_/' <<< $(TEA_VERSION))
 
 TAGS ?=
-SDK ?= $(shell $(GO) list -f '{{.Version}}' -m code.gitea.io/sdk/gitea)
+SDK ?= $(shell $(GO) list -f '{{.Version}}' -m gitea.dev/sdk)
 LDFLAGS := -X "gitea.dev/tea/modules/version.Version=$(TEA_VERSION)" -X "gitea.dev/tea/modules/version.Tags=$(TAGS)" -X "gitea.dev/tea/modules/version.SDK=$(SDK)" -s -w
 
 # override to allow passing additional goflags via make CLI

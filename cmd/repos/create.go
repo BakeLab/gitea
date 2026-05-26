@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -102,7 +102,7 @@ var CmdRepoCreate = cli.Command{
 	}, flags.LoginOutputFlags...),
 }
 
-func runRepoCreate(_ stdctx.Context, cmd *cli.Command) error {
+func runRepoCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -141,15 +141,15 @@ func runRepoCreate(_ stdctx.Context, cmd *cli.Command) error {
 		ObjectFormatName: ctx.String("object-format"),
 	}
 	if len(ctx.String("owner")) != 0 {
-		repo, _, err = client.CreateOrgRepo(ctx.String("owner"), opts)
+		repo, _, err = client.Repositories.CreateOrgRepo(requestCtx, ctx.String("owner"), opts)
 	} else {
-		repo, _, err = client.CreateRepo(opts)
+		repo, _, err = client.Repositories.CreateRepo(requestCtx, opts)
 	}
 	if err != nil {
 		return err
 	}
 
-	topics, _, err := client.ListRepoTopics(repo.Owner.UserName, repo.Name, gitea.ListRepoTopicsOptions{})
+	topics, _, err := client.Repositories.ListRepoTopics(requestCtx, repo.Owner.UserName, repo.Name, gitea.ListRepoTopicsOptions{})
 	if err != nil {
 		return err
 	}

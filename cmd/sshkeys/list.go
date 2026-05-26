@@ -6,7 +6,7 @@ package sshkeys
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -30,14 +30,14 @@ var CmdSSHKeyList = cli.Command{
 }
 
 // RunSSHKeyList lists SSH keys for the current user
-func RunSSHKeyList(_ stdctx.Context, cmd *cli.Command) error {
+func RunSSHKeyList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
 	}
 	client := ctx.Login.Client()
 
-	keys, _, err := client.ListMyPublicKeys(gitea.ListPublicKeysOptions{
+	keys, _, err := client.Users.ListMyPublicKeys(requestCtx, gitea.ListPublicKeysOptions{
 		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {

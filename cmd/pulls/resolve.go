@@ -19,12 +19,12 @@ var CmdPullsResolve = cli.Command{
 	Usage:       "Resolve a review comment on a pull request",
 	Description: "Resolve a review comment on a pull request",
 	ArgsUsage:   "<comment id>",
-	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
 		ctx, err := context.InitCommand(cmd)
 		if err != nil {
 			return err
 		}
-		return runResolveComment(ctx, task.ResolvePullReviewComment)
+		return runResolveComment(requestCtx, ctx, task.ResolvePullReviewComment)
 	},
 	Flags: flags.AllDefaultFlags,
 }

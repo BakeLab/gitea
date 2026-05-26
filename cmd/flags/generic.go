@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
 )
 

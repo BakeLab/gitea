@@ -6,7 +6,7 @@ package milestones
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -39,7 +39,7 @@ var CmdMilestonesList = cli.Command{
 }
 
 // RunMilestonesList list milestones
-func RunMilestonesList(_ stdctx.Context, cmd *cli.Command) error {
+func RunMilestonesList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -62,7 +62,7 @@ func RunMilestonesList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	client := ctx.Login.Client()
-	milestones, _, err := client.ListRepoMilestones(ctx.Owner, ctx.Repo, gitea.ListMilestoneOption{
+	milestones, _, err := client.Repositories.ListMilestones(requestCtx, ctx.Owner, ctx.Repo, gitea.ListMilestoneOption{
 		ListOptions: flags.GetListOptions(cmd),
 		State:       state,
 	})

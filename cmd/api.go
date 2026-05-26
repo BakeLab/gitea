@@ -104,7 +104,7 @@ type preparedAPIRequest struct {
 	Body     []byte
 }
 
-func runApi(_ stdctx.Context, cmd *cli.Command) error {
+func runApi(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err

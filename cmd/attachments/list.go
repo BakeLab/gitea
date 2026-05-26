@@ -7,8 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
-
+	gitea "gitea.dev/sdk"
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/cmd/releases"
 	"gitea.dev/tea/modules/context"
@@ -31,7 +30,7 @@ var CmdReleaseAttachmentList = cli.Command{
 }
 
 // RunReleaseAttachmentList list release attachments
-func RunReleaseAttachmentList(_ stdctx.Context, cmd *cli.Command) error {
+func RunReleaseAttachmentList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -46,12 +45,12 @@ func RunReleaseAttachmentList(_ stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("release tag needed to list attachments")
 	}
 
-	release, err := releases.GetReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
+	release, err := releases.GetReleaseByTag(requestCtx, ctx.Owner, ctx.Repo, tag, client)
 	if err != nil {
 		return err
 	}
 
-	attachments, _, err := ctx.Login.Client().ListReleaseAttachments(ctx.Owner, ctx.Repo, release.ID, gitea.ListReleaseAttachmentsOptions{
+	attachments, _, err := ctx.Login.Client().Releases.ListReleaseAttachments(requestCtx, ctx.Owner, ctx.Repo, release.ID, gitea.ListReleaseAttachmentsOptions{
 		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {

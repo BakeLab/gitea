@@ -4,24 +4,24 @@
 package task
 
 import (
+	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
-
+	gitea "gitea.dev/sdk"
 	"gitea.dev/tea/modules/context"
 )
 
 // EditPull edits a pull request and returns the updated pull request.
-func EditPull(ctx *context.TeaContext, client *gitea.Client, opts EditIssueOption) (*gitea.PullRequest, error) {
+func EditPull(requestCtx stdctx.Context, ctx *context.TeaContext, client *gitea.Client, opts EditIssueOption) (*gitea.PullRequest, error) {
 	if client == nil {
 		client = ctx.Login.Client()
 	}
 
-	addLabelOpts, err := ResolveLabelOpts(client, ctx.Owner, ctx.Repo, opts.AddLabels)
+	addLabelOpts, err := ResolveLabelOpts(requestCtx, client, ctx.Owner, ctx.Repo, opts.AddLabels)
 	if err != nil {
 		return nil, err
 	}
-	rmLabelOpts, err := ResolveLabelOpts(client, ctx.Owner, ctx.Repo, opts.RemoveLabels)
+	rmLabelOpts, err := ResolveLabelOpts(requestCtx, client, ctx.Owner, ctx.Repo, opts.RemoveLabels)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +37,7 @@ func EditPull(ctx *context.TeaContext, client *gitea.Client, opts EditIssueOptio
 		prOptsDirty = true
 	}
 	if opts.Milestone != nil {
-		id, err := ResolveMilestoneID(client, ctx.Owner, ctx.Repo, *opts.Milestone)
+		id, err := ResolveMilestoneID(requestCtx, client, ctx.Owner, ctx.Repo, *opts.Milestone)
 		if err != nil {
 			return nil, err
 		}
@@ -56,22 +56,22 @@ func EditPull(ctx *context.TeaContext, client *gitea.Client, opts EditIssueOptio
 		prOptsDirty = true
 	}
 
-	if err := ApplyLabelChanges(client, ctx.Owner, ctx.Repo, opts.Index, addLabelOpts, rmLabelOpts); err != nil {
+	if err := ApplyLabelChanges(requestCtx, client, ctx.Owner, ctx.Repo, opts.Index, addLabelOpts, rmLabelOpts); err != nil {
 		return nil, err
 	}
 
-	if err := ApplyReviewerChanges(client, ctx.Owner, ctx.Repo, opts.Index, opts.AddReviewers, opts.RemoveReviewers); err != nil {
+	if err := ApplyReviewerChanges(requestCtx, client, ctx.Owner, ctx.Repo, opts.Index, opts.AddReviewers, opts.RemoveReviewers); err != nil {
 		return nil, err
 	}
 
 	var pr *gitea.PullRequest
 	if prOptsDirty {
-		pr, _, err = client.EditPullRequest(ctx.Owner, ctx.Repo, opts.Index, prOpts)
+		pr, _, err = client.PullRequests.EditPullRequest(requestCtx, ctx.Owner, ctx.Repo, opts.Index, prOpts)
 		if err != nil {
 			return nil, fmt.Errorf("could not edit pull request: %s", err)
 		}
 	} else {
-		pr, _, err = client.GetPullRequest(ctx.Owner, ctx.Repo, opts.Index)
+		pr, _, err = client.PullRequests.GetPullRequest(requestCtx, ctx.Owner, ctx.Repo, opts.Index)
 		if err != nil {
 			return nil, fmt.Errorf("could not get pull request: %s", err)
 		}

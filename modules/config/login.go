@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/debug"
 	"gitea.dev/tea/modules/httputil"
@@ -342,7 +342,7 @@ func (l *Login) RefreshOAuthToken() error {
 				}
 
 				// Still need to refresh - proceed with OAuth call
-				newToken, err := doOAuthRefresh(l)
+				newToken, err := doOAuthRefresh(context.Background(), l)
 				if err != nil {
 					return err
 				}
@@ -370,7 +370,7 @@ func (l *Login) RefreshOAuthToken() error {
 }
 
 // doOAuthRefresh performs the actual OAuth token refresh API call.
-func doOAuthRefresh(l *Login) (*oauth2.Token, error) {
+func doOAuthRefresh(ctx context.Context, l *Login) (*oauth2.Token, error) {
 	// Build current token from credstore (single load) or YAML fields
 	var accessToken, refreshToken string
 	var expiry time.Time
@@ -388,8 +388,6 @@ func doOAuthRefresh(l *Login) (*oauth2.Token, error) {
 		RefreshToken: refreshToken,
 		Expiry:       expiry,
 	}
-
-	ctx := context.Background()
 
 	httpClient := &http.Client{
 		Transport: httputil.WrapTransport(&http.Transport{

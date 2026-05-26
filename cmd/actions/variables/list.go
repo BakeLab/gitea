@@ -42,7 +42,7 @@ func RunVariablesList(ctx stdctx.Context, cmd *cli.Command) error {
 
 	if name := cmd.String("name"); name != "" {
 		// Get specific variable
-		variable, _, err := client.GetRepoActionVariable(c.Owner, c.Repo, name)
+		variable, _, err := client.Actions.GetRepoVariable(ctx, c.Owner, c.Repo, name)
 		if err != nil {
 			return err
 		}

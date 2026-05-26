@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -106,7 +106,7 @@ func RunRunsList(ctx stdctx.Context, cmd *cli.Command) error {
 	// Build list options
 	listOpts := flags.GetListOptions(cmd)
 
-	runs, _, err := client.ListRepoActionRuns(c.Owner, c.Repo, gitea.ListRepoActionRunsOptions{
+	runs, _, err := client.Actions.ListRepoRuns(ctx, c.Owner, c.Repo, gitea.ListRepoActionRunsOptions{
 		ListOptions: listOpts,
 		Status:      cmd.String("status"),
 		Branch:      cmd.String("branch"),

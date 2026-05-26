@@ -8,7 +8,7 @@ import (
 
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
 
 	"gitea.dev/tea/cmd/flags"
@@ -71,7 +71,7 @@ var CmdMilestoneRemoveIssue = cli.Command{
 	Flags:       flags.AllDefaultFlags,
 }
 
-func runMilestoneIssueList(_ stdctx.Context, cmd *cli.Command) error {
+func runMilestoneIssueList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -97,12 +97,12 @@ func runMilestoneIssueList(_ stdctx.Context, cmd *cli.Command) error {
 
 	milestone := ctx.Args().First()
 	// make sure milestone exist
-	_, _, err = client.GetMilestoneByName(ctx.Owner, ctx.Repo, milestone)
+	_, _, err = client.Repositories.GetMilestoneByName(requestCtx, ctx.Owner, ctx.Repo, milestone)
 	if err != nil {
 		return err
 	}
 
-	issues, _, err := client.ListRepoIssues(ctx.Owner, ctx.Repo, gitea.ListIssueOption{
+	issues, _, err := client.Issues.ListRepoIssues(requestCtx, ctx.Owner, ctx.Repo, gitea.ListIssueOption{
 		ListOptions: flags.GetListOptions(cmd),
 		Milestones:  []string{milestone},
 		Type:        kind,
@@ -119,7 +119,7 @@ func runMilestoneIssueList(_ stdctx.Context, cmd *cli.Command) error {
 	return print.IssuesPullsList(issues, ctx.Output, fields)
 }
 
-func runMilestoneIssueAdd(_ stdctx.Context, cmd *cli.Command) error {
+func runMilestoneIssueAdd(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -140,12 +140,12 @@ func runMilestoneIssueAdd(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	// make sure milestone exist
-	mile, _, err := client.GetMilestoneByName(ctx.Owner, ctx.Repo, mileName)
+	mile, _, err := client.Repositories.GetMilestoneByName(requestCtx, ctx.Owner, ctx.Repo, mileName)
 	if err != nil {
 		return fmt.Errorf("failed to get milestone '%s': %w", mileName, err)
 	}
 
-	_, _, err = client.EditIssue(ctx.Owner, ctx.Repo, idx, gitea.EditIssueOption{
+	_, _, err = client.Issues.EditIssue(requestCtx, ctx.Owner, ctx.Repo, idx, gitea.EditIssueOption{
 		Milestone: &mile.ID,
 	})
 	if err != nil {
@@ -154,7 +154,7 @@ func runMilestoneIssueAdd(_ stdctx.Context, cmd *cli.Command) error {
 	return nil
 }
 
-func runMilestoneIssueRemove(_ stdctx.Context, cmd *cli.Command) error {
+func runMilestoneIssueRemove(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -174,7 +174,7 @@ func runMilestoneIssueRemove(_ stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("invalid issue index '%s': %w", issueIndex, err)
 	}
 
-	issue, _, err := client.GetIssue(ctx.Owner, ctx.Repo, idx)
+	issue, _, err := client.Issues.GetIssue(requestCtx, ctx.Owner, ctx.Repo, idx)
 	if err != nil {
 		return fmt.Errorf("failed to get issue #%d: %w", idx, err)
 	}
@@ -188,7 +188,7 @@ func runMilestoneIssueRemove(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	zero := int64(0)
-	_, _, err = client.EditIssue(ctx.Owner, ctx.Repo, idx, gitea.EditIssueOption{
+	_, _, err = client.Issues.EditIssue(requestCtx, ctx.Owner, ctx.Repo, idx, gitea.EditIssueOption{
 		Milestone: &zero,
 	})
 	if err != nil {

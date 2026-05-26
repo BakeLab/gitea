@@ -30,7 +30,7 @@ var CmdLabelDelete = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runLabelDelete(_ stdctx.Context, cmd *cli.Command) error {
+func runLabelDelete(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -43,12 +43,12 @@ func runLabelDelete(_ stdctx.Context, cmd *cli.Command) error {
 	client := ctx.Login.Client()
 
 	// Verify the label exists first
-	label, _, err := client.GetRepoLabel(ctx.Owner, ctx.Repo, labelID)
+	label, _, err := client.Repositories.GetRepoLabel(requestCtx, ctx.Owner, ctx.Repo, labelID)
 	if err != nil {
 		return fmt.Errorf("failed to get label %d: %w", labelID, err)
 	}
 
-	_, err = client.DeleteLabel(ctx.Owner, ctx.Repo, labelID)
+	_, err = client.Repositories.DeleteLabel(requestCtx, ctx.Owner, ctx.Repo, labelID)
 	if err != nil {
 		return fmt.Errorf("failed to delete label '%s' (id: %d): %w", label.Name, labelID, err)
 	}

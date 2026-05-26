@@ -8,7 +8,7 @@ import (
 	"io"
 	"testing"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
@@ -75,7 +75,7 @@ func TestPaginationFlags(t *testing.T) {
 				},
 				Flags: PaginationFlags,
 			}
-			err := cmd.Run(context.Background(), tc.args)
+			err := cmd.Run(t.Context(), tc.args)
 			require.NoError(t, err)
 		})
 	}
@@ -118,7 +118,7 @@ func TestPaginationFailures(t *testing.T) {
 			ErrWriter: io.Discard,
 		}
 		t.Run(tc.name, func(t *testing.T) {
-			err := cmd.Run(context.Background(), tc.args)
+			err := cmd.Run(t.Context(), tc.args)
 			require.ErrorContains(t, err, tc.expectedError.Error())
 			// require.ErrorIs(t, err, tc.expectedError)
 		})
@@ -140,7 +140,7 @@ func TestGetListOptionsDoesNotLeakBetweenCommands(t *testing.T) {
 			Flags: PaginationFlags,
 		}
 
-		require.NoError(t, cmd.Run(context.Background(), args))
+		require.NoError(t, cmd.Run(t.Context(), args))
 	}
 
 	run([]string{"test", "--page", "5", "--limit", "10"})

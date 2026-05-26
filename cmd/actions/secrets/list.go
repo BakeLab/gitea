@@ -6,7 +6,7 @@ package secrets
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -38,7 +38,7 @@ func RunSecretsList(ctx stdctx.Context, cmd *cli.Command) error {
 	}
 	client := c.Login.Client()
 
-	secrets, _, err := client.ListRepoActionSecret(c.Owner, c.Repo, gitea.ListRepoActionSecretOption{
+	secrets, _, err := client.Actions.ListRepoSecrets(ctx, c.Owner, c.Repo, gitea.ListRepoActionSecretOption{
 		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {

@@ -4,11 +4,12 @@
 package interact
 
 import (
+	stdctx "context"
 	"fmt"
 	"os"
 	"strconv"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/config"
 	"gitea.dev/tea/modules/context"
@@ -26,7 +27,7 @@ var reviewStates = map[string]gitea.ReviewStateType{
 var reviewStateOptions = []string{"comment", "request changes", "approve"}
 
 // ReviewPull interactively reviews a PR
-func ReviewPull(ctx *context.TeaContext, idx int64) error {
+func ReviewPull(requestCtx stdctx.Context, ctx *context.TeaContext, idx int64) error {
 	var state gitea.ReviewStateType
 	var comment string
 	var codeComments []gitea.CreatePullReviewComment
@@ -44,7 +45,7 @@ func ReviewPull(ctx *context.TeaContext, idx int64) error {
 	printTitleAndContent("Review / comment the diff?", strconv.FormatBool(reviewDiff))
 
 	if reviewDiff {
-		if codeComments, err = DoDiffReview(ctx, idx); err != nil {
+		if codeComments, err = DoDiffReview(requestCtx, ctx, idx); err != nil {
 			fmt.Printf("Error during diff review: %s\n", err)
 		}
 		fmt.Printf("Found %d code comments in your review\n", len(codeComments))
@@ -78,14 +79,14 @@ func ReviewPull(ctx *context.TeaContext, idx int64) error {
 	}
 	printTitleAndContent("Concluding comment(markdown):", comment)
 
-	return task.CreatePullReview(ctx, idx, state, comment, codeComments)
+	return task.CreatePullReview(requestCtx, ctx, idx, state, comment, codeComments)
 }
 
 // DoDiffReview (1) fetches & saves diff in tempfile, (2) starts $VISUAL or $EDITOR to comment on diff,
 // (3) parses resulting file into code comments.
 // It doesn't really make sense to use survey.Editor() here, as we'd read the file content at least twice.
-func DoDiffReview(ctx *context.TeaContext, idx int64) ([]gitea.CreatePullReviewComment, error) {
-	tmpFile, err := task.SavePullDiff(ctx, idx)
+func DoDiffReview(requestCtx stdctx.Context, ctx *context.TeaContext, idx int64) ([]gitea.CreatePullReviewComment, error) {
+	tmpFile, err := task.SavePullDiff(requestCtx, ctx, idx)
 	if err != nil {
 		return nil, err
 	}

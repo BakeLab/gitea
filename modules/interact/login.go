@@ -4,6 +4,7 @@
 package interact
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -11,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/auth"
 	"gitea.dev/tea/modules/config"
@@ -22,7 +23,7 @@ import (
 )
 
 // CreateLogin create an login interactive
-func CreateLogin() error {
+func CreateLogin(ctx context.Context) error {
 	var (
 		name, token, user, passwd, otp, scopes, sshKey, sshCertPrincipal, sshKeyFingerprint string
 		insecure, sshAgent, versionCheck, helper                                            bool
@@ -104,7 +105,7 @@ func CreateLogin() error {
 		}
 		printTitleAndContent("Allow Insecure connections:", strconv.FormatBool(insecure))
 
-		return auth.OAuthLoginWithOptions(name, giteaURL, insecure)
+		return auth.OAuthLoginWithOptions(ctx, name, giteaURL, insecure)
 	default: // token
 		var hasToken bool
 		if err := huh.NewConfirm().
@@ -270,7 +271,7 @@ func CreateLogin() error {
 		printTitleAndContent("Check version of Gitea instance:", strconv.FormatBool(versionCheck))
 	}
 
-	return task.CreateLogin(name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint, insecure, sshAgent, versionCheck, helper)
+	return task.CreateLogin(ctx, name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint, insecure, sshAgent, versionCheck, helper)
 }
 
 var tokenScopeOpts = []string{

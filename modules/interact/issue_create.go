@@ -4,9 +4,10 @@
 package interact
 
 import (
+	"context"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/config"
 	"gitea.dev/tea/modules/task"
@@ -21,7 +22,7 @@ func IsQuitting(err error) bool {
 }
 
 // CreateIssue interactively creates an issue
-func CreateIssue(login *config.Login, owner, repo string) error {
+func CreateIssue(ctx context.Context, login *config.Login, owner, repo string) error {
 	owner, repo, err := promptRepoSlug(owner, repo)
 	if err != nil {
 		return err
@@ -29,19 +30,19 @@ func CreateIssue(login *config.Login, owner, repo string) error {
 	printTitleAndContent("Target repo:", owner+"/"+repo)
 
 	var opts gitea.CreateIssueOption
-	if err := promptIssueProperties(login, owner, repo, &opts); err != nil {
+	if err := promptIssueProperties(ctx, login, owner, repo, &opts); err != nil {
 		return err
 	}
 
-	return task.CreateIssue(login, owner, repo, opts)
+	return task.CreateIssue(ctx, login, owner, repo, opts)
 }
 
-func promptIssueProperties(login *config.Login, owner, repo string, o *gitea.CreateIssueOption) error {
+func promptIssueProperties(ctx context.Context, login *config.Login, owner, repo string, o *gitea.CreateIssueOption) error {
 	var milestoneName string
 	var err error
 
 	selectableChan := make(chan (issueSelectables), 1)
-	go fetchIssueSelectables(login, owner, repo, selectableChan)
+	go fetchIssueSelectables(ctx, login, owner, repo, selectableChan)
 
 	// title
 	if err := huh.NewInput().
@@ -140,12 +141,12 @@ type issueSelectables struct {
 	Err           error
 }
 
-func fetchIssueSelectables(login *config.Login, owner, repo string, done chan issueSelectables) {
+func fetchIssueSelectables(ctx context.Context, login *config.Login, owner, repo string, done chan issueSelectables) {
 	// TODO PERF make these calls concurrent
 	r := issueSelectables{}
 	c := login.Client()
 
-	r.Repo, _, r.Err = c.GetRepo(owner, repo)
+	r.Repo, _, r.Err = c.Repositories.GetRepo(ctx, owner, repo)
 	if r.Err != nil {
 		done <- r
 		return
@@ -157,7 +158,7 @@ func fetchIssueSelectables(login *config.Login, owner, repo string, done chan is
 		return
 	}
 
-	assignees, _, err := c.GetAssignees(owner, repo)
+	assignees, _, err := c.Repositories.GetAssignees(ctx, owner, repo)
 	if err != nil {
 		r.Err = err
 		done <- r
@@ -168,7 +169,7 @@ func fetchIssueSelectables(login *config.Login, owner, repo string, done chan is
 		r.Assignees[i] = u.UserName
 	}
 
-	milestones, _, err := c.ListRepoMilestones(owner, repo, gitea.ListMilestoneOption{})
+	milestones, _, err := c.Repositories.ListMilestones(ctx, owner, repo, gitea.ListMilestoneOption{})
 	if err != nil {
 		r.Err = err
 		done <- r
@@ -184,7 +185,7 @@ func fetchIssueSelectables(login *config.Login, owner, repo string, done chan is
 	r.LabelMap = make(map[string]int64)
 	r.LabelList = make([]string, 0)
 	for page := 1; ; {
-		labels, resp, err := c.ListRepoLabels(owner, repo, gitea.ListLabelsOptions{
+		labels, resp, err := c.Repositories.ListRepoLabels(ctx, owner, repo, gitea.ListLabelsOptions{
 			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
 		})
 		if err != nil {

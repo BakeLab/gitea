@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"slices"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
 
 	"gitea.dev/tea/cmd/flags"
@@ -32,7 +32,7 @@ var CmdPullsList = cli.Command{
 }
 
 // RunPullsList return list of pulls
-func RunPullsList(_ stdctx.Context, cmd *cli.Command) error {
+func RunPullsList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -47,7 +47,7 @@ func RunPullsList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	client := ctx.Login.Client()
-	prs, _, err := client.ListRepoPullRequests(ctx.Owner, ctx.Repo, gitea.ListPullRequestsOptions{
+	prs, _, err := client.PullRequests.ListRepoPullRequests(requestCtx, ctx.Owner, ctx.Repo, gitea.ListPullRequestsOptions{
 		ListOptions: flags.GetListOptions(cmd),
 		State:       state,
 	})
@@ -67,7 +67,7 @@ func RunPullsList(_ stdctx.Context, cmd *cli.Command) error {
 			if pr.Head == nil || pr.Head.Sha == "" {
 				continue
 			}
-			ci, _, err := client.GetCombinedStatus(ctx.Owner, ctx.Repo, pr.Head.Sha)
+			ci, _, err := client.Repositories.GetCombinedStatus(requestCtx, ctx.Owner, ctx.Repo, pr.Head.Sha)
 			if err != nil {
 				fmt.Printf("error fetching CI status for PR #%d: %v\n", pr.Index, err)
 				continue

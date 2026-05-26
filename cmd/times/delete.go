@@ -25,7 +25,7 @@ var CmdTrackedTimesDelete = cli.Command{
 	Flags:     flags.LoginRepoFlags,
 }
 
-func runTrackedTimesDelete(_ stdctx.Context, cmd *cli.Command) error {
+func runTrackedTimesDelete(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -49,6 +49,6 @@ func runTrackedTimesDelete(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	_, err = client.DeleteTime(ctx.Owner, ctx.Repo, issue, timeID)
+	_, err = client.Issues.DeleteTime(requestCtx, ctx.Owner, ctx.Repo, issue, timeID)
 	return err
 }

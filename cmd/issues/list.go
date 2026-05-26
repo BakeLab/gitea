@@ -8,7 +8,7 @@ import (
 	"errors"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -33,7 +33,7 @@ var CmdIssuesList = cli.Command{
 }
 
 // RunIssuesList list issues
-func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
+func RunIssuesList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -72,7 +72,7 @@ func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
 	milestones, _ := flags.MilestoneFilterFlag.GetValues(cmd)
 	var issues []*gitea.Issue
 	if ctx.Repo != "" {
-		issues, _, err = ctx.Login.Client().ListRepoIssues(owner, ctx.Repo, gitea.ListIssueOption{
+		issues, _, err = ctx.Login.Client().Issues.ListRepoIssues(requestCtx, owner, ctx.Repo, gitea.ListIssueOption{
 			ListOptions: flags.GetListOptions(cmd),
 			State:       state,
 			Type:        kind,
@@ -92,7 +92,7 @@ func RunIssuesList(_ stdctx.Context, cmd *cli.Command) error {
 		if ctx.IsSet("assignee") {
 			return errors.New("--assignee requires --repo (global issue search does not support assignee filter)")
 		}
-		issues, _, err = ctx.Login.Client().ListIssues(gitea.ListIssueOption{
+		issues, _, err = ctx.Login.Client().Issues.ListIssues(requestCtx, gitea.ListIssueOption{
 			ListOptions: flags.GetListOptions(cmd),
 			State:       state,
 			Type:        kind,

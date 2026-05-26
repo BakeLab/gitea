@@ -40,7 +40,7 @@ func runMilestones(ctx stdctx.Context, cmd *cli.Command) error {
 	return milestones.RunMilestonesList(ctx, cmd)
 }
 
-func runMilestoneDetail(_ stdctx.Context, cmd *cli.Command, name string) error {
+func runMilestoneDetail(requestCtx stdctx.Context, cmd *cli.Command, name string) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -50,7 +50,7 @@ func runMilestoneDetail(_ stdctx.Context, cmd *cli.Command, name string) error {
 	}
 	client := ctx.Login.Client()
 
-	milestone, _, err := client.GetMilestoneByName(ctx.Owner, ctx.Repo, name)
+	milestone, _, err := client.Repositories.GetMilestoneByName(requestCtx, ctx.Owner, ctx.Repo, name)
 	if err != nil {
 		return err
 	}

@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -59,7 +59,7 @@ var CmdRepoEdit = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runRepoEdit(_ stdctx.Context, cmd *cli.Command) error {
+func runRepoEdit(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -97,12 +97,12 @@ func runRepoEdit(_ stdctx.Context, cmd *cli.Command) error {
 		opts.Archived = gitea.OptionalBool(strings.ToLower(ctx.String("archived"))[:1] == "t")
 	}
 
-	repo, _, err := client.EditRepo(ctx.Owner, ctx.Repo, opts)
+	repo, _, err := client.Repositories.EditRepo(requestCtx, ctx.Owner, ctx.Repo, opts)
 	if err != nil {
 		return err
 	}
 
-	topics, _, err := client.ListRepoTopics(repo.Owner.UserName, repo.Name, gitea.ListRepoTopicsOptions{})
+	topics, _, err := client.Repositories.ListRepoTopics(requestCtx, repo.Owner.UserName, repo.Name, gitea.ListRepoTopicsOptions{})
 	if err != nil {
 		return err
 	}

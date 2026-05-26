@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -56,7 +56,7 @@ func runVariablesDelete(ctx stdctx.Context, cmd *cli.Command) error {
 		}
 	}
 
-	_, err = client.DeleteRepoActionVariable(c.Owner, c.Repo, variableName)
+	_, err = client.Actions.DeleteRepoVariable(ctx, c.Owner, c.Repo, variableName)
 	if err != nil {
 		return err
 	}

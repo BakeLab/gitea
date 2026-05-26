@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/cmd/releases"
@@ -32,7 +32,7 @@ var CmdReleaseAttachmentDelete = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runReleaseAttachmentDelete(_ stdctx.Context, cmd *cli.Command) error {
+func runReleaseAttachmentDelete(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -56,14 +56,14 @@ func runReleaseAttachmentDelete(_ stdctx.Context, cmd *cli.Command) error {
 		return nil
 	}
 
-	release, err := releases.GetReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
+	release, err := releases.GetReleaseByTag(requestCtx, ctx.Owner, ctx.Repo, tag, client)
 	if err != nil {
 		return err
 	}
 
 	var existing []*gitea.Attachment
 	for page := 1; ; {
-		page_attachments, resp, err := client.ListReleaseAttachments(ctx.Owner, ctx.Repo, release.ID, gitea.ListReleaseAttachmentsOptions{
+		page_attachments, resp, err := client.Releases.ListReleaseAttachments(requestCtx, ctx.Owner, ctx.Repo, release.ID, gitea.ListReleaseAttachmentsOptions{
 			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
 		})
 		if err != nil {
@@ -87,7 +87,7 @@ func runReleaseAttachmentDelete(_ stdctx.Context, cmd *cli.Command) error {
 			return fmt.Errorf("release does not have attachment named '%s'", name)
 		}
 
-		_, err = client.DeleteReleaseAttachment(ctx.Owner, ctx.Repo, release.ID, attachment.ID)
+		_, err = client.Releases.DeleteReleaseAttachment(requestCtx, ctx.Owner, ctx.Repo, release.ID, attachment.ID)
 		if err != nil {
 			return err
 		}

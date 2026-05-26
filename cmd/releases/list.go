@@ -6,7 +6,7 @@ package releases
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -29,7 +29,7 @@ var CmdReleaseList = cli.Command{
 }
 
 // RunReleasesList list releases
-func RunReleasesList(_ stdctx.Context, cmd *cli.Command) error {
+func RunReleasesList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -38,7 +38,7 @@ func RunReleasesList(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	releases, _, err := ctx.Login.Client().ListReleases(ctx.Owner, ctx.Repo, gitea.ListReleasesOptions{
+	releases, _, err := ctx.Login.Client().Releases.ListReleases(requestCtx, ctx.Owner, ctx.Repo, gitea.ListReleasesOptions{
 		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {

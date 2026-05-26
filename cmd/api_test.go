@@ -296,7 +296,7 @@ func runApiWithArgs(t *testing.T, args []string) (method string, body []byte, er
 	}
 
 	fullArgs := append([]string{"api", "--login", "testLogin"}, args...)
-	runErr := cmd.Run(stdctx.Background(), fullArgs)
+	runErr := cmd.Run(t.Context(), fullArgs)
 
 	return capturedMethod, capturedBody, runErr
 }

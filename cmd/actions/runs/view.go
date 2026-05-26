@@ -8,8 +8,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"code.gitea.io/sdk/gitea"
-
+	gitea "gitea.dev/sdk"
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
 	"gitea.dev/tea/modules/print"
@@ -54,7 +53,7 @@ func runRunsView(ctx stdctx.Context, cmd *cli.Command) error {
 	}
 
 	// Fetch run details
-	run, _, err := client.GetRepoActionRun(c.Owner, c.Repo, runID)
+	run, _, err := client.Actions.GetRepoRun(ctx, c.Owner, c.Repo, runID)
 	if err != nil {
 		return fmt.Errorf("failed to get run: %w", err)
 	}
@@ -64,7 +63,7 @@ func runRunsView(ctx stdctx.Context, cmd *cli.Command) error {
 
 	// Fetch and print jobs if requested
 	if cmd.Bool("jobs") {
-		jobs, _, err := client.ListRepoActionRunJobs(c.Owner, c.Repo, runID, gitea.ListRepoActionJobsOptions{
+		jobs, _, err := client.Actions.ListRepoJobsByRun(ctx, c.Owner, c.Repo, runID, gitea.ListRepoActionJobsOptions{
 			ListOptions: flags.GetListOptions(cmd),
 		})
 		if err != nil {

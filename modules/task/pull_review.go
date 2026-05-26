@@ -4,12 +4,13 @@
 package task
 
 import (
+	stdctx "context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	unidiff "gitea.com/noerw/unidiff-comments"
 	"gitea.dev/tea/modules/context"
@@ -28,10 +29,10 @@ var diffReviewHelp = `# This is the current diff of PR #%d on %s.
 `
 
 // CreatePullReview submits a review for a PR
-func CreatePullReview(ctx *context.TeaContext, idx int64, status gitea.ReviewStateType, comment string, codeComments []gitea.CreatePullReviewComment) error {
+func CreatePullReview(requestCtx stdctx.Context, ctx *context.TeaContext, idx int64, status gitea.ReviewStateType, comment string, codeComments []gitea.CreatePullReviewComment) error {
 	c := ctx.Login.Client()
 
-	review, _, err := c.CreatePullReview(ctx.Owner, ctx.Repo, idx, gitea.CreatePullReviewOptions{
+	review, _, err := c.PullRequests.CreatePullReview(requestCtx, ctx.Owner, ctx.Repo, idx, gitea.CreatePullReviewOptions{
 		State:    status,
 		Body:     comment,
 		Comments: codeComments,
@@ -46,8 +47,8 @@ func CreatePullReview(ctx *context.TeaContext, idx int64, status gitea.ReviewSta
 
 // SavePullDiff fetches the diff of a pull request and stores it as a temporary file.
 // The path to the file is returned.
-func SavePullDiff(ctx *context.TeaContext, idx int64) (string, error) {
-	diff, _, err := ctx.Login.Client().GetPullRequestDiff(ctx.Owner, ctx.Repo, idx, gitea.PullRequestDiffOptions{})
+func SavePullDiff(requestCtx stdctx.Context, ctx *context.TeaContext, idx int64) (string, error) {
+	diff, _, err := ctx.Login.Client().PullRequests.GetPullRequestDiff(requestCtx, ctx.Owner, ctx.Repo, idx, gitea.PullRequestDiffOptions{})
 	if err != nil {
 		return "", err
 	}

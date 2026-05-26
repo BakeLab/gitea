@@ -4,12 +4,13 @@
 package task
 
 import (
+	stdctx "context"
 	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/utils"
 	"golang.org/x/crypto/ssh"
@@ -17,11 +18,11 @@ import (
 
 // findSSHKey retrieves the ssh keys registered in gitea, and tries to find
 // a matching private key in ~/.ssh/. If no match is found, path is empty.
-func findSSHKey(client *gitea.Client) (string, error) {
+func findSSHKey(ctx stdctx.Context, client *gitea.Client) (string, error) {
 	// get keys registered on gitea instance
 	var keys []*gitea.PublicKey
 	for page := 1; ; {
-		page_keys, resp, err := client.ListMyPublicKeys(gitea.ListPublicKeysOptions{
+		page_keys, resp, err := client.Users.ListMyPublicKeys(ctx, gitea.ListPublicKeysOptions{
 			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
 		})
 		if err != nil {

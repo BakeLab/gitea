@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -44,7 +44,7 @@ var CmdBranchesUnprotect = cli.Command{
 }
 
 // RunBranchesProtect function to protect/unprotect a list of branches
-func RunBranchesProtect(_ stdctx.Context, cmd *cli.Command) error {
+func RunBranchesProtect(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -67,7 +67,7 @@ func RunBranchesProtect(_ stdctx.Context, cmd *cli.Command) error {
 		var err error
 		command := ctx.Command.Name
 		if command == "protect" {
-			_, _, err = ctx.Login.Client().CreateBranchProtection(owner, ctx.Repo, gitea.CreateBranchProtectionOption{
+			_, _, err = ctx.Login.Client().Repositories.CreateBranchProtection(requestCtx, owner, ctx.Repo, gitea.CreateBranchProtectionOption{
 				BranchName:                    branch,
 				RuleName:                      "",
 				EnablePush:                    false,
@@ -93,7 +93,7 @@ func RunBranchesProtect(_ stdctx.Context, cmd *cli.Command) error {
 				UnprotectedFilePatterns:       "",
 			})
 		} else if command == "unprotect" {
-			_, err = ctx.Login.Client().DeleteBranchProtection(owner, ctx.Repo, branch)
+			_, err = ctx.Login.Client().Repositories.DeleteBranchProtection(requestCtx, owner, ctx.Repo, branch)
 		} else {
 			return fmt.Errorf("command %s is not supported", command)
 		}

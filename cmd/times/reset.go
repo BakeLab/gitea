@@ -24,7 +24,7 @@ var CmdTrackedTimesReset = cli.Command{
 	Flags:     flags.LoginRepoFlags,
 }
 
-func runTrackedTimesReset(_ stdctx.Context, cmd *cli.Command) error {
+func runTrackedTimesReset(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -43,6 +43,6 @@ func runTrackedTimesReset(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	_, err = client.ResetIssueTime(ctx.Owner, ctx.Repo, issue)
+	_, err = client.Issues.ResetIssueTime(requestCtx, ctx.Owner, ctx.Repo, issue)
 	return err
 }

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 )
 
 // WebhooksList prints a listing of webhooks

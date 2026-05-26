@@ -6,7 +6,7 @@ package labels
 import (
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -35,7 +35,7 @@ var CmdLabelsList = cli.Command{
 }
 
 // RunLabelsList list labels.
-func RunLabelsList(_ stdctx.Context, cmd *cli.Command) error {
+func RunLabelsList(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -45,7 +45,7 @@ func RunLabelsList(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	client := ctx.Login.Client()
-	labels, _, err := client.ListRepoLabels(ctx.Owner, ctx.Repo, gitea.ListLabelsOptions{
+	labels, _, err := client.Repositories.ListRepoLabels(requestCtx, ctx.Owner, ctx.Repo, gitea.ListLabelsOptions{
 		ListOptions: flags.GetListOptions(cmd),
 	})
 	if err != nil {

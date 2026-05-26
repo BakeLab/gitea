@@ -4,9 +4,10 @@
 package task
 
 import (
+	stdctx "context"
 	"net/url"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/config"
 	local_git "gitea.dev/tea/modules/git"
@@ -15,13 +16,14 @@ import (
 // RepoClone creates a local git clone in the given path, and sets up upstream remote
 // for fork repos, for good usability with tea.
 func RepoClone(
+	ctx stdctx.Context,
 	path string,
 	login *config.Login,
 	repoOwner, repoName string,
 	callback func(string) (string, error),
 	depth int,
 ) (*local_git.TeaRepo, error) {
-	repoMeta, _, err := login.Client().GetRepo(repoOwner, repoName)
+	repoMeta, _, err := login.Client().Repositories.GetRepo(ctx, repoOwner, repoName)
 	if err != nil {
 		return nil, err
 	}

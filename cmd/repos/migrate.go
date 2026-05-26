@@ -8,7 +8,7 @@ import (
 
 	stdctx "context"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
 
 	"gitea.dev/tea/cmd/flags"
@@ -109,7 +109,7 @@ var CmdRepoMigrate = cli.Command{
 	}, flags.LoginOutputFlags...),
 }
 
-func runRepoMigrate(_ stdctx.Context, cmd *cli.Command) error {
+func runRepoMigrate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -159,12 +159,12 @@ func runRepoMigrate(_ stdctx.Context, cmd *cli.Command) error {
 		LFSEndpoint:    ctx.String("lfs-endpoint"),
 	}
 
-	repo, _, err = client.MigrateRepo(opts)
+	repo, _, err = client.Repositories.MigrateRepo(requestCtx, opts)
 	if err != nil {
 		return err
 	}
 
-	topics, _, err := client.ListRepoTopics(repo.Owner.UserName, repo.Name, gitea.ListRepoTopicsOptions{})
+	topics, _, err := client.Repositories.ListRepoTopics(requestCtx, repo.Owner.UserName, repo.Name, gitea.ListRepoTopicsOptions{})
 	if err != nil {
 		return err
 	}

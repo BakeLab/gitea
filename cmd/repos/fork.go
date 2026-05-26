@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -32,7 +32,7 @@ var CmdRepoFork = cli.Command{
 	}, flags.LoginRepoFlags...),
 }
 
-func runRepoFork(_ stdctx.Context, cmd *cli.Command) error {
+func runRepoFork(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -48,12 +48,12 @@ func runRepoFork(_ stdctx.Context, cmd *cli.Command) error {
 		opts.Organization = &owner
 	}
 
-	repo, _, err := client.CreateFork(ctx.Owner, ctx.Repo, opts)
+	repo, _, err := client.Repositories.CreateFork(requestCtx, ctx.Owner, ctx.Repo, opts)
 	if err != nil {
 		return err
 	}
 
-	topics, _, err := client.ListRepoTopics(repo.Owner.UserName, repo.Name, gitea.ListRepoTopicsOptions{})
+	topics, _, err := client.Repositories.ListRepoTopics(requestCtx, repo.Owner.UserName, repo.Name, gitea.ListRepoTopicsOptions{})
 	if err != nil {
 		return err
 	}

@@ -7,7 +7,7 @@ import (
 	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -33,7 +33,7 @@ var CmdBranchesRename = cli.Command{
 }
 
 // RunBranchesRename function to rename a branch
-func RunBranchesRename(_ stdctx.Context, cmd *cli.Command) error {
+func RunBranchesRename(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -54,7 +54,7 @@ func RunBranchesRename(_ stdctx.Context, cmd *cli.Command) error {
 		owner = ctx.String("owner")
 	}
 
-	successful, _, err := ctx.Login.Client().RenameRepoBranch(owner, ctx.Repo, oldBranchName, gitea.RenameRepoBranchOption{
+	successful, _, err := ctx.Login.Client().Repositories.RenameRepoBranch(requestCtx, owner, ctx.Repo, oldBranchName, gitea.RenameRepoBranchOption{
 		Name: newBranchName,
 	})
 	if err != nil {

@@ -5,12 +5,13 @@ package cmd
 
 import (
 	"bytes"
+	stdctx "context"
 	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
@@ -32,7 +33,7 @@ type fakeIssueCommentClient struct {
 	comments []*gitea.Comment
 }
 
-func (f *fakeIssueCommentClient) ListIssueComments(owner, repo string, index int64, _ gitea.ListIssueCommentOptions) ([]*gitea.Comment, *gitea.Response, error) {
+func (f *fakeIssueCommentClient) ListIssueComments(_ stdctx.Context, owner, repo string, index int64, _ gitea.ListIssueCommentOptions) ([]*gitea.Comment, *gitea.Response, error) {
 	f.owner = owner
 	f.repo = repo
 	f.index = index
@@ -47,14 +48,14 @@ type fakeIssueDetailClient struct {
 	reactions []*gitea.Reaction
 }
 
-func (f *fakeIssueDetailClient) GetIssue(owner, repo string, index int64) (*gitea.Issue, *gitea.Response, error) {
+func (f *fakeIssueDetailClient) GetIssue(_ stdctx.Context, owner, repo string, index int64) (*gitea.Issue, *gitea.Response, error) {
 	f.owner = owner
 	f.repo = repo
 	f.index = index
 	return f.issue, nil, nil
 }
 
-func (f *fakeIssueDetailClient) GetIssueReactions(owner, repo string, index int64) ([]*gitea.Reaction, *gitea.Response, error) {
+func (f *fakeIssueDetailClient) ListIssueReactions(_ stdctx.Context, owner, repo string, index int64, _ gitea.ListIssueReactionsOptions) ([]*gitea.Reaction, *gitea.Response, error) {
 	f.owner = owner
 	f.repo = repo
 	f.index = index
@@ -221,7 +222,7 @@ func TestRunIssueDetailAsJSON(t *testing.T) {
 				require.NoError(t, testContext.Set("comments", "false"))
 			}
 
-			err := runIssueDetailAsJSONWithClient(&testContext, &testCase.issue, client)
+			err := runIssueDetailAsJSONWithClient(t.Context(), &testContext, &testCase.issue, client)
 
 			require.NoError(t, err, "Failed to run issue detail as JSON")
 			if testCase.flagComments {
@@ -351,7 +352,7 @@ func TestRunIssueDetailUsesOwnerFlag(t *testing.T) {
 		reactions: []*gitea.Reaction{},
 	}
 
-	err = runIssueDetailWithClient(teaCtx, idx, client)
+	err = runIssueDetailWithClient(t.Context(), teaCtx, idx, client)
 	require.NoError(t, err, "Expected runIssueDetail to succeed")
 	assert.Equal(t, expectedOwner, client.owner)
 	assert.Equal(t, expectedRepo, client.repo)

@@ -6,7 +6,7 @@ package print
 import (
 	"strconv"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 )
 
 // LabelsList prints a listing of labels

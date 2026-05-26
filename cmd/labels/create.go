@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
@@ -45,7 +45,7 @@ var CmdLabelCreate = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runLabelCreate(_ stdctx.Context, cmd *cli.Command) error {
+func runLabelCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -56,7 +56,7 @@ func runLabelCreate(_ stdctx.Context, cmd *cli.Command) error {
 
 	labelFile := ctx.String("file")
 	if len(labelFile) == 0 {
-		_, _, err := ctx.Login.Client().CreateLabel(ctx.Owner, ctx.Repo, gitea.CreateLabelOption{
+		_, _, err := ctx.Login.Client().Repositories.CreateLabel(requestCtx, ctx.Owner, ctx.Repo, gitea.CreateLabelOption{
 			Name:        ctx.String("name"),
 			Color:       ctx.String("color"),
 			Description: ctx.String("description"),
@@ -78,7 +78,7 @@ func runLabelCreate(_ stdctx.Context, cmd *cli.Command) error {
 		if color == "" || name == "" {
 			log.Printf("Line %d ignored because lack of enough fields: %s\n", i, line)
 		} else {
-			_, _, err = ctx.Login.Client().CreateLabel(ctx.Owner, ctx.Repo, gitea.CreateLabelOption{
+			_, _, err = ctx.Login.Client().Repositories.CreateLabel(requestCtx, ctx.Owner, ctx.Repo, gitea.CreateLabelOption{
 				Name:        name,
 				Color:       color,
 				Description: description,

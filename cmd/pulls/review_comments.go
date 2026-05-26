@@ -31,7 +31,7 @@ var CmdPullsReviewComments = cli.Command{
 	Flags:       append([]cli.Flag{reviewCommentFieldsFlag}, flags.AllDefaultFlags...),
 }
 
-func runPullsReviewComments(_ stdctx.Context, cmd *cli.Command) error {
+func runPullsReviewComments(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -49,7 +49,7 @@ func runPullsReviewComments(_ stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	comments, err := task.ListPullReviewComments(ctx, idx)
+	comments, err := task.ListPullReviewComments(requestCtx, ctx, idx)
 	if err != nil {
 		return err
 	}

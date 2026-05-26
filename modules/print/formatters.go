@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 	"github.com/muesli/termenv"
 	"golang.org/x/term"
 )

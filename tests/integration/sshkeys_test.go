@@ -4,7 +4,6 @@
 package integration
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -14,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	sshkeyscmd "gitea.dev/tea/cmd/sshkeys"
 
@@ -65,14 +64,14 @@ func TestSSHKeyAddAndDelete(t *testing.T) {
 	cmd := sshKeysCmd()
 	client := login.Client()
 
-	err := cmd.Run(context.Background(), []string{
+	err := cmd.Run(t.Context(), []string{
 		"ssh-keys", "add", pubKeyFile,
 		"--title", keyTitle,
 		"--login", login.Name,
 	})
 	require.NoError(t, err)
 
-	keys, _, err := client.ListMyPublicKeys(gitea.ListPublicKeysOptions{
+	keys, _, err := client.Users.ListMyPublicKeys(t.Context(), gitea.ListPublicKeysOptions{
 		ListOptions: gitea.ListOptions{Page: -1},
 	})
 	require.NoError(t, err)
@@ -87,17 +86,17 @@ func TestSSHKeyAddAndDelete(t *testing.T) {
 	require.NotNil(t, addedKey, "added key not found in key list")
 
 	t.Cleanup(func() {
-		client.DeletePublicKey(addedKey.ID) //nolint:errcheck
+		client.Users.DeletePublicKey(t.Context(), addedKey.ID) //nolint:errcheck
 	})
 
-	err = cmd.Run(context.Background(), []string{
+	err = cmd.Run(t.Context(), []string{
 		"ssh-keys", "delete", strconv.FormatInt(addedKey.ID, 10),
 		"--confirm",
 		"--login", login.Name,
 	})
 	assert.NoError(t, err)
 
-	_, resp, err := client.GetPublicKey(addedKey.ID)
+	_, resp, err := client.Users.GetPublicKey(t.Context(), addedKey.ID)
 	assert.Error(t, err)
 	if assert.NotNil(t, resp) {
 		assert.Equal(t, 404, resp.StatusCode)
@@ -108,7 +107,7 @@ func TestSSHKeyList(t *testing.T) {
 	login := createIntegrationLogin(t)
 
 	cmd := sshKeysCmd()
-	err := cmd.Run(context.Background(), []string{
+	err := cmd.Run(t.Context(), []string{
 		"ssh-keys", "list",
 		"--login", login.Name,
 	})

@@ -4,13 +4,14 @@
 package integration
 
 import (
+	stdctx "context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/require"
 
 	"gitea.dev/tea/modules/config"
@@ -44,7 +45,7 @@ func TestMain(m *testing.M) {
 			if integrationSetupErr == nil {
 				tokenName := fmt.Sprintf("tea-integration-%d", time.Now().UnixNano())
 				var token *gitea.AccessToken
-				token, _, integrationSetupErr = integrationClient.CreateAccessToken(gitea.CreateAccessTokenOption{
+				token, _, integrationSetupErr = integrationClient.Users.CreateAccessToken(stdctx.Background(), gitea.CreateAccessTokenOption{
 					Name:   tokenName,
 					Scopes: []gitea.AccessTokenScope{gitea.AccessTokenScopeAll},
 				})
@@ -59,7 +60,7 @@ func TestMain(m *testing.M) {
 	exitCode := m.Run()
 
 	if integrationClient != nil && integrationTokenID != 0 {
-		if _, err := integrationClient.DeleteAccessToken(integrationTokenID); err != nil {
+		if _, err := integrationClient.Users.DeleteAccessToken(stdctx.Background(), integrationTokenID); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to delete integration token %d: %v\n", integrationTokenID, err)
 			if exitCode == 0 {
 				exitCode = 1
@@ -95,7 +96,7 @@ func createIntegrationLogin(t *testing.T) *config.Login {
 
 	require.NotEmpty(t, integrationToken, "integration token setup failed")
 
-	require.NoError(t, task.CreateLogin("integration", integrationToken, "", "", "", "", "", integrationGiteaURL, "", "", true, false, false, false))
+	require.NoError(t, task.CreateLogin(t.Context(), "integration", integrationToken, "", "", "", "", "", integrationGiteaURL, "", "", true, false, false, false))
 
 	login, err := config.GetLoginByName("integration")
 	require.NoError(t, err)

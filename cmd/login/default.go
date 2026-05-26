@@ -23,7 +23,7 @@ var CmdLoginSetDefault = cli.Command{
 	Flags:       []cli.Flag{&flags.OutputFlag},
 }
 
-func runLoginSetDefault(_ context.Context, cmd *cli.Command) error {
+func runLoginSetDefault(requestCtx context.Context, cmd *cli.Command) error {
 	if cmd.Args().Len() == 0 {
 		l, err := config.GetDefaultLogin()
 		if err != nil {

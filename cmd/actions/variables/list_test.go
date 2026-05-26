@@ -4,7 +4,6 @@
 package variables
 
 import (
-	stdctx "context"
 	"os"
 	"testing"
 
@@ -94,6 +93,6 @@ func TestRunVariablesListRequiresRepoContext(t *testing.T) {
 	}
 	require.NoError(t, cmd.Set("login", "test"))
 
-	err = RunVariablesList(stdctx.Background(), cmd)
+	err = RunVariablesList(t.Context(), cmd)
 	require.ErrorContains(t, err, "remote repository required")
 }

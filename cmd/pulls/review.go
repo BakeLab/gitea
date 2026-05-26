@@ -23,7 +23,7 @@ var CmdPullsReview = cli.Command{
 	Usage:       "Interactively review a pull request",
 	Description: "Interactively review a pull request",
 	ArgsUsage:   "<pull index>",
-	Action: func(_ stdctx.Context, cmd *cli.Command) error {
+	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
 		ctx, err := context.InitCommand(cmd)
 		if err != nil {
 			return err
@@ -48,7 +48,7 @@ var CmdPullsReview = cli.Command{
 				return err
 			}
 
-			if err := interact.ReviewPull(ctx, idx); err != nil && !interact.IsQuitting(err) {
+			if err := interact.ReviewPull(requestCtx, ctx, idx); err != nil && !interact.IsQuitting(err) {
 				return err
 			}
 		}

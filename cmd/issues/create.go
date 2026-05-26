@@ -25,7 +25,7 @@ var CmdIssuesCreate = cli.Command{
 	Flags:       flags.IssuePRCreateFlags,
 }
 
-func runIssuesCreate(_ stdctx.Context, cmd *cli.Command) error {
+func runIssuesCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -35,20 +35,19 @@ func runIssuesCreate(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	if ctx.IsInteractiveMode() {
-		err := interact.CreateIssue(ctx.Login, ctx.Owner, ctx.Repo)
+		err := interact.CreateIssue(requestCtx, ctx.Login, ctx.Owner, ctx.Repo)
 		if err != nil && !interact.IsQuitting(err) {
 			return err
 		}
 		return nil
 	}
 
-	opts, err := flags.GetIssuePRCreateFlags(ctx)
+	opts, err := flags.GetIssuePRCreateFlags(requestCtx, ctx)
 	if err != nil {
 		return err
 	}
 
-	return task.CreateIssue(
-		ctx.Login,
+	return task.CreateIssue(requestCtx, ctx.Login,
 		ctx.Owner,
 		ctx.Repo,
 		*opts,

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 )
 
 // ReposList prints a listing of the repos

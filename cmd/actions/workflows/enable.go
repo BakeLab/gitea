@@ -38,7 +38,7 @@ func runWorkflowsEnable(ctx stdctx.Context, cmd *cli.Command) error {
 	client := c.Login.Client()
 
 	workflowID := cmd.Args().First()
-	_, err = client.EnableRepoActionWorkflow(c.Owner, c.Repo, workflowID)
+	_, err = client.Actions.EnableRepoWorkflow(ctx, c.Owner, c.Repo, workflowID)
 	if err != nil {
 		return fmt.Errorf("failed to enable workflow: %w", err)
 	}

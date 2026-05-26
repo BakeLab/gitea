@@ -4,7 +4,7 @@
 package print
 
 import (
-	"code.gitea.io/sdk/gitea"
+	"gitea.dev/sdk"
 )
 
 // ReleasesList prints a listing of releases

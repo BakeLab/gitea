@@ -34,7 +34,7 @@ var CmdReleaseDelete = cli.Command{
 	}, flags.AllDefaultFlags...),
 }
 
-func runReleaseDelete(_ stdctx.Context, cmd *cli.Command) error {
+func runReleaseDelete(requestCtx stdctx.Context, cmd *cli.Command) error {
 	ctx, err := context.InitCommand(cmd)
 	if err != nil {
 		return err
@@ -55,17 +55,17 @@ func runReleaseDelete(_ stdctx.Context, cmd *cli.Command) error {
 	}
 
 	for _, tag := range ctx.Args().Slice() {
-		release, err := GetReleaseByTag(ctx.Owner, ctx.Repo, tag, client)
+		release, err := GetReleaseByTag(requestCtx, ctx.Owner, ctx.Repo, tag, client)
 		if err != nil {
 			return err
 		}
-		_, err = client.DeleteRelease(ctx.Owner, ctx.Repo, release.ID)
+		_, err = client.Releases.DeleteRelease(requestCtx, ctx.Owner, ctx.Repo, release.ID)
 		if err != nil {
 			return err
 		}
 
 		if ctx.Bool("delete-tag") {
-			_, err = client.DeleteTag(ctx.Owner, ctx.Repo, tag)
+			_, err = client.Repositories.DeleteTag(requestCtx, ctx.Owner, ctx.Repo, tag)
 			return err
 		}
 	}

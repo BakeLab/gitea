@@ -4,22 +4,23 @@
 package task
 
 import (
+	stdctx "context"
 	"fmt"
 
-	"code.gitea.io/sdk/gitea"
+	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/config"
 	"gitea.dev/tea/modules/print"
 )
 
 // CreateIssue creates an issue in the given repo and prints the result
-func CreateIssue(login *config.Login, repoOwner, repoName string, opts gitea.CreateIssueOption) error {
+func CreateIssue(requestCtx stdctx.Context, rlogin *config.Login, repoOwner, repoName string, opts gitea.CreateIssueOption) error {
 	// title is required
 	if len(opts.Title) == 0 {
 		return fmt.Errorf("title is required")
 	}
 
-	issue, _, err := login.Client().CreateIssue(repoOwner, repoName, opts)
+	issue, _, err := rlogin.Client().Issues.CreateIssue(requestCtx, repoOwner, repoName, opts)
 	if err != nil {
 		return fmt.Errorf("could not create issue: %s", err)
 	}
