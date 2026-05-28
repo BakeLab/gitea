@@ -54,10 +54,16 @@ func runPullsCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	if err := ctx.Ensure(context.CtxRequirement{
-		LocalRepo:  true,
-		RemoteRepo: true,
-	}); err != nil {
+	// Interactive mode and head-branch defaulting both need a local repo.
+	// When --head is given explicitly the user can target a cross-fork PR
+	// from outside a working tree (e.g. with --repo <owner>/<repo>);
+	// task.CreatePull only consults ctx.LocalRepo when head is empty.
+	needsLocalRepo := ctx.IsInteractiveMode() || len(ctx.String("head")) == 0
+	requirement := context.CtxRequirement{RemoteRepo: true}
+	if needsLocalRepo {
+		requirement.LocalRepo = true
+	}
+	if err := ctx.Ensure(requirement); err != nil {
 		return err
 	}
 
