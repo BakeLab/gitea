@@ -59,9 +59,12 @@ func PullDetails(pr *gitea.PullRequest, reviews []*gitea.PullReview, ciStatus *g
 	}
 
 	if pr.State == gitea.StateOpen {
-		if pr.Mergeable {
+		switch {
+		case pr.Mergeable:
 			out += "- No Conflicts\n"
-		} else {
+		case pr.Draft:
+			out += "- Draft (not mergeable until marked ready)\n"
+		default:
 			out += "- **Conflicting files**\n"
 		}
 	}
