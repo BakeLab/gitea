@@ -16,10 +16,15 @@ import (
 
 // CmdLoginAdd represents to login a gitea server.
 var CmdLoginAdd = cli.Command{
-	Name:        "add",
-	Usage:       "Add a Gitea login",
-	Description: `Add a Gitea login, without args it will create one interactively`,
-	ArgsUsage:   " ", // command does not accept arguments
+	Name:  "add",
+	Usage: "Add a Gitea login",
+	Description: `Add a Gitea login, without args it will create one interactively.
+
+By default tea only stores the token for its own API use. Pass --git-credentials
+to also register tea as a git credential helper for the login's URL, so that
+'git push' and 'git clone' over HTTPS authenticate silently using the stored
+token. Equivalent to running 'tea login helper setup' afterwards.`,
+	ArgsUsage: " ", // command does not accept arguments
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "name",
@@ -89,9 +94,9 @@ var CmdLoginAdd = cli.Command{
 			Usage:   "Use SSH public key or SSH fingerprint to login (needs a running ssh-agent with ssh key loaded)",
 		},
 		&cli.BoolFlag{
-			Name:    "helper",
-			Aliases: []string{"j"},
-			Usage:   "Add helper",
+			Name:    "git-credentials",
+			Aliases: []string{"helper", "j"},
+			Usage:   "Register tea as a git credential helper for this login's URL, so 'git push' and 'git clone' over HTTPS authenticate silently using the stored token",
 		},
 		&cli.BoolFlag{
 			Name:    "oauth",
@@ -161,6 +166,6 @@ func runLoginAdd(requestCtx context.Context, cmd *cli.Command) error {
 		cmd.Bool("insecure"),
 		sshAgent,
 		!cmd.Bool("no-version-check"),
-		cmd.Bool("helper"),
+		cmd.Bool("git-credentials"),
 	)
 }

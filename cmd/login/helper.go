@@ -19,23 +19,31 @@ import (
 
 // CmdLoginHelper represents to login a gitea helper.
 var CmdLoginHelper = cli.Command{
-	Name:        "helper",
-	Aliases:     []string{"git-credential"},
-	Usage:       "Git helper",
-	Description: `Git helper`,
-	Hidden:      true,
+	Name:    "helper",
+	Aliases: []string{"git-credential"},
+	Usage:   "Act as a git credential helper for stored Gitea logins",
+	Description: `Speaks git's credential helper protocol so that HTTPS push and clone
+operations against your configured Gitea instances authenticate silently
+using the tokens tea already stores.
+
+Typical use is automatic: 'tea login add --git-credentials' (or 'tea login
+helper setup' for existing logins) registers '!tea login helper' as a
+credential helper in ~/.gitconfig. Git then invokes the 'get' subcommand
+when it needs credentials for a configured host.`,
 	Commands: []*cli.Command{
 		{
 			Name:        "store",
-			Description: "Command drops",
 			Aliases:     []string{"erase"},
+			Usage:       "No-op (git credential protocol store/erase)",
+			Description: "No-op invoked by git on credential store/erase; tea persists credentials only in its own config",
 			Action: func(requestCtx context.Context, _ *cli.Command) error {
 				return nil
 			},
 		},
 		{
 			Name:        "setup",
-			Description: "Setup helper to tea authenticate",
+			Usage:       "Register tea as a git credential helper for every configured login",
+			Description: "Register tea as a git credential helper in ~/.gitconfig for every configured login",
 			Action: func(requestCtx context.Context, _ *cli.Command) error {
 				logins, err := config.GetLogins()
 				if err != nil {
@@ -56,7 +64,8 @@ var CmdLoginHelper = cli.Command{
 		},
 		{
 			Name:        "get",
-			Description: "Get token to auth",
+			Usage:       "Return the stored token for a URL (git credential protocol)",
+			Description: "Return the stored token for a given URL in git's credential helper protocol (called by git, reads request from stdin)",
 			Flags: []cli.Flag{
 				&cli.StringFlag{
 					Name:    "login",

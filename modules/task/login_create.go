@@ -146,6 +146,8 @@ func CreateLogin(ctx stdctx.Context, name, token, user, passwd, otp, scopes, ssh
 		if _, err := SetupHelper(login); err != nil {
 			return err
 		}
+	} else {
+		fmt.Println("Tip: pass --git-credentials (or run 'tea login helper setup') to authenticate 'git push' and 'git clone' over HTTPS with this token.")
 	}
 
 	return nil
