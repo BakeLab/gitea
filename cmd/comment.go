@@ -56,12 +56,16 @@ func runAddComment(requestCtx stdctx.Context, cmd *cli.Command) error {
 	}
 
 	body := strings.Join(ctx.Args().Tail(), " ")
-	if interact.IsStdinPiped() {
+	// Only consume stdin if no positional body was given. interact.IsStdinPiped()
+	// is true for any non-TTY stdin (CI, subshells, agent harnesses) — not just
+	// piped data — so reading unconditionally would block forever in those
+	// contexts when the body is supplied via args.
+	if len(body) == 0 && interact.IsStdinPiped() {
 		// custom solution until https://github.com/AlecAivazis/survey/issues/328 is fixed
 		if bodyStdin, err := io.ReadAll(ctx.Reader); err != nil {
 			return err
 		} else if len(bodyStdin) != 0 {
-			body = strings.Join([]string{body, string(bodyStdin)}, "\n\n")
+			body = string(bodyStdin)
 		}
 	} else if len(body) == 0 {
 		if err := huh.NewForm(
