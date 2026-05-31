@@ -18,6 +18,42 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// applyDraftFlag mutates opts.Title according to --draft / --ready.
+// If a flag is set but --title isn't, it fetches the current title from the server.
+// Returns an error if both --draft and --ready are set, or on a server error.
+func applyDraftFlag(requestCtx stdctx.Context, ctx *context.TeaContext, client *gitea.Client, idx int64, opts *task.EditIssueOption) error {
+	draft := ctx.Bool("draft")
+	ready := ctx.Bool("ready")
+	if !draft && !ready {
+		return nil
+	}
+	if draft && ready {
+		return fmt.Errorf("--draft and --ready are mutually exclusive")
+	}
+
+	var current string
+	if opts.Title != nil {
+		current = *opts.Title
+	} else {
+		pr, _, err := client.PullRequests.GetPullRequest(requestCtx, ctx.Owner, ctx.Repo, idx)
+		if err != nil {
+			return fmt.Errorf("could not fetch pull request #%d: %s", idx, err)
+		}
+		current = pr.Title
+	}
+
+	var next string
+	if draft {
+		next = utils.AddDraftPrefix(current)
+	} else {
+		next = utils.StripDraftPrefix(current)
+	}
+	if next != current || opts.Title != nil {
+		opts.Title = &next
+	}
+	return nil
+}
+
 // CmdPullsEdit is the subcommand of pulls to edit pull requests
 var CmdPullsEdit = cli.Command{
 	Name:    "edit",
@@ -36,6 +72,14 @@ use an empty string (eg. --milestone "").`,
 		&cli.StringFlag{
 			Name:  "remove-reviewers",
 			Usage: "Comma-separated list of usernames to remove from reviewers",
+		},
+		&cli.BoolFlag{
+			Name:  "draft",
+			Usage: "Mark as draft by prepending \"WIP: \" to the title (idempotent)",
+		},
+		&cli.BoolFlag{
+			Name:  "ready",
+			Usage: "Mark as ready for review by stripping any leading \"WIP: \" or \"[WIP]\" prefix",
 		},
 	),
 }
@@ -72,6 +116,9 @@ func runPullsEdit(requestCtx stdctx.Context, cmd *cli.Command) error {
 
 	client := ctx.Login.Client()
 	for _, opts.Index = range indices {
+		if err := applyDraftFlag(requestCtx, ctx, client, opts.Index, opts); err != nil {
+			return err
+		}
 		pr, err := task.EditPull(requestCtx, ctx, client, *opts)
 		if err != nil {
 			return err

@@ -13,6 +13,7 @@ import (
 	"gitea.dev/tea/modules/context"
 	"gitea.dev/tea/modules/interact"
 	"gitea.dev/tea/modules/task"
+	"gitea.dev/tea/modules/utils"
 )
 
 // CmdPullsCreate creates a pull request
@@ -45,6 +46,10 @@ var CmdPullsCreate = cli.Command{
 		&cli.StringFlag{
 			Name:  "topic",
 			Usage: "Topic name for agit flow pull request",
+		},
+		&cli.BoolFlag{
+			Name:  "draft",
+			Usage: "Create as a draft (prepends \"WIP: \" to the title; Gitea treats WIP-prefixed PRs as drafts)",
 		},
 	}, flags.IssuePRCreateFlags...),
 }
@@ -79,6 +84,10 @@ func runPullsCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 	opts, err := flags.GetIssuePRCreateFlags(requestCtx, ctx)
 	if err != nil {
 		return err
+	}
+
+	if ctx.Bool("draft") {
+		opts.Title = utils.AddDraftPrefix(opts.Title)
 	}
 
 	if ctx.Bool("agit") {
