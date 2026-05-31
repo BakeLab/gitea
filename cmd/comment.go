@@ -4,97 +4,28 @@
 package cmd
 
 import (
-	stdctx "context"
-	"errors"
-	"fmt"
-	"io"
-	"strings"
+	"gitea.dev/tea/cmd/comments"
 
-	gitea "gitea.dev/sdk"
-
-	"gitea.dev/tea/cmd/flags"
-	"gitea.dev/tea/modules/config"
-	"gitea.dev/tea/modules/context"
-	"gitea.dev/tea/modules/interact"
-	"gitea.dev/tea/modules/print"
-	"gitea.dev/tea/modules/theme"
-	"gitea.dev/tea/modules/utils"
-
-	"charm.land/huh/v2"
 	"github.com/urfave/cli/v3"
 )
 
-// CmdAddComment is the main command to operate with notifications
-var CmdAddComment = cli.Command{
-	Name:        "comment",
-	Aliases:     []string{"c"},
-	Category:    catEntities,
-	Usage:       "Add a comment to an issue / pr",
-	Description: "Add a comment to an issue / pr",
-	ArgsUsage:   "<issue / pr index> [<comment body>]",
-	Action:      runAddComment,
-	Flags:       flags.AllDefaultFlags,
-}
+// CmdComments is the top-level command for managing comments on issues and pull requests.
+var CmdComments = cli.Command{
+	Name:     "comments",
+	Aliases:  []string{"comment", "c"},
+	Category: catEntities,
+	Usage:    "Manage comments on issues and pull requests",
+	Description: `Manage comments on issues and pull requests.
 
-func runAddComment(requestCtx stdctx.Context, cmd *cli.Command) error {
-	ctx, err := context.InitCommand(cmd)
-	if err != nil {
-		return err
-	}
-	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
-		return err
-	}
-
-	args := ctx.Args()
-	if args.Len() == 0 {
-		return fmt.Errorf("please specify issue / pr index")
-	}
-
-	idx, err := utils.ArgToIndex(ctx.Args().First())
-	if err != nil {
-		return err
-	}
-
-	body := strings.Join(ctx.Args().Tail(), " ")
-	// Only consume stdin if no positional body was given. interact.IsStdinPiped()
-	// is true for any non-TTY stdin (CI, subshells, agent harnesses) — not just
-	// piped data — so reading unconditionally would block forever in those
-	// contexts when the body is supplied via args.
-	if len(body) == 0 && interact.IsStdinPiped() {
-		// custom solution until https://github.com/AlecAivazis/survey/issues/328 is fixed
-		if bodyStdin, err := io.ReadAll(ctx.Reader); err != nil {
-			return err
-		} else if len(bodyStdin) != 0 {
-			body = string(bodyStdin)
-		}
-	} else if len(body) == 0 {
-		if err := huh.NewForm(
-			huh.NewGroup(
-				huh.NewText().
-					Title("Comment(markdown):").
-					ExternalEditor(config.GetPreferences().Editor).
-					EditorExtension("md").
-					Value(&body),
-			),
-		).WithTheme(theme.GetTheme()).
-			Run(); err != nil {
-			return err
-		}
-	}
-
-	if len(body) == 0 {
-		return errors.New("no comment content provided")
-	}
-
-	client := ctx.Login.Client()
-	comment, _, err := client.Issues.CreateIssueComment(requestCtx, ctx.Owner, ctx.Repo, idx, gitea.CreateIssueCommentOption{
-		Body: body,
-	})
-	if err != nil {
-		return err
-	}
-
-	print.Comment(comment)
-
-	return nil
+When invoked with an issue/PR index and an optional body, behaves like 'tea comments add'
+(this preserves the historical 'tea comment <idx> "<body>"' shorthand).`,
+	ArgsUsage: "<issue / pr index> [<comment body>]",
+	Action:    comments.RunCommentsAdd,
+	Flags:     comments.CmdCommentsAdd.Flags,
+	Commands: []*cli.Command{
+		&comments.CmdCommentsAdd,
+		&comments.CmdCommentsList,
+		&comments.CmdCommentsEdit,
+		&comments.CmdCommentsDelete,
+	},
 }

@@ -1,0 +1,97 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package comments
+
+import (
+	stdctx "context"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+
+	gitea "gitea.dev/sdk"
+
+	"gitea.dev/tea/cmd/flags"
+	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/interact"
+	"gitea.dev/tea/modules/print"
+	"gitea.dev/tea/modules/theme"
+	"gitea.dev/tea/modules/utils"
+
+	"charm.land/huh/v2"
+	"github.com/urfave/cli/v3"
+)
+
+// CmdCommentsAdd adds a comment to an issue or pull request.
+var CmdCommentsAdd = cli.Command{
+	Name:        "add",
+	Aliases:     []string{"a"},
+	Usage:       "Add a comment to an issue or pull request",
+	Description: "Add a comment to an issue or pull request.",
+	ArgsUsage:   "<issue / pr index> [<comment body>]",
+	Action:      RunCommentsAdd,
+	Flags:       flags.AllDefaultFlags,
+}
+
+// RunCommentsAdd creates a new comment.
+func RunCommentsAdd(requestCtx stdctx.Context, cmd *cli.Command) error {
+	ctx, err := context.InitCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Ensure(context.CtxRequirement{RemoteRepo: true}); err != nil {
+		return err
+	}
+
+	if ctx.Args().Len() == 0 {
+		return fmt.Errorf("please specify issue / pr index")
+	}
+
+	idx, err := utils.ArgToIndex(ctx.Args().First())
+	if err != nil {
+		return err
+	}
+
+	body := strings.Join(ctx.Args().Tail(), " ")
+	// Only consume stdin if no positional body was given. interact.IsStdinPiped()
+	// is true for any non-TTY stdin (CI, subshells, agent harnesses) — not just
+	// piped data — so reading unconditionally would block forever in those
+	// contexts when the body is supplied via args.
+	if len(body) == 0 && interact.IsStdinPiped() {
+		if bodyStdin, err := io.ReadAll(ctx.Reader); err != nil {
+			return err
+		} else if len(bodyStdin) != 0 {
+			body = string(bodyStdin)
+		}
+	} else if len(body) == 0 {
+		if err := huh.NewForm(
+			huh.NewGroup(
+				huh.NewText().
+					Title("Comment(markdown):").
+					ExternalEditor(config.GetPreferences().Editor).
+					EditorExtension("md").
+					Value(&body),
+			),
+		).WithTheme(theme.GetTheme()).
+			Run(); err != nil {
+			return err
+		}
+	}
+
+	if len(body) == 0 {
+		return errors.New("no comment content provided")
+	}
+
+	client := ctx.Login.Client()
+	comment, _, err := client.Issues.CreateIssueComment(requestCtx, ctx.Owner, ctx.Repo, idx, gitea.CreateIssueCommentOption{
+		Body: body,
+	})
+	if err != nil {
+		return err
+	}
+
+	print.Comment(comment)
+	return nil
+}
