@@ -8,7 +8,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.3
 	code.gitea.io/gitea-vet v0.2.3
 	gitea.com/noerw/unidiff-comments v0.0.0-20220822113322-50f4daa0e35c
-	gitea.dev/sdk v1.0.1
+	gitea.dev/sdk v1.1.0
 	github.com/adrg/xdg v0.5.3
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/enescakir/emoji v1.0.0
@@ -54,7 +54,6 @@ require (
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fatih/color v1.19.0 // indirect
-	github.com/go-fed/httpsig v1.1.0 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
