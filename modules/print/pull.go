@@ -73,6 +73,10 @@ func PullDetails(pr *gitea.PullRequest, reviews []*gitea.PullReview, ciStatus *g
 		out += "- Maintainers are allowed to edit\n"
 	}
 
+	if pr.HTMLURL != "" {
+		out = strings.TrimRight(out, "\n") + "\n\n" + pr.HTMLURL + "\n"
+	}
+
 	outputMarkdown(out, getRepoURL(pr.HTMLURL))
 }
 

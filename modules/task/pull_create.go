@@ -88,8 +88,6 @@ func CreatePull(requestCtx stdctx.Context, ctx *context.TeaContext, base, head s
 
 	print.PullDetails(pr, nil, nil)
 
-	fmt.Println(pr.HTMLURL)
-
 	return err
 }
 

@@ -99,6 +99,17 @@ func TestFormatCIStatusAllStates(t *testing.T) {
 	}
 }
 
+func TestPullDetailsIncludesHTMLURL(t *testing.T) {
+	pr := newTestPR(8, "Crm wip")
+	pr.HTMLURL = "https://gitea.example.com/owner/repo/pulls/8"
+
+	out := captureStdout(t, func() {
+		PullDetails(pr, nil, nil)
+	})
+
+	assert.Contains(t, out, pr.HTMLURL)
+}
+
 func TestPullsListWithCIField(t *testing.T) {
 	prs := []*gitea.PullRequest{
 		newTestPR(1, "feat: add feature"),
