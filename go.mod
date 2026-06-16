@@ -12,13 +12,13 @@ require (
 	github.com/adrg/xdg v0.5.3
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/enescakir/emoji v1.0.0
-	github.com/go-authgate/sdk-go v0.12.0
+	github.com/go-authgate/sdk-go v0.14.0
 	github.com/muesli/termenv v0.16.0
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli-docs/v3 v3.1.0
-	github.com/urfave/cli/v3 v3.9.0
+	github.com/urfave/cli/v3 v3.9.1
 	golang.org/x/crypto v0.53.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sys v0.46.0
