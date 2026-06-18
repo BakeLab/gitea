@@ -3,9 +3,9 @@ module gitea.dev/tea
 go 1.26
 
 require (
-	charm.land/glamour/v2 v2.0.0
+	charm.land/glamour/v2 v2.0.1
 	charm.land/huh/v2 v2.0.3
-	charm.land/lipgloss/v2 v2.0.3
+	charm.land/lipgloss/v2 v2.0.4
 	code.gitea.io/gitea-vet v0.2.3
 	gitea.com/noerw/unidiff-comments v0.0.0-20220822113322-50f4daa0e35c
 	gitea.dev/sdk v1.1.0
