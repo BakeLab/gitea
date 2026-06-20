@@ -159,8 +159,12 @@ func performBrowserOAuthFlow(ctx context.Context, opts OAuthOptions) (serverURL 
 	// Get the authorization URL
 	authCodeURL := oauth2Config.AuthCodeURL(state, authCodeOpts...)
 
-	// Start a local server to receive the callback
-	code, receivedState, err := startLocalServerAndOpenBrowser(authCodeURL, state, opts)
+	// Start a local server to receive the callback. When opts.Port == 0,
+	// this resolves opts.RedirectURL to the actual listener port; mirror
+	// that into oauth2Config so Exchange sends the same redirect_uri the
+	// authorize step advertised (RFC 6749 §4.1.3).
+	code, receivedState, err := startLocalServerAndOpenBrowser(authCodeURL, state, &opts)
+	oauth2Config.RedirectURL = opts.RedirectURL
 	if err != nil {
 		// Check for redirect URI errors
 		if strings.Contains(err.Error(), "no authorization code") ||
@@ -218,9 +222,11 @@ func generateCodeChallenge(codeVerifier string) string {
 	return base64.RawURLEncoding.EncodeToString(hash[:])
 }
 
-// startLocalServerAndOpenBrowser starts a local HTTP server to receive the OAuth callback
-// and opens the browser to the authorization URL
-func startLocalServerAndOpenBrowser(authURL, expectedState string, opts OAuthOptions) (string, string, error) {
+// startLocalServerAndOpenBrowser starts a local HTTP server to receive the
+// OAuth callback and opens the browser to the authorization URL. If
+// opts.Port is 0, the listener picks a free port and opts.RedirectURL is
+// rewritten in place with that port.
+func startLocalServerAndOpenBrowser(authURL, expectedState string, opts *OAuthOptions) (string, string, error) {
 	// Channel to receive the authorization code
 	codeChan := make(chan string, 1)
 	stateChan := make(chan string, 1)
@@ -357,8 +363,9 @@ func startLocalServerAndOpenBrowser(authURL, expectedState string, opts OAuthOpt
 	}
 }
 
-// openBrowser opens the default browser to the specified URL
-func openBrowser(url string) error {
+// openBrowser opens the default browser to the specified URL.
+// It is a variable to allow tests to inject a fake browser.
+var openBrowser = func(url string) error {
 	fmt.Printf("Please authorize the application by visiting this URL in your browser:\n%s\n", url)
 
 	return open.Run(url)
