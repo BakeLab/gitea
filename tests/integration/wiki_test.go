@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/sdk"
+	gitea "gitea.dev/sdk"
 	teacmd "gitea.dev/tea/cmd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,10 +25,10 @@ func TestWikiCommandLifecycle(t *testing.T) {
 	client := login.Client()
 	repoName := fmt.Sprintf("tea-wiki-integration-%d", time.Now().UnixNano())
 
-	_, _, err := client.CreateRepo(context.Background(), gitea.CreateRepoOption{Name: repoName})
+	_, _, err := client.Repositories.CreateRepo(context.Background(), gitea.CreateRepoOption{Name: repoName})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		if _, delErr := client.DeleteRepo(context.Background(), login.User, repoName); delErr != nil {
+		if _, delErr := client.Repositories.DeleteRepo(context.Background(), login.User, repoName); delErr != nil {
 			t.Logf("failed to delete integration test repo %q: %v", repoName, delErr)
 		}
 	})
@@ -60,10 +60,10 @@ func TestWikiCommandLifecycle(t *testing.T) {
 	assert.Contains(t, listOutput, "\"title\": \"Home\"")
 
 	emptyRepoName := fmt.Sprintf("tea-wiki-empty-%d", time.Now().UnixNano())
-	_, _, err = client.CreateRepo(context.Background(), gitea.CreateRepoOption{Name: emptyRepoName})
+	_, _, err = client.Repositories.CreateRepo(context.Background(), gitea.CreateRepoOption{Name: emptyRepoName})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		if _, delErr := client.DeleteRepo(context.Background(), login.User, emptyRepoName); delErr != nil {
+		if _, delErr := client.Repositories.DeleteRepo(context.Background(), login.User, emptyRepoName); delErr != nil {
 			t.Logf("failed to delete empty wiki repo %q: %v", emptyRepoName, delErr)
 		}
 	})

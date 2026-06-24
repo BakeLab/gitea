@@ -23,6 +23,16 @@ func ResolveLabelNames(requestCtx stdctx.Context, client *gitea.Client, owner, r
 		if err != nil {
 			return nil, err
 		}
+		if _, _, err := client.Organizations.GetOrg(requestCtx, owner); err == nil {
+			orgLabels, _, err := client.Organizations.ListOrgLabels(requestCtx, owner, gitea.ListOrgLabelsOptions{
+				ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
+			})
+			if err != nil {
+				return nil, err
+			}
+			labels = append(labels, orgLabels...)
+		}
+
 		for _, l := range labels {
 			if utils.Contains(labelNames, l.Name) {
 				labelIDs = append(labelIDs, l.ID)
