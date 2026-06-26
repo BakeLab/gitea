@@ -16,6 +16,18 @@ import (
 var (
 	tokenStore     *credstore.SecureStore[credstore.Token]
 	tokenStoreOnce sync.Once
+
+	saveOAuthTokenToStore = func(loginName, accessToken, refreshToken string, expiresAt time.Time) error {
+		return getTokenStore().Save(loginName, credstore.Token{
+			AccessToken:  accessToken,
+			RefreshToken: refreshToken,
+			ExpiresAt:    expiresAt,
+			ClientID:     loginName,
+		})
+	}
+	deleteOAuthTokenFromStore = func(loginName string) error {
+		return getTokenStore().Delete(loginName)
+	}
 )
 
 func getTokenStore() *credstore.SecureStore[credstore.Token] {
@@ -37,17 +49,12 @@ func LoadOAuthToken(loginName string) (*credstore.Token, error) {
 
 // SaveOAuthToken saves OAuth tokens to the secure store.
 func SaveOAuthToken(loginName, accessToken, refreshToken string, expiresAt time.Time) error {
-	return getTokenStore().Save(loginName, credstore.Token{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		ExpiresAt:    expiresAt,
-		ClientID:     loginName,
-	})
+	return saveOAuthTokenToStore(loginName, accessToken, refreshToken, expiresAt)
 }
 
 // DeleteOAuthToken removes tokens from the secure store.
 func DeleteOAuthToken(loginName string) error {
-	return getTokenStore().Delete(loginName)
+	return deleteOAuthTokenFromStore(loginName)
 }
 
 // SaveOAuthTokenFromOAuth2 saves an oauth2.Token to credstore, falling back to

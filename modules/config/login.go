@@ -269,6 +269,34 @@ func AddLogin(login *Login) error {
 	})
 }
 
+// AddOAuthLogin saves the OAuth token and login profile as one operation.
+// The profile is only written after secure token storage succeeds.
+func AddOAuthLogin(login *Login, accessToken, refreshToken string, expiresAt time.Time) error {
+	return withConfigLock(func() error {
+		// Check for duplicate login names before touching credential storage.
+		for _, existing := range config.Logins {
+			if strings.EqualFold(existing.Name, login.Name) {
+				return fmt.Errorf("login name '%s' already exists", login.Name)
+			}
+		}
+
+		if err := SaveOAuthToken(login.Name, accessToken, refreshToken, expiresAt); err != nil {
+			return fmt.Errorf("failed to save token to secure store: %w", err)
+		}
+
+		config.Logins = append(config.Logins, *login)
+		if err := saveConfigUnsafe(); err != nil {
+			config.Logins = config.Logins[:len(config.Logins)-1]
+			if deleteErr := DeleteOAuthToken(login.Name); deleteErr != nil {
+				return errors.Join(err, fmt.Errorf("failed to clean up OAuth token after config save failure: %w", deleteErr))
+			}
+			return err
+		}
+
+		return nil
+	})
+}
+
 // SaveLoginTokens updates the token fields for an existing login.
 // This is used after browser-based re-authentication to save new tokens.
 func SaveLoginTokens(login *Login) error {

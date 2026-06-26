@@ -412,14 +412,9 @@ func createLoginFromToken(ctx context.Context, name, serverURL string, token *oa
 	}
 	login.SSHHost = parsedURL.Host
 
-	// Add login to config
-	if err := config.AddLogin(&login); err != nil {
+	// Save tokens and add login to config
+	if err := config.AddOAuthLogin(&login, token.AccessToken, token.RefreshToken, token.Expiry); err != nil {
 		return err
-	}
-
-	// Save tokens to credstore
-	if err := config.SaveOAuthToken(login.Name, token.AccessToken, token.RefreshToken, token.Expiry); err != nil {
-		return fmt.Errorf("failed to save token to secure store: %s", err)
 	}
 
 	fmt.Printf("Login as %s on %s successful. Added this login as %s\n", login.User, login.URL, login.Name)
