@@ -77,9 +77,9 @@ func doPRFetch(
 	localRemote *local_git.Remote,
 	callback func(string) (string, error),
 ) (string, error) {
+	_ = callback
 	localRemoteName := localRemote.Config().Name
 	localBranchName := pr.Head.Ref
-	// get auth & fetch remote via its configured protocol
 	url, err := localRepo.TeaRemoteURL(localRemoteName)
 	if err != nil {
 		return "", err

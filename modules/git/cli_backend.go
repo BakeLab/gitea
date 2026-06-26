@@ -164,7 +164,20 @@ func (r *cliRepository) CreateTrackingBranch(localBranchName, remoteBranchName, 
 }
 
 func (r *cliRepository) Checkout(ref ReferenceName) error {
-	_, err := r.git(nil, nil, "checkout", ref.String())
+	args := []string{"checkout"}
+	switch {
+	case ref.IsBranch():
+		// `git checkout refs/heads/<branch>` detaches HEAD, while the short branch
+		// name switches to the local branch as intended.
+		args = append(args, ref.Short())
+	case ref.IsRemote():
+		// Be explicit about detached HEAD when checking out a remote-tracking ref.
+		args = append(args, "--detach", ref.String())
+	default:
+		args = append(args, ref.String())
+	}
+
+	_, err := r.git(nil, nil, args...)
 	return err
 }
 

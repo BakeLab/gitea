@@ -56,6 +56,21 @@ func ResolvePullReviewComment(requestCtx stdctx.Context, ctx *context.TeaContext
 	return nil
 }
 
+// ReplyToPullReviewComment replies to a review comment on a pull request.
+func ReplyToPullReviewComment(requestCtx stdctx.Context, ctx *context.TeaContext, idx, commentID int64, body string) error {
+	c := ctx.Login.Client()
+
+	comment, _, err := c.PullRequests.CreatePullReviewCommentReply(requestCtx, ctx.Owner, ctx.Repo, idx, commentID, gitea.CreatePullReviewCommentReplyOptions{
+		Body: body,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(comment.HTMLURL)
+	return nil
+}
+
 // UnresolvePullReviewComment unresolves a review comment
 func UnresolvePullReviewComment(requestCtx stdctx.Context, ctx *context.TeaContext, commentID int64) error {
 	c := ctx.Login.Client()

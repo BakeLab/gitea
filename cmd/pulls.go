@@ -78,6 +78,7 @@ var CmdPulls = cli.Command{
 		&pulls.CmdPullsApprove,
 		&pulls.CmdPullsReject,
 		&pulls.CmdPullsMerge,
+		&pulls.CmdPullsReply,
 		&pulls.CmdPullsReviewComments,
 		&pulls.CmdPullsResolve,
 		&pulls.CmdPullsUnresolve,
