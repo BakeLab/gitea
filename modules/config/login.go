@@ -418,9 +418,7 @@ func doOAuthRefresh(ctx context.Context, l *Login) (*oauth2.Token, error) {
 	}
 
 	httpClient := &http.Client{
-		Transport: httputil.WrapTransport(&http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: l.Insecure},
-		}),
+		Transport: httputil.WrapTransport(&tls.Config{InsecureSkipVerify: l.Insecure}),
 	}
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
 
@@ -448,15 +446,19 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 		os.Exit(1)
 	}
 
-	httpClient := &http.Client{}
+	// Configure transport-level timeouts so a stalled or unresponsive server
+	// fails fast instead of hanging forever. These bound connection setup and
+	// time-to-first-response-byte only, so slow-but-progressing transfers (e.g.
+	// large attachment uploads) are unaffected.
+	httpClient := &http.Client{
+		Transport: httputil.WrapTransport(nil),
+	}
 	if l.Insecure {
 		cookieJar, _ := cookiejar.New(nil) // New with nil options never returns an error
 
 		httpClient = &http.Client{
-			Jar: cookieJar,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
+			Jar:       cookieJar,
+			Transport: httputil.WrapTransport(&tls.Config{InsecureSkipVerify: true}),
 		}
 	}
 
@@ -465,6 +467,10 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 		options = append([]gitea.ClientOption{gitea.SetGiteaVersion("")}, options...)
 	}
 
+	// SetUserAgent is intentionally redundant with the User-Agent the WrapTransport
+	// transport already sets: this is the SDK's own guarantee, so the UA survives
+	// even if the client is ever given a transport that didn't come from WrapTransport.
+	// Both resolve to httputil.UserAgent(), so the duplicate Header.Set is a no-op.
 	options = append(options, gitea.SetToken(l.GetAccessToken()), gitea.SetHTTPClient(httpClient), gitea.SetUserAgent(httputil.UserAgent()))
 	if debug.IsDebug() {
 		options = append(options, gitea.SetDebugMode())

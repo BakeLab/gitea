@@ -31,9 +31,7 @@ func NewClient(login *config.Login) *Client {
 	}
 
 	httpClient := &http.Client{
-		Transport: httputil.WrapTransport(&http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: login.Insecure},
-		}),
+		Transport: httputil.WrapTransport(&tls.Config{InsecureSkipVerify: login.Insecure}),
 	}
 
 	return &Client{

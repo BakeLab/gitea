@@ -201,9 +201,7 @@ func performBrowserOAuthFlow(ctx context.Context, opts OAuthOptions) (serverURL 
 // createHTTPClient creates an HTTP client with optional insecure setting
 func createHTTPClient(insecure bool) *http.Client {
 	return &http.Client{
-		Transport: httputil.WrapTransport(&http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
-		}),
+		Transport: httputil.WrapTransport(&tls.Config{InsecureSkipVerify: insecure}),
 	}
 }
 
