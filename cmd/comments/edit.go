@@ -7,7 +7,6 @@ import (
 	stdctx "context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	gitea "gitea.dev/sdk"
@@ -31,10 +30,16 @@ var CmdCommentsEdit = cli.Command{
 	Usage:   "Edit the body of an existing comment",
 	Description: `Edit the body of an existing comment by its comment ID. Use 'tea comments list <issue>' to find IDs.
 
-The new body can be supplied as a positional argument, piped on stdin, or (if neither is given and stdin is a terminal) entered in your $EDITOR.`,
+The new body can be supplied as a positional argument, via -d/--description, piped on stdin, or (if none is given and stdin is a terminal) entered in your $EDITOR.`,
 	ArgsUsage: "<comment id> [<new body>]",
 	Action:    RunCommentsEdit,
-	Flags:     flags.AllDefaultFlags,
+	Flags: append([]cli.Flag{
+		&cli.StringFlag{
+			Name:    "description",
+			Aliases: []string{"d"},
+			Usage:   "new comment body (alternative to the positional argument)",
+		},
+	}, flags.AllDefaultFlags...),
 }
 
 // RunCommentsEdit updates the body of an existing comment.
@@ -56,14 +61,12 @@ func RunCommentsEdit(requestCtx stdctx.Context, cmd *cli.Command) error {
 		return fmt.Errorf("invalid comment id %q: %s", ctx.Args().First(), err)
 	}
 
-	body := strings.Join(ctx.Args().Tail(), " ")
-	if len(body) == 0 && interact.IsStdinPiped() {
-		if bodyStdin, err := io.ReadAll(ctx.Reader); err != nil {
-			return err
-		} else if len(bodyStdin) != 0 {
-			body = string(bodyStdin)
-		}
-	} else if len(body) == 0 {
+	stdinPiped := interact.IsStdinPiped()
+	body, err := resolveBody(strings.Join(ctx.Args().Tail(), " "), ctx.String("description"), stdinPiped, ctx.Reader)
+	if err != nil {
+		return err
+	}
+	if len(body) == 0 && !stdinPiped {
 		// Fetch current body to pre-populate the editor.
 		client := ctx.Login.Client()
 		current, _, fetchErr := client.Issues.GetIssueComment(requestCtx, ctx.Owner, ctx.Repo, id)

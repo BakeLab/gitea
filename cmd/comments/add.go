@@ -7,7 +7,6 @@ import (
 	stdctx "context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	gitea "gitea.dev/sdk"
@@ -32,7 +31,13 @@ var CmdCommentsAdd = cli.Command{
 	Description: "Add a comment to an issue or pull request.",
 	ArgsUsage:   "<issue / pr index> [<comment body>]",
 	Action:      RunCommentsAdd,
-	Flags:       flags.AllDefaultFlags,
+	Flags: append([]cli.Flag{
+		&cli.StringFlag{
+			Name:    "description",
+			Aliases: []string{"d"},
+			Usage:   "comment body (alternative to the positional argument)",
+		},
+	}, flags.AllDefaultFlags...),
 }
 
 // RunCommentsAdd creates a new comment.
@@ -54,18 +59,12 @@ func RunCommentsAdd(requestCtx stdctx.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	body := strings.Join(ctx.Args().Tail(), " ")
-	// Only consume stdin if no positional body was given. interact.IsStdinPiped()
-	// is true for any non-TTY stdin (CI, subshells, agent harnesses) — not just
-	// piped data — so reading unconditionally would block forever in those
-	// contexts when the body is supplied via args.
-	if len(body) == 0 && interact.IsStdinPiped() {
-		if bodyStdin, err := io.ReadAll(ctx.Reader); err != nil {
-			return err
-		} else if len(bodyStdin) != 0 {
-			body = string(bodyStdin)
-		}
-	} else if len(body) == 0 {
+	stdinPiped := interact.IsStdinPiped()
+	body, err := resolveBody(strings.Join(ctx.Args().Tail(), " "), ctx.String("description"), stdinPiped, ctx.Reader)
+	if err != nil {
+		return err
+	}
+	if len(body) == 0 && !stdinPiped {
 		if err := huh.NewForm(
 			huh.NewGroup(
 				huh.NewText().
