@@ -5,7 +5,6 @@ package interact
 
 import (
 	"fmt"
-	"os"
 
 	"gitea.dev/tea/modules/theme"
 
@@ -14,7 +13,7 @@ import (
 
 // printTitleAndContent prints a title and content with the gitea theme
 func printTitleAndContent(title, content string) {
-	hasDarkBG := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+	hasDarkBG := theme.HasDarkBackground()
 	style := lipgloss.NewStyle().
 		Foreground(theme.GetTheme().Theme(hasDarkBG).Blurred.Title.GetForeground()).Bold(true).
 		Padding(0, 1)
