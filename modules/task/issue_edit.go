@@ -23,23 +23,26 @@ type EditIssueOption struct {
 	Deadline        *time.Time
 	AddLabels       []string
 	RemoveLabels    []string
+	SetAssignees    []string
 	AddAssignees    []string
+	RemoveAssignees []string
 	AddReviewers    []string
 	RemoveReviewers []string
-	// RemoveAssignees []string // NOTE: with the current go-sdk, clearing assignees is not possible.
 }
 
 // Normalizes the options into parameters that can be passed to the sdk.
 // the returned value will be nil, when no change to this part of the issue is requested.
-func (o EditIssueOption) toSdkOptions(requestCtx stdctx.Context, ctx *context.TeaContext, client *gitea.Client) (*gitea.EditIssueOption, *gitea.IssueLabelsOption, *gitea.IssueLabelsOption, error) {
+func (o EditIssueOption) toSdkOptions(requestCtx stdctx.Context, ctx *context.TeaContext, client *gitea.Client) (*gitea.EditIssueOption, *gitea.IssueLabelsOption, *gitea.IssueLabelsOption, *gitea.IssueAssigneesOption, *gitea.IssueAssigneesOption, error) {
 	addLabelOpts, err := ResolveLabelOpts(requestCtx, client, ctx.Owner, ctx.Repo, o.AddLabels)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	rmLabelOpts, err := ResolveLabelOpts(requestCtx, client, ctx.Owner, ctx.Repo, o.RemoveLabels)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
+	addAssigneeOpts := ResolveAssigneeOpts(o.AddAssignees)
+	rmAssigneeOpts := ResolveAssigneeOpts(o.RemoveAssignees)
 
 	issueOpts := gitea.EditIssueOption{}
 	var issueOptsDirty bool
@@ -58,7 +61,7 @@ func (o EditIssueOption) toSdkOptions(requestCtx stdctx.Context, ctx *context.Te
 	if o.Milestone != nil {
 		id, err := ResolveMilestoneID(requestCtx, client, ctx.Owner, ctx.Repo, *o.Milestone)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 		issueOpts.Milestone = gitea.OptionalInt64(id)
 		issueOptsDirty = true
@@ -70,15 +73,16 @@ func (o EditIssueOption) toSdkOptions(requestCtx stdctx.Context, ctx *context.Te
 			issueOpts.RemoveDeadline = gitea.OptionalBool(true)
 		}
 	}
-	if len(o.AddAssignees) != 0 {
-		issueOpts.Assignees = o.AddAssignees
+	o.SetAssignees = cleanAssignees(o.SetAssignees)
+	if len(o.SetAssignees) != 0 {
+		issueOpts.Assignees = o.SetAssignees
 		issueOptsDirty = true
 	}
 
 	if issueOptsDirty {
-		return &issueOpts, addLabelOpts, rmLabelOpts, nil
+		return &issueOpts, addLabelOpts, rmLabelOpts, addAssigneeOpts, rmAssigneeOpts, nil
 	}
-	return nil, addLabelOpts, rmLabelOpts, nil
+	return nil, addLabelOpts, rmLabelOpts, addAssigneeOpts, rmAssigneeOpts, nil
 }
 
 // EditIssue edits an issue and returns the updated issue.
@@ -87,12 +91,16 @@ func EditIssue(requestCtx stdctx.Context, ctx *context.TeaContext, client *gitea
 		client = ctx.Login.Client()
 	}
 
-	issueOpts, addLabelOpts, rmLabelOpts, err := opts.toSdkOptions(requestCtx, ctx, client)
+	issueOpts, addLabelOpts, rmLabelOpts, addAssigneeOpts, rmAssigneeOpts, err := opts.toSdkOptions(requestCtx, ctx, client)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := ApplyLabelChanges(requestCtx, client, ctx.Owner, ctx.Repo, opts.Index, addLabelOpts, rmLabelOpts); err != nil {
+		return nil, err
+	}
+
+	if err := ApplyAssigneeChanges(requestCtx, client, ctx.Owner, ctx.Repo, opts.Index, addAssigneeOpts, rmAssigneeOpts); err != nil {
 		return nil, err
 	}
 

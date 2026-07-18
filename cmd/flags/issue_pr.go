@@ -178,9 +178,17 @@ func GetIssuePRCreateFlags(requestCtx stdctx.Context, ctx *context.TeaContext) (
 // IssuePREditFlags defines flags for editing properties of issues and PRs
 var IssuePREditFlags = append([]cli.Flag{
 	&cli.StringFlag{
+		Name:  "set-assignees",
+		Usage: "Clear all existing assignees and assign comma-separated list of usernames. Takes precedence over --add-assignees and --remove-assignees",
+	},
+	&cli.StringFlag{
 		Name:    "add-assignees",
 		Aliases: []string{"a"},
-		Usage:   "Comma-separated list of usernames to assign",
+		Usage:   "Comma-separated list of usernames to assign. Takes precedence over --remove-assignees",
+	},
+	&cli.StringFlag{
+		Name:  "remove-assignees",
+		Usage: "Comma-separated list of usernames to remove",
 	},
 	&cli.StringFlag{
 		Name:    "add-labels",
@@ -224,17 +232,25 @@ func GetIssuePREditFlags(ctx *context.TeaContext) (*task.EditIssueOption, error)
 			opts.Deadline = &t
 		}
 	}
+	if ctx.IsSet("set-assignees") {
+		val := ctx.String("set-assignees")
+		opts.SetAssignees = strings.Split(strings.ReplaceAll(val, " ", ""), ",")
+	}
 	if ctx.IsSet("add-assignees") {
 		val := ctx.String("add-assignees")
-		opts.AddAssignees = strings.Split(val, ",")
+		opts.AddAssignees = strings.Split(strings.ReplaceAll(val, " ", ""), ",")
+	}
+	if ctx.IsSet("remove-assignees") {
+		val := ctx.String("remove-assignees")
+		opts.RemoveAssignees = strings.Split(strings.ReplaceAll(val, " ", ""), ",")
 	}
 	if ctx.IsSet("add-labels") {
 		val := ctx.String("add-labels")
-		opts.AddLabels = strings.Split(val, ",")
+		opts.AddLabels = strings.Split(strings.ReplaceAll(val, " ", ""), ",")
 	}
 	if ctx.IsSet("remove-labels") {
 		val := ctx.String("remove-labels")
-		opts.RemoveLabels = strings.Split(val, ",")
+		opts.RemoveLabels = strings.Split(strings.ReplaceAll(val, " ", ""), ",")
 	}
 	return &opts, nil
 }

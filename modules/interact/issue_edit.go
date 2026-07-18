@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	gitea "gitea.dev/sdk"
 	"gitea.dev/tea/modules/config"
 	"gitea.dev/tea/modules/context"
 	"gitea.dev/tea/modules/task"
@@ -40,9 +41,10 @@ func EditIssue(requestCtx stdctx.Context, ctx context.TeaContext, index int64) (
 		Deadline: i.Deadline,
 	}
 
+	i.Assignees = cleanAssignees(i.Assignees)
 	if len(i.Assignees) != 0 {
 		for _, a := range i.Assignees {
-			opts.AddAssignees = append(opts.AddAssignees, a.UserName)
+			opts.SetAssignees = append(opts.SetAssignees, a.UserName)
 		}
 	}
 
@@ -109,7 +111,7 @@ func promptIssueEditProperties(requestCtx stdctx.Context, ctx *context.TeaContex
 		return nil
 	}
 
-	currAssignees := o.AddAssignees
+	currAssignees := o.SetAssignees
 	newAssignees := selectables.Assignees
 
 	for _, c := range currAssignees {
@@ -119,10 +121,14 @@ func promptIssueEditProperties(requestCtx stdctx.Context, ctx *context.TeaContex
 	}
 
 	// assignees
-	if o.AddAssignees, err = promptMultiSelect("Add Assignees:", newAssignees, "[other]"); err != nil {
+	if currAssignees, err = promptMultiSelectWithPreselect("Set Assignees:", currAssignees, newAssignees, "[other]"); err != nil {
 		return err
 	}
-	printTitleAndContent("Assignees:", strings.Join(o.AddAssignees, "\n"))
+	if len(currAssignees) == 0 && len(o.SetAssignees) > 0 {
+		o.RemoveAssignees = o.SetAssignees
+	}
+	o.SetAssignees = currAssignees
+	printTitleAndContent("Assignees:", strings.Join(o.SetAssignees, "\n"))
 
 	// milestone
 	if len(selectables.MilestoneList) != 0 {
@@ -174,4 +180,14 @@ func promptIssueEditProperties(requestCtx stdctx.Context, ctx *context.TeaContex
 	printTitleAndContent("Due date:", deadlineStr)
 
 	return nil
+}
+
+func cleanAssignees(list []*gitea.User) []*gitea.User {
+	out := make([]*gitea.User, 0, len(list))
+	for _, a := range list {
+		if strings.TrimSpace(a.UserName) != "" {
+			out = append(out, a)
+		}
+	}
+	return out
 }

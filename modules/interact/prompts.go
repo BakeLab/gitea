@@ -92,10 +92,26 @@ func promptDatetime(prompt string) (val *time.Time, err error) {
 
 // promptSelect creates a generic multiselect prompt, with processing of custom values.
 func promptMultiSelect(prompt string, options []string, customVal string) ([]string, error) {
+	opts := huh.NewOptions(makeSelectOpts(options, customVal, "")...)
+	return runMultiSelect(prompt, opts, customVal)
+}
+
+// promptMultiSelectWithPreselect creates a generic multiselect prompt with preselected values and processing of custom values.
+func promptMultiSelectWithPreselect(prompt string, selected []string, options []string, customVal string) ([]string, error) {
+	opts := make([]huh.Option[string], 0, len(selected)+len(options)+1)
+	for _, name := range selected {
+		opts = append(opts, huh.NewOption(name, name).Selected(true))
+	}
+	opts = append(opts, huh.NewOptions(makeSelectOpts(options, customVal, "")...)...)
+
+	return runMultiSelect(prompt, opts, customVal)
+}
+
+func runMultiSelect(prompt string, opts []huh.Option[string], customVal string) ([]string, error) {
 	var selection []string
 	if err := huh.NewMultiSelect[string]().
 		Title(prompt).
-		Options(huh.NewOptions(makeSelectOpts(options, customVal, "")...)...).
+		Options(opts...).
 		Value(&selection).
 		WithTheme(theme.GetTheme()).
 		Run(); err != nil {

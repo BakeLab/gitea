@@ -80,7 +80,7 @@ func TestResolveLabelNames_ReturnsRepoAndOrgLabels(t *testing.T) {
 	runGit("commit", "--allow-empty", "-m", "Initial commit")
 	runGit("push", "-u", "origin", "HEAD:branch-with-labels")
 
-	waitForBranches(t, orgRepo.FullName)
+	waitForBranches(t, orgRepo.FullName, "branch-with-labels")
 	_ = runTeaCommand(
 		t, "pr", "create", "--repo", orgRepo.FullName,
 		"--login", login.Name, "--base", "main", "--head", "branch-with-labels",
@@ -94,7 +94,7 @@ func TestResolveLabelNames_ReturnsRepoAndOrgLabels(t *testing.T) {
 	require.ElementsMatch(t, labels, []*gitea.Label{orgLabel, repoLabel})
 }
 
-func waitForBranches(t *testing.T, repoFullName string) {
+func waitForBranches(t *testing.T, repoFullName string, branchName string) {
 	t.Helper()
 	url := fmt.Sprintf("%s/api/v1/repos/%s/branches", os.Getenv("GITEA_TEA_TEST_URL"), repoFullName)
 
@@ -112,7 +112,7 @@ func waitForBranches(t *testing.T, repoFullName string) {
 				for _, b := range branches {
 					have[b.Name] = true
 				}
-				if have["main"] && have["branch-with-labels"] {
+				if have["main"] && have[branchName] {
 					return
 				}
 			}

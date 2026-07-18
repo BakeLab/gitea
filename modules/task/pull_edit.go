@@ -25,6 +25,8 @@ func EditPull(requestCtx stdctx.Context, ctx *context.TeaContext, client *gitea.
 	if err != nil {
 		return nil, err
 	}
+	addAssigneeOpts := ResolveAssigneeOpts(opts.AddAssignees)
+	rmAssigneeOpts := ResolveAssigneeOpts(opts.RemoveAssignees)
 
 	prOpts := gitea.EditPullRequestOption{}
 	var prOptsDirty bool
@@ -51,12 +53,17 @@ func EditPull(requestCtx stdctx.Context, ctx *context.TeaContext, client *gitea.
 			prOpts.RemoveDeadline = gitea.OptionalBool(true)
 		}
 	}
-	if len(opts.AddAssignees) != 0 {
-		prOpts.Assignees = opts.AddAssignees
+	opts.SetAssignees = cleanAssignees(opts.SetAssignees)
+	if len(opts.SetAssignees) != 0 {
+		prOpts.Assignees = opts.SetAssignees
 		prOptsDirty = true
 	}
 
 	if err := ApplyLabelChanges(requestCtx, client, ctx.Owner, ctx.Repo, opts.Index, addLabelOpts, rmLabelOpts); err != nil {
+		return nil, err
+	}
+
+	if err := ApplyAssigneeChanges(requestCtx, client, ctx.Owner, ctx.Repo, opts.Index, addAssigneeOpts, rmAssigneeOpts); err != nil {
 		return nil, err
 	}
 
