@@ -45,7 +45,18 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
-      - run: curl --noproxy "*" http://gitea:3000/api/v1/version # verify connection to instance
+      - name: wait for the gitea instance to be ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl --noproxy "*" -sf http://gitea:3000/api/v1/version; then
+              echo "gitea is ready after ${i} attempt(s)"
+              exit 0
+            fi
+            echo "waiting for gitea, attempt ${i}/30"
+            sleep 2
+          done
+          echo "::error::gitea did not become ready within 60s"
+          exit 1
       - name: integration test
         run: |
           make integration-test
