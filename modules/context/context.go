@@ -166,7 +166,7 @@ and then run your command again`)
 		if shouldPromptFallbackLogin(c.Login, canPrompt) {
 			fallback := false
 			if err := huh.NewConfirm().
-				Title(fmt.Sprintf("NOTE: no gitea login detected, whether falling back to login '%s'?", c.Login.Name)).
+				Title(fmt.Sprintf("NOTE: no login matched this repository. Fall back to login '%s'?", c.Login.Name)).
 				Value(&fallback).
 				WithTheme(theme.GetTheme()).
 				Run(); err != nil {
@@ -176,7 +176,7 @@ and then run your command again`)
 				return nil, ErrCommandCanceled
 			}
 		} else if !c.Login.Default {
-			fmt.Fprintf(os.Stderr, "NOTE: no gitea login detected, falling back to login '%s' in non-interactive mode.\n", c.Login.Name)
+			fmt.Fprintf(os.Stderr, "NOTE: no login matched this repository, falling back to login '%s' in non-interactive mode.\n", c.Login.Name)
 		}
 	}
 
