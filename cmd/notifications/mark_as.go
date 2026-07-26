@@ -24,7 +24,7 @@ var CmdNotificationsMarkRead = cli.Command{
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
 	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
-		ctx, err := context.InitCommand(cmd)
+		ctx, err := context.InitCommandWithOptions(cmd, context.InitOptions{SkipLocalRepo: cmd.Bool("mine")})
 		if err != nil {
 			return err
 		}
@@ -48,7 +48,7 @@ var CmdNotificationsMarkUnread = cli.Command{
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
 	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
-		ctx, err := context.InitCommand(cmd)
+		ctx, err := context.InitCommandWithOptions(cmd, context.InitOptions{SkipLocalRepo: cmd.Bool("mine")})
 		if err != nil {
 			return err
 		}
@@ -72,7 +72,7 @@ var CmdNotificationsMarkPinned = cli.Command{
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
 	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
-		ctx, err := context.InitCommand(cmd)
+		ctx, err := context.InitCommandWithOptions(cmd, context.InitOptions{SkipLocalRepo: cmd.Bool("mine")})
 		if err != nil {
 			return err
 		}
@@ -95,7 +95,7 @@ var CmdNotificationsUnpin = cli.Command{
 	ArgsUsage:   "[all | <notification id>]",
 	Flags:       flags.NotificationFlags,
 	Action: func(requestCtx stdctx.Context, cmd *cli.Command) error {
-		ctx, err := context.InitCommand(cmd)
+		ctx, err := context.InitCommandWithOptions(cmd, context.InitOptions{SkipLocalRepo: cmd.Bool("mine")})
 		if err != nil {
 			return err
 		}

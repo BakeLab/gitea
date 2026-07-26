@@ -37,6 +37,12 @@ type TeaContext struct {
 	LocalRepo *git.TeaRepo  // is set if flags specified a local repo via --repo, or if $PWD is a git repo
 }
 
+// InitOptions controls which optional sources InitCommand may inspect.
+type InitOptions struct {
+	// SkipLocalRepo avoids probing the current directory for a git repository.
+	SkipLocalRepo bool
+}
+
 // GetRemoteRepoHTMLURL returns the web-ui url of the remote repo,
 // after ensuring a remote repo is present in the context.
 func (ctx *TeaContext) GetRemoteRepoHTMLURL() (string, error) {
@@ -61,6 +67,12 @@ func shouldPromptFallbackLogin(login *config.Login, canPrompt bool) bool {
 // the remotes of the .git repo specified in repoFlag or $PWD, and using overrides from
 // command flags. If a local git repo can't be found, repo slug values are unset.
 func InitCommand(cmd *cli.Command) (*TeaContext, error) {
+	return InitCommandWithOptions(cmd, InitOptions{})
+}
+
+// InitCommandWithOptions resolves the application context like InitCommand, with
+// optional controls for commands that do not need repository context.
+func InitCommandWithOptions(cmd *cli.Command, opts InitOptions) (*TeaContext, error) {
 	// these flags are used as overrides to the context detection via local git repo
 	repoFlag := cmd.String("repo")
 	loginFlag := cmd.String("login")
@@ -76,7 +88,7 @@ func InitCommand(cmd *cli.Command) (*TeaContext, error) {
 	)
 
 	// check if repoFlag can be interpreted as path to local repo.
-	if len(repoFlag) != 0 {
+	if len(repoFlag) != 0 && !opts.SkipLocalRepo {
 		if repoFlagPathExists, err = utils.DirExists(repoFlag); err != nil {
 			return nil, err
 		}
@@ -85,6 +97,8 @@ func InitCommand(cmd *cli.Command) (*TeaContext, error) {
 		} else {
 			c.RepoSlug = repoFlag
 		}
+	} else if len(repoFlag) != 0 {
+		c.RepoSlug = repoFlag
 	}
 
 	if len(remoteFlag) == 0 {
@@ -101,24 +115,26 @@ func InitCommand(cmd *cli.Command) (*TeaContext, error) {
 		extraLogins = append(extraLogins, *envLogin)
 	}
 
-	// try to read local git repo & extract context: if repoFlag specifies a valid path, read repo in that dir,
-	// otherwise attempt PWD. if no repo is found, continue with default login
-	if repoPath == "" {
-		if repoPath, err = os.Getwd(); err != nil {
-			return nil, err
+	if !opts.SkipLocalRepo {
+		// try to read local git repo & extract context: if repoFlag specifies a valid path, read repo in that dir,
+		// otherwise attempt PWD. if no repo is found, continue with default login
+		if repoPath == "" {
+			if repoPath, err = os.Getwd(); err != nil {
+				return nil, err
+			}
 		}
-	}
 
-	var localSlug string
-	if c.LocalRepo, c.Login, localSlug, err = contextFromLocalRepo(repoPath, remoteFlag, extraLogins); err != nil {
-		if err == errNotAGiteaRepo || err == git.ErrRepositoryNotExists {
-			// we can deal with that, commands needing the optional values use ctx.Ensure()
-		} else {
-			return nil, err
+		var localSlug string
+		if c.LocalRepo, c.Login, localSlug, err = contextFromLocalRepo(repoPath, remoteFlag, extraLogins); err != nil {
+			if err == errNotAGiteaRepo || err == git.ErrRepositoryNotExists {
+				// we can deal with that, commands needing the optional values use ctx.Ensure()
+			} else {
+				return nil, err
+			}
 		}
-	}
-	if c.RepoSlug == "" && localSlug != "" {
-		c.RepoSlug = localSlug
+		if c.RepoSlug == "" && localSlug != "" {
+			c.RepoSlug = localSlug
+		}
 	}
 
 	// If env vars are set, always use the env login (but repo slug was already

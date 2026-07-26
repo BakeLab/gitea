@@ -63,12 +63,12 @@ func listNotifications(requestCtx stdctx.Context, cmd *cli.Command, status []git
 	var news []*gitea.NotificationThread
 	var err error
 
-	ctx, err := context.InitCommand(cmd)
+	all := cmd.Bool("mine")
+	ctx, err := context.InitCommandWithOptions(cmd, context.InitOptions{SkipLocalRepo: all})
 	if err != nil {
 		return err
 	}
 	client := ctx.Login.Client()
-	all := ctx.Bool("mine")
 
 	// This enforces pagination (see https://github.com/go-gitea/gitea/issues/16733)
 	listOpts := flags.GetListOptions(cmd)
