@@ -29,6 +29,8 @@ func TestRepoFromPath_Worktree(t *testing.T) {
 	assert.NoError(t, cmd.Run())
 	cmd = exec.Command("git", "-C", mainRepoPath, "config", "user.name", "Test User")
 	assert.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "-C", mainRepoPath, "config", "commit.gpgsign", "false")
+	assert.NoError(t, cmd.Run())
 
 	cmd = exec.Command("git", "-C", mainRepoPath, "remote", "add", "origin", "https://gitea.com/owner/repo.git")
 	assert.NoError(t, cmd.Run())
