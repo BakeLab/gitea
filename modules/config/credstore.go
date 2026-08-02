@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/go-authgate/sdk-go/credstore"
+	"github.com/go-signet/sdk-go/credstore"
 	"golang.org/x/oauth2"
 )
 
