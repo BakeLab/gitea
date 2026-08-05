@@ -1,8 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "local>gitea/renovate-config",
-    "local>gitea/renovate-config:security",
-    "local>gitea/renovate-config:go-deps"
+    "local>gitea/renovate-config"
   ]
 }
