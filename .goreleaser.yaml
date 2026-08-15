@@ -76,24 +76,13 @@ builds:
       - cmd: sh .goreleaser.checksum.sh {{ .Path }}
       - cmd: sh .goreleaser.checksum.sh {{ .Path }}.xz
 
-blobs:
-  -
-    provider: s3
-    bucket: "{{ .Env.S3_BUCKET }}"
-    region: "{{ .Env.S3_REGION }}"
-    directory: "tea/{{.Version}}"
-    extra_files:
-      - glob: ./**.xz
-      - glob: ./**.sha256
-
-# Mirrors the S3 `blobs:` upload above into Cloudflare R2 during the
-# parallel S3+R2 period (S3 will be removed once migration completes).
-# A second `blobs:` entry is impossible here since the blob pipe
-# authenticates from the global AWS_* env with no per-entry
-# credentials; `publishers:` supports per-entry `env:` instead, so
-# it's used to invoke scripts/upload-r2.sh once per artifact. Custom
-# publishers inherit almost nothing from the environment, hence the
-# explicit R2_* forwarding below.
+# Uploads the release artifacts to Cloudflare R2. A `blobs:` entry is
+# not used here since the blob pipe authenticates from the global
+# AWS_* env with no per-entry credentials; `publishers:` supports
+# per-entry `env:` instead, so it's used to invoke
+# scripts/upload-r2.sh once per artifact. Custom publishers inherit
+# almost nothing from the environment, hence the explicit R2_*
+# forwarding below.
 #
 # This publisher fires more than once per distinct key because
 # goreleaser's release pipe already registers `release.extra_files`

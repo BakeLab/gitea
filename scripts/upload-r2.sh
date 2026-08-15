@@ -6,13 +6,9 @@
 # Cloudflare R2 bucket, using curl's built-in AWS SigV4 signer (R2 is
 # S3-API compatible).
 #
-# This is the R2 half of the release process's parallel S3+R2 upload
-# period: goreleaser's `blobs:` pipe still uploads every release
-# artifact to AWS S3, and this script is invoked once per artifact
-# (via a goreleaser `publishers:` entry) to mirror the same artifact
-# into R2. Once the migration away from S3 is complete, the `blobs:`
-# block and the AWS_* secrets can be dropped without touching this
-# script.
+# It is invoked once per release artifact via a goreleaser
+# `publishers:` entry, and is the only artifact storage upload in the
+# release process.
 #
 # Usage:
 #   upload-r2.sh <local-file> <remote-key>
@@ -24,7 +20,7 @@
 # preflight step in CI: goreleaser custom publishers run as the very
 # last step of the publish pipeline, so without a preflight check a
 # missing R2_* secret would only be discovered after the Gitea release
-# has already been created and every artifact already uploaded to S3.
+# has already been created.
 #
 # Required environment variables:
 #   R2_ENDPOINT          Base URL of the R2 endpoint, e.g.
