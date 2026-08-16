@@ -6,11 +6,16 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,4 +93,37 @@ func TestPerformBrowserOAuthFlow_RedirectURIMatchesAcrossAuthorizeAndExchange(t 
 	require.NotEmpty(t, exchangeRedirectURI)
 	assert.Equal(t, authorizeRedirectURI, exchangeRedirectURI,
 		"redirect_uri must match between authorize and token exchange (RFC 6749 §4.1.3)")
+}
+
+// Regression test for the browser opener hang: xdg-open does not exit until
+// the browser it launched does, and the callback is only consumed after
+// openBrowser returns. Waiting on the opener hangs the CLI even though the
+// user authenticated successfully.
+func TestOpenBrowser_DoesNotWaitForOpener(t *testing.T) {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		t.Skip("xdg-open is not the opener on this platform")
+	}
+
+	const (
+		fakeOpenerSleepTime = 10 * time.Second
+		openBrowserTimeout  = 2 * time.Second
+	)
+
+	// A stand-in xdg-open that holds the foreground the way a browser it had
+	// to launch would.
+	dir := t.TempDir()
+	opener := filepath.Join(dir, "xdg-open")
+	script := fmt.Sprintf("#!/bin/sh\nexec sleep %d\n", int(fakeOpenerSleepTime.Seconds()))
+	require.NoError(t, os.WriteFile(opener, []byte(script), 0o755))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	done := make(chan error, 1)
+	go func() { done <- openBrowser("http://127.0.0.1:1/") }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(openBrowserTimeout):
+		t.Fatal("openBrowser blocked on the opener; the callback would never be consumed")
+	}
 }

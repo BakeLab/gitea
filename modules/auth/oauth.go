@@ -366,7 +366,9 @@ func startLocalServerAndOpenBrowser(authURL, expectedState string, opts *OAuthOp
 var openBrowser = func(url string) error {
 	fmt.Printf("Please authorize the application by visiting this URL in your browser:\n%s\n", url)
 
-	return open.Run(url)
+	// Don't wait for the opener to exit, so a browser that holds the
+	// foreground can't block the wait for the callback.
+	return open.Start(url)
 }
 
 // createLoginFromToken creates a login entry using the obtained access token
