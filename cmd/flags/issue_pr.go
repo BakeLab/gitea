@@ -101,6 +101,10 @@ var issuePRFlags = append([]cli.Flag{
 		Aliases: []string{"d"},
 	},
 	&cli.StringFlag{
+		Name:  "description-file",
+		Usage: "Read description from file ('-' for stdin)",
+	},
+	&cli.StringFlag{
 		Name:    "referenced-version",
 		Aliases: []string{"v"},
 		Usage:   "commit-hash or tag name to assign",
@@ -133,12 +137,22 @@ var IssuePRCreateFlags = append([]cli.Flag{
 
 // GetIssuePRCreateFlags parses all IssuePREditFlags
 func GetIssuePRCreateFlags(requestCtx stdctx.Context, ctx *context.TeaContext) (*gitea.CreateIssueOption, error) {
+	body, err := resolveCreateBody(
+		ctx.String("description"),
+		ctx.String("description-file"),
+		ctx.IsSet("description-file"),
+		stdinPiped(),
+		ctx.Reader,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	opts := gitea.CreateIssueOption{
 		Title:     ctx.String("title"),
-		Body:      ctx.String("description"),
+		Body:      body,
 		Assignees: strings.Split(ctx.String("assignees"), ","),
 	}
-	var err error
 
 	date := ctx.String("deadline")
 	if date != "" {
@@ -208,9 +222,18 @@ func GetIssuePREditFlags(ctx *context.TeaContext) (*task.EditIssueOption, error)
 		val := ctx.String("title")
 		opts.Title = &val
 	}
-	if ctx.IsSet("description") {
-		val := ctx.String("description")
-		opts.Body = &val
+	body, err := resolveEditBody(
+		ctx.String("description"),
+		ctx.IsSet("description"),
+		ctx.String("description-file"),
+		ctx.IsSet("description-file"),
+		ctx.Reader,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		opts.Body = body
 	}
 	if ctx.IsSet("referenced-version") {
 		val := ctx.String("referenced-version")
