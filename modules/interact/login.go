@@ -200,25 +200,9 @@ func CreateLogin(ctx context.Context) error {
 			}
 			printTitleAndContent("Selected ssh-key:", sshKey)
 
-			// ssh certificate
-			if strings.Contains(sshKey, "principals") {
-				sshCertPrincipal = regexp.MustCompile(`.*?principals: (.*?)[,|\s]`).FindStringSubmatch(sshKey)[1]
-				if strings.Contains(sshKey, "(ssh-agent)") {
-					sshAgent = true
-					sshKey = ""
-				} else {
-					sshKey = regexp.MustCompile(`\((.*?)\)$`).FindStringSubmatch(sshKey)[1]
-					sshKey = strings.TrimSuffix(sshKey, "-cert.pub")
-				}
-			} else {
-				sshKeyFingerprint = regexp.MustCompile(`(SHA256:.*?)\s`).FindStringSubmatch(sshKey)[1]
-				if strings.Contains(sshKey, "(ssh-agent)") {
-					sshAgent = true
-					sshKey = ""
-				} else {
-					sshKey = regexp.MustCompile(`\((.*?)\)$`).FindStringSubmatch(sshKey)[1]
-					sshKey = strings.TrimSuffix(sshKey, ".pub")
-				}
+			sshKey, sshCertPrincipal, sshKeyFingerprint, sshAgent, err = parseSSHPubkeySelection(sshKey)
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -272,6 +256,40 @@ func CreateLogin(ctx context.Context) error {
 	}
 
 	return task.CreateLogin(ctx, name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint, insecure, sshAgent, versionCheck, helper)
+}
+
+func parseSSHPubkeySelection(display string) (sshKey, sshCertPrincipal, sshKeyFingerprint string, sshAgent bool, err error) {
+	if strings.Contains(display, "principals") {
+		if sshCertPrincipal, err = regexpSubmatch(regexp.MustCompile(`.*?principals: (.*?)[,|\s]`), display); err != nil {
+			return "", "", "", false, fmt.Errorf("failed to parse SSH certificate principal from %q: %w", display, err)
+		}
+		if strings.HasSuffix(display, "(ssh-agent)") {
+			return "", sshCertPrincipal, "", true, nil
+		}
+		if sshKey, err = regexpSubmatch(regexp.MustCompile(`\((.*?)\)$`), display); err != nil {
+			return "", "", "", false, fmt.Errorf("failed to parse SSH certificate path from %q: %w", display, err)
+		}
+		return strings.TrimSuffix(sshKey, "-cert.pub"), sshCertPrincipal, "", false, nil
+	}
+
+	if sshKeyFingerprint, err = regexpSubmatch(regexp.MustCompile(`(SHA256:.*?)\s`), display); err != nil {
+		return "", "", "", false, fmt.Errorf("failed to parse SSH key fingerprint from %q: %w", display, err)
+	}
+	if strings.HasSuffix(display, "(ssh-agent)") {
+		return "", "", sshKeyFingerprint, true, nil
+	}
+	if sshKey, err = regexpSubmatch(regexp.MustCompile(`\((.*?)\)$`), display); err != nil {
+		return "", "", "", false, fmt.Errorf("failed to parse SSH key path from %q: %w", display, err)
+	}
+	return strings.TrimSuffix(sshKey, ".pub"), "", sshKeyFingerprint, false, nil
+}
+
+func regexpSubmatch(re *regexp.Regexp, s string) (string, error) {
+	match := re.FindStringSubmatch(s)
+	if len(match) < 2 {
+		return "", fmt.Errorf("no match")
+	}
+	return match[1], nil
 }
 
 var tokenScopeOpts = []string{
