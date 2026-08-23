@@ -2,7 +2,7 @@ module gitea.dev/tea
 
 go 1.26.0
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	charm.land/glamour/v2 v2.0.1
