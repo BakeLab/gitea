@@ -446,6 +446,14 @@ func (l *Login) Client(options ...gitea.ClientOption) *gitea.Client {
 		os.Exit(1)
 	}
 
+	return l.ClientWithoutRefresh(options...)
+}
+
+// ClientWithoutRefresh returns a client to operate the Gitea API without
+// attempting an automatic OAuth token refresh. Commands that need to handle
+// token refresh errors themselves (such as 'tea login status') should use this
+// instead of Client, which prints to stderr and exits on refresh failure.
+func (l *Login) ClientWithoutRefresh(options ...gitea.ClientOption) *gitea.Client {
 	// Configure transport-level timeouts so a stalled or unresponsive server
 	// fails fast instead of hanging forever. These bound connection setup and
 	// time-to-first-response-byte only, so slow-but-progressing transfers (e.g.

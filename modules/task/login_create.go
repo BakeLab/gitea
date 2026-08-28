@@ -48,6 +48,29 @@ func SetupHelper(login config.Login) (ok bool, err error) {
 	return true, nil
 }
 
+// HasGitCredentialHelper reports whether tea is registered as a git credential
+// helper for the given login. It mirrors the global git config lookup used by
+// SetupHelper.
+func HasGitCredentialHelper(login config.Login) bool {
+	if login.URL == "" {
+		return false
+	}
+
+	helperKey := fmt.Sprintf("credential.%s.helper", login.URL)
+	currentHelpers, err := exec.Command("git", "config", "--global", "--get-all", helperKey).Output()
+	if err != nil {
+		return false
+	}
+
+	for _, line := range strings.Split(strings.ReplaceAll(string(currentHelpers), "\r", ""), "\n") {
+		if strings.HasSuffix(strings.TrimSpace(line), "login helper") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // CreateLogin create a login to be stored in config
 func CreateLogin(ctx stdctx.Context, name, token, user, passwd, otp, scopes, sshKey, giteaURL, sshCertPrincipal, sshKeyFingerprint string, insecure, sshAgent, versionCheck, addHelper bool) error {
 	// checks ...

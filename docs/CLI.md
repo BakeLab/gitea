@@ -109,6 +109,12 @@ Return the stored token for a URL (git credential protocol)
 
 Refresh an OAuth token
 
+### status
+
+Show authentication status for Gitea logins
+
+**--output, -o**="": Output format. (simple, table, csv, tsv, yaml, json)
+
 ## logout
 
 Log out from a Gitea server

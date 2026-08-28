@@ -31,6 +31,7 @@ var CmdLogin = cli.Command{
 		&login.CmdLoginSetDefault,
 		&login.CmdLoginHelper,
 		&login.CmdLoginOAuthRefresh,
+		&login.CmdLoginStatus,
 	},
 }
 
