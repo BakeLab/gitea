@@ -8,6 +8,7 @@ import (
 
 	gitea "gitea.dev/sdk"
 	"gitea.dev/tea/modules/context"
+	"gitea.dev/tea/modules/print"
 	"gitea.dev/tea/modules/task"
 	"gitea.dev/tea/modules/theme"
 
@@ -134,11 +135,18 @@ func CreatePull(requestCtx stdctx.Context, ctx *context.TeaContext) (err error) 
 		return err
 	}
 
-	return task.CreatePull(
+	pr, err := task.CreatePull(
 		requestCtx,
 		ctx,
 		base,
 		head,
 		&allowMaintainerEdits,
 		&opts)
+	if err != nil {
+		return err
+	}
+
+	print.PullDetails(pr, nil, nil)
+
+	return nil
 }

@@ -14,7 +14,6 @@ import (
 	"gitea.dev/tea/modules/config"
 	"gitea.dev/tea/modules/context"
 	local_git "gitea.dev/tea/modules/git"
-	"gitea.dev/tea/modules/print"
 	"gitea.dev/tea/modules/utils"
 )
 
@@ -24,24 +23,26 @@ var (
 	consecutive = regexp.MustCompile(`[\s]{2,}`)
 )
 
-// CreatePull creates a PR in the given repo and prints the result
-func CreatePull(requestCtx stdctx.Context, ctx *context.TeaContext, base, head string, allowMaintainerEdits *bool, opts *gitea.CreateIssueOption) (err error) {
+// CreatePull creates a PR in the given repo and returns the created PR
+func CreatePull(requestCtx stdctx.Context, ctx *context.TeaContext, base, head string, allowMaintainerEdits *bool, opts *gitea.CreateIssueOption) (*gitea.PullRequest, error) {
+	var err error
+
 	// default is default branch
 	if len(base) == 0 {
 		base, err = GetDefaultPRBase(requestCtx, ctx.Login, ctx.Owner, ctx.Repo)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	// default is current one
 	if len(head) == 0 {
 		if ctx.LocalRepo == nil {
-			return fmt.Errorf("no local git repo detected, please specify head branch")
+			return nil, fmt.Errorf("no local git repo detected, please specify head branch")
 		}
 		headOwner, headBranch, err := GetDefaultPRHead(ctx.LocalRepo)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		head = GetHeadSpec(headOwner, headBranch, ctx.Owner)
@@ -49,7 +50,7 @@ func CreatePull(requestCtx stdctx.Context, ctx *context.TeaContext, base, head s
 
 	// head & base may not be the same
 	if head == base {
-		return fmt.Errorf("can't create PR from %s to %s", head, base)
+		return nil, fmt.Errorf("can't create PR from %s to %s", head, base)
 	}
 
 	// default is head branch name
@@ -58,7 +59,7 @@ func CreatePull(requestCtx stdctx.Context, ctx *context.TeaContext, base, head s
 	}
 	// title is required
 	if len(opts.Title) == 0 {
-		return fmt.Errorf("title is required")
+		return nil, fmt.Errorf("title is required")
 	}
 
 	client := ctx.Login.Client()
@@ -74,7 +75,7 @@ func CreatePull(requestCtx stdctx.Context, ctx *context.TeaContext, base, head s
 		Deadline:  opts.Deadline,
 	})
 	if err != nil {
-		return fmt.Errorf("could not create PR from %s to %s:%s: %s", head, ctx.Owner, base, err)
+		return nil, fmt.Errorf("could not create PR from %s to %s:%s: %s", head, ctx.Owner, base, err)
 	}
 
 	if allowMaintainerEdits != nil && pr.AllowMaintainerEdit != *allowMaintainerEdits {
@@ -82,13 +83,11 @@ func CreatePull(requestCtx stdctx.Context, ctx *context.TeaContext, base, head s
 			AllowMaintainerEdit: allowMaintainerEdits,
 		})
 		if err != nil {
-			return fmt.Errorf("could not enable maintainer edit on pull: %v", err)
+			return nil, fmt.Errorf("could not enable maintainer edit on pull: %v", err)
 		}
 	}
 
-	print.PullDetails(pr, nil, nil)
-
-	return err
+	return pr, nil
 }
 
 // GetDefaultPRBase retrieves the default base branch for the given repo

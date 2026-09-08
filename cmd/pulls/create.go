@@ -5,6 +5,9 @@ package pulls
 
 import (
 	stdctx "context"
+	"encoding/json"
+	"fmt"
+	"io"
 
 	gitea "gitea.dev/sdk"
 	"github.com/urfave/cli/v3"
@@ -12,6 +15,7 @@ import (
 	"gitea.dev/tea/cmd/flags"
 	"gitea.dev/tea/modules/context"
 	"gitea.dev/tea/modules/interact"
+	"gitea.dev/tea/modules/print"
 	"gitea.dev/tea/modules/task"
 	"gitea.dev/tea/modules/utils"
 )
@@ -80,6 +84,12 @@ func runPullsCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 		return nil
 	}
 
+	// agit flow creates the PR via git push and returns no PR object, so
+	// --output cannot be honored there; fail fast before any API calls
+	if ctx.Bool("agit") && ctx.IsSet("output") {
+		return fmt.Errorf("--output cannot be combined with --agit: the PR is created via git push, so no pull request object is available to print")
+	}
+
 	// else use args to create PR
 	opts, err := flags.GetIssuePRCreateFlags(requestCtx, ctx)
 	if err != nil {
@@ -108,7 +118,7 @@ func runPullsCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 		allowMaintainerEdits = gitea.OptionalBool(ctx.Bool("allow-maintainer-edits"))
 	}
 
-	return task.CreatePull(
+	pr, err := task.CreatePull(
 		requestCtx,
 		ctx,
 		ctx.String("base"),
@@ -116,4 +126,41 @@ func runPullsCreate(requestCtx stdctx.Context, cmd *cli.Command) error {
 		allowMaintainerEdits,
 		opts,
 	)
+	if err != nil {
+		return err
+	}
+
+	if ctx.IsSet("output") {
+		switch ctx.String("output") {
+		case "json":
+			return writeCreatedPullAsJSON(ctx.Writer, pr)
+		}
+	}
+
+	print.PullDetails(pr, nil, nil)
+
+	return nil
+}
+
+// createdPullJSON is the machine-readable representation of a freshly
+// created pull request. A new PR has no reviews, comments or CI yet, so
+// this is intentionally leaner than the detail view's pullData (cmd/pulls.go).
+type createdPullJSON struct {
+	Index int64           `json:"index"`
+	Title string          `json:"title"`
+	URL   string          `json:"url"`
+	State gitea.StateType `json:"state"`
+	Base  string          `json:"base"`
+	Head  string          `json:"head"`
+}
+
+func writeCreatedPullAsJSON(w io.Writer, pr *gitea.PullRequest) error {
+	return json.NewEncoder(w).Encode(createdPullJSON{
+		Index: pr.Index,
+		Title: pr.Title,
+		URL:   pr.HTMLURL,
+		State: pr.State,
+		Base:  pr.Base.Ref,
+		Head:  pr.Head.Ref,
+	})
 }
