@@ -5,11 +5,13 @@ package interact
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	gitea "gitea.dev/sdk"
 
 	"gitea.dev/tea/modules/config"
+	"gitea.dev/tea/modules/print"
 	"gitea.dev/tea/modules/task"
 	"gitea.dev/tea/modules/theme"
 
@@ -34,7 +36,16 @@ func CreateIssue(ctx context.Context, login *config.Login, owner, repo string) e
 		return err
 	}
 
-	return task.CreateIssue(ctx, login, owner, repo, opts)
+	issue, err := task.CreateIssue(ctx, login, owner, repo, opts)
+	if err != nil {
+		return err
+	}
+
+	print.IssueDetails(issue, nil)
+
+	fmt.Println(issue.HTMLURL)
+
+	return nil
 }
 
 func promptIssueProperties(ctx context.Context, login *config.Login, owner, repo string, o *gitea.CreateIssueOption) error {
