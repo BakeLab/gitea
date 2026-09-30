@@ -258,6 +258,21 @@ func (e *gitCommandError) Unwrap() error {
 	return e.err
 }
 
+func gitCommandEnv(authEnv []string) []string {
+	baseEnv := os.Environ()
+	env := make([]string, 0, len(baseEnv)+len(authEnv)+3)
+	for _, value := range baseEnv {
+		if strings.HasPrefix(value, "LC_ALL=") ||
+			strings.HasPrefix(value, "LANG=") ||
+			strings.HasPrefix(value, "LANGUAGE=") {
+			continue
+		}
+		env = append(env, value)
+	}
+	env = append(env, authEnv...)
+	return append(env, "LC_ALL=C", "LANG=C", "LANGUAGE=C")
+}
+
 func runGitCommand(dir string, auth *AuthMethod, extraConfigs []string, args ...string) (string, error) {
 	authConfigs, authEnv, cleanup, err := prepareCLIAuth(auth)
 	if err != nil {
@@ -278,7 +293,7 @@ func runGitCommand(dir string, auth *AuthMethod, extraConfigs []string, args ...
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	cmd.Env = append(os.Environ(), authEnv...)
+	cmd.Env = gitCommandEnv(authEnv)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
