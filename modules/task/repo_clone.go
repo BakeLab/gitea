@@ -33,7 +33,7 @@ func RepoClone(
 		return nil, err
 	}
 
-	auth, err := local_git.GetAuthForURL(originURL, login.GetAccessToken(), login.SSHKey, callback)
+	auth, err := local_git.GetAuthForURL(originURL, login.GetAccessToken(), login.SSHKeyPath(), callback)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func RepoClone(
 
 func cloneURL(repo *gitea.Repository, login *config.Login) (*url.URL, error) {
 	urlStr := repo.CloneURL
-	if login.SSHKey != "" {
+	if login.SSHKeyPath() != "" || login.SSHAgent {
 		urlStr = repo.SSHURL
 	}
 	return local_git.ParseURL(urlStr)

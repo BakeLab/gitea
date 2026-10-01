@@ -153,7 +153,7 @@ func CreateLogin(ctx stdctx.Context, name, token, user, passwd, otp, scopes, ssh
 	// so we just use the host
 	login.SSHHost = serverURL.Host
 
-	if len(sshKey) == 0 {
+	if shouldFindSSHKey(sshKey, sshAgent) {
 		login.SSHKey, err = findSSHKey(ctx, client)
 		if err != nil {
 			fmt.Printf("Warning: problem while finding a SSH key: %s\n", err)
@@ -174,6 +174,10 @@ func CreateLogin(ctx stdctx.Context, name, token, user, passwd, otp, scopes, ssh
 	}
 
 	return nil
+}
+
+func shouldFindSSHKey(sshKey string, sshAgent bool) bool {
+	return sshKey == "" && !sshAgent
 }
 
 func shouldCheckTokenUniqueness(token string, sshAgent bool, sshKey, sshCertPrincipal, sshKeyFingerprint string) bool {

@@ -489,7 +489,7 @@ func (l *Login) ClientWithoutRefresh(options ...gitea.ClientOption) *gitea.Clien
 			fmt.Fprintf(os.Stderr, "Failed to read SSH passphrase: %s\n", err)
 			os.Exit(1)
 		}
-		options = append(options, gitea.UseSSHCert(l.SSHCertPrincipal, l.SSHKey, l.SSHPassphrase))
+		options = append(options, gitea.UseSSHCert(l.SSHCertPrincipal, l.SSHKeyPath(), l.SSHPassphrase))
 	}
 
 	if l.SSHKeyFingerprint != "" {
@@ -497,7 +497,7 @@ func (l *Login) ClientWithoutRefresh(options ...gitea.ClientOption) *gitea.Clien
 			fmt.Fprintf(os.Stderr, "Failed to read SSH passphrase: %s\n", err)
 			os.Exit(1)
 		}
-		options = append(options, gitea.UseSSHPubkey(l.SSHKeyFingerprint, l.SSHKey, l.SSHPassphrase))
+		options = append(options, gitea.UseSSHPubkey(l.SSHKeyFingerprint, l.SSHKeyPath(), l.SSHPassphrase))
 	}
 
 	client, err := gitea.NewClient(l.URL, options...)
@@ -513,7 +513,7 @@ func (l *Login) ClientWithoutRefresh(options ...gitea.ClientOption) *gitea.Clien
 }
 
 func (l *Login) askForSSHPassphrase() error {
-	if ok, err := utils.IsKeyEncrypted(l.SSHKey); ok && err == nil && l.SSHPassphrase == "" {
+	if ok, err := utils.IsKeyEncrypted(l.SSHKeyPath()); ok && err == nil && l.SSHPassphrase == "" {
 		return huh.NewInput().
 			Title("ssh-key is encrypted please enter the passphrase: ").
 			Validate(huh.ValidateNotEmpty()).
@@ -523,6 +523,15 @@ func (l *Login) askForSSHPassphrase() error {
 			Run()
 	}
 	return nil
+}
+
+// SSHKeyPath returns the on-disk SSH key to use, or an empty string when the
+// login is configured to authenticate through a running ssh-agent.
+func (l *Login) SSHKeyPath() string {
+	if l.SSHAgent {
+		return ""
+	}
+	return l.SSHKey
 }
 
 // GetSSHHost returns SSH host name

@@ -210,7 +210,7 @@ func CreateAgitFlowPull(requestCtx stdctx.Context, ctx *context.TeaContext, remo
 		return err
 	}
 
-	auth, err := local_git.GetAuthForURL(url, ctx.Login.GetAccessToken(), ctx.Login.SSHKey, callback)
+	auth, err := local_git.GetAuthForURL(url, ctx.Login.GetAccessToken(), ctx.Login.SSHKeyPath(), callback)
 	if err != nil {
 		return err
 	}

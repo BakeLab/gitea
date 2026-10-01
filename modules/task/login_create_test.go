@@ -55,3 +55,35 @@ func TestShouldCheckTokenUniqueness(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldFindSSHKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		sshKey   string
+		sshAgent bool
+		want     bool
+	}{
+		{
+			name:   "explicit key",
+			sshKey: "~/.ssh/id_ed25519",
+			want:   false,
+		},
+		{
+			name:     "ssh agent",
+			sshAgent: true,
+			want:     false,
+		},
+		{
+			name: "no key configured",
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldFindSSHKey(tt.sshKey, tt.sshAgent); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}

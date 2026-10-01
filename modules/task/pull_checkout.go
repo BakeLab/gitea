@@ -61,10 +61,9 @@ func remoteURLForPR(login *config.Login, pr *gitea.PullRequest) string {
 	if isRemoteDeleted(pr) {
 		repo = pr.Base.Repository
 	}
-	if len(login.SSHKey) != 0 {
-		// login.SSHKey is nonempty, if user specified a key manually or we automatically
-		// found a matching private key on this machine during login creation.
-		// this means, we are very likely to have a working ssh setup.
+	if login.SSHKeyPath() != "" || login.SSHAgent {
+		// Use SSH when a key file is configured, or when the login authenticates
+		// through a running ssh-agent. In both cases we have a working SSH setup.
 		return repo.SSHURL
 	}
 	return repo.CloneURL
@@ -84,7 +83,7 @@ func doPRFetch(
 	if err != nil {
 		return "", err
 	}
-	auth, err := local_git.GetAuthForURL(url, login.GetAccessToken(), login.SSHKey, callback)
+	auth, err := local_git.GetAuthForURL(url, login.GetAccessToken(), login.SSHKeyPath(), callback)
 	if err != nil {
 		return "", err
 	}

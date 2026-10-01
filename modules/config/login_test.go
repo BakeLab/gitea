@@ -90,6 +90,39 @@ func TestLoginClientWithSSHPubkeyDoesNotDeadlockOnFirstRequest(t *testing.T) {
 	assert.EqualValues(t, 1, signedIssueRequests.Load())
 }
 
+func TestLoginSSHKeyPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		login Login
+		want  string
+	}{
+		{
+			name:  "disk key",
+			login: Login{SSHKey: "/tmp/id_ed25519"},
+			want:  "/tmp/id_ed25519",
+		},
+		{
+			name:  "ssh agent ignores disk key",
+			login: Login{SSHKey: "/tmp/id_ed25519", SSHAgent: true},
+			want:  "",
+		},
+		{
+			name:  "ssh agent without disk key",
+			login: Login{SSHAgent: true},
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.login.SSHKeyPath())
+		})
+	}
+}
+
 func writeTestSSHKey(t *testing.T) (string, string) {
 	t.Helper()
 

@@ -95,7 +95,7 @@ call me again with the --ignore-sha flag`, remoteBranch)
 		if urlErr != nil {
 			return urlErr
 		}
-		auth, authErr := local_git.GetAuthForURL(url, login.GetAccessToken(), login.SSHKey, callback)
+		auth, authErr := local_git.GetAuthForURL(url, login.GetAccessToken(), login.SSHKeyPath(), callback)
 		if authErr != nil {
 			return authErr
 		}
