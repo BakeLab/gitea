@@ -1,120 +1,30 @@
-# Gitea actions workflows
+# Gitea Actions workflows
 
-## Workflow management with tea
+Select a repository explicitly for scripts and supply a token scoped to its instance:
 
-### List workflows
-
-```bash
-# List all workflows in the repository
-tea actions workflows list
+```sh
+export TEA_HOST=https://gitea.example.org
+export TEA_REPO=owner/repository
+# Supply GITEA_TOKEN through your CI secret environment.
+tea workflow list --no-input --json
+tea workflow view deploy.yml --no-input --json
+tea workflow run deploy.yml --ref main --field env=staging --field version=1.2.3 --no-input
+tea workflow disable deploy.yml --yes --no-input
+tea workflow enable deploy.yml --no-input
 ```
 
-### View workflow details
+Workflow dispatch requires a `workflow_dispatch` trigger in the workflow. Dispatch
+and watching are separate commands; find the run with `tea run list`, then use
+`tea run watch RUN_ID --timeout 10m --no-input`. Unsuccessful completed runs return
+a nonzero exit code.
 
-```bash
-# View details of a specific workflow by ID or filename
-tea actions workflows view deploy.yml
+For an explicitly authorized merge in CI:
+
+```sh
+tea pr merge 123 --repo owner/repository --method rebase --no-input
 ```
 
-### Dispatch (trigger) a workflow
-
-```bash
-# Dispatch a workflow on the current branch
-tea actions workflows dispatch deploy.yml
-
-# Dispatch on a specific branch
-tea actions workflows dispatch deploy.yml --ref main
-
-# Dispatch with workflow inputs
-tea actions workflows dispatch deploy.yml --ref main --input env=staging --input version=1.2.3
-
-# Dispatch and follow log output
-tea actions workflows dispatch ci.yml --ref feature/my-pr --follow
-```
-
-### Enable / disable workflows
-
-```bash
-# Disable a workflow
-tea actions workflows disable deploy.yml --confirm
-
-# Enable a workflow
-tea actions workflows enable deploy.yml
-```
-
-## Example: Re-trigger CI from an AI-driven PR flow
-
-Use `tea actions workflows dispatch` to re-run a specific workflow after
-pushing changes in an automated PR workflow:
-
-```bash
-# Push changes to a feature branch, then re-trigger CI
-git push origin feature/auto-fix
-tea actions workflows dispatch check-and-test --ref feature/auto-fix --follow
-```
-
-## Example: Dispatch a workflow with `workflow_dispatch` trigger
-
-```yaml
-name: deploy
-
-on:
-  workflow_dispatch:
-    inputs:
-      env:
-        description: "Target environment"
-        required: true
-        default: "staging"
-      version:
-        description: "Version to deploy"
-        required: true
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Deploy
-        run: |
-          echo "Deploying version ${{ gitea.event.inputs.version }} to ${{ gitea.event.inputs.env }}"
-```
-
-Trigger this workflow from the CLI:
-
-```bash
-tea actions workflows dispatch deploy.yml --ref main --input env=production --input version=2.0.0
-```
-
-## Merge Pull request on approval
-
-```yaml
----
-name: Pull request
-on:
-  pull_request_review:
-    types: [submitted, dismissed]
-jobs:
-  approved:
-    name: Approved
-    if: gitea.event.review.type == 'pull_request_review_approved'
-    container:
-      image: docker.io/pysen/tea:latest
-    runs-on: ubuntu-latest
-    steps:
-    - name: Configure Tea
-      env:
-        # This is a tea config.yml with (service) account token
-        TEA_CREDENTIALS: ${{ secrets.TEA_CREDENTIALS }}
-      run: |
-        echo "$TEA_CREDENTIALS" > $HOME/.config/tea/config.yml
-    - name: Rebase then fast-forward merge Git
-      run: |
-        tea pr merge --repo ${{ gitea.event.repository.full_name }} --style rebase ${{ gitea.event.pull_request.number }}
-  dismissed:
-    name: Dismissed
-    if: gitea.event.review.type == 'pull_request_review_rejected'
-    runs-on: ubuntu-latest
-    steps:
-    - run: |
-        tea pr reject --repo ${{ gitea.event.repository.full_name }} ${{ gitea.event.pull_request.number }} "Dismissed"
-```
+Keep credentials in the secret environment or credential store. Never write a token
+into `config.yml` or `hosts.yml`. Run `tea help <command>`, or see the command
+reference in each release's docs archive, for supported flags and the
+[README](../README.md) for fresh authentication.

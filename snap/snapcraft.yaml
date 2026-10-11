@@ -15,7 +15,7 @@ adopt-info: tea
 apps:
   tea:
     command: tea
-    plugs: [network, network-bind, removable-media]
+    plugs: [network, network-bind, removable-media, password-manager-service]
 
 parts:
   tea:
@@ -23,7 +23,7 @@ parts:
     source: https://gitea.com/gitea/tea.git
     stage-packages: [ git,  openssh-client ]
     build-packages: [ git, build-essential]
-    build-snaps: [ go/1.21/stable ]
+    build-snaps: [ go/1.27/stable ]
     build-environment:
       - LDFLAGS: ""
     override-pull: |

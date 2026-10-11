@@ -12,6 +12,7 @@ linters:
     - misspell
     - ineffassign
     - unused
+    - copyloopvar
 
   settings:
     revive:

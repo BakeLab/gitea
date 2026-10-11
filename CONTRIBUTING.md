@@ -56,8 +56,26 @@ high-level discussions.
 
 ## Testing redux
 
-Before sending code out for review, run all the test by executing: `make test`
+Before sending code out for review, run the unit tests with `make test`.
 Since TEA is an cli tool it should be obvious to test your feature locally first.
+
+Tests live beside the packages they exercise. `make integration-test` runs the
+`TestGitea*` tests against a disposable Gitea instance with an administrator
+account named `integration` and a reviewer named `tea-reviewer`. Never point
+these tests at a production instance: they create and delete resources.
+
+```sh
+GITEA_TEA_TEST_URL=http://127.0.0.1:3000 \
+GITEA_TEA_TEST_TOKEN_FILE=/private/path/admin-token \
+GITEA_TEA_TEST_REVIEWER_TOKEN_FILE=/private/path/reviewer-token \
+  make integration-test
+```
+
+Token files contain scoped PATs for their accounts and should be `0600`;
+`scripts/integration-tokens.py` creates them for the CI accounts. Optional
+coverage is enabled by `GITEA_TEA_TEST_REPOSITORY_ROOT` (the server's repository
+root, with `[repository] IMPORT_LOCAL_PATHS = true`, for migration) and
+`GITEA_TEA_TEST_SSH_ENDPOINT` (an SSH clone endpoint).
 
 ## Code review
 
@@ -81,52 +99,49 @@ Some of the key points:
 ## Styleguide
 
 ### Commands
-- Subcommands should follow the following structure:
-    ```
-    tea <noun> <verb> [<noun>] [<flags>]
-    ```
 
-    for example:
+Use explicit singular noun/verb commands, such as `tea issue list` and
+`tea pr create`. Bare command groups show help. Commands validate input, collect
+missing fields when the shared prompting policy permits it, invoke services, and
+render results through injected streams. Destructive commands require confirmation
+or `--yes`; `--no-input` disables implicit interaction. JSON results go to stdout;
+diagnostics and prompts go to stderr. Lists register `--limit`/`--page` with
+`pageFlags` and print through `writeList`, which renders one `terminal.Table`
+(ID or number first, then title or name, then state) through the pager.
 
-    ```
-    tea issues list
-    tea pulls create
-    tea teams add user --team x --user y
-    ```
-- Commands should accept nouns as singular & plural by making use of the `Aliases` field.
-- The default action without a verb is `list`.
-- There is a standard set of verbs: `list/ls`, `create`, `edit`, `delete`
-  - `ls` lists objects with filter options, and applies pagination where available.
-  - `delete` should show info what is deleted and ask user again, if force flag`-y` is not set
-  - Verbs that accept large numbers of flags provide an interactive mode when called without any arguments or flags.
-- Try to reuse as many flag definitions as possible, see `cmd/flags/flags.go`.
-- Always make sure that the help texts are properly set, and as concise as possible.
+### Internal Package Structure
 
-### Internal Module Structure
-- `cmd`: only contains command/flag options for `urfave/cli`
-  - subcommands are in a subpackage named after its parent command
-- `modules/task`: contain func for doing something with gitea
-  (e.g. create token by user/passwd)
-- `modules/print`: contain all functions that print to stdout
-- `modules/config`: config tea & login things
-- `modules/interact`: contain functions to interact with user by prompts
-- `modules/git`: do git related stuff (get info/push/pull/checkout/...)
-- `modules/utils`: helper functions used by other functions
+- `internal/app`: Cobra commands and application dependency construction.
+- `internal/services`: typed workflows over `gitea.dev/sdk`, independent of CLI flags
+  and terminal I/O, including pagination policy. Services map SDK types to tea's
+  output types; requests the SDK cannot make yet go through the raw helpers in
+  `raw.go`, each marked `TODO(sdk)` with the missing SDK piece.
+- `internal/settings`: split configuration, validation, persistence, target resolution,
+  and remote URL parsing.
+- `internal/auth`: secure credentials and OAuth lifecycle.
+- `internal/transport`: the tea HTTP client shared by the SDK and raw requests: TLS,
+  timeouts, User-Agent, `--debug`, retries, token, Sudo and SSH-signature
+  authentication, and sanitised API errors. Its raw requests serve `tea api`, signed
+  downloads and log streaming.
+- `internal/git`: repository discovery and cancellable Git subprocesses.
+- `internal/terminal`: streams, input, editor, browser, and rendering.
+- `internal/clierr`: typed errors and executable exit codes.
+- `internal/aliases`: user command alias expansion.
+- `internal/filelock`: cross-process locks for configuration writes.
+- `internal/version`: build version metadata.
+
+Unit and integration tests live beside their packages; see [Testing redux](#testing-redux).
 
 ### Code Style
 Use `make fmt`, check with `make lint`.
-For imports you should use the following format (_without_ the comments)
+Group imports into the standard library, then all other packages (local and
+external) in one sorted block, as gofumpt keeps them:
 ```go
 import (
-  // stdlib
   "encoding/json"
   "fmt"
 
-  // local packages
-  "code.gitea.io/gitea/models"
-  "gitea.dev/sdk"
-
-  // external packages
+  "gitea.dev/tea/internal/services"
   "github.com/foo/bar"
   "gopkg.io/baz.v1"
 )

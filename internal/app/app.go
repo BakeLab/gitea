@@ -1,0 +1,474 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+// Package app builds the tea command tree and its injected dependencies.
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"reflect"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+	"unicode"
+
+	"gitea.dev/tea/internal/aliases"
+	"gitea.dev/tea/internal/auth"
+	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/tea/internal/git"
+	"gitea.dev/tea/internal/services"
+	"gitea.dev/tea/internal/settings"
+	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/tea/internal/transport"
+	"gitea.dev/tea/internal/version"
+	"github.com/spf13/cobra"
+)
+
+// Dependencies supplies external boundaries for a fresh CLI invocation.
+type Dependencies struct {
+	Browser       terminal.Browser
+	Editor        terminal.Editor
+	Pager         terminal.Pager
+	Executable    func() (string, error)
+	Git           git.Runner
+	Now           func() time.Time
+	Settings      *settings.Store
+	Credentials   *auth.Store
+	Streams       terminal.Streams
+	Prompter      terminal.Prompter
+	IssueForm     terminal.IssueForm
+	IssueEditForm terminal.IssueEditForm
+	PullForm      terminal.PullForm
+	ReviewForm    terminal.ReviewForm
+	MergeForm     terminal.MergeForm
+	MilestoneForm terminal.MilestoneForm
+	Getenv        func(string) string
+	Client        func(string, string, bool) *transport.Client
+}
+
+// System connects the CLI to the current environment and terminal.
+func System() Dependencies {
+	streams := terminal.System()
+	store := settings.New(os.Getenv("TEA_CONFIG_DIR"))
+	prompter := &terminal.FormPrompter{Streams: streams}
+	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: streams.ErrOut}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, Getenv: os.Getenv, Client: transport.New}
+}
+
+type options struct {
+	host, user, repo, cwd, remote string
+	sudo                          string
+	json, jq                      string
+	noInput, interactive, yes     bool
+	debug                         bool
+}
+
+type application struct {
+	deps    Dependencies
+	options options
+}
+
+// NewRoot builds fresh commands. Construction performs no disk, network, or Git IO.
+func NewRoot(deps Dependencies) *cobra.Command {
+	if deps.Executable == nil {
+		deps.Executable = os.Executable
+	}
+	if deps.Now == nil {
+		deps.Now = time.Now
+	}
+	if deps.Git == nil {
+		deps.Git = git.System{In: deps.Streams.In, ErrOut: deps.Streams.ErrOut}
+	}
+	if deps.Browser == nil {
+		deps.Browser = terminal.SystemBrowser{ErrOut: deps.Streams.ErrOut}
+	}
+	if deps.Editor == nil {
+		deps.Editor = terminal.SystemEditor{Streams: deps.Streams}
+	}
+	a := &application{deps: deps}
+	if client := deps.Client; client != nil {
+		a.deps.Client = func(instance, token string, insecure bool) *transport.Client {
+			if a.options.debug {
+				return client(instance, token, insecure).Debug(deps.Streams.ErrOut)
+			}
+			return client(instance, token, insecure)
+		}
+	}
+	root := &cobra.Command{Use: "tea", Short: "Work with Gitea from your terminal", Version: version.Format(), SilenceErrors: true, SilenceUsage: true}
+	root.SetIn(deps.Streams.In)
+	root.SetOut(deps.Streams.Out)
+	root.SetErr(deps.Streams.ErrOut)
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return clierr.Wrap(clierr.Usage, err) })
+	flags := root.PersistentFlags()
+	flags.StringVar(&a.options.host, "host", "", "Gitea instance URL, including any base path")
+	flags.StringVar(&a.options.user, "user", "", "Account on the selected instance")
+	flags.StringVar(&a.options.sudo, "sudo", "", "Perform API requests as this user (requires an administrator account)")
+	flags.StringVarP(&a.options.repo, "repo", "R", "", "Repository owner/name or URL")
+	flags.StringVar(&a.options.cwd, "cwd", "", "Working directory for repository discovery")
+	flags.StringVar(&a.options.remote, "remote", "", "Git remote used for repository discovery")
+	flags.StringVar(&a.options.json, "json", "", "Output JSON; optionally select comma-separated fields")
+	flags.Lookup("json").NoOptDefVal = "*"
+	flags.StringVar(&a.options.jq, "jq", "", "Filter JSON with a jq expression")
+	flags.BoolVar(&a.options.noInput, "no-input", false, "Disable prompts and implicit editor/browser interactions")
+	flags.BoolVar(&a.options.interactive, "interactive", false, "Allow prompts with machine output")
+	flags.BoolVar(&a.options.yes, "yes", false, "Accept confirmations without prompting")
+	flags.BoolVar(&a.options.debug, "debug", false, "Log the method, URL, status, and duration of each HTTP request to stderr")
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		if reason := cmd.Annotations["tea.text"]; reason != "" && a.options.json != "" {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("%s; --json is not supported", reason))
+		}
+		if flag := cmd.Flags().Lookup("web"); flag != nil && flag.Value.String() == "true" && (a.options.json != "" || a.options.jq != "") {
+			return clierr.Wrap(clierr.Usage, errors.New("--web cannot be combined with --json or --jq"))
+		}
+		if a.options.jq != "" && a.options.json == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--jq requires --json"))
+		}
+		if cmd.Flags().Changed("sudo") {
+			if a.options.sudo == "" || strings.IndexFunc(a.options.sudo, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+				return clierr.Wrap(clierr.Usage, errors.New("--sudo requires a username"))
+			}
+			for c := cmd; c.HasParent(); c = c.Parent() {
+				if c.Name() == "auth" && !c.Parent().HasParent() {
+					return clierr.Wrap(clierr.Usage, errors.New("--sudo cannot be used with auth commands"))
+				}
+			}
+		}
+		if err := terminal.ValidateOutput(a.options.json, a.options.jq, commandOutputFields(cmd)); err != nil {
+			return clierr.Wrap(clierr.Usage, err)
+		}
+		if offline(cmd) {
+			return nil
+		}
+		snapshot, err := a.deps.Settings.Load()
+		if err != nil {
+			return err
+		}
+		return a.policy(snapshot).Validate(a.deps.Streams)
+	}
+	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.labelCommand(), a.milestoneCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false))
+	root.AddCommand(a.manCommand())
+	root.AddCommand(&cobra.Command{Use: "version", Short: "Print tea's version", Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), version.Format())
+		return err
+	}})
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+	root.SetVersionTemplate("{{.Version}}\n")
+	rejectUnknownSubcommands(root)
+	return root
+}
+
+// offline reports commands that must work without valid settings.
+func offline(cmd *cobra.Command) bool {
+	if cmd.Annotations["tea.group"] == "true" {
+		return true
+	}
+	switch cmd.Name() {
+	case "help", "version", "man", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		return true
+	}
+	return cmd.HasParent() && cmd.Parent().Name() == "completion"
+}
+
+// rejectUnknownSubcommands makes `tea bogus` and `tea issue bogus` usage errors instead of printing help.
+func rejectUnknownSubcommands(cmd *cobra.Command) {
+	if cmd.HasSubCommands() && !cmd.Runnable() {
+		if cmd.Annotations == nil {
+			cmd.Annotations = map[string]string{}
+		}
+		cmd.Annotations["tea.group"] = "true"
+		cmd.Args, cmd.SuggestionsMinimumDistance = cobra.ArbitraryArgs, 2
+		cmd.RunE = func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			err := fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+			if suggestions := cmd.SuggestionsFor(args[0]); len(suggestions) > 0 {
+				err = fmt.Errorf("%w; did you mean %s?", err, strings.Join(suggestions, " or "))
+			}
+			return clierr.Wrap(clierr.Usage, err)
+		}
+	}
+	for _, child := range cmd.Commands() {
+		rejectUnknownSubcommands(child)
+	}
+}
+
+func builtins(root *cobra.Command) map[string]bool {
+	names := map[string]bool{"help": true, "completion": true}
+	for _, cmd := range root.Commands() {
+		if cmd.Annotations["tea.alias"] != "true" {
+			names[cmd.Name()] = true
+		}
+	}
+	return names
+}
+
+// Execute expands aliases and executes the fresh root without printing errors.
+func Execute(ctx context.Context, deps Dependencies, args []string) error {
+	root := NewRoot(deps)
+	if at := commandIndex(root, args); at == len(args) || (args[at] != cobra.ShellCompRequestCmd && args[at] != cobra.ShellCompNoDescRequestCmd) {
+		args = joinJSONFields(root, args)
+	}
+	// Broken settings or aliases must not prevent help or recovery commands.
+	snapshot, loadErr := deps.Settings.Load()
+	names := builtins(root)
+	if commandAt := commandIndex(root, args); commandAt < len(args) {
+		name := args[commandAt]
+		completion := name == cobra.ShellCompRequestCmd || name == cobra.ShellCompNoDescRequestCmd
+		switch {
+		case loadErr != nil:
+			// An alias cannot be expanded without settings; report why instead of "unknown command".
+			if !names[name] && !completion {
+				return loadErr
+			}
+		case completion:
+			completionArgs := args[commandAt+1:]
+			if aliasAt := commandIndex(root, completionArgs); aliasAt < len(completionArgs) {
+				if expanded, err := aliases.ExpandCompletion(completionArgs[aliasAt:], snapshot.Preferences.Aliases, names); err == nil {
+					args = slices.Concat(args[:commandAt+1], completionArgs[:aliasAt], expanded)
+				}
+			}
+		default:
+			expanded, err := aliases.Expand(args[commandAt:], snapshot.Preferences.Aliases, names)
+			if err != nil {
+				return clierr.Wrap(clierr.Usage, err)
+			}
+			args = joinJSONFields(root, slices.Concat(args[:commandAt], expanded))
+		}
+	}
+	if loadErr == nil {
+		for name, expansion := range snapshot.Preferences.Aliases {
+			if aliases.Check(name, snapshot.Preferences.Aliases, names) == nil {
+				root.AddCommand(&cobra.Command{Use: name, Short: "Alias for " + expansion, Annotations: map[string]string{"tea.alias": "true"}, RunE: func(*cobra.Command, []string) error {
+					return clierr.Wrap(clierr.Usage, errors.New("alias must be expanded before execution"))
+				}})
+			}
+		}
+	}
+	root.SetArgs(args)
+	err := root.ExecuteContext(ctx)
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == 401 {
+		return clierr.Wrap(clierr.Authentication, err)
+	}
+	return err
+}
+
+var jsonFieldList = regexp.MustCompile(`^[a-z_]+(,[a-z_]+)*$`)
+
+// joinJSONFields accepts `--json number,title` like `--json=number,title` unless the selected command
+// does not output those fields, in which case the word stays a positional argument. A bare --json
+// still selects every field. Unknown commands, such as aliases before expansion, are joined.
+func joinJSONFields(root *cobra.Command, args []string) []string {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			break
+		}
+		if args[i] != "--json" || i+1 >= len(args) || !jsonFieldList.MatchString(args[i+1]) {
+			continue
+		}
+		cmd, _, err := root.Find(slices.Concat(args[:i+1], args[i+2:]))
+		if err == nil && terminal.ValidateOutput(args[i+1], "", commandOutputFields(cmd)) != nil {
+			continue
+		}
+		args = slices.Concat(args[:i], []string{"--json=" + args[i+1]}, args[i+2:])
+	}
+	return args
+}
+
+// confirm asks for confirmation under the prompt policy unless --yes was supplied.
+func (a *application) confirm(cmd *cobra.Command, description string) error {
+	s, err := a.deps.Settings.Load()
+	if err != nil {
+		return err
+	}
+	return terminal.Confirm(cmd.Context(), description, a.options.yes, a.deps.Streams, a.policy(s), a.deps.Prompter)
+}
+
+// require prompts for a missing required value under the prompt policy.
+func (a *application) require(cmd *cobra.Command, value *string, flag string) (bool, error) {
+	s, err := a.deps.Settings.Load()
+	if err != nil {
+		return false, err
+	}
+	return terminal.Require(cmd.Context(), value, flag, a.deps.Streams, a.policy(s), a.deps.Prompter)
+}
+
+func (a *application) policy(snapshot settings.Snapshot) terminal.Policy {
+	return terminal.Policy{Enabled: snapshot.Preferences.Prompt == "enabled", NoInput: a.options.noInput, Machine: a.options.json != "", Interactive: a.options.interactive}
+}
+
+// titleCase capitalizes an ASCII command word for help and status text.
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// textOutput marks a command whose output is not a JSON resource, so --json is rejected up front.
+func textOutput(reason string) map[string]string {
+	return map[string]string{"tea.text": reason}
+}
+
+// commandIndex skips persistent flags without parsing or mutating command state.
+func commandIndex(root *cobra.Command, args []string) int {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return i + 1
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			return i
+		}
+		name := strings.TrimLeft(arg, "-")
+		if strings.Contains(name, "=") {
+			continue
+		}
+		flag := root.PersistentFlags().Lookup(name)
+		if flag == nil && len(name) > 0 && !strings.HasPrefix(arg, "--") {
+			flag = root.PersistentFlags().ShorthandLookup(name[:1])
+			if len(name) > 1 {
+				continue
+			}
+		}
+		if flag != nil && flag.NoOptDefVal == "" {
+			i++
+		}
+	}
+	return len(args)
+}
+
+func commandOutputFields(cmd *cobra.Command) []string {
+	if cmd.Name() == "status" && cmd.Parent() != nil {
+		if cmd.Parent().Name() == "pr" {
+			return jsonFields[services.PullStatus]()
+		}
+		if cmd.Parent().Parent() == nil {
+			return jsonFields[services.AccountStatus]()
+		}
+	}
+	if cmd.Parent() == nil {
+		return nil
+	}
+	if cmd.Parent().Name() == "search" {
+		if cmd.Name() == "repo" {
+			return jsonFields[services.Repository]()
+		}
+		return jsonFields[services.SearchItem]()
+	}
+	switch cmd.Parent().Name() {
+	case "auth":
+		if cmd.Name() == "status" {
+			return jsonFields[authStatusRow]()
+		}
+	case "config":
+		if cmd.Name() == "get" || cmd.Name() == "list" {
+			return []string{
+				"version", "default_host", "git_protocol", "editor", "prompt", "pager", "browser", "color", "remote",
+				"ssh_host", "insecure", "oauth_client_id",
+				"ssh_key", "ssh_agent", "ssh_certificate_principal", "ssh_key_fingerprint",
+			}
+		}
+	case "tea":
+		if cmd.Name() == "doctor" {
+			return jsonFields[target]()
+		}
+	case "attachment":
+		return jsonFields[services.IssueAttachment]()
+	case "artifact":
+		return jsonFields[services.Artifact]()
+	case "user":
+		if cmd.Parent().Parent() != nil && cmd.Parent().Parent().Name() == "admin" {
+			return jsonFields[services.AdminUser]()
+		}
+	case "webhook":
+		return jsonFields[services.Webhook]()
+	case "branch":
+		return jsonFields[services.Branch]()
+	case "team":
+		return jsonFields[services.Team]()
+	case "notification":
+		return jsonFields[services.Notification]()
+	case "org":
+		return jsonFields[services.Organization]()
+	case "member":
+		return jsonFields[services.OrganizationMember]()
+	case "asset":
+		return jsonFields[services.ReleaseAsset]()
+	case "release":
+		return jsonFields[services.Release]()
+	case "secret":
+		return jsonFields[services.ActionSecret]()
+	case "variable":
+		return jsonFields[services.ActionVariable]()
+	case "wiki":
+		if cmd.Name() == "revisions" {
+			return jsonFields[services.WikiRevision]()
+		}
+		return jsonFields[services.WikiPage]()
+	case "time":
+		return jsonFields[services.TrackedTime]()
+	case "ssh-key":
+		return jsonFields[services.SSHKey]()
+	case "comment":
+		return jsonFields[services.Comment]()
+	case "issue":
+		return jsonFields[services.Issue]()
+	case "review":
+		if cmd.Name() == "request" || cmd.Name() == "cancel-request" {
+			return jsonFields[services.Pull]()
+		}
+		if cmd.Name() == "comments" || cmd.Name() == "reply" {
+			return jsonFields[services.ReviewComment]()
+		}
+		return jsonFields[services.Review]()
+	case "pr":
+		switch cmd.Name() {
+		case "checkout":
+			return jsonFields[git.CheckoutResult]()
+		case "checks":
+			return jsonFields[services.Check]()
+		case "review":
+			return jsonFields[services.Review]()
+		case "clean":
+			return jsonFields[git.CleanResult]()
+		}
+		return jsonFields[services.Pull]()
+	case "repo":
+		if cmd.Name() == "sync" {
+			return jsonFields[git.SyncResult]()
+		}
+		return jsonFields[services.Repository]()
+	case "label":
+		return jsonFields[services.Label]()
+	case "milestone":
+		return jsonFields[services.Milestone]()
+	case "workflow":
+		if cmd.Name() == "run" {
+			return jsonFields[services.DispatchResult]()
+		}
+		return jsonFields[services.Workflow]()
+	case "run":
+		if cmd.Name() == "jobs" {
+			return jsonFields[services.Job]()
+		}
+		return jsonFields[services.Run]()
+	}
+	return nil
+}
+
+// jsonFields lists the JSON names of T's fields, which --json can select.
+func jsonFields[T any]() []string {
+	t := reflect.TypeFor[T]()
+	fields := make([]string, 0, t.NumField())
+	for field := range t.Fields() {
+		if name, _, _ := strings.Cut(field.Tag.Get("json"), ","); name != "" && name != "-" {
+			fields = append(fields, name)
+		}
+	}
+	return fields
+}

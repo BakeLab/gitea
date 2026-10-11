@@ -24,17 +24,13 @@ endif
 TEA_VERSION_TAG ?= $(shell sed 's/+/_/' <<< $(TEA_VERSION))
 
 TAGS ?=
-SDK ?= $(shell $(GO) list -f '{{.Version}}' -m gitea.dev/sdk)
-LDFLAGS := -X "gitea.dev/tea/modules/version.Version=$(TEA_VERSION)" -X "gitea.dev/tea/modules/version.Tags=$(TAGS)" -X "gitea.dev/tea/modules/version.SDK=$(SDK)" -s -w
+LDFLAGS := -X "gitea.dev/tea/internal/version.Version=$(TEA_VERSION)" -X "gitea.dev/tea/internal/version.Tags=$(TAGS)" -s -w
 
 # override to allow passing additional goflags via make CLI
 override GOFLAGS := $(GOFLAGS) -tags '$(TAGS)' -ldflags '$(LDFLAGS)'
 
-PACKAGES ?= $(shell $(GO) list ./... | grep -v '^gitea.dev/tea/tests')
+PACKAGES ?= $(shell $(GO) list ./...)
 UNIT_PACKAGES ?= $(PACKAGES)
-INTEGRATION_PACKAGES ?= $(shell $(GO) list ./tests/... 2>/dev/null)
-INTEGRATION_TEST_TAGS ?= testtools
-INTEGRATION_TEST_GOFLAGS ?= -v
 SOURCES ?= $(shell find . -name "*.go" -type f)
 
 # OS specific vars.
@@ -68,11 +64,11 @@ vet:
 
 .PHONY: lint
 lint:
-	$(GO) run $(GOLANGCI_LINT_PACKAGE) run --build-tags testtools
+	$(GO) run $(GOLANGCI_LINT_PACKAGE) run
 
 .PHONY: lint-fix
 lint-fix:
-	$(GO) run $(GOLANGCI_LINT_PACKAGE) run --build-tags testtools --fix
+	$(GO) run $(GOLANGCI_LINT_PACKAGE) run --fix
 
 .PHONY: fmt-check
 fmt-check:
@@ -84,18 +80,39 @@ fmt-check:
 		exit 1; \
 	fi;
 
+# Man pages are dated by the last commit unless SOURCE_DATE_EPOCH is already set.
 .PHONY: docs
 docs:
-	$(GO) run docs/docs.go --out docs/CLI.md
+	SOURCE_DATE_EPOCH=$${SOURCE_DATE_EPOCH:-$$(git log -1 --format=%ct 2>/dev/null)} TZ=UTC $(GO) run ./tools/cli-docs --out docs/generated
 
-.PHONY: docs-check
-docs-check:
-	@DIFF=$$($(GO) run docs/docs.go | diff docs/CLI.md -); \
-	if [ -n "$$DIFF" ]; then \
-		echo "Please run 'make docs' and commit the result:"; \
-		echo "$$DIFF"; \
-		exit 1; \
-	fi;
+# Versioned docs archive for release uploads (references, man pages, completions).
+# Keep the artifact outside dist/: goreleaser requires dist/ empty after before hooks.
+# The .tar.xz suffix matches existing release/publisher/checksum ./**.xz globs.
+DOCS_ARCHIVE ?= tea-$(TEA_VERSION_TAG)-docs.tar.xz
+
+.PHONY: docs-archive
+docs-archive: docs
+	@rm -f "$(DOCS_ARCHIVE)" "$(DOCS_ARCHIVE).sha256"
+	tar -C docs/generated -c README.md reference man completion | xz -9 > "$(DOCS_ARCHIVE)"
+	@bash .goreleaser.checksum.sh "$(DOCS_ARCHIVE)"
+
+# Install generated man pages and shell completions for packagers / local installs.
+# Binary install remains `make install` (GOPATH/bin). Override PREFIX/DESTDIR as needed.
+PREFIX ?= /usr/local
+DESTDIR ?=
+
+.PHONY: install-docs
+install-docs: docs
+	install -d "$(DESTDIR)$(PREFIX)/share/man/man1"
+	install -m 644 docs/generated/man/*.1 "$(DESTDIR)$(PREFIX)/share/man/man1/"
+	install -d "$(DESTDIR)$(PREFIX)/share/bash-completion/completions"
+	install -m 644 docs/generated/completion/tea.bash "$(DESTDIR)$(PREFIX)/share/bash-completion/completions/tea"
+	install -d "$(DESTDIR)$(PREFIX)/share/zsh/site-functions"
+	install -m 644 docs/generated/completion/_tea "$(DESTDIR)$(PREFIX)/share/zsh/site-functions/_tea"
+	install -d "$(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d"
+	install -m 644 docs/generated/completion/tea.fish "$(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d/tea.fish"
+	install -d "$(DESTDIR)$(PREFIX)/share/powershell/Modules/tea"
+	install -m 644 docs/generated/completion/tea.ps1 "$(DESTDIR)$(PREFIX)/share/powershell/Modules/tea/tea.ps1"
 
 .PHONY: unit-test
 unit-test:
@@ -103,18 +120,17 @@ unit-test:
 
 .PHONY: integration-test
 integration-test:
-	@if [ -n "$(INTEGRATION_PACKAGES)" ]; then \
-		$(GO) test $(INTEGRATION_TEST_GOFLAGS) -tags='$(INTEGRATION_TEST_TAGS)' $(INTEGRATION_PACKAGES); \
-	else \
-		echo "No integration test packages found"; \
-	fi
+	@test -n "$$GITEA_TEA_TEST_URL" || { echo 'Set GITEA_TEA_TEST_URL to a disposable Gitea instance' >&2; exit 1; }
+	@test -r "$$GITEA_TEA_TEST_TOKEN_FILE" || { echo 'Set GITEA_TEA_TEST_TOKEN_FILE to a readable administrator token file' >&2; exit 1; }
+	@test -r "$$GITEA_TEA_TEST_REVIEWER_TOKEN_FILE" || { echo 'Set GITEA_TEA_TEST_REVIEWER_TOKEN_FILE to a readable reviewer token file' >&2; exit 1; }
+	$(GO) test -count=1 -race -run '^TestGitea' $(PACKAGES)
 
 .PHONY: test
-test: unit-test integration-test
+test: unit-test
 
 .PHONY: unit-test-coverage
 unit-test-coverage:
-	$(GO) test -cover -coverprofile coverage.out $(UNIT_PACKAGES) && echo "\n==>\033[32m Ok\033[m\n" || exit 1
+	$(GO) test -race -cover -coverprofile coverage.out $(UNIT_PACKAGES) && echo "\n==>\033[32m Ok\033[m\n" || exit 1
 
 .PHONY: tidy
 tidy:

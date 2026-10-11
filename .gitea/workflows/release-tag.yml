@@ -34,9 +34,6 @@ jobs:
         with:
           gpg_private_key: ${{ secrets.GPGSIGN_KEY }}
           passphrase: ${{ secrets.GPGSIGN_PASSPHRASE }}
-      - name: get SDK version
-        id: sdk_version
-        run: echo "version=$(go list -f '{{.Version}}' -m gitea.dev/sdk)" >> "$GITHUB_OUTPUT"
       - name: goreleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
@@ -44,7 +41,6 @@ jobs:
             version: "~> v2"
             args: release
         env:
-          SDK_VERSION: ${{ steps.sdk_version.outputs.version }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}

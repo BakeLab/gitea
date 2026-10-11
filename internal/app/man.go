@@ -1,0 +1,69 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package app
+
+import (
+	"errors"
+	"io"
+	"strconv"
+	"time"
+
+	"gitea.dev/tea/internal/clierr"
+	"github.com/spf13/cobra"
+	"github.com/spf13/cobra/doc"
+)
+
+func (a *application) manCommand() *cobra.Command {
+	var output string
+	command := &cobra.Command{
+		Use: "man [command...]", Short: "Generate the full manual or a command's man page", Hidden: true,
+		Annotations: textOutput("man pages are troff"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Use built-ins only so personal aliases and settings cannot change the manual.
+			root := NewRoot(Dependencies{})
+			target, remaining, err := root.Find(args)
+			if err != nil || len(remaining) != 0 {
+				return clierr.Wrap(clierr.Usage, errors.New("unknown manual command; use tea help to list commands"))
+			}
+			date := ManualDate(a.deps.Getenv)
+			return writeOutput(cmd, output, func(writer io.Writer) error {
+				var render func(*cobra.Command) error
+				render = func(page *cobra.Command) error {
+					if err := cmd.Context().Err(); err != nil {
+						return err
+					}
+					page.DisableAutoGenTag = true
+					// GenMan fills an empty Title from the command path by mutating the header, so each page needs its own.
+					header := &doc.GenManHeader{Section: "1", Date: &date, Source: "Tea", Manual: "Tea Manual"}
+					if err := doc.GenMan(page, header, writer); err != nil {
+						return err
+					}
+					if len(args) == 0 {
+						for _, child := range page.Commands() {
+							if child.Hidden {
+								continue
+							}
+							if err := render(child); err != nil {
+								return err
+							}
+						}
+					}
+					return nil
+				}
+				return render(target)
+			})
+		},
+	}
+	command.Flags().StringVarP(&output, "output-file", "o", "", "Write the man page to a new file (default stdout)")
+	return command
+}
+
+// ManualDate dates man pages from SOURCE_DATE_EPOCH, falling back to a fixed date so the
+// manual stays reproducible when the variable is unset.
+func ManualDate(getenv func(string) string) time.Time {
+	if seconds, err := strconv.ParseInt(getenv("SOURCE_DATE_EPOCH"), 10, 64); err == nil {
+		return time.Unix(seconds, 0).UTC()
+	}
+	return time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+}

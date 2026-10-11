@@ -1,45 +1,31 @@
 // Copyright 2020 The Gitea Authors. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-// Tea is command line tool for Gitea.
-package main // import "gitea.dev/tea"
+// Tea is a scriptable command line tool for Gitea.
+package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
-	"gitea.dev/tea/cmd"
-	teacontext "gitea.dev/tea/modules/context"
-	"gitea.dev/tea/modules/debug"
+	"gitea.dev/tea/internal/app"
+	"gitea.dev/tea/internal/clierr"
 )
 
 func main() {
-	app := cmd.App()
-	app.Flags = append(app.Flags, debug.CliFlag())
-	err := app.Run(context.Background(), preprocessArgs(os.Args))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	deps := app.System()
+	err := app.Execute(ctx, deps, os.Args[1:])
+	if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+		err = clierr.Wrap(clierr.Interrupted, err)
+	}
 	if err != nil {
-		if errors.Is(err, teacontext.ErrCommandCanceled) {
-			os.Exit(0)
-		}
-		// app.Run already exits for errors implementing ErrorCoder,
-		// so we only handle generic errors with code 1 here.
-		fmt.Fprintf(app.ErrWriter, "Error: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(deps.Streams.ErrOut, "Error: %v\n", err)
 	}
-}
-
-// preprocessArgs normalizes command-line arguments.
-// Converts "-o-" to "-o -" for the api command's output flag.
-func preprocessArgs(args []string) []string {
-	result := make([]string, 0, len(args)+1)
-	for _, arg := range args {
-		if arg == "-o-" {
-			result = append(result, "-o", "-")
-		} else {
-			result = append(result, arg)
-		}
-	}
-	return result
+	os.Exit(clierr.ExitCode(err))
 }
