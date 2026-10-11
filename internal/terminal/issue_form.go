@@ -1,0 +1,175 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package terminal
+
+import (
+	"context"
+	"errors"
+	"strconv"
+	"strings"
+	"time"
+
+	"charm.land/huh/v2"
+)
+
+// IssueTemplateChoice seeds title/body when selected in an interactive create form.
+type IssueTemplateChoice struct {
+	Name, About, Title, Body string
+}
+
+// IssueMilestoneChoice identifies an open milestone for interactive selection.
+type IssueMilestoneChoice struct {
+	Title string
+	ID    int64
+}
+
+// IssueLabelChoice identifies a repository label for interactive selection.
+type IssueLabelChoice struct {
+	Name string
+	ID   int64
+}
+
+// BodyEditor collects a markdown body through the shared draft editor instead of
+// an inline text field. Callers must finish the returned Draft.
+type BodyEditor func(context.Context, string) (Draft, error)
+
+// IssueFormChoices supplies options for an interactive issue create form.
+type IssueFormChoices struct {
+	Templates  []IssueTemplateChoice
+	Assignees  []string
+	Milestones []IssueMilestoneChoice
+	Labels     []IssueLabelChoice
+	CanPush    bool
+	EditBody   BodyEditor
+}
+
+// IssueFormValues holds interactively collected issue create fields.
+type IssueFormValues struct {
+	Title, Body string
+	Assignees   []string
+	Milestone   int64
+	Labels      []int64
+	Deadline    *time.Time
+	Draft       Draft
+}
+
+// IssueForm collects interactive issue create input.
+type IssueForm interface {
+	CreateIssue(context.Context, IssueFormChoices) (IssueFormValues, error)
+}
+
+// CreateIssue runs the interactive issue create form on stderr.
+func (p *FormPrompter) CreateIssue(ctx context.Context, choices IssueFormChoices) (IssueFormValues, error) {
+	title, body := "", ""
+	if len(choices.Templates) > 0 {
+		options := []huh.Option[int]{huh.NewOption("[none]", -1)}
+		for i, template := range choices.Templates {
+			label := template.Name
+			switch {
+			case template.Name != "" && template.About != "":
+				label = template.Name + " — " + template.About
+			case label == "":
+				label = template.About
+			}
+			if label == "" {
+				label = "template " + strconv.Itoa(i+1)
+			}
+			options = append(options, huh.NewOption(label, i))
+		}
+		selected := -1
+		if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(
+			huh.NewSelect[int]().Title("Issue template:").Options(options...).Value(&selected),
+		))); err != nil {
+			return IssueFormValues{}, err
+		}
+		if selected >= 0 {
+			title, body = choices.Templates[selected].Title, choices.Templates[selected].Body
+		}
+	}
+	return p.collectIssueProperties(ctx, title, body, choices)
+}
+
+// issueFields holds the shared issue form inputs that create and edit bind to.
+type issueFields struct {
+	title, body, deadline string
+	assignees             []string
+	milestone             int64
+	labels                []int64
+}
+
+// groups builds title/body and, when canPush, assignee/milestone/label/due-date fields.
+func (f *issueFields) groups(editBody BodyEditor, canPush bool, assignees []string, milestones []IssueMilestoneChoice, labels []IssueLabelChoice) []*huh.Group {
+	fields := []huh.Field{huh.NewInput().Title("Issue title (required):").Value(&f.title).Validate(huh.ValidateNotEmpty())}
+	if editBody == nil {
+		fields = append(fields, huh.NewText().Title("Issue description(markdown):").Value(&f.body))
+	}
+	groups := []*huh.Group{huh.NewGroup(fields...)}
+	if !canPush {
+		return groups
+	}
+	if len(assignees) > 0 {
+		groups = append(groups, huh.NewGroup(huh.NewMultiSelect[string]().Title("Assignees:").Options(huh.NewOptions(assignees...)...).Value(&f.assignees)))
+	}
+	if len(milestones) > 0 {
+		options := []huh.Option[int64]{huh.NewOption("[none]", int64(0))}
+		for _, milestone := range milestones {
+			options = append(options, huh.NewOption(milestone.Title, milestone.ID))
+		}
+		groups = append(groups, huh.NewGroup(huh.NewSelect[int64]().Title("Milestone:").Options(options...).Value(&f.milestone)))
+	}
+	if len(labels) > 0 {
+		options := make([]huh.Option[int64], 0, len(labels))
+		for _, label := range labels {
+			options = append(options, huh.NewOption(label.Name, label.ID))
+		}
+		groups = append(groups, huh.NewGroup(huh.NewMultiSelect[int64]().Title("Labels:").Options(options...).Value(&f.labels)))
+	}
+	return append(groups, huh.NewGroup(dueDateInput("Due date:", &f.deadline)))
+}
+
+// editBody runs the draft editor after the form, keeping the draft on failure.
+func editBody(ctx context.Context, edit BodyEditor, body string) (string, Draft, error) {
+	if edit == nil {
+		return body, Draft{}, nil
+	}
+	draft, err := edit(ctx, body)
+	if err != nil {
+		return body, draft, err
+	}
+	return draft.Body, draft, nil
+}
+
+func dueDateInput(title string, value *string) *huh.Input {
+	return huh.NewInput().Title(title).Placeholder("YYYY-MM-DD").Value(value).Validate(func(s string) error {
+		_, err := parseDueDate(s)
+		return err
+	})
+}
+
+// parseDueDate returns nil for an empty value.
+func parseDueDate(value string) (*time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.DateOnly, value)
+	if err != nil {
+		return nil, errors.New("use YYYY-MM-DD")
+	}
+	return &parsed, nil
+}
+
+func (p *FormPrompter) collectIssueProperties(ctx context.Context, title, body string, choices IssueFormChoices) (IssueFormValues, error) {
+	fields := issueFields{title: title, body: body}
+	if err := p.runForm(ctx, huh.NewForm(fields.groups(choices.EditBody, choices.CanPush, choices.Assignees, choices.Milestones, choices.Labels)...)); err != nil {
+		return IssueFormValues{}, err
+	}
+	values := IssueFormValues{Title: strings.TrimSpace(fields.title), Assignees: fields.assignees, Milestone: fields.milestone, Labels: fields.labels}
+	var err error
+	if values.Body, values.Draft, err = editBody(ctx, choices.EditBody, fields.body); err != nil {
+		return values, err
+	}
+	values.Deadline, err = parseDueDate(fields.deadline)
+	return values, err
+}
