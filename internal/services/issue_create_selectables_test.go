@@ -1,0 +1,126 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package services
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestRepositoryAssigneesParseLogins(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/repos/alice/project/assignees", r.URL.Path)
+		_, _ = w.Write([]byte(`[{"login":"alice","email":"hidden@example.test"},{"login":"bob"}]`))
+	}))
+	names, err := (Repositories{Client: client}).assignees(context.Background(), "alice/project")
+	require.NoError(t, err)
+	require.Equal(t, []string{"alice", "bob"}, names)
+}
+
+func TestIssueTemplatesParseMarkdownAndForm(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/repos/alice/project/issue_templates", r.URL.Path)
+		_, _ = w.Write([]byte(`[
+			{"name":"Bug","about":"Report a bug","title":"bug: ","content":"## Steps\n","body":null},
+			{"name":"Form","about":"Structured","title":"form: ","content":"","body":[{"type":"markdown","attributes":{"value":"Hi"}}]}
+		]`))
+	}))
+	templates, err := (Issues{Client: client, Repository: "alice/project"}).IssueTemplates(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []IssueTemplate{
+		{Name: "Bug", About: "Report a bug", Title: "bug: ", Content: "## Steps\n", Form: false},
+		{Name: "Form", About: "Structured", Title: "form: ", Content: "", Form: true},
+	}, templates)
+}
+
+func TestIssueTemplatesNullBecomesEmpty(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`null`))
+	}))
+	templates, err := (Issues{Client: client, Repository: "alice/project"}).IssueTemplates(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, templates)
+	require.NotNil(t, templates)
+}
+
+func TestCreateSelectablesLoadWriteFieldsOnlyWithPush(t *testing.T) {
+	pages := map[string]map[string]string{
+		"/api/v1/repos/alice/project/milestones": {"1": `[{"id":1,"title":"v1"}]`, "2": `[{"id":2,"title":"v2"}]`},
+		"/api/v1/repos/alice/project/labels":     {"1": `[{"id":3,"name":"bug"}]`, "2": `[{"id":4,"name":"docs"}]`},
+	}
+	for _, push := range []bool{false, true} {
+		t.Run(fmt.Sprintf("push=%t", push), func(t *testing.T) {
+			calls := map[string]int{}
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls[r.URL.Path]++
+				switch r.URL.Path {
+				case "/api/v1/repos/alice/project":
+					_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","permissions":{"push":%t,"pull":true}}`, push)
+				case "/api/v1/repos/alice/project/issue_templates":
+					_, _ = w.Write([]byte(`[{"name":"Bug","title":"t","content":"c"}]`))
+				case "/api/v1/repos/alice/project/assignees":
+					_, _ = w.Write([]byte(`[{"login":"alice"},{"login":"bob"}]`))
+				case "/api/v1/repos/alice/project/milestones", "/api/v1/repos/alice/project/labels":
+					if strings.HasSuffix(r.URL.Path, "/milestones") {
+						assert.Equal(t, "open", r.URL.Query().Get("state"))
+					}
+					body, ok := pages[r.URL.Path][r.URL.Query().Get("page")]
+					if !ok {
+						body = `[]`
+					}
+					_, _ = w.Write([]byte(body))
+				default:
+					t.Errorf("unexpected path %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			for _, load := range []func() (CreateSelectables, error){
+				func() (CreateSelectables, error) {
+					return (Pulls{Client: client, Repository: "alice/project"}).CreateSelectables(context.Background())
+				},
+				func() (CreateSelectables, error) {
+					result, err := (Issues{Client: client, Repository: "alice/project"}).CreateSelectables(context.Background())
+					require.Len(t, result.Templates, 1)
+					return result.CreateSelectables, err
+				},
+			} {
+				result, err := load()
+				require.NoError(t, err)
+				want := CreateSelectables{Assignees: []string{}, Milestones: []Milestone{}, Labels: []Label{}}
+				if push {
+					want = CreateSelectables{
+						CanPush:    true,
+						Assignees:  []string{"alice", "bob"},
+						Milestones: []Milestone{{ID: 1, Title: "v1"}, {ID: 2, Title: "v2"}},
+						Labels:     []Label{{ID: 3, Name: "bug"}, {ID: 4, Name: "docs"}},
+					}
+				}
+				require.Equal(t, want, result)
+			}
+			require.Equal(t, 2, calls["/api/v1/repos/alice/project"])
+			require.Equal(t, 1, calls["/api/v1/repos/alice/project/issue_templates"])
+			if !push {
+				require.Zero(t, calls["/api/v1/repos/alice/project/assignees"])
+			}
+		})
+	}
+}
+
+func TestViewPermissionsKeepsRepositorySchemaSeparate(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id":1,"name":"project","full_name":"alice/project","permissions":{"admin":true,"push":true,"pull":true}}`))
+	}))
+	repo, err := (Repositories{Client: client}).View(context.Background(), "alice/project")
+	require.NoError(t, err)
+	require.Equal(t, "alice/project", repo.FullName)
+	permissions, err := (Repositories{Client: client}).viewPermissions(context.Background(), "alice/project")
+	require.NoError(t, err)
+	require.Equal(t, RepositoryPermissions{Admin: true, Push: true, Pull: true}, permissions)
+}

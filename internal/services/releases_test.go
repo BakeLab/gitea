@@ -1,0 +1,236 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package services
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	gitea "gitea.dev/sdk"
+	"gitea.dev/tea/internal/transport"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestReleaseUploadStreamsAndMapsMetadata(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/repos/alice/project/releases/1/assets", r.URL.Path)
+		reader, err := r.MultipartReader()
+		if !assert.NoError(t, err) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		part, err := reader.NextPart()
+		if !assert.NoError(t, err) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		assert.Equal(t, "attachment", part.FormName())
+		assert.Equal(t, "file.bin", part.FileName())
+		content, err := io.ReadAll(part)
+		assert.NoError(t, err)
+		assert.Equal(t, "asset bytes", string(content))
+		_, err = reader.NextPart()
+		assert.ErrorIs(t, err, io.EOF)
+		_, _ = w.Write([]byte(`{"id":2,"name":"file.bin","size":11,"browser_download_url":"https://example.test/file"}`))
+	}))
+	service := Releases{Client: client, Repository: "alice/project"}
+	asset, err := service.UploadAsset(context.Background(), 1, "file.bin", strings.NewReader("asset bytes"))
+	require.NoError(t, err)
+	require.Equal(t, int64(2), asset.ID)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = service.UploadAsset(ctx, 1, "file.bin", strings.NewReader("asset bytes"))
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestReleaseAssetPaginationUsesOneUnpaginatedRequest(t *testing.T) {
+	requests := 0
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		assert.Equal(t, "/api/v1/repos/owner/repo/releases/1/assets", r.URL.Path)
+		_, _ = w.Write([]byte(`[{"id":1},{"id":2},{"id":3}]`))
+	}))
+	service := Releases{Client: client, Repository: "owner/repo"}
+	items, err := service.AllAssets(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	require.Equal(t, 1, requests)
+	page, err := service.Assets(context.Background(), 1, 2, 2)
+	require.NoError(t, err)
+	require.Len(t, page, 1)
+	require.EqualValues(t, 3, page[0].ID)
+	page, err = service.Assets(context.Background(), 1, 100, int(^uint(0)>>1))
+	require.NoError(t, err)
+	require.Empty(t, page)
+	require.NotNil(t, page)
+}
+
+func TestReleaseAssetDownloadFollowsObjectStorageRedirect(t *testing.T) {
+	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte("asset bytes"))
+	}))
+	defer storage.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/attachments/uuid" {
+			http.Redirect(w, r, storage.URL+"/bucket/uuid?X-Amz-Signature=value", http.StatusSeeOther)
+			return
+		}
+		assert.Equal(t, "/api/v1/repos/alice/project/releases/1/assets/2", r.URL.Path)
+		_, _ = w.Write([]byte(`{"uuid":"uuid"}`))
+	}))
+	defer server.Close()
+	service := Releases{Client: transport.New(server.URL, "secret", false), Repository: "alice/project"}
+	body, err := service.DownloadAsset(context.Background(), 1, 2)
+	require.NoError(t, err)
+	defer body.Close()
+	data, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.Equal(t, "asset bytes", string(data))
+}
+
+func TestReleaseAssetDownloadRejectsUnsafeIdentifiers(t *testing.T) {
+	for _, uuid := range []string{"", "../secret", "a/b", `a\b`, "a.b"} {
+		t.Run(uuid, func(t *testing.T) {
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/api/v1/repos/alice/project/releases/1/assets/2", r.URL.Path, "download followed an unsafe identifier")
+				_ = json.NewEncoder(w).Encode(map[string]string{"uuid": uuid})
+			}))
+			_, err := (Releases{Client: client, Repository: "alice/project"}).DownloadAsset(context.Background(), 1, 2)
+			require.ErrorContains(t, err, "invalid attachment identifier")
+		})
+	}
+}
+
+func TestReleaseDeleteReportsCompletedStep(t *testing.T) {
+	for name, test := range map[string]struct {
+		deleteTag            bool
+		failRelease, failTag bool
+		wantCalls            []string
+		wantErr              string
+	}{
+		"release only":    {wantCalls: []string{"/releases/5"}},
+		"release and tag": {deleteTag: true, wantCalls: []string{"/releases/5", "/tags/v1%2Fbeta"}},
+		"release fails":   {deleteTag: true, failRelease: true, wantCalls: []string{"/releases/5"}, wantErr: "unavailable"},
+		"tag fails":       {deleteTag: true, failTag: true, wantCalls: []string{"/releases/5", "/tags/v1%2Fbeta"}, wantErr: "release deleted, but tag deletion failed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var calls []string
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodDelete, r.Method)
+				path := strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/repos/alice/project")
+				calls = append(calls, path)
+				if (test.failRelease && strings.HasPrefix(path, "/releases/")) || (test.failTag && strings.HasPrefix(path, "/tags/")) {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			err := (Releases{Client: client, Repository: "alice/project"}).Delete(context.Background(), Release{ID: 5, Tag: "v1/beta"}, test.deleteTag)
+			if test.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, test.wantErr)
+			}
+			if test.failRelease {
+				require.NotContains(t, err.Error(), "release deleted")
+			}
+			require.Equal(t, test.wantCalls, calls)
+		})
+	}
+}
+
+func TestReleaseFromMapsServerFields(t *testing.T) {
+	release := decode[gitea.Release](t, `{"id":3,"tag_name":"v1","target_commitish":"main","name":"One","body":"Notes",
+		"url":"https://gitea.test/api/v1/repos/alice/project/releases/3","html_url":"https://gitea.test/alice/project/releases/tag/v1",
+		"draft":true,"prerelease":true,"created_at":"2026-10-01T12:00:00+02:00","published_at":"2026-10-02T12:00:00Z","author":null}`)
+	published := "2026-10-02T12:00:00Z"
+	require.Equal(t, Release{
+		ID: 3, Tag: "v1", Target: "main", Title: "One", Body: "Notes", URL: "https://gitea.test/alice/project/releases/tag/v1",
+		Draft: true, Prerelease: true, CreatedAt: "2026-10-01T12:00:00+02:00", PublishedAt: &published,
+	}, releaseFrom(release))
+}
+
+func TestReleaseListAndViewEscapeTags(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project/releases" {
+			assert.Equal(t, "10", r.URL.Query().Get("limit"))
+			assert.Equal(t, "2", r.URL.Query().Get("page"))
+			_, _ = w.Write([]byte(`[{"id":1,"tag_name":"v1"}]`))
+			return
+		}
+		assert.Equal(t, "/api/v1/repos/alice/project/releases/tags/v1%2Fbeta%20one", r.URL.EscapedPath())
+		_, _ = w.Write([]byte(`{"id":2,"tag_name":"v1/beta one"}`))
+	}))
+	service := Releases{Client: client, Repository: "alice/project"}
+	items, err := service.List(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, []Release{{ID: 1, Tag: "v1"}}, items)
+	item, err := service.View(context.Background(), "v1/beta one")
+	require.NoError(t, err)
+	require.Equal(t, "v1/beta one", item.Tag)
+}
+
+func TestReleaseCreateAndEditPayloads(t *testing.T) {
+	var payloads []map[string]any
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload := requestJSON(t, r)
+		payloads = append(payloads, payload)
+		_, _ = w.Write([]byte(`{"id":7,"tag_name":"v1","name":"v1"}`))
+	}))
+	service := Releases{Client: client, Repository: "alice/project"}
+	tag, title, body, yes := "v1", "Release one", "Notes", true
+	_, err := service.Create(context.Background(), ReleaseOptions{Tag: &tag, Title: &title, Body: &body, Prerelease: &yes})
+	require.NoError(t, err)
+	_, err = service.Edit(context.Background(), 7, ReleaseOptions{Title: &title, Draft: &yes})
+	require.NoError(t, err)
+	require.Len(t, payloads, 2)
+	require.Equal(t, "v1", payloads[0]["tag_name"])
+	require.Equal(t, "Release one", payloads[0]["name"])
+	require.Equal(t, "Notes", payloads[0]["body"])
+	require.Equal(t, false, payloads[0]["draft"])
+	require.Equal(t, true, payloads[0]["prerelease"])
+	require.Equal(t, "Release one", payloads[1]["name"])
+	require.Equal(t, true, payloads[1]["draft"])
+	require.Nil(t, payloads[1]["prerelease"])
+	for _, field := range []string{"tag_name", "target_commitish", "body"} {
+		require.Empty(t, payloads[1][field], "Gitea ignores empty edit fields")
+	}
+}
+
+func TestReleaseCreateRequiresTitle(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s", r.URL.Path)
+	}))
+	tag, title := "v1", " "
+	_, err := (Releases{Client: client, Repository: "alice/project"}).Create(context.Background(), ReleaseOptions{Tag: &tag, Title: &title})
+	require.ErrorContains(t, err, "title is empty")
+}
+
+func TestReleaseAssetRenameAndDelete(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/repos/alice/project/releases/1/assets/2", r.URL.Path)
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		assert.Equal(t, http.MethodPatch, r.Method)
+		var payload map[string]string
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		assert.Equal(t, map[string]string{"name": "renamed.bin"}, payload)
+		_, _ = w.Write([]byte(`{"id":2,"name":"renamed.bin","created_at":"0001-01-01T00:00:00Z"}`))
+	}))
+	service := Releases{Client: client, Repository: "alice/project"}
+	asset, err := service.RenameAsset(context.Background(), 1, 2, "renamed.bin")
+	require.NoError(t, err)
+	require.Equal(t, ReleaseAsset{ID: 2, Name: "renamed.bin"}, asset)
+	require.NoError(t, service.DeleteAsset(context.Background(), 1, 2))
+}
