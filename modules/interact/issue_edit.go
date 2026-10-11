@@ -70,7 +70,7 @@ func promptIssueEditProperties(requestCtx stdctx.Context, ctx *context.TeaContex
 	var labelsSelected []string
 	var err error
 
-	selectableChan := make(chan (issueSelectables), 1)
+	selectableChan := make(chan issueSelectables, 1)
 	go fetchIssueSelectables(requestCtx, ctx.Login, ctx.Owner, ctx.Repo, selectableChan)
 
 	// title

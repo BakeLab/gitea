@@ -51,7 +51,9 @@ func (r *fakeRepoBackend) DeleteLocalBranch(branchName string) error { return ni
 func (r *fakeRepoBackend) DeleteRemoteBranch(remoteName, remoteBranch string, auth *AuthMethod) error {
 	return nil
 }
+
 func (r *fakeRepoBackend) ListReferences(prefixes ...string) ([]*Reference, error) { return nil, nil }
+
 func (r *fakeRepoBackend) PushToAgitFlowPR(remoteName, head, base, topic string, pushOptions map[string]string, auth *AuthMethod) error {
 	return nil
 }

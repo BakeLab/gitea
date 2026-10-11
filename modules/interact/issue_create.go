@@ -52,7 +52,7 @@ func promptIssueProperties(ctx context.Context, login *config.Login, owner, repo
 	var milestoneName string
 	var err error
 
-	selectableChan := make(chan (issueSelectables), 1)
+	selectableChan := make(chan issueSelectables, 1)
 	go fetchIssueSelectables(ctx, login, owner, repo, selectableChan)
 
 	// title
