@@ -54,7 +54,9 @@ func (t captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, err
 	}
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
-	holder.Store(newAPIError(resp.StatusCode, req.Method, req.URL.Path, t.token, data))
+	failure := newAPIError(resp.StatusCode, req.Method, req.URL.Path, t.token, data)
+	failure.bind(req.URL, t.base)
+	holder.Store(failure)
 	resp.Body = struct {
 		io.Reader
 		io.Closer

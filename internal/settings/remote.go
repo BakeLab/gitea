@@ -5,6 +5,7 @@ package settings
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 )
@@ -126,14 +127,107 @@ func looksLikeWebResourcePath(parts []string) bool {
 // ValidSlug reports whether slug is exactly owner/name.
 func ValidSlug(slug string) bool {
 	pieces := strings.Split(slug, "/")
-	if len(pieces) != 2 {
-		return false
+	return len(pieces) == 2 && validPiece(pieces[0]) && validPiece(pieces[1])
+}
+
+// validPiece reports whether piece can be an owner or repository name.
+func validPiece(piece string) bool {
+	// ':' keeps scp-style remotes such as git@host:owner/name.git from passing as a slug.
+	return piece != "" && piece != "." && piece != ".." && !strings.ContainsAny(piece, ":?#\\ \t\r\n")
+}
+
+// RepositoryRef is a parsed repository argument.
+type RepositoryRef struct {
+	// Host is the instance URL the argument names, or "" when it names none.
+	Host string
+	// Owner is "" for a bare NAME, which belongs to the active account.
+	Owner, Name string
+}
+
+// Slug returns owner/name, or the bare name when the owner is not known yet.
+func (r RepositoryRef) Slug() string {
+	if r.Owner == "" {
+		return r.Name
 	}
-	for _, piece := range pieces {
-		// ':' keeps scp-style remotes such as git@host:owner/name.git from passing as a slug.
-		if piece == "" || piece == "." || piece == ".." || strings.ContainsAny(piece, ":?#\\ \t\r\n") {
-			return false
+	return r.Owner + "/" + r.Name
+}
+
+// ParseRepository reads a repository argument: NAME, OWNER/NAME, HOST/OWNER/NAME (with an
+// optional .git suffix), or a clone or web URL. HOST may carry a port and a configured
+// instance's base path; it takes the scheme of the configured instance it names, else https.
+func ParseRepository(raw string, hosts map[string]Host) (RepositoryRef, error) {
+	raw = strings.TrimSpace(raw)
+	if strings.Contains(raw, "://") || scpLike(raw) {
+		host, slug, err := RepositoryURL(raw, hosts)
+		if err != nil {
+			return RepositoryRef{}, err
+		}
+		owner, name, _ := strings.Cut(slug, "/")
+		return RepositoryRef{Host: host, Owner: owner, Name: name}, nil
+	}
+	invalid := fmt.Errorf("invalid repository %q: use OWNER/REPO, HOST/OWNER/REPO or a URL", raw)
+	trimmed := strings.TrimSuffix(raw, ".git")
+	pieces := strings.Split(trimmed, "/")
+	switch {
+	case len(pieces) == 1 && validPiece(pieces[0]):
+		return RepositoryRef{Name: pieces[0]}, nil
+	case len(pieces) == 2 && ValidSlug(trimmed):
+		return RepositoryRef{Owner: pieces[0], Name: pieces[1]}, nil
+	case len(pieces) < 3:
+		return RepositoryRef{}, invalid
+	}
+	// The longest configured instance prefix wins, so example.org/gitea/owner/name selects the
+	// instance installed below /gitea rather than example.org.
+	best := ""
+	for instance := range hosts {
+		prefix := bareInstance(instance)
+		if len(prefix) > len(bareInstance(best)) && strings.HasPrefix(strings.ToLower(trimmed), strings.ToLower(prefix)+"/") && ValidSlug(trimmed[len(prefix)+1:]) {
+			best = instance
 		}
 	}
-	return true
+	if best != "" {
+		owner, name, _ := strings.Cut(trimmed[len(bareInstance(best))+1:], "/")
+		return RepositoryRef{Host: best, Owner: owner, Name: name}, nil
+	}
+	if len(pieces) != 3 || !ValidSlug(pieces[1]+"/"+pieces[2]) {
+		return RepositoryRef{}, invalid
+	}
+	host, err := ResolveHost(pieces[0], hosts)
+	if err != nil {
+		return RepositoryRef{}, invalid
+	}
+	return RepositoryRef{Host: host, Owner: pieces[1], Name: pieces[2]}, nil
+}
+
+// ResolveHost normalizes an instance given as a URL or as a bare HOST[:PORT][/PATH]. A bare
+// host takes the scheme of the configured instance it names, else https.
+func ResolveHost(raw string, hosts map[string]Host) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if strings.Contains(raw, "://") {
+		return NormalizeHost(raw)
+	}
+	bare := strings.TrimSuffix(raw, "/")
+	var matches []string
+	for instance := range hosts {
+		if strings.EqualFold(bareInstance(instance), bare) {
+			matches = append(matches, instance)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		instance, err := NormalizeHost("https://" + raw)
+		if err != nil {
+			return "", fmt.Errorf("invalid instance %q: use HOST[:PORT][/PATH] or an http(s) URL", raw)
+		}
+		return instance, nil
+	case 1:
+		return matches[0], nil
+	}
+	return "", fmt.Errorf("instance %q is configured for both http and https; include the scheme", raw)
+}
+
+// bareInstance returns an instance URL without its scheme, such as localhost:3001/gitea.
+func bareInstance(instance string) string {
+	_, bare, _ := strings.Cut(instance, "://")
+	return bare
 }

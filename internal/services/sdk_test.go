@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -32,6 +33,14 @@ func TestSDKCallsAuthenticateWithoutVersionProbe(t *testing.T) {
 	require.True(t, renamed)
 }
 
+// requireAPIError checks the request and server message an *transport.APIError reports.
+func requireAPIError(t *testing.T, want transport.APIError, err error) {
+	t.Helper()
+	got, ok := errors.AsType[*transport.APIError](err)
+	require.True(t, ok, "%v is not an API error", err)
+	require.Equal(t, want, transport.APIError{Status: got.Status, Method: got.Method, Endpoint: got.Endpoint, Message: got.Message})
+}
+
 func TestSDKErrorsMapToAPIErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, message string
@@ -50,7 +59,7 @@ func TestSDKErrorsMapToAPIErrors(t *testing.T) {
 			err := do(context.Background(), client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 				return c.Repositories.DeleteRepo(ctx, "alice", "project")
 			})
-			require.Equal(t, &transport.APIError{Status: tc.status, Method: http.MethodDelete, Endpoint: "/api/v1/repos/alice/project", Message: tc.message}, err)
+			requireAPIError(t, transport.APIError{Status: tc.status, Method: http.MethodDelete, Endpoint: "/api/v1/repos/alice/project", Message: tc.message}, err)
 			require.NotContains(t, err.Error(), "secret")
 		})
 	}
@@ -65,7 +74,7 @@ func TestSDKStatusOnlyFailureKeepsServerMessage(t *testing.T) {
 		return c.Repositories.RenameRepoBranch(ctx, "alice", "project", "main", gitea.RenameRepoBranchOption{Name: "trunk"})
 	})
 	require.False(t, renamed)
-	require.Equal(t, &transport.APIError{Status: http.StatusUnprocessableEntity, Method: http.MethodPatch, Endpoint: "/api/v1/repos/alice/project/branches/main", Message: "branch trunk already exists"}, err)
+	requireAPIError(t, transport.APIError{Status: http.StatusUnprocessableEntity, Method: http.MethodPatch, Endpoint: "/api/v1/repos/alice/project/branches/main", Message: "branch trunk already exists"}, err)
 	require.EqualError(t, err, "Gitea API returned HTTP 422 for PATCH /api/v1/repos/alice/project/branches/main: branch trunk already exists")
 }
 
@@ -78,7 +87,7 @@ func TestSDKFailureWithoutResponseKeepsCapturedError(t *testing.T) {
 		_, _, err := c.Repositories.GetRepo(ctx, "alice", "project")
 		return nil, nil, err
 	})
-	require.Equal(t, &transport.APIError{Status: http.StatusNotFound, Method: http.MethodGet, Endpoint: "/api/v1/repos/alice/project", Message: "repository does not exist"}, err)
+	requireAPIError(t, transport.APIError{Status: http.StatusNotFound, Method: http.MethodGet, Endpoint: "/api/v1/repos/alice/project", Message: "repository does not exist"}, err)
 }
 
 func TestSDKInvalidJSONIsReportedWithoutBody(t *testing.T) {

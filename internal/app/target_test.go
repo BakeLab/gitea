@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -230,6 +231,75 @@ func TestRepositoryResolutionPrecedence(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "owner/upstream", resolved.Repo)
 	require.False(t, runner.prompt)
+}
+
+func TestRepositoryArgumentsAcceptShorthands(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"full_name":"` + strings.TrimPrefix(r.URL.Path, "/api/v1/repos/") + `"}`))
+	}))
+	defer server.Close()
+	bare := strings.TrimPrefix(server.URL, "http://")
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"bare name belongs to the active account", []string{"repo", "view", "project"}, "alice/project"},
+		{"bare name belongs to the sudo user", []string{"repo", "view", "project", "--sudo", "bob"}, "bob/project"},
+		{".git suffix", []string{"repo", "view", "bob/tool.git"}, "bob/tool"},
+		{"HOST/OWNER/REPO", []string{"repo", "view", bare + "/bob/tool"}, "bob/tool"},
+		{"--repo HOST/OWNER/REPO", []string{"repo", "view", "-R", bare + "/bob/tool.git"}, "bob/tool"},
+		{"bare --host", []string{"repo", "view", "bob/tool", "--host", bare}, "bob/tool"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, out, _ := testDeps(t)
+			configureAccounts(t, deps, server.URL, "alice", "alice", "bob")
+			require.NoError(t, Execute(context.Background(), deps, append(tc.args, "--no-input", "--json=full_name")))
+			require.JSONEq(t, `{"full_name":"`+tc.want+`"}`, out.String())
+		})
+	}
+}
+
+func TestRepositoryNamedLikeAGitRemoteSuggestsRemote(t *testing.T) {
+	deps, _, _ := testDeps(t)
+	deps.Getenv = serverEnv("https://example.org", nil)
+	deps.Git = &fakeGit{results: map[string]string{"remote": "origin\nupstream"}}
+	err := Execute(context.Background(), deps, []string{"issue", "list", "-R", "origin"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, `invalid repository "origin": use OWNER/REPO, HOST/OWNER/REPO or a URL; did you mean --remote origin?`)
+	err = Execute(context.Background(), deps, []string{"issue", "list", "-R", "a/b/c/d"})
+	require.EqualError(t, err, `invalid repository "a/b/c/d": use OWNER/REPO, HOST/OWNER/REPO or a URL`)
+}
+
+func TestAccountErrorsNameTheInstanceAndAccounts(t *testing.T) {
+	const instance = "https://example.org"
+	remote := map[string]string{"remote": "origin", "remote get-url origin": "https://gitea.com/alice/project.git"}
+	for _, tc := range []struct {
+		name   string
+		users  []string
+		active string
+		args   []string
+		git    map[string]string
+		want   string
+	}{
+		{"unknown --user", []string{"alice", "bob"}, "alice", []string{"-R", "alice/project", "--user", "nobody"}, nil, `account "nobody" is not logged in on https://example.org (accounts: alice, bob)`},
+		{"unknown --user without accounts", nil, "", []string{"-R", "alice/project", "--user", "nobody", "--host", instance}, nil, `account "nobody" is not logged in on https://example.org; run gt auth login --host https://example.org`},
+		{"no active account", []string{"alice", "bob"}, "", []string{"-R", "alice/project"}, nil, "no active account on https://example.org (accounts: alice, bob); pass --user or run gt auth switch"},
+		{"instance from a remote", []string{"alice"}, "alice", nil, remote, `no account for https://gitea.com (instance from git remote "origin"); run gt auth login --host https://gitea.com, or use -R or --host to target another instance`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _, _ := testDeps(t)
+			if tc.users != nil {
+				configureAccounts(t, deps, instance, tc.active, tc.users...)
+			}
+			if tc.git != nil {
+				deps.Git = &fakeGit{results: tc.git}
+			}
+			err := Execute(context.Background(), deps, append([]string{"issue", "list", "--no-input"}, tc.args...))
+			require.Equal(t, clierr.Authentication, clierr.ExitCode(err), "%v", err)
+			require.EqualError(t, err, tc.want)
+		})
+	}
 }
 
 func TestRepositoryDiscoveryOutsideCheckoutWritesNoGitDiagnostics(t *testing.T) {

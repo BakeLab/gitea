@@ -97,12 +97,13 @@ func TestIssueListLinksNumbersOnColorTerminals(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	args := []string{"issue", "list", "-R", "alice/project"}
 	require.NoError(t, Execute(context.Background(), deps, args))
-	require.Equal(t, "7   Short                 open    alice\n12  Evil]52;c;aGk= Title  closed  bob\n", out.String())
+	require.Equal(t, "7\tShort\topen\talice\n12\tEvil]52;c;aGk= Title\tclosed\tbob\n", out.String())
 	out.Reset()
 	deps.Streams.OutTTY = true
 	require.NoError(t, Execute(context.Background(), deps, args))
-	require.Equal(t, "\x1b]8;;https://example.org/i/7\x1b\\7\x1b]8;;\x1b\\   Short                 \x1b[38;2;45;164;78mopen\x1b[0m    alice\n"+
-		"\x1b]8;;https://example.org/i/12\x1b\\12\x1b]8;;\x1b\\  Evil]52;c;aGk= Title  \x1b[38;2;207;34;46mclosed\x1b[0m  bob\n", out.String())
+	require.Equal(t, "\x1b[90mID\x1b[0m   \x1b[90mTITLE\x1b[0m                 \x1b[90mSTATE\x1b[0m   \x1b[90mAUTHOR\x1b[0m\n"+
+		"\x1b]8;;https://example.org/i/7\x1b\\#7\x1b]8;;\x1b\\   Short                 \x1b[32mopen\x1b[0m    alice\n"+
+		"\x1b]8;;https://example.org/i/12\x1b\\#12\x1b]8;;\x1b\\  Evil]52;c;aGk= Title  \x1b[31mclosed\x1b[0m  bob\n", out.String())
 }
 
 func TestIssueListKindFilter(t *testing.T) {

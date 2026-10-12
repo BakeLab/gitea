@@ -71,6 +71,8 @@ func TestAPIErrorIncludesOnlySanitizedServerMessage(t *testing.T) {
 		{"oversized body", `{"message":"` + strings.Repeat("y", 5000) + `"}`, fmt.Sprintf(merge, 500), 500},
 		{"token echo", `{"message":"bad token secret"}`, fmt.Sprintf(merge, 400), 400},
 		{"authentication", `{"message":"user alice not found"}`, "authentication rejected; run gt auth login", 401},
+		{"bare not found", `{"message":"not found","url":"https://leak.example/?key=abc"}`, "not found (HTTP 404 POST /api/v1/repos/a/b/pulls/1/merge)", 404},
+		{"described not found", `{"message":"label does not exist [label_id: 9]"}`, "not found (HTTP 404 POST /api/v1/repos/a/b/pulls/1/merge): label does not exist [label_id: 9]", 404},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -146,6 +148,9 @@ func TestNetworkErrorsKeepCauseWithoutURL(t *testing.T) {
 	require.ErrorAs(t, err, &opErr)
 	require.ErrorContains(t, err, "API request failed: ")
 	require.NotContains(t, err.Error(), "query-secret")
+	var failure *RequestFailure
+	require.ErrorAs(t, err, &failure)
+	require.Equal(t, server.URL, failure.Server)
 	_, err = client.Download(context.Background(), server.URL+"/file?signature=query-secret")
 	require.ErrorAs(t, err, &opErr)
 	require.ErrorContains(t, err, "download failed: ")
@@ -153,14 +158,86 @@ func TestNetworkErrorsKeepCauseWithoutURL(t *testing.T) {
 }
 
 func TestDebugLogsRequestsWithoutSecrets(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTeapot)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/a/b/labels/8":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"label does not exist [label_id: 8]"}`))
+		case "/api/v1/repos/a/b/labels/9":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"label does not exist; secret-token"}`))
+		default:
+			w.WriteHeader(http.StatusTeapot)
+		}
 	}))
 	defer server.Close()
 	var log bytes.Buffer
 	client := New(server.URL, "secret-token", false).Debug(&log)
-	_, err := client.Do(context.Background(), http.MethodGet, "repos/a/b?page=2&token=query-secret", nil, nil)
+	_, err := client.Do(context.Background(), http.MethodGet, "repos/a/b?page=2&state=open&token=query-secret&access_token=query-secret", nil, nil)
 	require.Error(t, err)
-	require.Regexp(t, `^\[debug\] GET `+regexp.QuoteMeta(server.URL)+`/api/v1/repos/a/b\?page=REDACTED&token=REDACTED -> 418 I'm a teapot \(\d+(\.\d+)?[µm]?s\)\n$`, log.String())
+	require.Regexp(t, `^\[debug\] GET `+regexp.QuoteMeta(server.URL)+`/api/v1/repos/a/b\?access_token=REDACTED&page=2&state=open&token=REDACTED -> 418 I'm a teapot \(\d+(\.\d+)?[µm]?s\)\n$`, log.String())
+	log.Reset()
+	_, err = client.Do(context.Background(), http.MethodGet, "repos/a/b/labels/8", nil, nil)
+	require.Regexp(t, `-> 404 Not Found \(\d+(\.\d+)?[µm]?s\): label does not exist \[label_id: 8\]\n$`, log.String())
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, "label does not exist [label_id: 8]", apiErr.Message, "the logged body stays readable")
+	log.Reset()
+	_, err = client.Do(context.Background(), http.MethodGet, "repos/a/b/labels/9", nil, nil)
+	require.Error(t, err)
+	require.Regexp(t, `-> 404 Not Found \(\d+(\.\d+)?[µm]?s\)\n$`, log.String(), "a message echoing the token is dropped")
 	require.NotContains(t, log.String(), "secret")
+}
+
+func TestDebugRedactsOnlySensitiveQueryValues(t *testing.T) {
+	for _, tc := range []struct {
+		path, key string
+		redacted  bool
+	}{
+		{"/api/v1/repos/a/b/issues", "limit", false},
+		{"/api/v1/repos/a/b/issues", "page", false},
+		{"/api/v1/repos/a/b/issues", "state", false},
+		{"/api/v1/repos/a/b/issues", "labels", false},
+		{"/api/v1/repos/a/b/issues", "token", true},
+		{"/api/v1/repos/a/b/issues", "access_token", true},
+		{"/api/v1/users", "password", true},
+		{"/login/oauth/authorize", "state", true},
+		{"/login/oauth/access_token", "code", true},
+		{"/login/oauth/access_token", "client_secret", true},
+		{"/storage/blob", "X-Amz-Signature", true},
+		{"/storage/blob", "X-Amz-Credential", true},
+		{"/storage/blob", "X-Amz-Security-Token", true},
+		{"/storage/blob", "sig", true},
+		{"/storage/blob", "X-Amz-Date", false},
+	} {
+		require.Equal(t, tc.redacted, sensitiveQuery(tc.path, tc.key), "%s %s", tc.path, tc.key)
+	}
+}
+
+func TestAPIErrorLookupRepeatsReadsWithTheFailedCredential(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "token secret", r.Header.Get("Authorization"))
+		require.Equal(t, "bob", r.Header.Get("Sudo"))
+		if r.URL.Path == "/base/api/v1/repos/a/b" {
+			_, _ = w.Write([]byte(`{"full_name":"a/b","has_issues":false}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"not found"}`))
+	}))
+	defer server.Close()
+	client := New(server.URL+"/base", "secret", false)
+	client.Sudo = "bob"
+	_, err := client.Do(context.Background(), http.MethodGet, "repos/a/b/issues/9", nil, nil)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, server.URL+"/base", apiErr.Instance)
+	var repo struct {
+		FullName  string `json:"full_name"`
+		HasIssues bool   `json:"has_issues"`
+	}
+	require.Equal(t, http.StatusOK, apiErr.Lookup(context.Background(), "repos/a/b", &repo))
+	require.Equal(t, "a/b", repo.FullName)
+	require.Equal(t, http.StatusNotFound, apiErr.Lookup(context.Background(), "repos/a/missing", nil))
+	require.Zero(t, (&APIError{Status: http.StatusNotFound}).Lookup(context.Background(), "repos/a/b", nil), "errors built without a request cannot look up")
 }

@@ -32,5 +32,5 @@ func TestIssueFormMarksTitleRequired(t *testing.T) {
 	p, rendered := accessiblePrompter(t, "Title\n")
 	_, err := p.collectIssueProperties(context.Background(), "", "", IssueFormChoices{EditBody: noEdit})
 	require.NoError(t, err)
-	require.Contains(t, rendered.String(), "Issue title (required):")
+	require.Contains(t, rendered.String(), "Title (required):")
 }

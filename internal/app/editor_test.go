@@ -13,6 +13,7 @@ import (
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
@@ -307,4 +308,31 @@ func TestReviewLifecycleEditorRejectsEmptyRequiredText(t *testing.T) {
 			require.Empty(t, out.String())
 		})
 	}
+}
+
+func TestBodyEditorTypesInlineWithoutAnEditor(t *testing.T) {
+	deps, _, _ := testDeps(t)
+	prompt := &askingPrompter{}
+	deps.Prompter = prompt
+	a, cmd := outputApplication(deps, "")
+	draft, err := a.bodyEditor(cmd)(context.Background(), "## Steps")
+	require.NoError(t, err)
+	require.Equal(t, terminal.Draft{Body: "typed body"}, draft)
+	require.Equal(t, []string{terminal.BodyTitle + " ## Steps"}, prompt.texts)
+
+	editor, path := newDraftEditor(t, "edited body")
+	deps.Editor = editor
+	deps.Getenv = envFunc(map[string]string{"EDITOR": "vi"})
+	a, cmd = outputApplication(deps, "")
+	draft, err = a.bodyEditor(cmd)(context.Background(), "## Steps")
+	require.NoError(t, err)
+	require.Equal(t, terminal.Draft{Path: path, Body: "edited body"}, draft)
+	require.Equal(t, "## Steps", editor.initial)
+	require.Len(t, prompt.texts, 1)
+
+	deps.Prompter = &scriptedPrompter{}
+	deps.Getenv = envFunc(nil)
+	a, cmd = outputApplication(deps, "")
+	_, err = a.bodyEditor(cmd)(context.Background(), "")
+	require.ErrorContains(t, err, "configure an editor")
 }

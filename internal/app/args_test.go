@@ -51,3 +51,58 @@ func TestParseTimeRangeRejectsOnlyInvertedBounds(t *testing.T) {
 		require.Equal(t, tc.wantErr, err != nil, tc.since+".."+tc.until)
 	}
 }
+
+func TestNumberAcceptsHashPrefix(t *testing.T) {
+	for raw, want := range map[string]int64{"12": 12, "#12": 12} {
+		n, err := number(raw)
+		require.NoError(t, err, raw)
+		require.Equal(t, want, n, raw)
+	}
+	for _, raw := range []string{"#", "##1", "0", "#-1", "1#", "abc"} {
+		_, err := number(raw)
+		require.ErrorContains(t, err, "invalid resource number", raw)
+	}
+}
+
+func TestUsageArgumentsSplitTopLevelGroups(t *testing.T) {
+	for use, want := range map[string][]string{
+		"list":                               nil,
+		"list [flags]":                       nil,
+		"view <number>":                      {"<number>"},
+		"view [number]":                      {"[number]"},
+		"close <number>...":                  {"<number>..."},
+		"clone <repository> [directory]":     {"<repository>", "[directory]"},
+		"diff [<number> | <url> | <branch>]": {"[<number> | <url> | <branch>]"},
+		"download <tag> <asset-id> [flags]":  {"<tag>", "<asset-id>"},
+		"upload <tag> <file>... [flags]":     {"<tag>", "<file>..."},
+	} {
+		require.Equal(t, want, usageArguments(use), use)
+	}
+}
+
+func TestArgumentErrorsShowTheUsageLine(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"issue", "view"}, "missing issue number\nUsage: gt issue view <number> [flags]\nRun 'gt issue view --help' for more information."},
+		{[]string{"issue", "view", "1", "2"}, "too many arguments\nUsage: gt issue view <number> [flags]"},
+		{[]string{"issue", "list", "extra"}, "unexpected argument \"extra\"\nUsage: gt issue list [flags]"},
+		{[]string{"pr", "checkout"}, "missing pull request number\nUsage: gt pr checkout <number> [flags]"},
+		{[]string{"run", "view"}, "missing run ID\nUsage: gt run view <id> [flags]"},
+		{[]string{"release", "asset", "download", "v1"}, "missing asset ID\nUsage: gt release asset download <tag> <asset-id> [flags]"},
+		{[]string{"repo", "clone"}, "missing repository\nUsage: gt repo clone <repository> [directory] [flags]"},
+	} {
+		requireUsageBeforeRequests(t, tc.want, tc.args...)
+	}
+}
+
+func TestLimitAcceptsShorthandUpToOneThousand(t *testing.T) {
+	var limit, page int
+	cmd := &cobra.Command{Use: "list"}
+	pageFlags(cmd, &limit, &page)
+	require.Equal(t, 30, limit)
+	require.NoError(t, cmd.Flags().Parse([]string{"-L", "1000"}))
+	require.Equal(t, 1000, limit)
+	require.ErrorContains(t, cmd.Flags().Parse([]string{"-L", "1001"}), "must be 1..1000")
+}

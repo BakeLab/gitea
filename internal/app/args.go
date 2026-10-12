@@ -18,8 +18,9 @@ import (
 	"github.com/spf13/pflag"
 )
 
+// number parses a resource number written as N or #N.
 func number(raw string) (int64, error) {
-	n, err := strconv.ParseInt(raw, 10, 64)
+	n, err := strconv.ParseInt(strings.TrimPrefix(raw, "#"), 10, 64)
 	if err != nil || n < 1 {
 		return 0, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid resource number %q", raw))
 	}
@@ -83,9 +84,13 @@ func oneOf(flag, value string, allowed ...string) error {
 	return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s must be %s or %s", flag, choices, allowed[last]))
 }
 
-// pageFlags registers --limit and --page, which reject out-of-range values while parsing.
+// maxLimit bounds --limit; list services page through the server's smaller pages to reach it.
+const maxLimit = 1000
+
+// pageFlags registers -L/--limit and --page, which reject out-of-range values while parsing.
 func pageFlags(cmd *cobra.Command, limit, page *int) {
-	positiveIntVar(cmd, limit, "limit", 30, 100, "Maximum results (1..100)")
+	*limit = 30
+	cmd.Flags().VarP(positiveInt{limit, maxLimit}, "limit", "L", "Maximum number of results (1..1000)")
 	positiveIntVar(cmd, page, "page", 1, math.MaxInt, "Result page")
 }
 
@@ -194,11 +199,106 @@ func argsExact(n int) cobra.PositionalArgs {
 	return usageArgs(cobra.ExactArgs(n))
 }
 
-// usageArgs reports positional argument errors with the usage exit code.
+// usageArgs reports positional argument errors with the usage exit code, the usage line and a
+// pointer to the command's help.
 func usageArgs(validate cobra.PositionalArgs) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
-		return clierr.Wrap(clierr.Usage, validate(cmd, args))
+		err := validate(cmd, args)
+		if err == nil {
+			return nil
+		}
+		return clierr.Wrap(clierr.Usage, &argumentError{problem: argumentProblem(cmd, args, err), cmd: cmd})
 	}
+}
+
+// argumentError reports a positional argument problem followed by the command's usage.
+type argumentError struct {
+	problem string
+	cmd     *cobra.Command
+}
+
+func (e *argumentError) Error() string {
+	more := "for more information"
+	if e.cmd.Example != "" {
+		more = "for examples"
+	}
+	return fmt.Sprintf("%s\nUsage: %s\nRun '%s --help' %s.", e.problem, e.cmd.UseLine(), e.cmd.CommandPath(), more)
+}
+
+// argumentProblem names what is wrong with args from the arguments in the command's Use, such
+// as "missing issue number", falling back to the validator's message.
+func argumentProblem(cmd *cobra.Command, args []string, err error) string {
+	arguments := usageArguments(cmd.Use)
+	required, variadic := 0, false
+	for _, argument := range arguments {
+		if !strings.HasPrefix(argument, "[") {
+			required++
+		}
+		variadic = variadic || strings.HasSuffix(strings.TrimRight(argument, "]}>"), "...")
+	}
+	switch {
+	case len(args) < required:
+		return "missing " + argumentName(cmd, arguments[len(args)])
+	case len(arguments) == 0 && len(args) > 0:
+		return fmt.Sprintf("unexpected argument %q", args[0])
+	case !variadic && len(arguments) > 0 && len(args) > len(arguments):
+		return "too many arguments"
+	}
+	return err.Error()
+}
+
+// usageArguments splits the arguments of a Use line, such as "view <number>", into its
+// top-level groups: "<number>", "[<number> | <url>]" or "<file>...". [flags] is not one.
+func usageArguments(use string) []string {
+	_, rest, _ := strings.Cut(use, " ")
+	var arguments []string
+	depth, start := 0, -1
+	for i, r := range rest {
+		switch {
+		case strings.ContainsRune("<[{", r):
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case strings.ContainsRune(">]}", r):
+			depth--
+		}
+		if depth == 0 && start >= 0 && (i == len(rest)-1 || rest[i+1] == ' ') {
+			if argument := rest[start : i+1]; argument != "[flags]" {
+				arguments = append(arguments, argument)
+			}
+			start = -1
+		}
+	}
+	return arguments
+}
+
+// argumentName words a Use argument for an error: "<asset-id>" is "asset ID", and a bare
+// "<number>" or "<id>" names the command group's resource, as in "issue number".
+func argumentName(cmd *cobra.Command, argument string) string {
+	first, _, _ := strings.Cut(argument, "|")
+	name := strings.Trim(first, "<>[]{}. ")
+	words := strings.Split(name, "-")
+	for i, word := range words {
+		if word == "id" {
+			words[i] = "ID"
+		}
+	}
+	text := strings.Join(words, " ")
+	if name != "number" && name != "id" && name != "id-or-name" {
+		return text
+	}
+	group := cmd
+	for group.HasParent() && group.Parent().HasParent() {
+		group = group.Parent()
+	}
+	if group == cmd {
+		return text
+	}
+	if noun := group.Name(); noun == "pr" {
+		return "pull request " + text
+	}
+	return group.Name() + " " + text
 }
 
 // localFlagsChanged reports whether any command-specific flag was supplied.

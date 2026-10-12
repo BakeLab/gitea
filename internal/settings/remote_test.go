@@ -68,6 +68,61 @@ func TestParseRemoteReadsSCPStyleRemotes(t *testing.T) {
 	require.Equal(t, "ssh://git@git.example.org/alice/project.git", u.String())
 }
 
+func TestParseRepositoryAcceptsShorthands(t *testing.T) {
+	hosts := map[string]Host{"http://localhost:3001": {}, "https://example.org/gitea": {}, "https://example.org": {}}
+	for _, tc := range []struct {
+		raw  string
+		want RepositoryRef
+		err  string
+	}{
+		{raw: "project", want: RepositoryRef{Name: "project"}},
+		{raw: "alice/project", want: RepositoryRef{Owner: "alice", Name: "project"}},
+		{raw: "alice/project.git", want: RepositoryRef{Owner: "alice", Name: "project"}},
+		{raw: " alice/project ", want: RepositoryRef{Owner: "alice", Name: "project"}},
+		{raw: "localhost:3001/alice/project", want: RepositoryRef{Host: "http://localhost:3001", Owner: "alice", Name: "project"}},
+		{raw: "LOCALHOST:3001/alice/project.git", want: RepositoryRef{Host: "http://localhost:3001", Owner: "alice", Name: "project"}},
+		{raw: "example.org/gitea/alice/project", want: RepositoryRef{Host: "https://example.org/gitea", Owner: "alice", Name: "project"}},
+		{raw: "example.org/alice/project", want: RepositoryRef{Host: "https://example.org", Owner: "alice", Name: "project"}},
+		{raw: "gitea.com/gitea/cli", want: RepositoryRef{Host: "https://gitea.com", Owner: "gitea", Name: "cli"}},
+		{raw: "http://localhost:3001/alice/project.git", want: RepositoryRef{Host: "http://localhost:3001", Owner: "alice", Name: "project"}},
+		{raw: "a/b/c/d", err: `invalid repository "a/b/c/d": use OWNER/REPO, HOST/OWNER/REPO or a URL`},
+		{raw: "alice/", err: "invalid repository"},
+		{raw: "../x", err: "invalid repository"},
+		{raw: "", err: "invalid repository"},
+	} {
+		got, err := ParseRepository(tc.raw, hosts)
+		if tc.err != "" {
+			require.ErrorContains(t, err, tc.err, tc.raw)
+			continue
+		}
+		require.NoError(t, err, tc.raw)
+		require.Equal(t, tc.want, got, tc.raw)
+	}
+	require.Equal(t, "project", RepositoryRef{Name: "project"}.Slug())
+	require.Equal(t, "alice/project", RepositoryRef{Owner: "alice", Name: "project"}.Slug())
+}
+
+func TestResolveHostAcceptsBareHosts(t *testing.T) {
+	hosts := map[string]Host{"http://localhost:3001": {}, "https://example.org/gitea": {}}
+	for raw, want := range map[string]string{
+		"localhost:3001":            "http://localhost:3001",
+		"localhost:3001/":           "http://localhost:3001",
+		"example.org/gitea":         "https://example.org/gitea",
+		"gitea.com":                 "https://gitea.com",
+		"https://localhost:3001":    "https://localhost:3001",
+		"https://gitea.com:443/x/":  "https://gitea.com/x",
+		"http://example.org/gitea/": "http://example.org/gitea",
+	} {
+		got, err := ResolveHost(raw, hosts)
+		require.NoError(t, err, raw)
+		require.Equal(t, want, got, raw)
+	}
+	_, err := ResolveHost("localhost:3001", map[string]Host{"http://localhost:3001": {}, "https://localhost:3001": {}})
+	require.ErrorContains(t, err, "include the scheme")
+	_, err = ResolveHost("bad host", hosts)
+	require.ErrorContains(t, err, `invalid instance "bad host"`)
+}
+
 func TestValidSlugRejectsSCPStyleRemotes(t *testing.T) {
 	require.True(t, ValidSlug("alice/project"))
 	require.False(t, ValidSlug("git@example.org:alice/project.git"))

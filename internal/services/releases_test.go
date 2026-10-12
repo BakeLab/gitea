@@ -119,7 +119,7 @@ func TestReleaseDeleteReportsCompletedStep(t *testing.T) {
 	}{
 		"release only":    {wantCalls: []string{"/releases/5"}},
 		"release and tag": {deleteTag: true, wantCalls: []string{"/releases/5", "/tags/v1%2Fbeta"}},
-		"release fails":   {deleteTag: true, failRelease: true, wantCalls: []string{"/releases/5"}, wantErr: "unavailable"},
+		"release fails":   {deleteTag: true, failRelease: true, wantCalls: []string{"/releases/5"}, wantErr: "not found"},
 		"tag fails":       {deleteTag: true, failTag: true, wantCalls: []string{"/releases/5", "/tags/v1%2Fbeta"}, wantErr: "release deleted, but tag deletion failed"},
 	} {
 		t.Run(name, func(t *testing.T) {

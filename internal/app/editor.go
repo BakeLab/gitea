@@ -49,7 +49,17 @@ func (a *application) editDraft(cmd *cobra.Command, body string) (terminal.Draft
 	return editor.Edit(cmd.Context(), command, body)
 }
 
+// bodyEditor collects the body of an interactive form after the form ran. The editor is resolved
+// first: without one, the body is typed into an inline multi-line field instead, so the input
+// already given is never lost to a missing editor.
 func (a *application) bodyEditor(cmd *cobra.Command) terminal.BodyEditor {
+	preferences, err := a.preferences()
+	if asker, ok := a.deps.Prompter.(terminal.Asker); ok && err == nil && preferences.Editor == "" {
+		return func(ctx context.Context, initial string) (terminal.Draft, error) {
+			body, err := asker.AskText(ctx, terminal.BodyTitle, initial)
+			return terminal.Draft{Body: body}, err
+		}
+	}
 	return func(_ context.Context, initial string) (terminal.Draft, error) { return a.editDraft(cmd, initial) }
 }
 

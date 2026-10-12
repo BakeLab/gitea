@@ -18,6 +18,11 @@ import (
 	"testing"
 	"time"
 
+	"gitea.dev/cli/internal/app"
+	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,6 +76,48 @@ func TestSignalInterruptReturns130(t *testing.T) {
 		t.Fatal("CLI did not exit after interrupt")
 	}
 	require.Empty(t, stdout.String())
-	require.Equal(t, 1, strings.Count(stderr.String(), "Error:"))
-	require.NotContains(t, stderr.String(), "disposable-test-token")
+	require.Empty(t, stderr.String(), "an interrupt exits silently")
+}
+
+type decliningPrompter struct{}
+
+func (decliningPrompter) Input(context.Context, string) (string, error) { return "", nil }
+func (decliningPrompter) SecretInput(context.Context, string) (string, error) {
+	return "", nil
+}
+func (decliningPrompter) Confirm(context.Context, string) (bool, error) { return false, nil }
+
+func TestRunReportsDeclinedConfirmationsAndExplainedFailures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/user":
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		case "/api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_issues":true}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		}
+	}))
+	defer server.Close()
+	store := settings.New(t.TempDir())
+	require.NoError(t, store.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
+		s.Hosts.Hosts[server.URL] = settings.Host{User: "alice", Users: map[string]settings.Account{"alice": {AuthMethod: settings.AuthToken, CredentialStore: settings.StoreFile}}}
+		return nil
+	}))
+	var stderr bytes.Buffer
+	deps := app.Dependencies{
+		Settings: store, Credentials: &auth.Store{Dir: store.Dir}, Client: transport.New, Prompter: decliningPrompter{},
+		Streams: terminal.Streams{In: &bytes.Buffer{}, Out: &bytes.Buffer{}, ErrOut: &stderr, InTTY: true, ErrTTY: true},
+		Getenv:  func(string) string { return "" },
+	}
+	require.Equal(t, 3, run(context.Background(), deps, []string{"auth", "logout"}))
+	require.Equal(t, "Canceled.\n", stderr.String())
+
+	stderr.Reset()
+	deps.Getenv = func(key string) string {
+		return map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL}[key]
+	}
+	require.Equal(t, 1, run(context.Background(), deps, []string{"issue", "view", "9", "-R", "alice/project", "--no-input"}))
+	require.Equal(t, "Error: issue #9 not found in alice/project\n", stderr.String())
 }

@@ -98,18 +98,19 @@ type issueFields struct {
 	labels                []int64
 }
 
-// groups builds title/body and, when canPush, assignee/milestone/label/due-date fields.
+// groups builds title/body and, when canPush, assignee/milestone/label/due-date fields. The labels
+// name no resource, as issues and pull requests share them.
 func (f *issueFields) groups(editBody BodyEditor, canPush bool, assignees []string, milestones []IssueMilestoneChoice, labels []IssueLabelChoice) []*huh.Group {
-	fields := []huh.Field{huh.NewInput().Title("Issue title (required):").Value(&f.title).Validate(huh.ValidateNotEmpty())}
+	fields := []huh.Field{titleField(&f.title)}
 	if editBody == nil {
-		fields = append(fields, huh.NewText().Title("Issue description(markdown):").Value(&f.body))
+		fields = append(fields, bodyField(BodyTitle, &f.body))
 	}
 	groups := []*huh.Group{huh.NewGroup(fields...)}
 	if !canPush {
 		return groups
 	}
 	if len(assignees) > 0 {
-		groups = append(groups, huh.NewGroup(huh.NewMultiSelect[string]().Title("Assignees:").Options(huh.NewOptions(assignees...)...).Value(&f.assignees)))
+		groups = append(groups, huh.NewGroup(multiSelect("Assignees:", huh.NewOptions(assignees...), &f.assignees)))
 	}
 	if len(milestones) > 0 {
 		options := []huh.Option[int64]{huh.NewOption("[none]", int64(0))}
@@ -123,7 +124,7 @@ func (f *issueFields) groups(editBody BodyEditor, canPush bool, assignees []stri
 		for _, label := range labels {
 			options = append(options, huh.NewOption(label.Name, label.ID))
 		}
-		groups = append(groups, huh.NewGroup(huh.NewMultiSelect[int64]().Title("Labels:").Options(options...).Value(&f.labels)))
+		groups = append(groups, huh.NewGroup(multiSelect("Labels:", options, &f.labels)))
 	}
 	return append(groups, huh.NewGroup(dueDateInput("Due date:", &f.deadline)))
 }

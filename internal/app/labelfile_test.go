@@ -66,5 +66,5 @@ func TestLabelImportAcceptsColorPrefixedRows(t *testing.T) {
 	require.Len(t, created, 2)
 	requirePayload(t, `{"name":"bug","color":"ee0701","description":"Something is not working"}`, strings.NewReader(created[0]))
 	requirePayload(t, `{"name":"enhancement","color":"84b6eb"}`, strings.NewReader(created[1]))
-	require.Equal(t, "1  bug\n2  enhancement\n", out.String())
+	require.Equal(t, "1\tbug\t\t\n2\tenhancement\t\t\n", out.String())
 }

@@ -77,9 +77,9 @@ func (p *FormPrompter) CreateReview(ctx context.Context, choices ReviewFormChoic
 			return values, err
 		}
 	} else {
-		field := huh.NewText().Title("Concluding comment(markdown):").Value(&body)
+		field := bodyField("Concluding comment (markdown):", &body)
 		if required {
-			field = field.Title("Concluding comment(markdown) (required):").Validate(huh.ValidateNotEmpty())
+			field = field.Title("Concluding comment (markdown, required):").Validate(huh.ValidateNotEmpty())
 		}
 		if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(field))); err != nil {
 			return ReviewFormValues{}, err

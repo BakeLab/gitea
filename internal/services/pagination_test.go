@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -87,6 +88,33 @@ func TestListsCollectPagesBeyondServerPageSize(t *testing.T) {
 			}
 			require.Equal(t, want, got)
 			require.Equal(t, tc.total > tc.page*tc.limit, more)
+		})
+	}
+}
+
+func TestPagesReportTheCountedTotal(t *testing.T) {
+	for _, tc := range []struct {
+		total, maxItems, limit, page int
+		count, more                  bool
+	}{
+		{120, 50, 30, 1, true, true},
+		{120, 50, 1000, 1, true, false},
+		{120, 50, 100, 2, true, false},
+		{40, 50, 100, 1, false, false},
+	} {
+		t.Run(fmt.Sprintf("%+v", tc), func(t *testing.T) {
+			server, _ := cappedServer(t, tc.total, tc.maxItems, true, tc.count)
+			client := transport.New(server.URL, "", false)
+			query := url.Values{"state": {"open"}}
+			window, err := rawPage[Organization](context.Background(), client, "orgs", query, tc.limit, tc.page)
+			require.NoError(t, err)
+			require.Len(t, window.Items, min(tc.limit, max(0, tc.total-(tc.page-1)*tc.limit)))
+			require.Equal(t, tc.more, window.More)
+			require.Equal(t, tc.count, window.Counted)
+			if tc.count {
+				require.Equal(t, tc.total, window.Total)
+			}
+			require.Equal(t, url.Values{"state": {"open"}}, query, "the caller's query is not modified")
 		})
 	}
 }

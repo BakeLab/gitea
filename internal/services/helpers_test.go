@@ -12,6 +12,7 @@ import (
 
 	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // newTestClient serves handler for the duration of the test and returns a client for it.
@@ -37,4 +38,40 @@ func requestJSON(t *testing.T, r *http.Request) map[string]any {
 	var payload map[string]any
 	assert.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
 	return payload
+}
+
+func TestNameOrIDPrefersIDsThenExactThenFoldedNames(t *testing.T) {
+	type label struct {
+		id   int64
+		name string
+	}
+	labels := []label{{11, "bug"}, {12, "Bug"}, {13, "7"}, {7, "seven"}, {20, "kind/feature"}, {21, "dup"}, {22, "dup"}}
+	lookup := NameOrID[label]{Kind: "label", Scope: "alice/project", ID: func(l label) int64 { return l.id }, Name: func(l label) string { return l.name }}
+	for _, tc := range []struct {
+		raw    string
+		byName bool
+		want   int64
+		err    string
+	}{
+		{raw: "7", want: 7},
+		{raw: "7", byName: true, want: 13},
+		{raw: "13", want: 13},
+		{raw: "bug", want: 11},
+		{raw: "BUG", err: `label "BUG" is ambiguous in alice/project (IDs 11, 12); pass an ID`},
+		{raw: "KIND/FEATURE", want: 20},
+		{raw: " kind/feature ", want: 20},
+		{raw: "dup", err: `label "dup" is ambiguous in alice/project (IDs 21, 22); pass an ID`},
+		{raw: "nope", err: `label "nope" not found in alice/project`},
+		{raw: "99", err: "label 99 not found in alice/project"},
+		{raw: "99", byName: true, err: `label "99" not found in alice/project`},
+	} {
+		lookup.ByName = tc.byName
+		got, err := lookup.Find(labels, tc.raw)
+		if tc.err != "" {
+			require.EqualError(t, err, tc.err, tc.raw)
+			continue
+		}
+		require.NoError(t, err, tc.raw)
+		require.Equal(t, tc.want, got.id, tc.raw)
+	}
 }

@@ -18,14 +18,26 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	deps := app.System()
-	err := app.Execute(ctx, deps, os.Args[1:])
-	if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+	code := run(ctx, app.System(), os.Args[1:])
+	stop()
+	os.Exit(code)
+}
+
+// run executes gt, reports a failure on stderr and returns the exit code. An interrupt exits
+// silently, and a declined confirmation prints only "Canceled.".
+func run(ctx context.Context, deps app.Dependencies, args []string) int {
+	err := app.Execute(ctx, deps, args)
+	if err != nil && ctx.Err() != nil {
+		// Whatever failed after Ctrl-C or SIGTERM failed because of it; the user knows why.
 		err = clierr.Wrap(clierr.Interrupted, err)
 	}
-	if err != nil {
-		fmt.Fprintf(deps.Streams.ErrOut, "Error: %v\n", err)
+	code := clierr.ExitCode(err)
+	switch {
+	case err == nil, code == clierr.Interrupted:
+	case code == clierr.Canceled && !errors.Is(err, context.DeadlineExceeded):
+		fmt.Fprintln(deps.Streams.ErrOut, "Canceled.")
+	default:
+		fmt.Fprintf(deps.Streams.ErrOut, "Error: %v\n", app.Explain(ctx, deps, err))
 	}
-	os.Exit(clierr.ExitCode(err))
+	return code
 }

@@ -172,7 +172,12 @@ func TestCaptureErrorsSanitizesAndKeepsBodyReadable(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.Equal(t, tc.body, string(data))
-			require.Equal(t, &APIError{Status: tc.status, Method: http.MethodPatch, Endpoint: "/api/v1/repos/a/b", Message: tc.message}, failure())
+			recorded := failure()
+			require.Equal(t, tc.status, recorded.Status)
+			require.Equal(t, http.MethodPatch, recorded.Method)
+			require.Equal(t, "/api/v1/repos/a/b", recorded.Endpoint)
+			require.Equal(t, tc.message, recorded.Message)
+			require.Equal(t, server.URL, recorded.Instance)
 		})
 	}
 }

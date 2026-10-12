@@ -32,6 +32,12 @@ type RequestSigner interface {
 type APIError struct {
 	Status                    int
 	Method, Endpoint, Message string
+	// Instance is the installation URL the failed request was sent to, when it was recorded
+	// from a request.
+	Instance string
+	// apiBase and lookup repeat reads on the failed request's instance with its credential.
+	apiBase string
+	lookup  http.RoundTripper
 }
 
 func (e *APIError) Error() string {
@@ -42,7 +48,11 @@ func (e *APIError) Error() string {
 	case 403:
 		text = "permission denied by the Gitea instance"
 	case 404:
-		text = "resource or API endpoint unavailable on the selected Gitea instance"
+		// Gitea's 404 message is usually just "not found"; the request names what was missing.
+		text = "not found (" + e.request() + ")"
+		if strings.EqualFold(e.Message, "not found") {
+			return text
+		}
 	case 429:
 		text = "Gitea rate limit exceeded; try again later"
 	default:
@@ -54,9 +64,52 @@ func (e *APIError) Error() string {
 	return text
 }
 
+// request describes the failed request, such as "HTTP 404 GET /api/v1/repos/alice/x".
+func (e *APIError) request() string {
+	return strings.TrimSpace(fmt.Sprintf("HTTP %d %s %s", e.Status, e.Method, e.Endpoint))
+}
+
+// bind records the instance of the request to u and the credentialed transport rt, so the
+// failure can later be explained with Lookup.
+func (e *APIError) bind(u *url.URL, rt http.RoundTripper) {
+	prefix, _, ok := strings.Cut(u.Path, "/api/v1/")
+	if !ok {
+		return
+	}
+	instance := url.URL{Scheme: u.Scheme, Host: u.Host, Path: prefix}
+	e.Instance = instance.String()
+	instance.Path += "/api/v1/"
+	e.apiBase, e.lookup = instance.String(), rt
+}
+
+// Lookup reads endpoint, a path below the API base such as "repos/alice/project", with the
+// instance and credential of the request that failed, and decodes a successful JSON response
+// into out. It returns the response status, or 0 when the error was not recorded from a
+// request or the lookup itself failed.
+func (e *APIError) Lookup(ctx context.Context, endpoint string, out any) int {
+	if e.lookup == nil {
+		return 0
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.apiBase+strings.TrimLeft(endpoint, "/"), nil)
+	if err != nil {
+		return 0
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := e.lookup.RoundTrip(req)
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 && out != nil && json.NewDecoder(io.LimitReader(resp.Body, maxLookupBody)).Decode(out) != nil {
+		return 0
+	}
+	return resp.StatusCode
+}
+
 const (
 	maxErrorBody    = 4 << 10
 	maxErrorMessage = 300
+	maxLookupBody   = 1 << 20
 )
 
 // newAPIError keeps only a bounded, printable JSON "message" field of a failed response body.
@@ -175,6 +228,20 @@ func (c *Client) URL(endpoint string) (string, error) {
 	return base.String(), nil
 }
 
+// RequestFailure reports a request that received no HTTP response, such as a refused
+// connection or an untrusted certificate.
+type RequestFailure struct {
+	// Action names what failed, such as "API request failed".
+	Action string
+	// Server is the scheme and host the request was sent to, without path or query.
+	Server string
+	// Err is the network or TLS cause.
+	Err error
+}
+
+func (e *RequestFailure) Error() string { return e.Action + ": " + e.Err.Error() }
+func (e *RequestFailure) Unwrap() error { return e.Err }
+
 // RequestError keeps the network or TLS cause of a failed request. The cause of a *url.Error
 // omits the request URL, whose query may carry secrets.
 func RequestError(ctx context.Context, action string, err error) error {
@@ -182,7 +249,11 @@ func RequestError(ctx context.Context, action string, err error) error {
 		return ctx.Err()
 	}
 	if urlErr, ok := errors.AsType[*url.Error](err); ok {
-		return fmt.Errorf("%s: %w", action, urlErr.Err)
+		failure := &RequestFailure{Action: action, Err: urlErr.Err}
+		if u, parseErr := url.Parse(urlErr.URL); parseErr == nil {
+			failure.Server = (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
+		}
+		return failure
 	}
 	return errors.New(action + "; check connectivity and TLS settings")
 }

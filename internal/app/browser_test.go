@@ -68,3 +68,21 @@ func TestDiscussionViewsShareBrowserContract(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenBrowserTellsTerminalUsers(t *testing.T) {
+	for _, tty := range []bool{true, false} {
+		deps, out, diagnostics := testDeps(t)
+		browser := &recordingBrowser{}
+		deps.Browser = browser
+		deps.Streams.OutTTY = tty
+		a, cmd := outputApplication(deps, "")
+		require.NoError(t, a.openBrowser(cmd, "http://localhost:3001/alice/project/issues/1"))
+		require.Equal(t, "http://localhost:3001/alice/project/issues/1", browser.resource)
+		require.Empty(t, out.String())
+		if tty {
+			require.Equal(t, "Opening localhost:3001/alice/project/issues/1 in your browser.\n", diagnostics.String())
+		} else {
+			require.Empty(t, diagnostics.String())
+		}
+	}
+}

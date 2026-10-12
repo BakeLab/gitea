@@ -35,7 +35,7 @@ func TestPullFormMarksRequiredFields(t *testing.T) {
 		{
 			"without head", "n\nmain\nalice\nfeature\ny\nTitle\n",
 			PullFormChoices{},
-			[]string{"Target branch (required):", "Source branch (required):", "Issue title (required):"},
+			[]string{"Target branch (required):", "Source branch (required):", "Title (required):"},
 			nil,
 		},
 		{
