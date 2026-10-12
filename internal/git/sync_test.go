@@ -31,10 +31,10 @@ func TestSyncValidatesBeforeChangingBranches(t *testing.T) {
 		}
 	}
 	runner := &checkoutRunner{localCommit: "previous"}
-	result, err := SyncBranch(context.Background(), runner, SyncOptions{Directory: "/work", Remote: "origin", Branch: "main", CredentialArgs: []string{"-c", "credential.helper=tea"}})
+	result, err := SyncBranch(context.Background(), runner, SyncOptions{Directory: "/work", Remote: "origin", Branch: "main", CredentialArgs: []string{"-c", "credential.helper=gt"}})
 	require.NoError(t, err)
 	require.Equal(t, SyncResult{Branch: "main", Commit: "abc123", Remote: "origin"}, result)
-	require.Contains(t, runner.calls, "-c credential.helper=tea fetch --no-tags -- origin refs/heads/main")
+	require.Contains(t, runner.calls, "-c credential.helper=gt fetch --no-tags -- origin refs/heads/main")
 	require.Equal(t, []string{"switch main", "merge --ff-only --no-edit abc123", "rev-parse --verify HEAD^{commit}"}, runner.calls[len(runner.calls)-3:])
 }
 

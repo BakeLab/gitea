@@ -7,7 +7,7 @@ import (
 	"context"
 	"io"
 
-	"gitea.dev/tea/internal/git"
+	"gitea.dev/cli/internal/git"
 )
 
 func (a *application) git(ctx context.Context, args ...string) (string, error) {

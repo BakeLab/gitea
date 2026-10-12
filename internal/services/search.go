@@ -68,10 +68,10 @@ func (s Issues) Search(ctx context.Context, opts DiscussionSearchOptions) ([]Sea
 
 func (s Issues) searchRepository(ctx context.Context, opts DiscussionSearchOptions, kind gitea.IssueType) ([]*gitea.Issue, error) {
 	if opts.ReviewRequested || opts.Reviewed {
-		return nil, &CapabilityError{Feature: "repository-scoped review search", Reason: "Gitea supports review filters on instance-wide search only; omit --repo or TEA_REPO"}
+		return nil, &CapabilityError{Feature: "repository-scoped review search", Reason: "Gitea supports review filters on instance-wide search only; omit --repo or GITEA_CLI_REPO"}
 	}
 	if opts.Team != "" {
-		return nil, &CapabilityError{Feature: "repository-scoped team search", Reason: "Gitea supports team filters on instance-wide search only; omit --repo or TEA_REPO"}
+		return nil, &CapabilityError{Feature: "repository-scoped team search", Reason: "Gitea supports team filters on instance-wide search only; omit --repo or GITEA_CLI_REPO"}
 	}
 	owner, repo, err := splitRepository(s.Repository)
 	if err != nil {

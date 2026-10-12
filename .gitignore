@@ -1,4 +1,4 @@
-/tea
+/gt
 /gitea-vet
 /gitea-vet.exe
 
@@ -17,8 +17,8 @@ dist/
 docs/generated/
 
 # Release docs archive produced by `make docs-archive` / goreleaser before hooks
-tea-*-docs.tar.xz
-tea-*-docs.tar.xz.sha256
+gitea-cli-*-docs.tar.xz
+gitea-cli-*-docs.tar.xz.sha256
 
 # Nix-specific
 .direnv/

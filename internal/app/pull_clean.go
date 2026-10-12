@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"strings"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/git"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
 	"github.com/spf13/cobra"
 )
 

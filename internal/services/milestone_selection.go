@@ -29,7 +29,7 @@ func (s Milestones) ResolveName(ctx context.Context, name string) (int64, error)
 		id = item.ID
 	}
 	if id == 0 {
-		return 0, fmt.Errorf("milestone %q does not exist; use tea milestone list --state all", name)
+		return 0, fmt.Errorf("milestone %q does not exist; use gt milestone list --state all", name)
 	}
 	return id, nil
 }

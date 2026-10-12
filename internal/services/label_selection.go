@@ -15,7 +15,7 @@ func selectLabelNames(names []string, matches map[string][]int64) ([]int64, erro
 	for _, name := range names {
 		candidates := matches[name]
 		if len(candidates) == 0 {
-			return nil, fmt.Errorf("label %q does not exist; use tea label list", name)
+			return nil, fmt.Errorf("label %q does not exist; use gt label list", name)
 		}
 		if len(candidates) > 1 {
 			return nil, fmt.Errorf("label %q is ambiguous", name)
@@ -95,7 +95,7 @@ func (s Labels) RequireFilterNames(ctx context.Context, names []string) error {
 	}
 	for _, name := range names {
 		if !known[name] {
-			return fmt.Errorf("label %q does not exist in %s; issue filters match repository labels only, see tea label list", name, s.Repository)
+			return fmt.Errorf("label %q does not exist in %s; issue filters match repository labels only, see gt label list", name, s.Repository)
 		}
 	}
 	return nil

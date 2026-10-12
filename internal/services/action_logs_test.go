@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
 

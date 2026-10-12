@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"gitea.dev/tea/internal/filelock"
+	"gitea.dev/cli/internal/filelock"
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
 )
@@ -29,7 +29,7 @@ const Version = "1"
 const LockTimeout = 30 * time.Second
 
 // ErrLegacy prevents overwriting the old combined login configuration.
-var ErrLegacy = errors.New("legacy tea configuration: archive the old config.yml or select a separate TEA_CONFIG_DIR, then run tea auth login; existing files have not been changed")
+var ErrLegacy = errors.New("legacy gt configuration: archive the old config.yml or select a separate GITEA_CLI_CONFIG_DIR, then run gt auth login; existing files have not been changed")
 
 // Authentication methods and credential stores recorded for accounts.
 const (
@@ -106,8 +106,8 @@ type Store struct {
 func New(dir string) *Store {
 	legacy := ""
 	if dir == "" {
-		dir = filepath.Join(xdg.ConfigHome, "tea")
-		legacy = filepath.Join(xdg.Home, ".tea", "tea.yml")
+		dir = filepath.Join(xdg.ConfigHome, "gitea-cli")
+		legacy = filepath.Join(xdg.Home, ".gt", "gt.yml")
 	}
 	return &Store{Dir: dir, LegacyPath: legacy}
 }
@@ -376,7 +376,7 @@ func (s *Store) Locked(fn func(Snapshot) error) error {
 
 // AtomicWrite publishes a complete private file after flushing its contents.
 func AtomicWrite(filename string, data []byte) error {
-	temp, err := os.CreateTemp(filepath.Dir(filename), ".tea-*")
+	temp, err := os.CreateTemp(filepath.Dir(filename), ".gt-*")
 	if err != nil {
 		return err
 	}

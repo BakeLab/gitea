@@ -37,10 +37,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       HTTP_PROXY: ""
-      GITEA_TEA_TEST_URL: "http://gitea:3000"
-      GITEA_TEA_TEST_TOKEN_FILE: /tmp/tea-ci-admin-token
-      GITEA_TEA_TEST_REVIEWER_TOKEN_FILE: /tmp/tea-ci-reviewer-token
-      GITEA_TEA_TEST_REPOSITORY_ROOT: /tmp/data
+      GITEA_CLI_TEST_URL: "http://gitea:3000"
+      GITEA_CLI_TEST_TOKEN_FILE: /tmp/gt-ci-admin-token
+      GITEA_CLI_TEST_REVIEWER_TOKEN_FILE: /tmp/gt-ci-reviewer-token
+      GITEA_CLI_TEST_REPOSITORY_ROOT: /tmp/data
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -87,6 +87,6 @@ jobs:
             && echo "[server]" >> /tmp/conf/app.ini
             && echo "ROOT_URL = http://gitea:3000" >> /tmp/conf/app.ini
             && gitea migrate -c /tmp/conf/app.ini
-            && gitea admin user create --username=integration --password=tea-local-integration-pass --email=integration@example.test --admin=true --must-change-password=false -c /tmp/conf/app.ini
-            && gitea admin user create --username=tea-reviewer --password=tea-local-reviewer-pass --email=tea-reviewer@example.test --must-change-password=false -c /tmp/conf/app.ini
+            && gitea admin user create --username=integration --password=gt-local-integration-pass --email=integration@example.test --admin=true --must-change-password=false -c /tmp/conf/app.ini
+            && gitea admin user create --username=gt-reviewer --password=gt-local-reviewer-pass --email=gt-reviewer@example.test --must-change-password=false -c /tmp/conf/app.ini
             && gitea web -c /tmp/conf/app.ini

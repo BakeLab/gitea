@@ -21,10 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/tea/internal/auth"
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/settings"
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -64,7 +64,7 @@ func TestLoginValidatesUserEnvironmentWithFlagPrecedence(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			deps, _, _ := testDeps(t)
 			deps.Streams.In = strings.NewReader("private-login-token\n")
-			deps.Getenv = envFunc(map[string]string{"TEA_USER": test.environment})
+			deps.Getenv = envFunc(map[string]string{"GITEA_CLI_USER": test.environment})
 			args := []string{"auth", "login", "--host", server.URL, "--with-token", "--credential-store", "file", "--no-input"}
 			if test.flag != "" {
 				args = append(args, "--user", test.flag)
@@ -179,8 +179,8 @@ func TestLogoutSelectsAccountWithoutAuthentication(t *testing.T) {
 		selected    string
 	}{
 		{name: "active account", selected: "alice"},
-		{name: "environment account", environment: map[string]string{"TEA_HOST": "https://example.org", "TEA_USER": "bob", "GITEA_TOKEN": "expired"}, selected: "bob"},
-		{name: "flag overrides environment", flags: []string{"--host", "https://example.org", "--user", "alice"}, environment: map[string]string{"TEA_HOST": "https://other.example.org", "TEA_USER": "bob"}, selected: "alice"},
+		{name: "environment account", environment: map[string]string{"GITEA_CLI_HOST": "https://example.org", "GITEA_CLI_USER": "bob", "GITEA_TOKEN": "expired"}, selected: "bob"},
+		{name: "flag overrides environment", flags: []string{"--host", "https://example.org", "--user", "alice"}, environment: map[string]string{"GITEA_CLI_HOST": "https://other.example.org", "GITEA_CLI_USER": "bob"}, selected: "alice"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			deps, out, _ := testDeps(t)
@@ -512,7 +512,7 @@ func TestOAuthLoginOpensAuthorizationURLInBrowser(t *testing.T) {
 	require.Equal(t, http.StatusOK, callback.StatusCode)
 	_ = callback.Body.Close()
 	require.NoError(t, <-done)
-	require.Contains(t, diagnostics.String(), "Open this URL to authorize tea:")
+	require.Contains(t, diagnostics.String(), "Open this URL to authorize gt:")
 	require.Contains(t, diagnostics.String(), resource)
 	snapshot, err := deps.Settings.Load()
 	require.NoError(t, err)

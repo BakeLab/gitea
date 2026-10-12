@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"io"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // Release describes a repository release.

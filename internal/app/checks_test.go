@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"testing"
 
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
 )
 

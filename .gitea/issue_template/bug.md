@@ -7,8 +7,8 @@ labels:
 ---
 
 ### describe your environment
-- tea version used (`tea -v`):
-    - [ ] I also reproduced the issue [with the latest main build](https://dl.gitea.com/tea/main/)
+- gt version used (`gt -v`):
+    - [ ] I also reproduced the issue [with the latest main build](https://dl.gitea.com/gitea-cli/main/)
 - Gitea version used:
     - [ ] the issue only occurred after updating gitea recently
 - operating system:
@@ -17,10 +17,10 @@ labels:
     - [ ] .ssh/config or .gitconfig host aliases in my git remotes
     - [ ] ssh_agent or similar
     - [ ] non-standard ports for gitea and/or ssh
-    - [ ] something else that's likely to interact badly with tea: ...
+    - [ ] something else that's likely to interact badly with gt: ...
 
 
-Please provide the output of `git remote -v` (if the issue is related to tea not finding resources on Gitea):
+Please provide the output of `git remote -v` (if the issue is related to gt not finding resources on Gitea):
 ```
 
 ```

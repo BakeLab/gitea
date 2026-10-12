@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/settings"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,9 +18,9 @@ func TestConfigReportsEffectivePreferenceSourcesWithoutAuthentication(t *testing
 	deps, out, _ := testDeps(t)
 	require.NoError(t, deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error { s.Preferences.DefaultHost = "https://stored.example.org"; return nil }))
 	configureHost(t, deps, "https://env.example.org/base", settings.Host{GitProtocol: "ssh"})
-	deps.Getenv = envFunc(map[string]string{"TEA_HOST": "https://ENV.example.org/base/"})
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": "https://ENV.example.org/base/"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "default_host", "--show-source", "--json"}))
-	require.JSONEq(t, `{"default_host":{"value":"https://env.example.org/base","source":"TEA_HOST"}}`, out.String())
+	require.JSONEq(t, `{"default_host":{"value":"https://env.example.org/base","source":"GITEA_CLI_HOST"}}`, out.String())
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "git_protocol", "--show-source", "--json"}))
 	require.JSONEq(t, `{"git_protocol":{"value":"ssh","source":"hosts.yml https://env.example.org/base"}}`, out.String())
@@ -40,7 +40,7 @@ func TestInstanceConfigUpdatesPreserveAccountsAndGlobalPreferences(t *testing.T)
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "editor", "vim"}))
 	global, err := os.ReadFile(filepath.Join(deps.Settings.Dir, "config.yml"))
 	require.NoError(t, err)
-	for _, value := range [][2]string{{"git_protocol", "ssh"}, {"ssh_host", "git.example.org:2222"}, {"insecure", "true"}, {"oauth_client_id", "tea-client"}} {
+	for _, value := range [][2]string{{"git_protocol", "ssh"}, {"ssh_host", "git.example.org:2222"}, {"insecure", "true"}, {"oauth_client_id", "gt-client"}} {
 		require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", value[0], value[1], "--host", instance + "/"}))
 	}
 	current, err := os.ReadFile(filepath.Join(deps.Settings.Dir, "config.yml"))
@@ -96,8 +96,8 @@ func TestConfigHelpDocumentsSettingsAndEnvironment(t *testing.T) {
 	for _, name := range []string{
 		"default_host", "git_protocol", "editor", "prompt", "pager", "browser", "color", "remote", "aliases",
 		"user", "ssh_host", "insecure", "oauth_client_id", "ssh_key", "ssh_agent", "ssh_certificate_principal", "ssh_key_fingerprint",
-		"TEA_CONFIG_DIR", "TEA_HOST", "GITEA_INSTANCE_URL", "GITEA_TOKEN", "TEA_USER", "TEA_REPO", "TEA_EDITOR", "VISUAL", "EDITOR",
-		"TEA_PAGER", "PAGER", "TEA_COLOR", "NO_COLOR", "BROWSER",
+		"GITEA_CLI_CONFIG_DIR", "GITEA_CLI_HOST", "GITEA_INSTANCE_URL", "GITEA_TOKEN", "GITEA_CLI_USER", "GITEA_CLI_REPO", "GITEA_CLI_EDITOR", "VISUAL", "EDITOR",
+		"GITEA_CLI_PAGER", "PAGER", "GITEA_CLI_COLOR", "NO_COLOR", "BROWSER",
 	} {
 		require.Contains(t, out.String(), name)
 	}

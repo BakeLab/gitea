@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/tea/internal/version"
+	"gitea.dev/cli/internal/version"
 	"github.com/stretchr/testify/require"
 )
 
@@ -70,7 +70,7 @@ func TestAPIErrorIncludesOnlySanitizedServerMessage(t *testing.T) {
 		{"other fields", `{"errors":["abc"]}`, fmt.Sprintf(merge, 500), 500},
 		{"oversized body", `{"message":"` + strings.Repeat("y", 5000) + `"}`, fmt.Sprintf(merge, 500), 500},
 		{"token echo", `{"message":"bad token secret"}`, fmt.Sprintf(merge, 400), 400},
-		{"authentication", `{"message":"user alice not found"}`, "authentication rejected; run tea auth login", 401},
+		{"authentication", `{"message":"user alice not found"}`, "authentication rejected; run gt auth login", 401},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -133,7 +133,7 @@ func TestTransportBoundsOnlySetupAndSendsUserAgent(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, response.Body.Close())
 	}
-	want := "tea/" + version.Version + " (" + runtime.GOOS + "/" + runtime.GOARCH + ")"
+	want := "gt/" + version.Version + " (" + runtime.GOOS + "/" + runtime.GOARCH + ")"
 	require.Equal(t, []string{want, want}, agents)
 }
 

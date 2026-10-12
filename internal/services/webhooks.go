@@ -7,8 +7,8 @@ import (
 	"context"
 	"maps"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // Webhook is safe webhook metadata. Delivery URLs and credentials are omitted.

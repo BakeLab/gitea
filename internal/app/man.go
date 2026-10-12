@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/clierr"
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
 )
@@ -24,7 +24,7 @@ func (a *application) manCommand() *cobra.Command {
 			root := NewRoot(Dependencies{})
 			target, remaining, err := root.Find(args)
 			if err != nil || len(remaining) != 0 {
-				return clierr.Wrap(clierr.Usage, errors.New("unknown manual command; use tea help to list commands"))
+				return clierr.Wrap(clierr.Usage, errors.New("unknown manual command; use gt help to list commands"))
 			}
 			date := ManualDate(a.deps.Getenv)
 			return writeOutput(cmd, output, func(writer io.Writer) error {
@@ -35,7 +35,7 @@ func (a *application) manCommand() *cobra.Command {
 					}
 					page.DisableAutoGenTag = true
 					// GenMan fills an empty Title from the command path by mutating the header, so each page needs its own.
-					header := &doc.GenManHeader{Section: "1", Date: &date, Source: "Tea", Manual: "Tea Manual"}
+					header := &doc.GenManHeader{Section: "1", Date: &date, Source: "gitea-cli", Manual: "gitea-cli Manual"}
 					if err := doc.GenMan(page, header, writer); err != nil {
 						return err
 					}

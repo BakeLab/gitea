@@ -8,8 +8,8 @@ import (
 	"errors"
 	"net/http"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // IssueReference identifies an issue that may live in another repository.

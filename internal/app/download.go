@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/clierr"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ func writeOutput(cmd *cobra.Command, output string, write func(io.Writer) error)
 	if output == "" || output == "-" {
 		return write(cmd.OutOrStdout())
 	}
-	file, err := os.CreateTemp(filepath.Dir(output), ".tea-download-*")
+	file, err := os.CreateTemp(filepath.Dir(output), ".gt-download-*")
 	if err != nil {
 		return err
 	}

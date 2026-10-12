@@ -20,10 +20,10 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.dev/tea/internal/git"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/settings"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/kballard/go-shellquote"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
@@ -36,7 +36,7 @@ type giteaTarget struct{ url, token string }
 // dependencies authenticated against it that run the system Git binary.
 func giteaDeps(t *testing.T) (giteaTarget, Dependencies, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
-	instance, tokenFile := os.Getenv("GITEA_TEA_TEST_URL"), os.Getenv("GITEA_TEA_TEST_TOKEN_FILE")
+	instance, tokenFile := os.Getenv("GITEA_CLI_TEST_URL"), os.Getenv("GITEA_CLI_TEST_TOKEN_FILE")
 	if instance == "" || tokenFile == "" {
 		t.Skip("disposable Gitea environment is not configured")
 	}
@@ -48,7 +48,7 @@ func giteaDeps(t *testing.T) (giteaTarget, Dependencies, *bytes.Buffer, *bytes.B
 }
 
 func (g giteaTarget) env(token string) func(string) string {
-	return envFunc(map[string]string{"TEA_HOST": g.url, "GITEA_TOKEN": token})
+	return envFunc(map[string]string{"GITEA_CLI_HOST": g.url, "GITEA_TOKEN": token})
 }
 
 func readTokenFile(t *testing.T, path string) string {
@@ -108,7 +108,7 @@ func verifyEditorSubmission(t *testing.T, deps Dependencies, repository, number 
 	out, diagnostics := &bytes.Buffer{}, &bytes.Buffer{}
 	deps.Streams.Out, deps.Streams.ErrOut = out, diagnostics
 	deps.Editor = terminal.SystemEditor{Directory: directory, Streams: deps.Streams}
-	deps.Getenv = withEnv(deps.Getenv, map[string]string{"TEA_EDITOR": shellquote.Join(program)})
+	deps.Getenv = withEnv(deps.Getenv, map[string]string{"GITEA_CLI_EDITOR": shellquote.Join(program)})
 	args := []string{"issue", "comment", "create", number}
 	if review {
 		args = []string{"pr", "review", number, "--event", "PENDING"}
@@ -130,7 +130,7 @@ func verifyEditorSubmission(t *testing.T, deps Dependencies, repository, number 
 			t.Errorf("editor submission cleanup: %v", err)
 		}
 	}()
-	files, err := filepath.Glob(filepath.Join(directory, "tea-draft-*.md"))
+	files, err := filepath.Glob(filepath.Join(directory, "gt-draft-*.md"))
 	require.NoError(t, err)
 	require.Empty(t, files)
 	require.Empty(t, diagnostics.String())
@@ -149,7 +149,7 @@ func verifyBodyEditorIntegration(t *testing.T, deps Dependencies, group, reposit
 	}()
 	editor, path := newDraftEditor(t, "Edited server body")
 	deps.Editor = editor
-	deps.Getenv = withEnv(deps.Getenv, map[string]string{"TEA_EDITOR": "integration-editor"})
+	deps.Getenv = withEnv(deps.Getenv, map[string]string{"GITEA_CLI_EDITOR": "integration-editor"})
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, append(base, "--editor", "--json=body")))
 	require.Equal(t, "Original editor body", editor.initial)
@@ -164,7 +164,7 @@ func executeWithEditorIntegration(t *testing.T, deps Dependencies, initial, body
 	deps.Streams.Out, deps.Streams.ErrOut = out, diagnostics
 	editor, path := newDraftEditor(t, body)
 	deps.Editor = editor
-	deps.Getenv = withEnv(deps.Getenv, map[string]string{"TEA_EDITOR": "integration-editor"})
+	deps.Getenv = withEnv(deps.Getenv, map[string]string{"GITEA_CLI_EDITOR": "integration-editor"})
 	require.NoError(t, Execute(context.Background(), deps, append(args, "--editor", "--no-input", "--json")))
 	require.Equal(t, initial, editor.initial)
 	require.Equal(t, "integration-editor", editor.command)
@@ -227,7 +227,7 @@ func verifySSHCloneAndCheckout(t *testing.T, deps Dependencies, repo services.Re
 	directory := t.TempDir()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
-	block, err := ssh.MarshalPrivateKey(private, "disposable Tea SSH fixture")
+	block, err := ssh.MarshalPrivateKey(private, "disposable gitea-cli SSH fixture")
 	require.NoError(t, err)
 	keyFile := filepath.Join(directory, "key with spaces")
 	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(block), 0o600))
@@ -265,7 +265,7 @@ func verifySSHCloneAndCheckout(t *testing.T, deps Dependencies, repo services.Re
 	}
 	env = append(env, "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "GIT_SSH_VARIANT=ssh")
 	deps.Git = git.System{Env: env, ErrOut: deps.Streams.ErrOut}
-	instance := deps.Getenv("TEA_HOST")
+	instance := deps.Getenv("GITEA_CLI_HOST")
 	require.NoError(t, deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
 		h := s.Hosts.Hosts[instance]
 		h.SSHHost, h.GitProtocol = endpoint, "ssh"

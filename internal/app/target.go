@@ -13,12 +13,12 @@ import (
 	"strconv"
 	"strings"
 
-	"gitea.dev/tea/internal/auth"
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/git"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/settings"
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/transport"
 )
 
 type target struct {
@@ -41,12 +41,12 @@ func (a *application) resolve(ctx context.Context, requireRepo bool) (target, er
 	return a.resolveTarget(ctx, requireRepo, true)
 }
 
-// tokenInstance returns the instance a GITEA_TOKEN belongs to: GITEA_INSTANCE_URL, else TEA_HOST.
+// tokenInstance returns the instance a GITEA_TOKEN belongs to: GITEA_INSTANCE_URL, else GITEA_CLI_HOST.
 func (a *application) tokenInstance() string {
 	if instance := a.deps.Getenv("GITEA_INSTANCE_URL"); instance != "" {
 		return instance
 	}
-	return a.deps.Getenv("TEA_HOST")
+	return a.deps.Getenv("GITEA_CLI_HOST")
 }
 
 // environmentHosts applies GITEA_INSTANCE_INSECURE and GITEA_INSTANCE_SSH_HOST to the instance
@@ -92,15 +92,15 @@ func (a *application) resolveTarget(ctx context.Context, requireRepo, authentica
 	rawRepo := a.options.repo
 	if rawRepo != "" {
 		t.RepoSource = "--repo"
-	} else if rawRepo = a.deps.Getenv("TEA_REPO"); rawRepo != "" {
-		t.RepoSource = "TEA_REPO"
+	} else if rawRepo = a.deps.Getenv("GITEA_CLI_REPO"); rawRepo != "" {
+		t.RepoSource = "GITEA_CLI_REPO"
 	}
 	if rawRepo == "" && requireRepo {
-		// Discovery probes fail outside a checkout; Git's diagnostics would only precede tea's own error.
+		// Discovery probes fail outside a checkout; Git's diagnostics would only precede gt's own error.
 		probe := func(args ...string) (string, error) { return a.gitProbe().Output(ctx, a.options.cwd, false, args...) }
-		if saved, saveErr := probe("config", "--get", "tea.repository"); saveErr == nil && saved != "" {
+		if saved, saveErr := probe("config", "--get", "gt.repository"); saveErr == nil && saved != "" {
 			rawRepo = saved
-			t.RepoSource = "git config tea.repository"
+			t.RepoSource = "git config gt.repository"
 		} else {
 			remote := a.options.remote
 			if remote == "" {
@@ -152,7 +152,7 @@ func (a *application) resolveTarget(ctx context.Context, requireRepo, authentica
 		t.Host, t.HostSource = explicit, "--host"
 	}
 	if t.Host == "" {
-		for _, key := range []string{"TEA_HOST", "GITEA_INSTANCE_URL"} {
+		for _, key := range []string{"GITEA_CLI_HOST", "GITEA_INSTANCE_URL"} {
 			if value := a.deps.Getenv(key); value != "" {
 				t.Host, err = settings.NormalizeHost(value)
 				if err != nil {
@@ -219,12 +219,12 @@ func (a *application) resolveTarget(ctx context.Context, requireRepo, authentica
 	if token != "" {
 		normalized, err := settings.NormalizeHost(a.tokenInstance())
 		if err != nil || normalized != t.Host {
-			return t, clierr.Wrap(clierr.Authentication, errors.New("GITEA_TOKEN requires GITEA_INSTANCE_URL or TEA_HOST matching the selected instance"))
+			return t, clierr.Wrap(clierr.Authentication, errors.New("GITEA_TOKEN requires GITEA_INSTANCE_URL or GITEA_CLI_HOST matching the selected instance"))
 		}
 	} else {
 		account, exists := host.Users[t.User]
 		if !exists {
-			return t, clierr.Wrap(clierr.Authentication, fmt.Errorf("no selected account on %s; run tea auth login or tea auth switch", t.Host))
+			return t, clierr.Wrap(clierr.Authentication, fmt.Errorf("no selected account on %s; run gt auth login or gt auth switch", t.Host))
 		}
 		if account.Tokenless() {
 			signer, err := auth.SignerForAccount(account, a.sshPassphrase(ctx, a.policy(s), account.SSHKey))
@@ -272,12 +272,12 @@ func (a *application) resolveTarget(ctx context.Context, requireRepo, authentica
 	return t, nil
 }
 
-// selectedUser returns the account named by --user or TEA_USER, and which one named it.
+// selectedUser returns the account named by --user or GITEA_CLI_USER, and which one named it.
 func (a *application) selectedUser() (string, string) {
 	if a.options.user != "" {
 		return a.options.user, "--user"
 	}
-	return a.deps.Getenv("TEA_USER"), "TEA_USER"
+	return a.deps.Getenv("GITEA_CLI_USER"), "GITEA_CLI_USER"
 }
 
 func matchAccount(users map[string]settings.Account, selected string) (string, bool) {

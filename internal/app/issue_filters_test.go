@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -124,6 +124,6 @@ func TestIssueListWithoutRepoPointsToSearch(t *testing.T) {
 	deps.Git = &fakeGit{}
 	err := Execute(context.Background(), deps, []string{"issue", "list", "--no-input"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-	require.ErrorContains(t, err, "tea search issue")
+	require.ErrorContains(t, err, "gt search issue")
 	require.Empty(t, out.String())
 }

@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"strings"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +48,7 @@ func (a *application) discussionSearchCommand(pulls bool) *cobra.Command {
 			return clierr.Wrap(clierr.Usage, errors.New("--team requires --owner"))
 		}
 		if opts.Team != "" && target.Repo != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--team requires instance-wide search; omit --repo or TEA_REPO"))
+			return clierr.Wrap(clierr.Usage, errors.New("--team requires instance-wide search; omit --repo or GITEA_CLI_REPO"))
 		}
 		if len(labelNames) > 0 {
 			if target.Repo != "" {

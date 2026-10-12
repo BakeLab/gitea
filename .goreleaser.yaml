@@ -1,13 +1,15 @@
 version: 2
 
+project_name: gitea-cli
+
 before:
   hooks:
     - go mod tidy
     # Regenerate references/man/completions, then pack a versioned docs
     # archive outside dist/ (goreleaser requires dist/ empty after hooks).
-    # tea-{{ .Version }}-docs.tar.xz is picked up by release/publisher/
+    # gitea-cli-{{ .Version }}-docs.tar.xz is picked up by release/publisher/
     # checksum ./**.xz globs alongside binary .xz artifacts.
-    - make docs-archive DOCS_ARCHIVE=tea-{{ .Version }}-docs.tar.xz
+    - make docs-archive DOCS_ARCHIVE=gitea-cli-{{ .Version }}-docs.tar.xz
 
 builds:
 - env:
@@ -63,7 +65,7 @@ builds:
   flags:
   - -trimpath
   ldflags:
-  - -s -w -X "gitea.dev/tea/internal/version.Version={{ trimprefix .Summary "v" }}" -X "gitea.dev/tea/internal/version.Tags="
+  - -s -w -X "gitea.dev/cli/internal/version.Version={{ trimprefix .Summary "v" }}" -X "gitea.dev/cli/internal/version.Tags="
   binary: >-
     {{ .ProjectName }}-
     {{- .Version }}-
@@ -112,7 +114,7 @@ publishers:
     extra_files:
       - glob: ./**.xz
       - glob: ./**.sha256
-    cmd: sh scripts/upload-r2.sh {{ abs .ArtifactPath }} tea/{{ .Version }}/{{ .ArtifactName }}
+    cmd: sh scripts/upload-r2.sh {{ abs .ArtifactPath }} gitea-cli/{{ .Version }}/{{ .ArtifactName }}
     env:
       - R2_ENDPOINT={{ index .Env "R2_ENDPOINT" }}
       - R2_BUCKET={{ index .Env "R2_BUCKET" }}
@@ -150,7 +152,7 @@ gitea_urls:
 
 release:
   # Includes per-platform binary .xz artifacts and the docs archive
-  # tea-<version>-docs.tar.xz (references, man pages, bash/zsh/fish/powershell
+  # gitea-cli-<version>-docs.tar.xz (references, man pages, bash/zsh/fish/powershell
   # completions) produced by the before.hooks docs-archive step.
   extra_files:
     - glob: ./**.xz

@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // WikiPage exposes decoded page content and revision metadata.

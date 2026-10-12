@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,7 +35,7 @@ func TestAPIFieldsPlaceholdersAndAtomicPagination(t *testing.T) {
 		}
 		require.Equal(t, "open", r.URL.Query().Get("state"))
 		require.Equal(t, "2", r.URL.Query().Get("limit"))
-		w.Header().Set("X-Tea-Test", "header-on-stderr")
+		w.Header().Set("X-Gt-Test", "header-on-stderr")
 		if r.URL.Query().Get("page") == "2" {
 			if failSecond {
 				w.WriteHeader(403)
@@ -61,7 +61,7 @@ func TestAPIFieldsPlaceholdersAndAtomicPagination(t *testing.T) {
 	args := []string{"api", "repos/{owner}/{repo}/issues", "-R", "alice/project", "-X", "GET", "-f", "state=open", "-F", "limit=2", "--paginate", "--include", "--output-file", output}
 	require.NoError(t, Execute(context.Background(), deps, args))
 	require.Empty(t, out.String())
-	require.Contains(t, diagnostics.String(), "X-Tea-Test: header-on-stderr")
+	require.Contains(t, diagnostics.String(), "X-Gt-Test: header-on-stderr")
 	data, err := os.ReadFile(output)
 	require.NoError(t, err)
 	require.Equal(t, "[{\"number\":1}]\n[{\"number\":2}]\n", string(data))
@@ -114,7 +114,7 @@ func TestAPIDebugLogsRequestsToStderr(t *testing.T) {
 
 func TestAPIWritesErrorResponses(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-Tea-Test", "error-header")
+		w.Header().Set("X-Gt-Test", "error-header")
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_, _ = w.Write([]byte(`{"message":"invalid","errors":["title"]}`))
 	}))
@@ -126,7 +126,7 @@ func TestAPIWritesErrorResponses(t *testing.T) {
 	require.Equal(t, http.StatusUnprocessableEntity, apiErr.Status)
 	require.Equal(t, `{"message":"invalid","errors":["title"]}`, out.String())
 	require.Contains(t, diagnostics.String(), "422 Unprocessable Entity")
-	require.Contains(t, diagnostics.String(), "X-Tea-Test: error-header")
+	require.Contains(t, diagnostics.String(), "X-Gt-Test: error-header")
 }
 
 func TestAPITypedFieldsInferJSONValues(t *testing.T) {
@@ -142,14 +142,14 @@ func TestAPIHeadersPreserveRawResponseAndRejectCredentialOverrides(t *testing.T)
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		require.Equal(t, "application/octet-stream", r.Header.Get("Accept"))
-		require.Equal(t, []string{"one", "two"}, r.Header.Values("X-Tea-Test"))
+		require.Equal(t, []string{"one", "two"}, r.Header.Values("X-Gt-Test"))
 		require.Equal(t, "token secret", r.Header.Get("Authorization"))
 		_, _ = w.Write([]byte{0, 1, 2, 255})
 	}))
 	defer server.Close()
 	deps, out, _ := testDeps(t)
-	deps.Getenv = envFunc(map[string]string{"TEA_HOST": server.URL, "GITEA_TOKEN": "secret"})
-	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user/data", "-H", "Accept: application/octet-stream", "-H", "X-Tea-Test: one", "-H", "X-Tea-Test: two"}))
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": server.URL, "GITEA_TOKEN": "secret"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user/data", "-H", "Accept: application/octet-stream", "-H", "X-Gt-Test: one", "-H", "X-Gt-Test: two"}))
 	require.Equal(t, []byte{0, 1, 2, 255}, out.Bytes())
 	for _, header := range []string{"Authorization: sensitive-value", "Host: unrelated.example.org", "Proxy-Authorization: sensitive-value", "Content-Length: 100", "Connection: upgrade", "Bad Name: value", "X-Test: value\r\nAuthorization: sensitive-value", "X-Test: value\x00", "missing-colon"} {
 		out.Reset()

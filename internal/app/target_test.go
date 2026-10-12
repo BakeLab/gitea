@@ -13,10 +13,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/git"
-	"gitea.dev/tea/internal/settings"
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,7 +31,7 @@ func TestResolvePromptsForAccountWhenNoneActive(t *testing.T) {
 	deps.Prompter = prompt
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	configureAccounts(t, deps, server.URL, "", "alice", "bob")
-	deps.Getenv = envFunc(map[string]string{"TEA_HOST": server.URL})
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": server.URL})
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "list", "--json", "--interactive"}))
 	require.Len(t, prompt.asked, 1)
 	require.JSONEq(t, `[]`, out.String())
@@ -46,7 +46,7 @@ func TestResolveUsesSoleConfiguredAccount(t *testing.T) {
 	prompt := &scriptedPrompter{}
 	deps.Prompter = prompt
 	configureAccounts(t, deps, server.URL, "", "alice")
-	deps.Getenv = envFunc(map[string]string{"TEA_HOST": server.URL})
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": server.URL})
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "list", "--json", "--no-input"}))
 	require.Empty(t, prompt.asked)
 	require.JSONEq(t, `[]`, out.String())
@@ -63,17 +63,17 @@ func TestAccountNamesMatchCaseInsensitively(t *testing.T) {
 		user    string
 		wantErr string
 	}{
-		"--user":       {args: []string{"repo", "list", "--json", "--user", "ALICE"}},
-		"TEA_USER":     {args: []string{"repo", "list", "--json"}, user: "ALICE"},
-		"config get":   {args: []string{"config", "get", "ssh_key", "--host", server.URL, "--user", "ALICE"}},
-		"config set":   {args: []string{"config", "set", "ssh_key", "/key", "--host", server.URL, "--user", "ALICE"}},
-		"auth logout":  {args: []string{"auth", "logout", "--user", "ALICE", "--yes"}},
-		"auth refresh": {args: []string{"auth", "refresh", "--user", "ALICE"}, wantErr: "only OAuth accounts can be refreshed"},
+		"--user":         {args: []string{"repo", "list", "--json", "--user", "ALICE"}},
+		"GITEA_CLI_USER": {args: []string{"repo", "list", "--json"}, user: "ALICE"},
+		"config get":     {args: []string{"config", "get", "ssh_key", "--host", server.URL, "--user", "ALICE"}},
+		"config set":     {args: []string{"config", "set", "ssh_key", "/key", "--host", server.URL, "--user", "ALICE"}},
+		"auth logout":    {args: []string{"auth", "logout", "--user", "ALICE", "--yes"}},
+		"auth refresh":   {args: []string{"auth", "refresh", "--user", "ALICE"}, wantErr: "only OAuth accounts can be refreshed"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			deps, _, _ := testDeps(t)
 			configureAccounts(t, deps, server.URL, "", "alice", "bob")
-			deps.Getenv = envFunc(map[string]string{"TEA_HOST": server.URL, "TEA_USER": test.user})
+			deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": server.URL, "GITEA_CLI_USER": test.user})
 			err := Execute(context.Background(), deps, test.args)
 			if test.wantErr != "" {
 				require.ErrorContains(t, err, test.wantErr)
@@ -85,7 +85,7 @@ func TestAccountNamesMatchCaseInsensitively(t *testing.T) {
 }
 
 func TestEnvironmentCredentialVerifiesSelectedAccountBeforeMutation(t *testing.T) {
-	for _, selection := range []string{"--user", "TEA_USER", "active instance account"} {
+	for _, selection := range []string{"--user", "GITEA_CLI_USER", "active instance account"} {
 		t.Run(selection, func(t *testing.T) {
 			reads, mutations := 0, 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,9 +101,9 @@ func TestEnvironmentCredentialVerifiesSelectedAccountBeforeMutation(t *testing.T
 			defer server.Close()
 			deps, out, diagnostics := testDeps(t)
 			host := server.URL + "/base"
-			env := map[string]string{"TEA_HOST": host, "GITEA_TOKEN": "private-test-token"}
-			if selection == "TEA_USER" {
-				env["TEA_USER"] = "bob"
+			env := map[string]string{"GITEA_CLI_HOST": host, "GITEA_TOKEN": "private-test-token"}
+			if selection == "GITEA_CLI_USER" {
+				env["GITEA_CLI_USER"] = "bob"
 			}
 			deps.Getenv = envFunc(env)
 			args := []string{"issue", "create", "-R", "alice/project", "--title", "Issue", "--body", "Body", "--no-input", "--json"}
@@ -146,7 +146,7 @@ func TestIssueCreateUsesEnvironmentCredentialAndCleanJSON(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, diagnostics := testDeps(t)
-	deps.Getenv = envFunc(map[string]string{"TEA_HOST": server.URL + "/base", "GITEA_TOKEN": "sensitive"})
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": server.URL + "/base", "GITEA_TOKEN": "sensitive"})
 	err := Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--title", "Title", "--body", "Body", "--json=number,url"})
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
@@ -200,20 +200,20 @@ func TestRepositoryResolutionPrecedence(t *testing.T) {
 	deps.Client = func(_, token string, insecure bool) *transport.Client {
 		return transport.New(server.URL, token, insecure)
 	}
-	deps.Getenv = envFunc(map[string]string{"TEA_HOST": "https://example.org", "GITEA_TOKEN": "secret"})
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": "https://example.org", "GITEA_TOKEN": "secret"})
 	runner := &fakeGit{results: map[string]string{
 		"symbolic-ref --short HEAD":       "main",
 		"config --get branch.main.remote": "feature-remote",
 		"remote get-url feature-remote":   "https://example.org/owner/current.git",
 		"remote get-url upstream":         "https://example.org/owner/upstream.git",
-		"config --get tea.repository":     "https://example.org/owner/saved",
+		"config --get gt.repository":      "https://example.org/owner/saved",
 	}}
 	deps.Git = runner
 	application := application{deps: deps}
 	resolved, err := application.resolve(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, "owner/saved", resolved.Repo)
-	require.Equal(t, []string{"config --get tea.repository"}, runner.calls)
+	require.Equal(t, []string{"config --get gt.repository"}, runner.calls)
 	application.options.repo = "owner/explicit"
 	runner.calls = nil
 	resolved, err = application.resolve(context.Background(), true)
@@ -221,7 +221,7 @@ func TestRepositoryResolutionPrecedence(t *testing.T) {
 	require.Equal(t, "owner/explicit", resolved.Repo)
 	require.Empty(t, runner.calls)
 	application.options.repo = ""
-	delete(runner.results, "config --get tea.repository")
+	delete(runner.results, "config --get gt.repository")
 	resolved, err = application.resolve(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, "owner/current", resolved.Repo)

@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/services"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
 	"github.com/spf13/cobra"
 )
 

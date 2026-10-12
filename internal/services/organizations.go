@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"net/url"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // Organization is the public command representation of a Gitea organization.

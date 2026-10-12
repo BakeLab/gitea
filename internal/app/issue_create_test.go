@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
 

@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"gitea.dev/tea/internal/auth"
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/settings"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -96,7 +96,7 @@ func (a *application) authCommand() *cobra.Command {
 		}
 		instance := a.options.host
 		if instance == "" {
-			instance = a.deps.Getenv("TEA_HOST")
+			instance = a.deps.Getenv("GITEA_CLI_HOST")
 		}
 		if instance == "" {
 			instance = a.deps.Getenv("GITEA_INSTANCE_URL")
@@ -148,7 +148,7 @@ func (a *application) authCommand() *cobra.Command {
 				return err
 			}
 			if selectedUser, _ := a.selectedUser(); !services.MatchAccount(selectedUser, user) {
-				return clierr.Wrap(clierr.Usage, errors.New("authenticated account does not match --user or TEA_USER"))
+				return clierr.Wrap(clierr.Usage, errors.New("authenticated account does not match --user or GITEA_CLI_USER"))
 			}
 			if prompted {
 				if err := a.confirm(cmd, "Save credentials for "+user+" on "+instance); err != nil {
@@ -173,7 +173,7 @@ func (a *application) authCommand() *cobra.Command {
 				clientID = auth.DefaultClientID
 			}
 			credential, err = auth.OAuthLogin(cmd.Context(), auth.OAuthOptions{Instance: instance, ClientID: clientID, HTTP: a.deps.Client(instance, "", insecure).HTTP, Authorize: func(_ context.Context, authorizationURL string) error {
-				if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Open this URL to authorize tea:", authorizationURL); err != nil {
+				if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Open this URL to authorize gt:", authorizationURL); err != nil {
 					return err
 				}
 				if err := a.openBrowser(cmd, authorizationURL); err != nil {
@@ -202,7 +202,7 @@ func (a *application) authCommand() *cobra.Command {
 			return err
 		}
 		if selectedUser, _ := a.selectedUser(); !services.MatchAccount(selectedUser, user) {
-			return clierr.Wrap(clierr.Usage, errors.New("token account does not match --user or TEA_USER"))
+			return clierr.Wrap(clierr.Usage, errors.New("token account does not match --user or GITEA_CLI_USER"))
 		}
 		if prompted {
 			if err := a.confirm(cmd, "Save credentials for "+user+" on "+instance); err != nil {
@@ -212,7 +212,7 @@ func (a *application) authCommand() *cobra.Command {
 		return manager.Register(instance, user, backend, method, auth.HostOptions{OAuthClientID: clientID, Insecure: insecure}, credential)
 	}}
 	login.Flags().BoolVar(&oauth, "oauth", false, "Authorize through a browser using OAuth PKCE")
-	login.Flags().StringVar(&clientID, "client-id", "", "OAuth client ID registered on the instance (default: the instance's stored ID, then tea's)")
+	login.Flags().StringVar(&clientID, "client-id", "", "OAuth client ID registered on the instance (default: the instance's stored ID, then gt's)")
 	login.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification for this instance")
 	login.Flags().BoolVar(&withToken, "with-token", false, "Read a personal access token from stdin")
 	login.Flags().StringVar(&sshKey, "ssh-key", "", "Authenticate with an SSH private key via HTTP signatures")
@@ -306,11 +306,11 @@ func (a *application) authCommand() *cobra.Command {
 		return a.deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
 			host, exists := s.Hosts.Hosts[instance]
 			if !exists {
-				return clierr.Wrap(clierr.Usage, errors.New("instance is not configured; run tea auth login first"))
+				return clierr.Wrap(clierr.Usage, errors.New("instance is not configured; run gt auth login first"))
 			}
 			user, exists := matchAccount(host.Users, args[0])
 			if !exists {
-				return clierr.Wrap(clierr.Usage, errors.New("account is not configured on the selected instance; use tea auth status --host URL to list accounts"))
+				return clierr.Wrap(clierr.Usage, errors.New("account is not configured on the selected instance; use gt auth status --host URL to list accounts"))
 			}
 			host.User = user
 			s.Hosts.Hosts[instance] = host
@@ -328,7 +328,7 @@ func (a *application) authCommand() *cobra.Command {
 			return err
 		}
 		if _, exists := s.Hosts.Hosts[instance].Users[user]; !exists {
-			return clierr.Wrap(clierr.Usage, errors.New("account is not configured on the selected instance; use tea auth status --host URL to list accounts"))
+			return clierr.Wrap(clierr.Usage, errors.New("account is not configured on the selected instance; use gt auth status --host URL to list accounts"))
 		}
 		if err := a.confirm(cmd, "Remove account "+user+" on "+instance); err != nil {
 			return err
@@ -346,10 +346,10 @@ func (a *application) authCommand() *cobra.Command {
 		}
 		account, exists := t.host.Users[t.User]
 		if !exists {
-			return clierr.Wrap(clierr.Authentication, errors.New("no selected account on this instance; run tea auth login or tea auth switch"))
+			return clierr.Wrap(clierr.Authentication, errors.New("no selected account on this instance; run gt auth login or gt auth switch"))
 		}
 		if account.AuthMethod != settings.AuthOAuth {
-			return clierr.Wrap(clierr.Usage, errors.New("only OAuth accounts can be refreshed; use tea auth login to replace a token"))
+			return clierr.Wrap(clierr.Usage, errors.New("only OAuth accounts can be refreshed; use gt auth login to replace a token"))
 		}
 		manager, err := auth.NewManager(a.deps.Settings, a.deps.Credentials)
 		if err != nil {

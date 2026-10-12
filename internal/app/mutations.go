@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/settings"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -169,7 +169,7 @@ func (a *application) addRepositoryMutations(group *cobra.Command) {
 			options.ActionsEnabled = &actionsEnabled
 		}
 		if options == (services.RepositoryEdit{}) {
-			return clierr.Wrap(clierr.Usage, errors.New("supply an edit flag; see tea repo edit --help"))
+			return clierr.Wrap(clierr.Usage, errors.New("supply an edit flag; see gt repo edit --help"))
 		}
 		t, err := a.resolve(cmd.Context(), true)
 		if err != nil {

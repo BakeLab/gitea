@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/tea/internal/services"
+	"gitea.dev/cli/internal/services"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGiteaRawAPIFieldsAndPagination(t *testing.T) {
 	_, deps, out, diagnostics := giteaDeps(t)
-	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "create", fmt.Sprintf("tea-api-%d", time.Now().UnixNano()), "--private", "--json"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "create", fmt.Sprintf("gt-api-%d", time.Now().UnixNano()), "--private", "--json"}))
 	var repo services.Repository
 	require.NoError(t, json.Unmarshal(out.Bytes(), &repo))
 	t.Cleanup(func() {

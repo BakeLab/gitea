@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // Notification is the stable representation of an account notification thread.

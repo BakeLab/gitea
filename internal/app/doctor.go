@@ -6,7 +6,7 @@ package app
 import (
 	"fmt"
 
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/clierr"
 	"github.com/spf13/cobra"
 )
 
@@ -15,7 +15,7 @@ func (a *application) doctorCommand() *cobra.Command {
 		// Repository discovery is best-effort: doctor must also work outside a clone.
 		// Only discovery (usage) failures fall back; authentication errors are reported.
 		target, err := a.resolve(cmd.Context(), true)
-		if clierr.ExitCode(err) == clierr.Usage && a.options.repo == "" && a.deps.Getenv("TEA_REPO") == "" {
+		if clierr.ExitCode(err) == clierr.Usage && a.options.repo == "" && a.deps.Getenv("GITEA_CLI_REPO") == "" {
 			target, err = a.resolve(cmd.Context(), false)
 		}
 		if err != nil {

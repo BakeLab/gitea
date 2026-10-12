@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/settings"
 	"github.com/kballard/go-shellquote"
 )
 
@@ -33,7 +33,7 @@ func CredentialHelper(instance, executable, user, configDir string) (string, err
 		if !filepath.IsAbs(configDir) {
 			return "", errors.New("credential helper configuration directory must be absolute")
 		}
-		helper = "TEA_CONFIG_DIR=" + shellquote.Join(configDir) + " " + helper
+		helper = "GITEA_CLI_CONFIG_DIR=" + shellquote.Join(configDir) + " " + helper
 	}
 	return "!" + helper, nil
 }

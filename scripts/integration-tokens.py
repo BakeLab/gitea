@@ -15,17 +15,17 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def main():
-    url = os.environ["GITEA_TEA_TEST_URL"].rstrip("/")
+    url = os.environ["GITEA_CLI_TEST_URL"].rstrip("/")
     fixtures = [
-        ("integration", "tea-local-integration-pass", "GITEA_TEA_TEST_TOKEN_FILE"),
-        ("tea-reviewer", "tea-local-reviewer-pass", "GITEA_TEA_TEST_REVIEWER_TOKEN_FILE"),
+        ("integration", "gt-local-integration-pass", "GITEA_CLI_TEST_TOKEN_FILE"),
+        ("gt-reviewer", "gt-local-reviewer-pass", "GITEA_CLI_TEST_REVIEWER_TOKEN_FILE"),
     ]
     # Do not follow redirects with Basic credentials.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     for user, password, variable in fixtures:
         request = urllib.request.Request(
             f"{url}/api/v1/users/{user}/tokens",
-            data=json.dumps({"name": f"tea-ci-{uuid.uuid4().hex}", "scopes": ["all"]}).encode(),
+            data=json.dumps({"name": f"gt-ci-{uuid.uuid4().hex}", "scopes": ["all"]}).encode(),
             headers={
                 "Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode(),
                 "Content-Type": "application/json",

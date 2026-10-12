@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/clierr"
 	"golang.org/x/term"
 )
 

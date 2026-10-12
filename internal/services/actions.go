@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"time"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // Workflow is the stable command representation of an Actions workflow.
@@ -142,7 +142,7 @@ func (o RunListOptions) Validate() error {
 		switch status {
 		case "pending", "waiting", "requested", "action_required", "queued", "in_progress", "completed", "failure", "success", "skipped", "neutral", "cancelled", "timed_out": //nolint:misspell // Gitea API spelling.
 		default:
-			return fmt.Errorf("unsupported run status %q; see tea run list --help", status)
+			return fmt.Errorf("unsupported run status %q; see gt run list --help", status)
 		}
 	}
 	return nil

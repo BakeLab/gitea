@@ -33,7 +33,7 @@ func TestRepositoryCommandsAcceptPositionalRepository(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			requests = nil
 			deps, out, _ := testDeps(t)
-			deps.Getenv = serverEnv(server.URL, map[string]string{"TEA_REPO": "alice/project"})
+			deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
 			require.NoError(t, Execute(context.Background(), deps, append(test.args, "--no-input", "--json=full_name")))
 			require.Equal(t, []string{test.want}, requests)
 			require.JSONEq(t, `{"full_name":"bob/tool"}`, out.String())

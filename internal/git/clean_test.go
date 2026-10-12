@@ -118,13 +118,13 @@ func TestCleanPullDeletesLocalAndRemoteBranches(t *testing.T) {
 	runner := &cleanRunner{onFeature: true}
 	result, err := CleanPull(context.Background(), runner, CleanOptions{
 		Directory: "/work", DefaultBranch: "main", LocalBranch: "feature", Remote: "origin", RemoteBranch: "feature",
-		DeleteRemote: true, CredentialArgs: []string{"-c", "credential.helper=tea"},
+		DeleteRemote: true, CredentialArgs: []string{"-c", "credential.helper=gt"},
 	})
 	require.NoError(t, err)
 	require.Equal(t, CleanResult{LocalBranch: "feature", Remote: "origin", RemoteBranch: "feature", DefaultBranch: "main", RemoteDeleted: true}, result)
 	require.Contains(t, runner.calls, "switch -- main")
 	require.Contains(t, runner.calls, "branch -D -- feature")
-	require.Contains(t, runner.calls, "-c credential.helper=tea push --delete -- origin feature")
+	require.Contains(t, runner.calls, "-c credential.helper=gt push --delete -- origin feature")
 }
 
 func TestCleanPullSkipsRemoteWhenUnavailable(t *testing.T) {

@@ -13,11 +13,11 @@ import (
 	"net/http"
 	"time"
 
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/settings"
 	"golang.org/x/oauth2"
 )
 
-// DefaultClientID identifies the public tea OAuth application.
+// DefaultClientID identifies the public gt OAuth application.
 const DefaultClientID = "d57cb8c4-630c-4168-8324-ec79935e18d4"
 
 // refreshTimeout bounds a token refresh, which holds the settings lock, below settings.LockTimeout.
@@ -54,7 +54,7 @@ func OAuthLogin(ctx context.Context, opts OAuthOptions) (Credential, error) {
 	}
 	state := base64.RawURLEncoding.EncodeToString(random)
 	verifier := oauth2.GenerateVerifier()
-	// Gitea ignores the port of a loopback redirect but compares its path; the built-in tea application registers none.
+	// Gitea ignores the port of a loopback redirect but compares its path; the built-in gt application registers none.
 	redirect := "http://" + listener.Addr().String()
 	config := oauthConfig(opts.Instance, opts.ClientID)
 	config.RedirectURL = redirect
@@ -83,7 +83,7 @@ func OAuthLogin(ctx context.Context, opts OAuthOptions) (Credential, error) {
 		case codes <- code:
 		default:
 		}
-		_, _ = fmt.Fprintln(w, "Authorization received. Return to tea.")
+		_, _ = fmt.Fprintln(w, "Authorization received. Return to gt.")
 	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
@@ -176,7 +176,7 @@ func (m Manager) Refresh(ctx context.Context, instance, user string, httpClient 
 			return nil
 		}
 		if credential.RefreshToken == "" {
-			return errors.New("OAuth token cannot be refreshed; run tea auth login")
+			return errors.New("OAuth token cannot be refreshed; run gt auth login")
 		}
 		clientID := current.Hosts.Hosts[instance].OAuthClientID
 		if clientID == "" {
@@ -195,7 +195,7 @@ func (m Manager) Refresh(ctx context.Context, instance, user string, httpClient 
 			if requestContext.Err() != nil {
 				return errors.New("OAuth refresh timed out; try again")
 			}
-			return errors.New("OAuth refresh failed; run tea auth login")
+			return errors.New("OAuth refresh failed; run gt auth login")
 		}
 		credential.AccessToken = token.AccessToken
 		if token.RefreshToken != "" {

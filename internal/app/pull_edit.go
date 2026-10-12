@@ -7,9 +7,9 @@ import (
 	"errors"
 	"strings"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -81,7 +81,7 @@ func (a *application) pullEditCommand() *cobra.Command {
 			opts.AllowMaintainerEdit = &maintainer
 		}
 		if opts == (services.PullEdit{}) && !useEditor && !draft && !ready && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone-name") {
-			return clierr.Wrap(clierr.Usage, errors.New("supply an edit flag; see tea pr edit --help"))
+			return clierr.Wrap(clierr.Usage, errors.New("supply an edit flag; see gt pr edit --help"))
 		}
 		target, err := a.resolve(cmd.Context(), true)
 		if err != nil {

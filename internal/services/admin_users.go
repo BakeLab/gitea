@@ -7,8 +7,8 @@ import (
 	"context"
 	"fmt"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // AdminUser is the explicit account-management result, without authentication secrets.

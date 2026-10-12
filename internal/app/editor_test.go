@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
 

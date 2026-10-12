@@ -84,4 +84,4 @@ jobs:
             linux/arm64
           push: true
           tags: |
-            gitea/tea:latest
+            gitea/gitea-cli:latest

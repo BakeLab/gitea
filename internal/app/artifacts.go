@@ -6,8 +6,8 @@ package app
 import (
 	"strconv"
 
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 

@@ -39,7 +39,7 @@ func (e SystemEditor) Edit(ctx context.Context, command, body string) (Draft, er
 	if err := ctx.Err(); err != nil {
 		return Draft{}, err
 	}
-	file, err := os.CreateTemp(e.Directory, "tea-draft-*.md")
+	file, err := os.CreateTemp(e.Directory, "gt-draft-*.md")
 	if err != nil {
 		return Draft{}, errors.New("cannot create a private editor draft")
 	}
@@ -54,7 +54,7 @@ func (e SystemEditor) Edit(ctx context.Context, command, body string) (Draft, er
 	if err != nil || !info.Mode().IsRegular() {
 		// A failed editor can remove its buffer or replace it with a non-file.
 		// Recover the original input separately without following that replacement.
-		recovery, recoveryErr := os.CreateTemp(e.Directory, "tea-draft-recovery-*.md")
+		recovery, recoveryErr := os.CreateTemp(e.Directory, "gt-draft-recovery-*.md")
 		if recoveryErr != nil {
 			return Draft{Body: body}, errors.Join(ctx.Err(), errors.New("editor draft is unavailable and original input could not be saved"))
 		}
@@ -109,7 +109,7 @@ func (e SystemEditor) EditPath(ctx context.Context, command, path string) error 
 func editorArgs(command string) ([]string, error) {
 	args, ok := commandArgs(command)
 	if !ok {
-		return nil, errors.New("configure an editor command using tea config set editor or EDITOR")
+		return nil, errors.New("configure an editor command using gt config set editor or EDITOR")
 	}
 	return args, nil
 }

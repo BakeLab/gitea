@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -209,7 +209,7 @@ func (a *application) issueCommand() *cobra.Command {
 		target, err := a.resolve(cmd.Context(), true)
 		if err != nil {
 			if errors.Is(err, errRepositoryRequired) {
-				return clierr.Wrap(clierr.Usage, errors.New("repository required: use --repo owner/name, or tea search issue for instance-wide results"))
+				return clierr.Wrap(clierr.Usage, errors.New("repository required: use --repo owner/name, or gt search issue for instance-wide results"))
 			}
 			return err
 		}

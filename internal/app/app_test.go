@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,7 +63,7 @@ func TestCommandLineEdgeCases(t *testing.T) {
 	err = Execute(context.Background(), deps, []string{"config", "list", "--jq", ".", "--remote", "-h"})
 	require.ErrorContains(t, err, "--jq requires --json")
 	require.NoError(t, Execute(context.Background(), deps, []string{"--version"}))
-	require.NotContains(t, out.String(), "tea version")
+	require.NotContains(t, out.String(), "gt version")
 }
 
 func TestAliasesAfterGlobalFlagsAndNestedHelp(t *testing.T) {
@@ -89,10 +89,10 @@ func TestJoinJSONFields(t *testing.T) {
 		{[]string{"issue", "list", "--json", "--state", "open"}, []string{"issue", "list", "--json", "--state", "open"}},
 		{[]string{"search", "issues", "--", "--json", "id"}, []string{"search", "issues", "--", "--json", "id"}},
 		{[]string{"issue", "list", "--json", "Number"}, []string{"issue", "list", "--json", "Number"}},
-		{[]string{"search", "repo", "--json", "tea"}, []string{"search", "repo", "--json", "tea"}},
+		{[]string{"search", "repo", "--json", "gt"}, []string{"search", "repo", "--json", "gt"}},
 		{[]string{"search", "issue", "--json", "bug"}, []string{"search", "issue", "--json", "bug"}},
 		{[]string{"repo", "clone", "--json", "project"}, []string{"repo", "clone", "--json", "project"}},
-		{[]string{"search", "repo", "--json", "name,url", "tea"}, []string{"search", "repo", "--json=name,url", "tea"}},
+		{[]string{"search", "repo", "--json", "name,url", "gt"}, []string{"search", "repo", "--json=name,url", "gt"}},
 		{[]string{"--json", "number", "my-alias"}, []string{"--json=number", "my-alias"}},
 	} {
 		deps, _, _ := testDeps(t)

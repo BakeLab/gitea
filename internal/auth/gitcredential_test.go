@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/settings"
 	"github.com/stretchr/testify/require"
 )
 

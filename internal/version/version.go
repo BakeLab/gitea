@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Version holds the current tea version.
+// Version holds the current gt version.
 // This is set at build time via ldflags.
 // If the Version is moved to another package or name changed,
 // build flags in .goreleaser.yaml or Makefile need to be updated accordingly.

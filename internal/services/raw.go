@@ -13,7 +13,7 @@ import (
 	"net/url"
 	"strconv"
 
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/transport"
 )
 
 var errInvalidJSON = errors.New("Gitea returned an invalid JSON response")

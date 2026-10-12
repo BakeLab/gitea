@@ -120,7 +120,7 @@ func TestCommandArgsKeepsUnquotedExecutablePaths(t *testing.T) {
 }
 
 func TestSubprocessFailuresKeepTheirCause(t *testing.T) {
-	const missing = "tea-test-missing-command"
+	const missing = "gt-test-missing-command"
 	streams := Streams{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 	require.ErrorIs(t, (SystemEditor{Streams: streams}).EditPath(context.Background(), missing, filepath.Join(t.TempDir(), "draft")), exec.ErrNotFound)
 	require.ErrorIs(t, (SystemPager{}).Page(context.Background(), missing, strings.NewReader("text\n"), streams), exec.ErrNotFound)

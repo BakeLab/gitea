@@ -13,12 +13,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/settings"
 	"github.com/zalando/go-keyring"
 )
 
 // keyringService namespaces credentials in the platform credential manager.
-const keyringService = "tea-cli-v2"
+const keyringService = "gitea-cli"
 
 // Credential holds the secret token material kept outside instance metadata.
 type Credential struct {
@@ -82,14 +82,14 @@ func (s *Store) Load(instance, user, backend string) (Credential, error) {
 		err = errors.New("unsupported credential store")
 	}
 	if errors.Is(err, keyring.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
-		return Credential{}, errors.New("credential unavailable; run tea auth login for this instance and account")
+		return Credential{}, errors.New("credential unavailable; run gt auth login for this instance and account")
 	}
 	if err != nil {
 		return Credential{}, fmt.Errorf("credential storage unavailable: %w", err)
 	}
 	var credential Credential
 	if err := json.Unmarshal(data, &credential); err != nil {
-		return Credential{}, errors.New("invalid stored credential; run tea auth login")
+		return Credential{}, errors.New("invalid stored credential; run gt auth login")
 	}
 	if credential.AccessToken == "" {
 		return Credential{}, errors.New("stored credential has no access token")

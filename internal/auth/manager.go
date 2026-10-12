@@ -6,7 +6,7 @@ package auth
 import (
 	"errors"
 
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/settings"
 )
 
 // Manager coordinates account metadata and credential changes under one lock.

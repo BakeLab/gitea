@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"gitea.dev/tea/internal/aliases"
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/settings"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/aliases"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +29,7 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 	if a.options.host != "" {
 		host, source = a.options.host, "--host"
 	} else {
-		for _, key := range []string{"TEA_HOST", "GITEA_INSTANCE_URL"} {
+		for _, key := range []string{"GITEA_CLI_HOST", "GITEA_INSTANCE_URL"} {
 			if value := a.deps.Getenv(key); value != "" {
 				host, source = value, key
 				break
@@ -57,20 +57,20 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 		preferences.Remote = a.options.remote
 		sources["remote"] = "--remote"
 	}
-	if value := strings.TrimSpace(a.deps.Getenv("TEA_PAGER")); value != "" {
+	if value := strings.TrimSpace(a.deps.Getenv("GITEA_CLI_PAGER")); value != "" {
 		preferences.Pager = value
-		sources["pager"] = "TEA_PAGER"
+		sources["pager"] = "GITEA_CLI_PAGER"
 	} else if value := strings.TrimSpace(a.deps.Getenv("PAGER")); value != "" && sources["pager"] == "" {
 		preferences.Pager = value
 		sources["pager"] = "PAGER"
 	}
-	if value := strings.TrimSpace(a.deps.Getenv("TEA_COLOR")); value != "" {
+	if value := strings.TrimSpace(a.deps.Getenv("GITEA_CLI_COLOR")); value != "" {
 		preferences.Color = value
-		sources["color"] = "TEA_COLOR"
+		sources["color"] = "GITEA_CLI_COLOR"
 	}
-	if value := a.deps.Getenv("TEA_EDITOR"); value != "" {
+	if value := a.deps.Getenv("GITEA_CLI_EDITOR"); value != "" {
 		preferences.Editor = value
-		sources["editor"] = "TEA_EDITOR"
+		sources["editor"] = "GITEA_CLI_EDITOR"
 	} else if value := a.deps.Getenv("VISUAL"); value != "" && sources["editor"] == "" {
 		preferences.Editor = value
 		sources["editor"] = "VISUAL"
@@ -89,9 +89,9 @@ func (a *application) configCommand() *cobra.Command {
 	group := &cobra.Command{Use: "config", Short: "Manage preferences", Long: `Manage preferences.
 
 Settings live in config.yml and hosts.yml in the configuration directory
-($TEA_CONFIG_DIR, or tea under the XDG config directory); tea config path prints both.
+($GITEA_CLI_CONFIG_DIR, or gt under the XDG config directory); gt config path prints both.
 
-config.yml preferences (tea config set <key> <value>):
+config.yml preferences (gt config set <key> <value>):
   default_host  instance URL used when no --host, environment or repository selects one
   git_protocol  https or ssh for clone and checkout remotes
   editor        command used to edit bodies
@@ -100,29 +100,29 @@ config.yml preferences (tea config set <key> <value>):
   browser       command used to open web pages; never disables opening
   color         auto, always or never
   remote        Git remote used for repository discovery
-  aliases       command aliases; manage them with tea alias
+  aliases       command aliases; manage them with gt alias
 
-hosts.yml per-instance settings (tea config set --host <url> <key> <value>):
-  user             active account, changed only by tea auth switch
+hosts.yml per-instance settings (gt config set --host <url> <key> <value>):
+  user             active account, changed only by gt auth switch
   ssh_host         SSH host[:port] when it differs from the web host
   insecure         true skips TLS certificate verification
   git_protocol     https or ssh, overriding config.yml for this instance
-  oauth_client_id  OAuth application used by tea auth login
+  oauth_client_id  OAuth application used by gt auth login
 
-Per-account SSH settings (tea config set --host <url> --user <name> <key> <value>):
+Per-account SSH settings (gt config set --host <url> --user <name> <key> <value>):
   ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint
 
 Environment overrides:
-  TEA_CONFIG_DIR                 configuration directory
-  TEA_HOST, GITEA_INSTANCE_URL   instance, overriding default_host
+  GITEA_CLI_CONFIG_DIR                 configuration directory
+  GITEA_CLI_HOST, GITEA_INSTANCE_URL   instance, overriding default_host
   GITEA_TOKEN                    access token for that instance instead of stored credentials
   GITEA_INSTANCE_INSECURE        with GITEA_TOKEN, skip TLS verification when true
   GITEA_INSTANCE_SSH_HOST        with GITEA_TOKEN, SSH host that identifies the instance's remotes
-  TEA_USER                       account on the selected instance
-  TEA_REPO                       repository as owner/name or URL
-  TEA_EDITOR                     editor, overriding config.yml
-  TEA_PAGER                      pager, overriding config.yml
-  TEA_COLOR                      color preference; NO_COLOR disables automatic color
+  GITEA_CLI_USER                       account on the selected instance
+  GITEA_CLI_REPO                       repository as owner/name or URL
+  GITEA_CLI_EDITOR                     editor, overriding config.yml
+  GITEA_CLI_PAGER                      pager, overriding config.yml
+  GITEA_CLI_COLOR                      color preference; NO_COLOR disables automatic color
   VISUAL, EDITOR, PAGER, BROWSER editor (VISUAL first), pager and browser when config.yml sets none`}
 	group.AddCommand(&cobra.Command{Use: "path", Short: "Show configuration file paths", Annotations: textOutput("config path prints text"), Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "config\t%s\nhosts\t%s\n", filepath.Join(a.deps.Settings.Dir, "config.yml"), filepath.Join(a.deps.Settings.Dir, "hosts.yml"))
@@ -151,7 +151,7 @@ Environment overrides:
 				return err
 			}
 			if _, exists := snapshot.Hosts.Hosts[preferences.DefaultHost]; a.options.user != "" && !exists {
-				return clierr.Wrap(clierr.Usage, errors.New("instance is not configured; run tea auth login first"))
+				return clierr.Wrap(clierr.Usage, errors.New("instance is not configured; run gt auth login first"))
 			}
 			values := map[string]any{
 				"version": preferences.Version, "default_host": preferences.DefaultHost,
@@ -235,7 +235,7 @@ Environment overrides:
 			return a.deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
 				host, exists := s.Hosts.Hosts[instance]
 				if !exists {
-					return clierr.Wrap(clierr.Usage, errors.New("instance is not configured; run tea auth login first"))
+					return clierr.Wrap(clierr.Usage, errors.New("instance is not configured; run gt auth login first"))
 				}
 				if a.options.user != "" {
 					user, exists := matchAccount(host.Users, a.options.user)

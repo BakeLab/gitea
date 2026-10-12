@@ -17,12 +17,12 @@ func TestPushAgitPREncodesOptionsAndRefspec(t *testing.T) {
 	runner := &checkoutRunner{}
 	err := PushAgitPR(context.Background(), runner, AgitOptions{
 		Directory: "/work", Remote: "origin", Head: "feature", Base: "main", Topic: "feature",
-		Title: "Hello", Body: "line1\nline2", CredentialArgs: []string{"-c", "credential.helper=tea"},
+		Title: "Hello", Body: "line1\nline2", CredentialArgs: []string{"-c", "credential.helper=gt"},
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{
 		"rev-parse --is-inside-work-tree",
-		"-c credential.helper=tea push -o title=Hello -o description={base64}bGluZTEKbGluZTI= -- origin refs/heads/feature:refs/for/main/feature",
+		"-c credential.helper=gt push -o title=Hello -o description={base64}bGluZTEKbGluZTI= -- origin refs/heads/feature:refs/for/main/feature",
 	}, runner.calls)
 }
 
@@ -39,7 +39,7 @@ func TestPushAgitPRWithOptionsToRealRemote(t *testing.T) {
 	}
 	root := t.TempDir()
 	env := append(os.Environ(), "GIT_CONFIG_GLOBAL="+filepath.Join(root, "gitconfig"), "GIT_CONFIG_NOSYSTEM=1",
-		"GIT_AUTHOR_NAME=tea", "GIT_AUTHOR_EMAIL=tea@example.invalid", "GIT_COMMITTER_NAME=tea", "GIT_COMMITTER_EMAIL=tea@example.invalid")
+		"GIT_AUTHOR_NAME=gt", "GIT_AUTHOR_EMAIL=gt@example.invalid", "GIT_COMMITTER_NAME=gt", "GIT_COMMITTER_EMAIL=gt@example.invalid")
 	runner := System{Env: env}
 	remote, work := filepath.Join(root, "remote.git"), filepath.Join(root, "work")
 	for _, step := range []struct {

@@ -13,8 +13,8 @@ import (
 	"net/http"
 	"time"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // Job identifies one workflow job without exposing server-specific metadata.

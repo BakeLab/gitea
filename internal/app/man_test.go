@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,7 +21,7 @@ func TestManWritesSelectedCommandWithoutReplacingFiles(t *testing.T) {
 	require.Empty(t, out.String())
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.Contains(t, string(data), "tea-pr-checkout")
+	require.Contains(t, string(data), "gt-pr-checkout")
 	require.Contains(t, string(data), "detach")
 	require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, args)))
 	after, err := os.ReadFile(path)
@@ -41,11 +41,11 @@ func TestManIncludesFullCommandTree(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	require.NoError(t, Execute(context.Background(), deps, []string{"man"}))
 	manual := out.String()
-	for _, command := range []string{"tea-pr-checkout", "tea-issue-comment-create", "tea-auth-login", "tea-run-artifact-download"} {
+	for _, command := range []string{"gt-pr-checkout", "gt-issue-comment-create", "gt-auth-login", "gt-run-artifact-download"} {
 		require.Contains(t, manual, command)
 	}
-	require.Contains(t, manual, `.TH "TEA-PR-CHECKOUT" "1" "Jan 2026"`)
-	require.NotContains(t, manual, "tea-auth-git-credential")
+	require.Contains(t, manual, `.TH "GT-PR-CHECKOUT" "1" "Jan 2026"`)
+	require.NotContains(t, manual, "gt-auth-git-credential")
 	first := manual
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"man"}))
@@ -53,7 +53,7 @@ func TestManIncludesFullCommandTree(t *testing.T) {
 	out.Reset()
 	deps.Getenv = envFunc(map[string]string{"SOURCE_DATE_EPOCH": "1780000000"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"man", "pr", "checkout"}))
-	require.Contains(t, out.String(), `.TH "TEA-PR-CHECKOUT" "1" "May 2026"`)
+	require.Contains(t, out.String(), `.TH "GT-PR-CHECKOUT" "1" "May 2026"`)
 }
 
 func TestCanceledManDoesNotPublishOutputFile(t *testing.T) {

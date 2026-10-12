@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.dev/tea/internal/auth"
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -65,7 +65,7 @@ func TestGitCredentialEnvironmentTokenIsScopedAndNeverPersisted(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Fatalf("unexpected request %s", r.URL.Path) }))
 	defer server.Close()
 	deps, out, _ := testDeps(t)
-	deps.Getenv = envFunc(map[string]string{"TEA_HOST": server.URL, "GITEA_TOKEN": "environment-token"})
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": server.URL, "GITEA_TOKEN": "environment-token"})
 	host := strings.TrimPrefix(server.URL, "http://")
 	deps.Streams.In = strings.NewReader("protocol=http\nhost=" + host + "\npath=alice/project.git\n\n")
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "git-credential", "get"}))

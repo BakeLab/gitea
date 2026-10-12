@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // accountCache holds each client's authenticated login per Sudo user; failed lookups are retried.

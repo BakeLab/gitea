@@ -25,7 +25,7 @@ func TestSetupGitCredentialsPreservesHelpersAndIsIdempotent(t *testing.T) {
 	key := "credential." + instance + ".helper"
 	_, err = runner.Output(ctx, cwd, false, "config", "--local", "--add", key, "existing-helper")
 	require.NoError(t, err)
-	executable := filepath.Join(cwd, "path with spaces and 'quote'", "tea")
+	executable := filepath.Join(cwd, "path with spaces and 'quote'", "gt")
 	require.NoError(t, SetupCredentials(ctx, runner, CredentialSetup{Directory: cwd, Local: true, Instance: instance, Executable: executable, User: "alice"}))
 	require.NoError(t, SetupCredentials(ctx, runner, CredentialSetup{Directory: cwd, Local: true, Instance: instance, Executable: executable, User: "alice"}))
 	data, err := runner.Output(ctx, cwd, false, "config", "--local", "--get-all", key)

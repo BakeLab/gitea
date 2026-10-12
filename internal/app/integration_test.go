@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -27,7 +27,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	_, deps, out, diagnostics := giteaDeps(t)
 	execute := outputExecutor(t, &deps, out, diagnostics)
 
-	adminUsername := fmt.Sprintf("tea-it-admin-%d", time.Now().UnixNano())
+	adminUsername := fmt.Sprintf("gt-it-admin-%d", time.Now().UnixNano())
 	var managedUser services.AdminUser
 	adminData := execute("admin", "user", "create", adminUsername, "--email", adminUsername+"@example.test", "--password", "local-admin-test-password", "--admin", "--restricted", "--prohibit-login", "--visibility", "limited", "--json")
 	require.NotContains(t, string(adminData), "local-admin-test-password")
@@ -60,7 +60,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	require.Contains(t, managedUsers, managedUser)
 	execute("admin", "user", "delete", adminUsername, "--yes")
 	userDeleted = true
-	name := fmt.Sprintf("tea-it-%d", time.Now().UnixNano())
+	name := fmt.Sprintf("gt-it-%d", time.Now().UnixNano())
 	var repo services.Repository
 	require.NoError(t, json.Unmarshal(execute("repo", "create", name, "--auto-init", "--private", "--json"), &repo))
 	require.Equal(t, name, repo.Name)
@@ -78,7 +78,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	require.Empty(t, repo.Website)
 	require.False(t, repo.Archived)
 	scoped := func(args ...string) []byte { return execute(append(args, "-R", repo.FullName, "--json")...) }
-	templateName := fmt.Sprintf("tea-template-%d", time.Now().UnixNano())
+	templateName := fmt.Sprintf("gt-template-%d", time.Now().UnixNano())
 	var template, generated services.Repository
 	require.NoError(t, json.Unmarshal(execute("repo", "create", templateName, "--as-template", "--auto-init", "--default-branch", "trunk", "--private", "--json"), &template))
 	t.Cleanup(func() {
@@ -87,7 +87,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 		}
 	})
 	require.True(t, template.Template)
-	generatedName := fmt.Sprintf("tea-generated-%d", time.Now().UnixNano())
+	generatedName := fmt.Sprintf("gt-generated-%d", time.Now().UnixNano())
 	require.NoError(t, json.Unmarshal(execute("repo", "create", generatedName, "--template", template.URL, "--private", "--copy-git-hooks=false", "--json"), &generated))
 	t.Cleanup(func() {
 		if err := Execute(context.Background(), deps, []string{"repo", "delete", "-R", generated.FullName, "--yes"}); err != nil {
@@ -105,8 +105,8 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	execute("api", "user/starred/"+generated.FullName, "--method", "DELETE")
 	require.NoError(t, json.Unmarshal(execute("repo", "list", "--watched", "--limit", "1", "--page", "2", "--json"), &foundRepos))
 	require.Len(t, foundRepos, 1)
-	if serverRoot := os.Getenv("GITEA_TEA_TEST_REPOSITORY_ROOT"); serverRoot != "" {
-		migrationName := fmt.Sprintf("tea-migrated-%d", time.Now().UnixNano())
+	if serverRoot := os.Getenv("GITEA_CLI_TEST_REPOSITORY_ROOT"); serverRoot != "" {
+		migrationName := fmt.Sprintf("gt-migrated-%d", time.Now().UnixNano())
 		var migrated services.Repository
 		require.NoError(t, json.Unmarshal(execute("repo", "migrate", "--server-path", filepath.ToSlash(filepath.Join(serverRoot, repo.FullName+".git")), "--name", migrationName, "--private", "--json"), &migrated))
 		t.Cleanup(func() {
@@ -259,7 +259,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	require.Equal(t, "[]\n", string(scoped("milestone", "issue", "list", ms)))
 	execute("milestone", "delete", ms, "-R", repo.FullName, "--yes")
 	require.Equal(t, "[]\n", string(scoped("wiki", "list")))
-	notifier := fmt.Sprintf("tea-notifier-%d", time.Now().UnixNano())
+	notifier := fmt.Sprintf("gt-notifier-%d", time.Now().UnixNano())
 	deps.Streams.In = bytes.NewBufferString(fmt.Sprintf(`{"username":%q,"password":"local-test-password!123","email":%q,"must_change_password":false}`, notifier, notifier+"@example.test"))
 	execute("api", "admin/users", "--input", "-")
 	t.Cleanup(func() {
@@ -363,7 +363,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	require.Equal(t, "BUILD_TOKEN", secrets[0].Name)
 	execute("secret", "delete", "BUILD_TOKEN", "-R", repo.FullName, "--yes")
 	require.Equal(t, "[]\n", string(scoped("secret", "list")))
-	accountName := fmt.Sprintf("TEA_IT_%d", time.Now().UnixNano())
+	accountName := fmt.Sprintf("CLI_IT_%d", time.Now().UnixNano())
 	execute("variable", "set", accountName, "--account", "--value", "account value")
 	t.Cleanup(func() {
 		if err := Execute(context.Background(), deps, []string{"variable", "delete", accountName, "--account", "--yes"}); err != nil {
@@ -372,7 +372,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	})
 	require.NoError(t, json.Unmarshal(execute("variable", "view", accountName, "--account", "--json"), &variable))
 	require.Equal(t, "account value", variable.Value)
-	orgName := fmt.Sprintf("tea-it-org-%d", time.Now().UnixNano())
+	orgName := fmt.Sprintf("gt-it-org-%d", time.Now().UnixNano())
 	var organization services.Organization
 	require.NoError(t, json.Unmarshal(execute("org", "create", orgName, "--description", "Original", "--visibility", "private", "--json"), &organization))
 	require.Equal(t, "private", organization.Visibility)

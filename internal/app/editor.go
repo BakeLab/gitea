@@ -11,8 +11,8 @@ import (
 	"os"
 	"strings"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -36,7 +36,7 @@ func (a *application) editor() (terminal.Editor, string, error) {
 		return nil, "", err
 	}
 	if preferences.Editor == "" {
-		return nil, "", clierr.Wrap(clierr.Usage, errors.New("configure an editor using tea config set editor or EDITOR"))
+		return nil, "", clierr.Wrap(clierr.Usage, errors.New("configure an editor using gt config set editor or EDITOR"))
 	}
 	return a.deps.Editor, preferences.Editor, nil
 }

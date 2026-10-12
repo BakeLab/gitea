@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/transport"
 )
 
 // PullStatus groups open pull requests by the selected account's participation.

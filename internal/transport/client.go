@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode"
 
-	"gitea.dev/tea/internal/version"
+	"gitea.dev/cli/internal/version"
 )
 
 // RequestSigner attaches HTTP signature headers for SSH/HTTPSign authentication.
@@ -38,7 +38,7 @@ func (e *APIError) Error() string {
 	var text string
 	switch e.Status {
 	case 401:
-		text = "authentication rejected; run tea auth login"
+		text = "authentication rejected; run gt auth login"
 	case 403:
 		text = "permission denied by the Gitea instance"
 	case 404:
@@ -91,8 +91,8 @@ type Client struct {
 	Retries int
 }
 
-// UserAgent identifies tea to instances, proxies, and server logs.
-var UserAgent = "tea/" + version.Version + " (" + runtime.GOOS + "/" + runtime.GOARCH + ")"
+// UserAgent identifies gt to instances, proxies, and server logs.
+var UserAgent = "gt/" + version.Version + " (" + runtime.GOOS + "/" + runtime.GOARCH + ")"
 
 type userAgentTransport struct{ base http.RoundTripper }
 

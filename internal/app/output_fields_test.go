@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/clierr"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -36,7 +36,7 @@ func TestCommandsWithoutOutputRejectJSON(t *testing.T) {
 		for _, sub := range command.Commands() {
 			walk(sub)
 		}
-		if command.HasSubCommands() || command.Annotations["tea.text"] != "" {
+		if command.HasSubCommands() || command.Annotations["gt.text"] != "" {
 			return
 		}
 		path := strings.Fields(command.CommandPath())[1:]
@@ -49,7 +49,7 @@ func TestCommandsWithoutOutputRejectJSON(t *testing.T) {
 					args = append(args, prefix+strconv.Itoa(len(args)+1))
 				}
 				deps, out, _ := testDeps(t)
-				deps.Getenv = serverEnv(server.URL, map[string]string{"TEA_REPO": "alice/project"})
+				deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				err := Execute(ctx, deps, slices.Concat(path, args, []string{"--json", "--yes", "--no-input"}))
 				cancel()

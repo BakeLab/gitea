@@ -54,7 +54,7 @@ func TestBatchSSHUsesPlinkOption(t *testing.T) {
 func TestNetworkSubcommand(t *testing.T) {
 	for args, want := range map[string]bool{
 		"push -- origin main": true, "-c core.sshCommand=ssh fetch origin": true, "-C /work ls-remote origin": true, "clone url": true,
-		"rev-parse HEAD": false, "-c credential.helper=tea config --get core.sshCommand": false, "remote get-url origin": false, "": false,
+		"rev-parse HEAD": false, "-c credential.helper=gt config --get core.sshCommand": false, "remote get-url origin": false, "": false,
 	} {
 		require.Equal(t, want, networkSubcommand(strings.Fields(args)), args)
 	}

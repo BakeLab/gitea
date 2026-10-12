@@ -13,8 +13,8 @@ import (
 	"net/url"
 	"strings"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // ReleaseAsset is the public metadata of a release attachment.

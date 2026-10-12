@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -268,7 +268,7 @@ func TestConfirmationsNameResolvedValues(t *testing.T) {
 			}))
 			defer server.Close()
 			deps, _, _ := testDeps(t)
-			deps.Getenv = serverEnv(server.URL, map[string]string{"TEA_REPO": "alice/project"})
+			deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
 			prompt := &scriptedPrompter{inputs: tc.inputs}
 			deps.Prompter = prompt
 			deps.Streams.InTTY, deps.Streams.ErrTTY = true, true

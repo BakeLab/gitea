@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/tea/internal/settings"
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )

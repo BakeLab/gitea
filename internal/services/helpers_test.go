@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/assert"
 )
 
 // newTestClient serves handler for the duration of the test and returns a client for it.
-// Requests probing the server version or API schema fail the test: tea targets one Gitea
+// Requests probing the server version or API schema fail the test: gt targets one Gitea
 // release and must never gate operations on either.
 func newTestClient(t *testing.T, handler http.Handler) *transport.Client {
 	t.Helper()

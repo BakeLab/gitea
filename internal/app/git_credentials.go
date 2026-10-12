@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitea.dev/tea/internal/auth"
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/git"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
 	"github.com/spf13/cobra"
 )
 
@@ -95,7 +95,7 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 			}
 		}
 		if strings.ContainsAny(user+credential.AccessToken, "\x00\r\n") {
-			return clierr.Wrap(clierr.Authentication, errors.New("stored Git credential contains invalid protocol characters; run tea auth login"))
+			return clierr.Wrap(clierr.Authentication, errors.New("stored Git credential contains invalid protocol characters; run gt auth login"))
 		}
 		if err := cmd.Context().Err(); err != nil {
 			return err
@@ -107,7 +107,7 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 
 func (a *application) setupGitCommand() *cobra.Command {
 	var local bool
-	command := &cobra.Command{Use: "setup-git", Short: "Explicitly register tea as a scoped Git credential helper", Annotations: textOutput("setup-git configures Git"), Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+	command := &cobra.Command{Use: "setup-git", Short: "Explicitly register gt as a scoped Git credential helper", Annotations: textOutput("setup-git configures Git"), Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		target, err := a.resolveTarget(cmd.Context(), false, false)
 		if err != nil {
 			return err
@@ -123,11 +123,11 @@ func (a *application) setupGitCommand() *cobra.Command {
 	return command
 }
 
-// credentialHelper locates tea's executable and absolute configuration directory for Git's credential helper.
+// credentialHelper locates gt's executable and absolute configuration directory for Git's credential helper.
 func (a *application) credentialHelper() (executable, configDir string, err error) {
 	executable, err = a.deps.Executable()
 	if err != nil {
-		return "", "", errors.New("cannot locate tea's executable for Git authentication")
+		return "", "", errors.New("cannot locate gt's executable for Git authentication")
 	}
 	configDir, err = filepath.Abs(a.deps.Settings.Dir)
 	if err != nil {

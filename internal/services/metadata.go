@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // Label is a repository or organization label.

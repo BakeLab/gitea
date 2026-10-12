@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/settings"
 	"github.com/42wim/httpsig"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"

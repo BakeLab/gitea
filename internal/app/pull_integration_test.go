@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/git"
-	"gitea.dev/tea/internal/services"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/services"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,13 +25,13 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	execute := outputExecutor(t, &deps, out, diagnostics)
 	out.Reset()
 	diagnostics.Reset()
-	identityErr := Execute(context.Background(), deps, []string{"issue", "create", "-R", "integration/nonexistent", "--title", "Must not submit", "--body", "Body", "--user", "tea-deliberately-wrong-account", "--no-input"})
+	identityErr := Execute(context.Background(), deps, []string{"issue", "create", "-R", "integration/nonexistent", "--title", "Must not submit", "--body", "Body", "--user", "gt-deliberately-wrong-account", "--no-input"})
 	require.ErrorContains(t, identityErr, "does not belong to the selected account")
 	require.Equal(t, clierr.Authentication, clierr.ExitCode(identityErr))
 	require.Empty(t, out.String())
 	require.Empty(t, diagnostics.String())
 	var repo services.Repository
-	name := fmt.Sprintf("tea-pr-edit-%d", time.Now().UnixNano())
+	name := fmt.Sprintf("gt-pr-edit-%d", time.Now().UnixNano())
 	require.NoError(t, json.Unmarshal(execute("repo", "create", name, "--auto-init", "--private", "--json"), &repo))
 	t.Cleanup(func() {
 		if err := Execute(context.Background(), deps, []string{"repo", "delete", "-R", repo.FullName, "--yes"}); err != nil {
@@ -119,7 +119,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.Equal(t, pull.Number, filtered[0].Number)
 	require.Equal(t, strings.SplitN(repo.FullName, "/", 2)[0], filtered[0].Author)
 	require.NotEmpty(t, filtered[0].UpdatedAt)
-	require.NoError(t, json.Unmarshal(execute("pr", "list", "-R", repo.FullName, "--base", "tea-nonexistent-target-branch", "--json"), &filtered))
+	require.NoError(t, json.Unmarshal(execute("pr", "list", "-R", repo.FullName, "--base", "gt-nonexistent-target-branch", "--json"), &filtered))
 	require.Empty(t, filtered)
 	var head struct {
 		Head struct {
@@ -155,7 +155,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.Equal(t, head.Head.SHA, actual)
 	execute("repo", "edit", "-R", repo.FullName, "--private=true")
 	for _, state := range []string{"failure", "success"} {
-		payload, err := json.Marshal(map[string]string{"state": state, "context": "tea-check", "description": "Disposable check"})
+		payload, err := json.Marshal(map[string]string{"state": state, "context": "gt-check", "description": "Disposable check"})
 		require.NoError(t, err)
 		deps.Streams.In = bytes.NewReader(payload)
 		execute("api", "repos/"+repo.FullName+"/statuses/"+head.Head.SHA, "--input", "-")
@@ -164,7 +164,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.NoError(t, json.Unmarshal(execute("pr", "checks", n, "-R", repo.FullName, "--json"), &checks))
 	require.Len(t, checks, 1)
 	require.Equal(t, "success", checks[0].State)
-	require.Equal(t, "tea-check", checks[0].Name)
+	require.Equal(t, "gt-check", checks[0].Name)
 	require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--set-labels", "repo:review", "--json"), &pull))
 	require.Equal(t, []services.Label{label}, pull.Labels)
 	require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--set-labels=", "--json"), &pull))
@@ -255,7 +255,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	verifyEditorSubmission(t, deps, repo.FullName, n, true)
 	require.Empty(t, out.String())
 	require.Contains(t, diagnostics.String(), "Deleted review")
-	if reviewerTokenFile := os.Getenv("GITEA_TEA_TEST_REVIEWER_TOKEN_FILE"); reviewerTokenFile != "" {
+	if reviewerTokenFile := os.Getenv("GITEA_CLI_TEST_REVIEWER_TOKEN_FILE"); reviewerTokenFile != "" {
 		reviewerDeps := deps
 		reviewerDeps.Getenv = gitea.env(readTokenFile(t, reviewerTokenFile))
 		out.Reset()
@@ -308,7 +308,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 
 func testTeamReviewRequests(t *testing.T, deps *Dependencies, execute func(...string) []byte, reviewer string) {
 	t.Helper()
-	orgName := fmt.Sprintf("tea-review-org-%d", time.Now().UnixNano())
+	orgName := fmt.Sprintf("gt-review-org-%d", time.Now().UnixNano())
 	execute("org", "create", orgName, "--visibility", "private")
 	t.Cleanup(func() {
 		if err := Execute(context.Background(), *deps, []string{"org", "delete", orgName, "--yes"}); err != nil {

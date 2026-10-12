@@ -1,5 +1,5 @@
 # The full repository name
-repo: gitea/tea
+repo: gitea/cli
 
 # Service type (gitea or github)
 service: gitea

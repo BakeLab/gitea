@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // Issue is the stable command representation of an issue.

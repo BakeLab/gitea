@@ -1,7 +1,7 @@
 // Copyright 2026 The Gitea Authors. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-// Package app builds the tea command tree and its injected dependencies.
+// Package app builds the gt command tree and its injected dependencies.
 package app
 
 import (
@@ -16,15 +16,15 @@ import (
 	"time"
 	"unicode"
 
-	"gitea.dev/tea/internal/aliases"
-	"gitea.dev/tea/internal/auth"
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/git"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/settings"
-	"gitea.dev/tea/internal/terminal"
-	"gitea.dev/tea/internal/transport"
-	"gitea.dev/tea/internal/version"
+	"gitea.dev/cli/internal/aliases"
+	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
+	"gitea.dev/cli/internal/transport"
+	"gitea.dev/cli/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +53,7 @@ type Dependencies struct {
 // System connects the CLI to the current environment and terminal.
 func System() Dependencies {
 	streams := terminal.System()
-	store := settings.New(os.Getenv("TEA_CONFIG_DIR"))
+	store := settings.New(os.Getenv("GITEA_CLI_CONFIG_DIR"))
 	prompter := &terminal.FormPrompter{Streams: streams}
 	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: streams.ErrOut}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, Getenv: os.Getenv, Client: transport.New}
 }
@@ -97,7 +97,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 			return client(instance, token, insecure)
 		}
 	}
-	root := &cobra.Command{Use: "tea", Short: "Work with Gitea from your terminal", Version: version.Format(), SilenceErrors: true, SilenceUsage: true}
+	root := &cobra.Command{Use: "gt", Short: "Work with Gitea from your terminal", Version: version.Format(), SilenceErrors: true, SilenceUsage: true}
 	root.SetIn(deps.Streams.In)
 	root.SetOut(deps.Streams.Out)
 	root.SetErr(deps.Streams.ErrOut)
@@ -117,7 +117,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	flags.BoolVar(&a.options.yes, "yes", false, "Accept confirmations without prompting")
 	flags.BoolVar(&a.options.debug, "debug", false, "Log the method, URL, status, and duration of each HTTP request to stderr")
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
-		if reason := cmd.Annotations["tea.text"]; reason != "" && a.options.json != "" {
+		if reason := cmd.Annotations["gt.text"]; reason != "" && a.options.json != "" {
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("%s; --json is not supported", reason))
 		}
 		if flag := cmd.Flags().Lookup("web"); flag != nil && flag.Value.String() == "true" && (a.options.json != "" || a.options.jq != "") {
@@ -150,7 +150,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	}
 	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.labelCommand(), a.milestoneCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false))
 	root.AddCommand(a.manCommand())
-	root.AddCommand(&cobra.Command{Use: "version", Short: "Print tea's version", Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
+	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), version.Format())
 		return err
 	}})
@@ -163,7 +163,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 
 // offline reports commands that must work without valid settings.
 func offline(cmd *cobra.Command) bool {
-	if cmd.Annotations["tea.group"] == "true" {
+	if cmd.Annotations["gt.group"] == "true" {
 		return true
 	}
 	switch cmd.Name() {
@@ -173,13 +173,13 @@ func offline(cmd *cobra.Command) bool {
 	return cmd.HasParent() && cmd.Parent().Name() == "completion"
 }
 
-// rejectUnknownSubcommands makes `tea bogus` and `tea issue bogus` usage errors instead of printing help.
+// rejectUnknownSubcommands makes `gt bogus` and `gt issue bogus` usage errors instead of printing help.
 func rejectUnknownSubcommands(cmd *cobra.Command) {
 	if cmd.HasSubCommands() && !cmd.Runnable() {
 		if cmd.Annotations == nil {
 			cmd.Annotations = map[string]string{}
 		}
-		cmd.Annotations["tea.group"] = "true"
+		cmd.Annotations["gt.group"] = "true"
 		cmd.Args, cmd.SuggestionsMinimumDistance = cobra.ArbitraryArgs, 2
 		cmd.RunE = func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -200,7 +200,7 @@ func rejectUnknownSubcommands(cmd *cobra.Command) {
 func builtins(root *cobra.Command) map[string]bool {
 	names := map[string]bool{"help": true, "completion": true}
 	for _, cmd := range root.Commands() {
-		if cmd.Annotations["tea.alias"] != "true" {
+		if cmd.Annotations["gt.alias"] != "true" {
 			names[cmd.Name()] = true
 		}
 	}
@@ -243,7 +243,7 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 	if loadErr == nil {
 		for name, expansion := range snapshot.Preferences.Aliases {
 			if aliases.Check(name, snapshot.Preferences.Aliases, names) == nil {
-				root.AddCommand(&cobra.Command{Use: name, Short: "Alias for " + expansion, Annotations: map[string]string{"tea.alias": "true"}, RunE: func(*cobra.Command, []string) error {
+				root.AddCommand(&cobra.Command{Use: name, Short: "Alias for " + expansion, Annotations: map[string]string{"gt.alias": "true"}, RunE: func(*cobra.Command, []string) error {
 					return clierr.Wrap(clierr.Usage, errors.New("alias must be expanded before execution"))
 				}})
 			}
@@ -311,7 +311,7 @@ func titleCase(s string) string {
 
 // textOutput marks a command whose output is not a JSON resource, so --json is rejected up front.
 func textOutput(reason string) map[string]string {
-	return map[string]string{"tea.text": reason}
+	return map[string]string{"gt.text": reason}
 }
 
 // commandIndex skips persistent flags without parsing or mutating command state.
@@ -373,7 +373,7 @@ func commandOutputFields(cmd *cobra.Command) []string {
 				"ssh_key", "ssh_agent", "ssh_certificate_principal", "ssh_key_fingerprint",
 			}
 		}
-	case "tea":
+	case "gt":
 		if cmd.Name() == "doctor" {
 			return jsonFields[target]()
 		}

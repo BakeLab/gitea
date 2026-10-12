@@ -89,4 +89,4 @@ jobs:
             linux/arm64
           push: true
           tags: |
-            gitea/tea:${{ env.VERSION }}
+            gitea/gitea-cli:${{ env.VERSION }}

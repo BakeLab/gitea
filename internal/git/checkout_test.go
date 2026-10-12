@@ -82,18 +82,18 @@ func TestPullCheckoutRejectsChangedHead(t *testing.T) {
 
 func TestPullCheckoutScopesCredentialArgumentsToFetch(t *testing.T) {
 	runner := &checkoutRunner{}
-	arguments := []string{"-c", "credential.https://example.test.helper=!tea-helper"}
+	arguments := []string{"-c", "credential.https://example.test.helper=!gt-helper"}
 	_, err := CheckoutPull(context.Background(), runner, CheckoutOptions{Directory: "/work", Remote: "origin", Number: 7, Branch: "pr/7", CredentialArgs: arguments})
 	require.NoError(t, err)
 	credentialCalls := 0
 	for _, call := range runner.calls {
 		if strings.HasPrefix(call, "-c ") {
 			credentialCalls++
-			require.Equal(t, "-c credential.https://example.test.helper=!tea-helper fetch --no-tags -- origin refs/pull/7/head", call)
+			require.Equal(t, "-c credential.https://example.test.helper=!gt-helper fetch --no-tags -- origin refs/pull/7/head", call)
 		}
 	}
 	require.Equal(t, 1, credentialCalls)
-	require.Equal(t, []string{"-c", "credential.https://example.test.helper=!tea-helper"}, arguments)
+	require.Equal(t, []string{"-c", "credential.https://example.test.helper=!gt-helper"}, arguments)
 }
 
 func TestDetachedCheckoutDoesNotCreateOrChangeBranches(t *testing.T) {

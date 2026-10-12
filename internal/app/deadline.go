@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/clierr"
 	"github.com/araddon/dateparse"
 )
 

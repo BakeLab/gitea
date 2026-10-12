@@ -20,7 +20,7 @@ import (
 
 func TestAgentConnectionClosesWhenNoKeyMatches(t *testing.T) {
 	// t.TempDir can exceed the length limit of Unix socket paths.
-	dir, err := os.MkdirTemp("", "tea-agent")
+	dir, err := os.MkdirTemp("", "gt-agent")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	socket := filepath.Join(dir, "agent.sock")

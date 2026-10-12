@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/settings"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,7 +42,7 @@ func TestOAuthLoginPKCEAndState(t *testing.T) {
 		callback, err := url.Parse(redirect)
 		require.NoError(t, err)
 		require.Equal(t, "127.0.0.1", callback.Hostname())
-		// Gitea's built-in tea application registers only the bare loopback URL.
+		// Gitea's built-in gt application registers only the bare loopback URL.
 		require.Empty(t, callback.Path)
 		challenge = u.Query().Get("code_challenge")
 		require.NotEmpty(t, challenge)
@@ -133,6 +133,6 @@ func TestOAuthWithoutHTTPClientUsesDefaultClient(t *testing.T) {
 }
 
 func TestRefreshEndsBeforeSettingsLockWaitersGiveUp(t *testing.T) {
-	// A refresh holds the settings lock, so concurrent tea processes must wait longer than it can take.
+	// A refresh holds the settings lock, so concurrent gt processes must wait longer than it can take.
 	require.Less(t, refreshTimeout, settings.LockTimeout)
 }

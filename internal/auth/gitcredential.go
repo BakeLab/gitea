@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/settings"
 )
 
 // GitRequest contains only the credential-routing parts of Git's input protocol.
@@ -160,7 +160,7 @@ func (m Manager) GitCredential(ctx context.Context, instance, user string, clien
 	}
 	account, exists := snapshot.Hosts.Hosts[instance].Users[user]
 	if !exists {
-		return Credential{}, errors.New("selected Git account is not configured; run tea auth login")
+		return Credential{}, errors.New("selected Git account is not configured; run gt auth login")
 	}
 	if account.AuthMethod == settings.AuthOAuth {
 		return m.Refresh(ctx, instance, user, client, false, now)

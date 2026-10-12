@@ -7,8 +7,8 @@ import (
 	"context"
 	"time"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // TrackedTime is a stable record of seconds spent on an issue or pull request.

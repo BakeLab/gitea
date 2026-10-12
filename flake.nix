@@ -1,5 +1,5 @@
 {
-  description = "Tea - A command line tool to interact with Gitea";
+  description = "gitea-cli - A command line tool to interact with Gitea";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -13,7 +13,7 @@
       in
       {
         devShells.default = pkgs.mkShell {
-          name = "tea-dev-environment";
+          name = "gitea-cli-dev-environment";
           buildInputs = with pkgs; [
             go_1_27
             gopls
@@ -22,7 +22,7 @@
           ];
 
           shellHook = ''
-            echo 'Welcome to tea. Check out the Makefile for runnable targets.'
+            echo 'Welcome to gt. Check out the Makefile for runnable targets.'
           '';
         };
       }

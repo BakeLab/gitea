@@ -6,7 +6,7 @@ package services
 import (
 	"context"
 
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/transport"
 )
 
 // CreateSelectables are the metadata choices offered by create forms; the lists stay empty unless CanPush.

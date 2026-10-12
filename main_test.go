@@ -28,7 +28,7 @@ func TestSignalInterruptReturns130(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	binary := filepath.Join(t.TempDir(), "tea")
+	binary := filepath.Join(t.TempDir(), "gt")
 	build := exec.CommandContext(ctx, "go", "build", "-o", binary, ".")
 	output, err := build.CombinedOutput()
 	require.NoError(t, err, "build: %s", output)
@@ -45,12 +45,12 @@ func TestSignalInterruptReturns130(t *testing.T) {
 	environment := []string{}
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
-		if strings.HasPrefix(key, "TEA_") || strings.HasPrefix(key, "GITEA_") {
+		if strings.HasPrefix(key, "GITEA_CLI_") || strings.HasPrefix(key, "GITEA_") {
 			continue
 		}
 		environment = append(environment, entry)
 	}
-	command.Env = append(environment, "TEA_CONFIG_DIR="+t.TempDir(), "TEA_HOST="+server.URL, "GITEA_TOKEN=disposable-test-token")
+	command.Env = append(environment, "GITEA_CLI_CONFIG_DIR="+t.TempDir(), "GITEA_CLI_HOST="+server.URL, "GITEA_TOKEN=disposable-test-token")
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	require.NoError(t, command.Start())

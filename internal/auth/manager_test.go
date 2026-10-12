@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"gitea.dev/tea/internal/settings"
+	"gitea.dev/cli/internal/settings"
 	"github.com/stretchr/testify/require"
 	"github.com/zalando/go-keyring"
 )
@@ -112,7 +112,7 @@ func TestCredentialLoadDistinguishesMissingFromUnavailable(t *testing.T) {
 	store := &Store{Dir: t.TempDir(), Keyring: keyring}
 	for _, backend := range []string{settings.StoreKeyring, settings.StoreFile} {
 		_, err := store.Load("https://example.org", "alice", backend)
-		require.ErrorContains(t, err, "run tea auth login", backend)
+		require.ErrorContains(t, err, "run gt auth login", backend)
 	}
 	// Logging in again cannot fix a locked or unreachable keyring, so do not suggest it.
 	keyring.fail = true

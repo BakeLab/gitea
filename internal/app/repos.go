@@ -6,9 +6,9 @@ package app
 import (
 	"errors"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -93,7 +93,7 @@ func (a *application) repoCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		_, err = a.git(cmd.Context(), "config", "--local", "tea.repository", target.Host+"/"+target.Repo)
+		_, err = a.git(cmd.Context(), "config", "--local", "gt.repository", target.Host+"/"+target.Repo)
 		return err
 	}})
 	a.addRepositoryMutations(group)

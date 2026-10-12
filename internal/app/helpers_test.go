@@ -18,12 +18,12 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.dev/tea/internal/auth"
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/git"
-	"gitea.dev/tea/internal/settings"
-	"gitea.dev/tea/internal/terminal"
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,7 +58,7 @@ func envFunc(vars map[string]string) func(string) string {
 
 // serverEnv authenticates against serverURL through the environment, plus extra variables.
 func serverEnv(serverURL string, extra map[string]string) func(string) string {
-	vars := map[string]string{"TEA_HOST": serverURL, "GITEA_TOKEN": "token"}
+	vars := map[string]string{"GITEA_CLI_HOST": serverURL, "GITEA_TOKEN": "token"}
 	maps.Copy(vars, extra)
 	return envFunc(vars)
 }
@@ -73,7 +73,7 @@ func requireUsageBeforeRequests(t *testing.T, want string, args ...string) {
 	}))
 	defer server.Close()
 	deps, out, diagnostics := testDeps(t)
-	deps.Getenv = serverEnv(server.URL, map[string]string{"TEA_REPO": "alice/project"})
+	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
 	err := Execute(context.Background(), deps, args)
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
 	require.ErrorContains(t, err, want)
@@ -214,7 +214,7 @@ func configureAccounts(t *testing.T, deps Dependencies, url, active string, user
 	}
 }
 
-// credentialCall returns the fakeGit key of a Git call authenticated through the tea credential helper.
+// credentialCall returns the fakeGit key of a Git call authenticated through the gt credential helper.
 func credentialCall(t *testing.T, deps Dependencies, host, user string, args ...string) string {
 	t.Helper()
 	executable, err := deps.Executable()

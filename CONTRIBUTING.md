@@ -18,7 +18,7 @@
 
 ## Introduction
 
-This document explains how to contribute changes to TEA.
+This document explains how to contribute changes to gitea-cli.
 Sensitive security-related issues should be reported to
 [security@gitea.io](mailto:security@gitea.io).
 
@@ -29,20 +29,20 @@ For configuring IDE or code editor to develop Gitea see [IDE and code editor con
 Please search the issues on the issue tracker with a variety of keywords
 to ensure your bug is not already reported.
 
-If unique, [open an issue](https://gitea.com/gitea/tea/issues/new).
+If unique, [open an issue](https://gitea.com/gitea/cli/issues/new).
 
 Please write clear, concise instructions so we can reproduce the behavior—
 even if it seems obvious. The more detailed and specific you are,
 the faster we can fix the issue. Check out [How to Report Bugs
 Effectively](http://www.chiark.greenend.org.uk/~sgtatham/bugs.html).
 
-Please be kind, remember that TEA comes at no cost to you, and you're
+Please be kind, remember that gitea-cli comes at no cost to you, and you're
 getting free help.
 
 ## Discuss your design
 
 The project welcomes submissions. If you want to change or add something,
-please let everyone know what you're working on—[file an issue](https://gitea.com/gitea/tea/issues/new)!
+please let everyone know what you're working on—[file an issue](https://gitea.com/gitea/cli/issues/new)!
 Significant changes must go through the change proposal process
 before they can be accepted. To create a proposal, file an issue with
 your proposed changes documented, and make sure to note in the title
@@ -57,29 +57,29 @@ high-level discussions.
 ## Testing redux
 
 Before sending code out for review, run the unit tests with `make test`.
-Since TEA is an cli tool it should be obvious to test your feature locally first.
+Since gitea-cli is an cli tool it should be obvious to test your feature locally first.
 
 Tests live beside the packages they exercise. `make integration-test` runs the
 `TestGitea*` tests against a disposable Gitea instance with an administrator
-account named `integration` and a reviewer named `tea-reviewer`. Never point
+account named `integration` and a reviewer named `gt-reviewer`. Never point
 these tests at a production instance: they create and delete resources.
 
 ```sh
-GITEA_TEA_TEST_URL=http://127.0.0.1:3000 \
-GITEA_TEA_TEST_TOKEN_FILE=/private/path/admin-token \
-GITEA_TEA_TEST_REVIEWER_TOKEN_FILE=/private/path/reviewer-token \
+GITEA_CLI_TEST_URL=http://127.0.0.1:3000 \
+GITEA_CLI_TEST_TOKEN_FILE=/private/path/admin-token \
+GITEA_CLI_TEST_REVIEWER_TOKEN_FILE=/private/path/reviewer-token \
   make integration-test
 ```
 
 Token files contain scoped PATs for their accounts and should be `0600`;
 `scripts/integration-tokens.py` creates them for the CI accounts. Optional
-coverage is enabled by `GITEA_TEA_TEST_REPOSITORY_ROOT` (the server's repository
+coverage is enabled by `GITEA_CLI_TEST_REPOSITORY_ROOT` (the server's repository
 root, with `[repository] IMPORT_LOCAL_PATHS = true`, for migration) and
-`GITEA_TEA_TEST_SSH_ENDPOINT` (an SSH clone endpoint).
+`GITEA_CLI_TEST_SSH_ENDPOINT` (an SSH clone endpoint).
 
 ## Code review
 
-Changes to TEA must be reviewed before they are accepted—no matter who
+Changes to gitea-cli must be reviewed before they are accepted—no matter who
 makes the change, even if they are an owner or a maintainer. We use Gitea's
 pull request & review workflow to do that. Gitea ensure every PR is reviewed by at least 2 maintainers.
 
@@ -100,8 +100,8 @@ Some of the key points:
 
 ### Commands
 
-Use explicit singular noun/verb commands, such as `tea issue list` and
-`tea pr create`. Bare command groups show help. Commands validate input, collect
+Use explicit singular noun/verb commands, such as `gt issue list` and
+`gt pr create`. Bare command groups show help. Commands validate input, collect
 missing fields when the shared prompting policy permits it, invoke services, and
 render results through injected streams. Destructive commands require confirmation
 or `--yes`; `--no-input` disables implicit interaction. JSON results go to stdout;
@@ -113,15 +113,15 @@ diagnostics and prompts go to stderr. Lists register `--limit`/`--page` with
 
 - `internal/app`: Cobra commands and application dependency construction.
 - `internal/services`: typed workflows over `gitea.dev/sdk`, independent of CLI flags
-  and terminal I/O, including pagination policy. Services map SDK types to tea's
+  and terminal I/O, including pagination policy. Services map SDK types to gt's
   output types; requests the SDK cannot make yet go through the raw helpers in
   `raw.go`, each marked `TODO(sdk)` with the missing SDK piece.
 - `internal/settings`: split configuration, validation, persistence, target resolution,
   and remote URL parsing.
 - `internal/auth`: secure credentials and OAuth lifecycle.
-- `internal/transport`: the tea HTTP client shared by the SDK and raw requests: TLS,
+- `internal/transport`: the gt HTTP client shared by the SDK and raw requests: TLS,
   timeouts, User-Agent, `--debug`, retries, token, Sudo and SSH-signature
-  authentication, and sanitised API errors. Its raw requests serve `tea api`, signed
+  authentication, and sanitised API errors. Its raw requests serve `gt api`, signed
   downloads and log streaming.
 - `internal/git`: repository discovery and cancellable Git subprocesses.
 - `internal/terminal`: streams, input, editor, browser, and rendering.
@@ -141,7 +141,7 @@ import (
   "encoding/json"
   "fmt"
 
-  "gitea.dev/tea/internal/services"
+  "gitea.dev/cli/internal/services"
   "github.com/foo/bar"
   "gopkg.io/baz.v1"
 )
@@ -219,7 +219,7 @@ and lead the development of Gitea.
 
 ## Versions
 
-tea has the `master` branch as a tip branch and has version branches
+gt has the `master` branch as a tip branch and has version branches
 such as `release/v0.9`. `release/v0.9` is a release branch and we will
 tag `v0.9.0` for binary download. If `v0.9.0` has bugs, we will accept
 pull requests on the `release/v0.9` branch and publish a `v0.9.1` tag,

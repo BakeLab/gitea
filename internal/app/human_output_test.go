@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -110,17 +110,17 @@ func TestTeaPagerAndColorEnvironmentOverrides(t *testing.T) {
 		_, _ = w.Write([]byte(`[{"id":1,"name":"bug","color":"ff0000","description":""},{"id":2,"name":"docs","color":"00ff00","description":""}]`))
 	}))
 	defer server.Close()
-	env := map[string]string{"TEA_PAGER": "tea-pager", "PAGER": "generic-pager", "TEA_COLOR": "always"}
+	env := map[string]string{"GITEA_CLI_PAGER": "gt-pager", "PAGER": "generic-pager", "GITEA_CLI_COLOR": "always"}
 	deps, out, _, pager := pagedDeps(t, server.URL, env, "pager", "configured-pager", "color", "never")
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
-	require.Equal(t, "tea-pager", pager.command)
+	require.Equal(t, "gt-pager", pager.command)
 	require.Contains(t, pager.input, "\x1b[38;2;255;0;0mbug\x1b[0m")
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "pager", "--show-source", "--json"}))
-	require.JSONEq(t, `{"pager":{"value":"tea-pager","source":"TEA_PAGER"}}`, out.String())
+	require.JSONEq(t, `{"pager":{"value":"gt-pager","source":"GITEA_CLI_PAGER"}}`, out.String())
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "color", "--show-source", "--json"}))
-	require.JSONEq(t, `{"color":{"value":"always","source":"TEA_COLOR"}}`, out.String())
+	require.JSONEq(t, `{"color":{"value":"always","source":"GITEA_CLI_COLOR"}}`, out.String())
 }
 
 func TestColorAutoUsesStdoutTTY(t *testing.T) {

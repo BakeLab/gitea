@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"gitea.dev/tea/internal/clierr"
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +41,7 @@ func (a *application) issueEditCommand() *cobra.Command {
 			if a.policy(snapshot).CanPrompt(a.deps.Streams) && a.deps.IssueEditForm != nil {
 				return a.editIssuesInteractively(cmd, numbers)
 			}
-			return clierr.Wrap(clierr.Usage, errors.New("supply an edit flag; see tea issue edit --help"))
+			return clierr.Wrap(clierr.Usage, errors.New("supply an edit flag; see gt issue edit --help"))
 		}
 		if useEditor && len(numbers) != 1 {
 			return clierr.Wrap(clierr.Usage, errors.New("--editor requires one issue"))
@@ -79,7 +79,7 @@ func (a *application) issueEditCommand() *cobra.Command {
 			return err
 		}
 		if opts == (services.IssueEdit{}) && !useEditor && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone-name") {
-			return clierr.Wrap(clierr.Usage, errors.New("supply an edit flag; see tea issue edit --help"))
+			return clierr.Wrap(clierr.Usage, errors.New("supply an edit flag; see gt issue edit --help"))
 		}
 		target, err := a.resolve(cmd.Context(), true)
 		if err != nil {

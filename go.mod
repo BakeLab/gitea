@@ -1,4 +1,4 @@
-module gitea.dev/tea
+module gitea.dev/cli
 
 go 1.27.0
 

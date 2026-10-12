@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // sdkClient binds the SDK to the instance's API transport, which owns authentication, retries,
@@ -99,7 +99,7 @@ func repoDo(ctx context.Context, client *transport.Client, repository string, op
 	return err
 }
 
-// repoConvert is repoCall for an operation whose result maps onto a tea value.
+// repoConvert is repoCall for an operation whose result maps onto a gt value.
 func repoConvert[S, T any](ctx context.Context, client *transport.Client, repository string, convert func(*S) T, op repoOperation[*S]) (T, error) {
 	item, err := repoCall(ctx, client, repository, op)
 	if err != nil {
@@ -140,7 +140,7 @@ func deref[T any](value *T) T {
 	return *value
 }
 
-// timestamp renders an SDK time as tea's RFC 3339 string, or "" when the server sent none.
+// timestamp renders an SDK time as gt's RFC 3339 string, or "" when the server sent none.
 func timestamp(t time.Time) string {
 	if t.IsZero() {
 		return ""

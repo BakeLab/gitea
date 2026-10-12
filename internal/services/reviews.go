@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // Review is a stable review result.

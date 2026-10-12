@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"gitea.dev/tea/internal/services"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +53,7 @@ func (a *application) statusCommand(pullsOnly bool) *cobra.Command {
 	}}
 	positiveIntVar(command, &limit, "limit", 30, 100, "Maximum results in each category (1..100)")
 	if !pullsOnly {
-		command.Flags().BoolVar(&runs, "runs", true, "Include failed or timed-out Actions runs when --repo or TEA_REPO is selected")
+		command.Flags().BoolVar(&runs, "runs", true, "Include failed or timed-out Actions runs when --repo or GITEA_CLI_REPO is selected")
 	}
 	return command
 }

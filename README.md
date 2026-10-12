@@ -1,57 +1,56 @@
-# <img alt='tea logo' src='https://gitea.com/repo-avatars/550-80a3a8c2ab0e2c2d69f296b7f8582485' height="40"/> *T E A*
+# <img alt='gt logo' src='https://gitea.com/repo-avatars/550-80a3a8c2ab0e2c2d69f296b7f8582485' height="40"/> *T E A*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://raster.shields.io/badge/dynamic/json.svg?label=release&url=https://gitea.com/api/v1/repos/gitea/tea/releases&query=$[0].tag_name)](https://gitea.com/gitea/tea/releases)
+[![Release](https://raster.shields.io/badge/dynamic/json.svg?label=release&url=https://gitea.com/api/v1/repos/gitea/cli/releases&query=$[0].tag_name)](https://gitea.com/gitea/cli/releases)
 [![Join the chat at https://img.shields.io/discord/322538954119184384.svg](https://img.shields.io/discord/322538954119184384.svg)](https://discord.gg/Gitea)
-[![Go Report Card](https://goreportcard.com/badge/gitea.dev/tea)](https://goreportcard.com/report/gitea.dev/tea) [![GoDoc](https://pkg.go.dev/badge/gitea.dev/tea?status.svg)](https://godoc.org/gitea.dev/tea)
-![Tea Release Status](https://gitea.com/gitea/tea/actions/workflows/release-nightly.yml/badge.svg)
+[![Go Report Card](https://goreportcard.com/badge/gitea.dev/cli)](https://goreportcard.com/report/gitea.dev/cli) [![GoDoc](https://pkg.go.dev/badge/gitea.dev/cli?status.svg)](https://godoc.org/gitea.dev/cli)
+![gitea-cli Release Status](https://gitea.com/gitea/cli/actions/workflows/release-nightly.yml/badge.svg)
 
 ## The official CLI for Gitea
 
-Tea manages repositories, issues, pull requests, releases, and other Gitea resources
+gitea-cli manages repositories, issues, pull requests, releases, and other Gitea resources
 with explicit commands suitable for local development and CI.
 
 ```sh
-tea auth login --host https://gitea.example.org --with-token < token-file
-tea issue list --repo owner/repository
-tea pr view 123 --repo owner/repository --json
-tea alias set bugs 'issue list --label bug'
-tea help
+gt auth login --host https://gitea.example.org --with-token < token-file
+gt issue list --repo owner/repository
+gt pr view 123 --repo owner/repository --json
+gt alias set bugs 'issue list --label bug'
+gt help
 ```
 
-tea 1.0 is a breaking release: it requires Gitea 28 or newer, commands, flags and
+gt 1.0 is a breaking release: it requires Gitea 28 or newer, commands, flags and
 output formats changed, it uses separate `config.yml` and `hosts.yml` files, and it
 requires fresh authentication.
 Existing combined configuration files are left untouched; archive the old file or
-choose an isolated `TEA_CONFIG_DIR` before setup. See
-[Migrating to tea 1.0](docs/migration-1.0.md) for the old-to-new mapping.
-Run `tea --help` or `tea <command> --help` for supported commands and flags; the
+choose an isolated `GITEA_CLI_CONFIG_DIR` before setup.
+Run `gt --help` or `gt <command> --help` for supported commands and flags; the
 full reference, man pages, and shell completions ship in each release's docs archive.
 Credentials use the operating-system keyring by default; explicitly
 select `--credential-store file` when private file storage is needed. For CI,
-supply `GITEA_TOKEN` and its instance through `TEA_HOST` or `GITEA_INSTANCE_URL`;
+supply `GITEA_TOKEN` and its instance through `GITEA_CLI_HOST` or `GITEA_INSTANCE_URL`;
 environment credentials are never persisted.
 
 ## Installation
 
-There are different ways to get `tea`:
+There are different ways to get `gt`:
 
 1. Install via your system package manager:
     - macOS via `brew` (official):
       ```sh
-      brew install tea
+      brew install gt
       ```
-    - arch linux ([tea](https://archlinux.org/packages/extra/x86_64/tea/), thirdparty)
-    - alpine linux ([tea](https://pkgs.alpinelinux.org/packages?name=tea&branch=edge), thirdparty)
-    - Windows via `MSYS2` ([tea](https://packages.msys2.org/base/mingw-w64-tea), thirdparty)
+    - arch linux ([gt](https://archlinux.org/packages/extra/x86_64/gt/), thirdparty)
+    - alpine linux ([gt](https://pkgs.alpinelinux.org/packages?name=gt&branch=edge), thirdparty)
+    - Windows via `MSYS2` ([gt](https://packages.msys2.org/base/mingw-w64-gt), thirdparty)
 
-2. Use the prebuilt binaries from [dl.gitea.com](https://dl.gitea.com/tea/)
+2. Use the prebuilt binaries from [dl.gitea.com](https://dl.gitea.com/gitea-cli/)
 
 3. Install from source: [see *Compilation*](#compilation)
 
-4. Docker: [Tea at docker hub](https://hub.docker.com/r/gitea/tea)
+4. Docker: [gitea-cli at docker hub](https://hub.docker.com/r/gitea/gitea-cli)
 
-### Log in to Gitea from tea
+### Log in to Gitea from gt
 
 Gitea can use many different authentication schemes, and not every authentication method will work with every Gitea deployment. When you are a Gitea instance administrator you can tweak your settings to fit your use case. For the method that is most likely to work with any Gitea deployment use the following steps:
 
@@ -61,43 +60,43 @@ Gitea can use many different authentication schemes, and not every authenticatio
 
 3. In your "user settings", generate an application token with at least **user read** permissions. If you want to do anything useful with the token add additional permissions/scopes.
 
-4. Save the token in a private file and run `tea auth login --host https://your-instance --with-token < token-file`. Credentials use the operating-system keyring by default.
+4. Save the token in a private file and run `gt auth login --host https://your-instance --with-token < token-file`. Credentials use the operating-system keyring by default.
 
-You should now be logged in to your gitea instance from tea.
+You should now be logged in to your gitea instance from gt.
 
-Alternatively, `tea auth login --host https://your-instance --oauth` authorizes tea in your browser. OAuth may not be available on all Gitea deployments, and needs a browser on the machine running tea.
+Alternatively, `gt auth login --host https://your-instance --oauth` authorizes gt in your browser. OAuth may not be available on all Gitea deployments, and needs a browser on the machine running gt.
 
 ### Shell completion
 
-If you installed from source or the package does not provide the completions with it you can add them yourself with `tea completion <shell>` command. To generate the completions run one of the following commands depending on your shell.
+If you installed from source or the package does not provide the completions with it you can add them yourself with `gt completion <shell>` command. To generate the completions run one of the following commands depending on your shell.
 
 ```shell
 # .bashrc
-source <(tea completion bash)
+source <(gt completion bash)
 
 # .zshrc
-source <(tea completion zsh)
+source <(gt completion zsh)
 
 # fish
-tea completion fish > ~/.config/fish/completions/tea.fish
+gt completion fish > ~/.config/fish/completions/gt.fish
 
 # PowerShell profile
-tea completion powershell | Out-String | Invoke-Expression
+gt completion powershell | Out-String | Invoke-Expression
 ```
 
 ### Man Page
 
-The hidden command `tea man` can be used to generate the `tea` man page.
+The hidden command `gt man` can be used to generate the `gt` man page.
 
 ```shell
 # for bash or zsh
-man <(tea man)
+man <(gt man)
 
 # for fish
-man (tea man | psub)
+man (gt man | psub)
 
 # write man page to a file
-tea man --output-file ./tea.man
+gt man --output-file ./gt.man
 ```
 
 ## Compilation
@@ -106,8 +105,8 @@ Make sure you have a current Go version installed (1.27 or newer).
 
 - To compile the source yourself with the recommended flags & tags:
   ```sh
-  git clone https://gitea.com/gitea/tea.git # or: tea repo clone https://gitea.com/gitea/tea ;)
-  cd tea
+  git clone https://gitea.com/gitea/cli.git # or: gt repo clone https://gitea.com/gitea/cli ;)
+  cd cli
   make
   ```
   Note that GNU Make (gmake on OpenBSD) is required.
@@ -119,7 +118,7 @@ Make sure you have a current Go version installed (1.27 or newer).
 
 - For a quick installation without `git` & `make`, set $version and exec:
   ```sh
-  go install gitea.dev/tea@${version}
+  go install gitea.dev/cli@${version}
   ```
 
 ## Contributing

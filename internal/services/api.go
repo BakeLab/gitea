@@ -13,7 +13,7 @@ import (
 	"slices"
 	"strings"
 
-	"gitea.dev/tea/internal/transport"
+	"gitea.dev/cli/internal/transport"
 )
 
 // API provides the raw escape hatch while keeping credentials scoped to one instance.

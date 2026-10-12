@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // Team is an organization's access group and its permission policy.

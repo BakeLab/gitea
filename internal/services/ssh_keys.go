@@ -6,8 +6,8 @@ package services
 import (
 	"context"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
-	"gitea.dev/tea/internal/transport"
 )
 
 // SSHKey describes a public key attached to the selected account.

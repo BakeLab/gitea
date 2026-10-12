@@ -5,7 +5,7 @@ package services
 
 import gitea "gitea.dev/sdk"
 
-// convertAll maps SDK items onto tea results as a non-nil slice, skipping absent items.
+// convertAll maps SDK items onto gt results as a non-nil slice, skipping absent items.
 func convertAll[S, T any](items []*S, convert func(*S) T) []T {
 	result := make([]T, 0, len(items))
 	for _, item := range items {

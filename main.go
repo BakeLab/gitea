@@ -1,7 +1,7 @@
 // Copyright 2020 The Gitea Authors. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-// Tea is a scriptable command line tool for Gitea.
+// gitea-cli is a scriptable command line tool for Gitea.
 package main
 
 import (
@@ -12,8 +12,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"gitea.dev/tea/internal/app"
-	"gitea.dev/tea/internal/clierr"
+	"gitea.dev/cli/internal/app"
+	"gitea.dev/cli/internal/clierr"
 )
 
 func main() {

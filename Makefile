@@ -12,19 +12,19 @@ GOLANGCI_LINT_PACKAGE ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@
 
 ifneq ($(DRONE_TAG),)
 	VERSION ?= $(subst v,,$(DRONE_TAG))
-	TEA_VERSION ?= $(VERSION)
+	GITEA_CLI_VERSION ?= $(VERSION)
 else
 	ifneq ($(DRONE_BRANCH),)
 		VERSION ?= $(subst release/v,,$(DRONE_BRANCH))
 	else
 		VERSION ?= main
 	endif
-	TEA_VERSION ?= $(shell git describe --tags --always | sed 's/-/+/' | sed 's/^v//')
+	GITEA_CLI_VERSION ?= $(shell git describe --tags --match 'v*' --always | sed 's/-/+/' | sed 's/^v//')
 endif
-TEA_VERSION_TAG ?= $(shell sed 's/+/_/' <<< $(TEA_VERSION))
+GITEA_CLI_VERSION_TAG ?= $(shell sed 's/+/_/' <<< $(GITEA_CLI_VERSION))
 
 TAGS ?=
-LDFLAGS := -X "gitea.dev/tea/internal/version.Version=$(TEA_VERSION)" -X "gitea.dev/tea/internal/version.Tags=$(TAGS)" -s -w
+LDFLAGS := -X "gitea.dev/cli/internal/version.Version=$(GITEA_CLI_VERSION)" -X "gitea.dev/cli/internal/version.Tags=$(TAGS)" -s -w
 
 # override to allow passing additional goflags via make CLI
 override GOFLAGS := $(GOFLAGS) -tags '$(TAGS)' -ldflags '$(LDFLAGS)'
@@ -35,10 +35,10 @@ SOURCES ?= $(shell find . -name "*.go" -type f)
 
 # OS specific vars.
 ifeq ($(OS), Windows_NT)
-	EXECUTABLE := tea.exe
+	EXECUTABLE := gt.exe
 	VET_TOOL := gitea-vet.exe
 else
-	EXECUTABLE := tea
+	EXECUTABLE := gt
 	VET_TOOL := gitea-vet
 endif
 
@@ -88,7 +88,7 @@ docs:
 # Versioned docs archive for release uploads (references, man pages, completions).
 # Keep the artifact outside dist/: goreleaser requires dist/ empty after before hooks.
 # The .tar.xz suffix matches existing release/publisher/checksum ./**.xz globs.
-DOCS_ARCHIVE ?= tea-$(TEA_VERSION_TAG)-docs.tar.xz
+DOCS_ARCHIVE ?= gitea-cli-$(GITEA_CLI_VERSION_TAG)-docs.tar.xz
 
 .PHONY: docs-archive
 docs-archive: docs
@@ -106,13 +106,13 @@ install-docs: docs
 	install -d "$(DESTDIR)$(PREFIX)/share/man/man1"
 	install -m 644 docs/generated/man/*.1 "$(DESTDIR)$(PREFIX)/share/man/man1/"
 	install -d "$(DESTDIR)$(PREFIX)/share/bash-completion/completions"
-	install -m 644 docs/generated/completion/tea.bash "$(DESTDIR)$(PREFIX)/share/bash-completion/completions/tea"
+	install -m 644 docs/generated/completion/gt.bash "$(DESTDIR)$(PREFIX)/share/bash-completion/completions/gt"
 	install -d "$(DESTDIR)$(PREFIX)/share/zsh/site-functions"
-	install -m 644 docs/generated/completion/_tea "$(DESTDIR)$(PREFIX)/share/zsh/site-functions/_tea"
+	install -m 644 docs/generated/completion/_gt "$(DESTDIR)$(PREFIX)/share/zsh/site-functions/_gt"
 	install -d "$(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d"
-	install -m 644 docs/generated/completion/tea.fish "$(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d/tea.fish"
-	install -d "$(DESTDIR)$(PREFIX)/share/powershell/Modules/tea"
-	install -m 644 docs/generated/completion/tea.ps1 "$(DESTDIR)$(PREFIX)/share/powershell/Modules/tea/tea.ps1"
+	install -m 644 docs/generated/completion/gt.fish "$(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d/gt.fish"
+	install -d "$(DESTDIR)$(PREFIX)/share/powershell/Modules/gt"
+	install -m 644 docs/generated/completion/gt.ps1 "$(DESTDIR)$(PREFIX)/share/powershell/Modules/gt/gt.ps1"
 
 .PHONY: unit-test
 unit-test:
@@ -120,9 +120,9 @@ unit-test:
 
 .PHONY: integration-test
 integration-test:
-	@test -n "$$GITEA_TEA_TEST_URL" || { echo 'Set GITEA_TEA_TEST_URL to a disposable Gitea instance' >&2; exit 1; }
-	@test -r "$$GITEA_TEA_TEST_TOKEN_FILE" || { echo 'Set GITEA_TEA_TEST_TOKEN_FILE to a readable administrator token file' >&2; exit 1; }
-	@test -r "$$GITEA_TEA_TEST_REVIEWER_TOKEN_FILE" || { echo 'Set GITEA_TEA_TEST_REVIEWER_TOKEN_FILE to a readable reviewer token file' >&2; exit 1; }
+	@test -n "$$GITEA_CLI_TEST_URL" || { echo 'Set GITEA_CLI_TEST_URL to a disposable Gitea instance' >&2; exit 1; }
+	@test -r "$$GITEA_CLI_TEST_TOKEN_FILE" || { echo 'Set GITEA_CLI_TEST_TOKEN_FILE to a readable administrator token file' >&2; exit 1; }
+	@test -r "$$GITEA_CLI_TEST_REVIEWER_TOKEN_FILE" || { echo 'Set GITEA_CLI_TEST_REVIEWER_TOKEN_FILE to a readable reviewer token file' >&2; exit 1; }
 	$(GO) test -count=1 -race -run '^TestGitea' $(PACKAGES)
 
 .PHONY: test
@@ -157,4 +157,4 @@ $(EXECUTABLE): $(SOURCES)
 
 .PHONY: build-image
 build-image:
-	docker build --build-arg VERSION=$(TEA_VERSION) -t gitea/tea:$(TEA_VERSION_TAG) .
+	docker build --build-arg VERSION=$(GITEA_CLI_VERSION) -t gitea/gitea-cli:$(GITEA_CLI_VERSION_TAG) .

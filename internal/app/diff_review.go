@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	unidiff "gitea.com/noerw/unidiff-comments"
-	"gitea.dev/tea/internal/terminal"
+	"gitea.dev/cli/internal/terminal"
 )
 
 const diffReviewHelp = `# This is the current diff of PR #%d on %s.

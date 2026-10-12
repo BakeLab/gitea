@@ -1,7 +1,7 @@
 // Copyright 2026 The Gitea Authors. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-// cli-docs generates tea's reference, man pages and shell completions.
+// cli-docs generates gt's reference, man pages and shell completions.
 package main
 
 import (
@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitea.dev/tea/internal/app"
+	"gitea.dev/cli/internal/app"
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
 )
@@ -64,9 +64,9 @@ func generate(output string) error {
 			return err
 		}
 	}
-	// Date the pages like tea man; make docs sets SOURCE_DATE_EPOCH to the last commit.
+	// Date the pages like gt man; make docs sets SOURCE_DATE_EPOCH to the last commit.
 	date := app.ManualDate(os.Getenv)
-	header := &doc.GenManHeader{Title: "TEA", Section: "1", Date: &date, Source: "Tea", Manual: "Tea Manual"}
+	header := &doc.GenManHeader{Title: "GT", Section: "1", Date: &date, Source: "gitea-cli", Manual: "gitea-cli Manual"}
 	if err := doc.GenManTree(root, header, filepath.Join(output, "man")); err != nil {
 		return err
 	}
@@ -74,10 +74,10 @@ func generate(output string) error {
 		name  string
 		write func(io.Writer) error
 	}{
-		{"tea.bash", func(w io.Writer) error { return root.GenBashCompletionV2(w, true) }},
-		{"_tea", root.GenZshCompletion},
-		{"tea.fish", func(w io.Writer) error { return root.GenFishCompletion(w, true) }},
-		{"tea.ps1", root.GenPowerShellCompletionWithDesc},
+		{"gt.bash", func(w io.Writer) error { return root.GenBashCompletionV2(w, true) }},
+		{"_gt", root.GenZshCompletion},
+		{"gt.fish", func(w io.Writer) error { return root.GenFishCompletion(w, true) }},
+		{"gt.ps1", root.GenPowerShellCompletionWithDesc},
 	}
 	for _, completion := range completions {
 		if err := writeFile(filepath.Join(output, "completion", completion.name), completion.write); err != nil {
@@ -85,18 +85,18 @@ func generate(output string) error {
 		}
 	}
 	return os.WriteFile(filepath.Join(output, "README.md"), []byte(strings.TrimSpace(`
-# Tea command reference
+# gitea-cli command reference
 
 Generated from the Cobra command tree with `+"`make docs`"+`.
 These files describe the built-in commands and their supported flags.
 Personal aliases are expanded dynamically by the installed shell completions.
 
-- [Command reference](reference/tea.md)
-- Man pages: `+"`man/tea.1`"+` and one page per command
-- Bash: `+"`completion/tea.bash`"+`
-- Zsh: `+"`completion/_tea`"+`
-- Fish: `+"`completion/tea.fish`"+`
-- PowerShell: `+"`completion/tea.ps1`"+`
+- [Command reference](reference/gt.md)
+- Man pages: `+"`man/gt.1`"+` and one page per command
+- Bash: `+"`completion/gt.bash`"+`
+- Zsh: `+"`completion/_gt`"+`
+- Fish: `+"`completion/gt.fish`"+`
+- PowerShell: `+"`completion/gt.ps1`"+`
 `)+"\n"), 0o644)
 }
 

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.dev/tea/internal/services"
+	"gitea.dev/cli/internal/services"
 	"github.com/stretchr/testify/require"
 )
 
