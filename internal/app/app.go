@@ -5,6 +5,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"gitea.dev/cli/internal/transport"
 	"gitea.dev/cli/internal/version"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // Dependencies supplies external boundaries for a fresh CLI invocation.
@@ -97,34 +99,37 @@ func NewRoot(deps Dependencies) *cobra.Command {
 			return client(instance, token, insecure)
 		}
 	}
-	root := &cobra.Command{Use: "gt", Short: "Work with Gitea from your terminal", Version: version.Format(), SilenceErrors: true, SilenceUsage: true}
+	root := &cobra.Command{Use: "gt", Short: "Work with Gitea from your terminal", Long: "Work seamlessly with Gitea from the command line.", Version: version.Format(), SilenceErrors: true, SilenceUsage: true}
 	root.SetIn(deps.Streams.In)
 	root.SetOut(deps.Streams.Out)
 	root.SetErr(deps.Streams.ErrOut)
-	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return clierr.Wrap(clierr.Usage, err) })
+	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error { return clierr.Wrap(clierr.Usage, suggestFlags(cmd, err)) })
 	flags := root.PersistentFlags()
-	flags.StringVar(&a.options.host, "host", "", "Gitea instance URL, including any base path")
-	flags.StringVar(&a.options.user, "user", "", "Account on the selected instance")
-	flags.StringVar(&a.options.sudo, "sudo", "", "Perform API requests as this user (requires an administrator account)")
-	flags.StringVarP(&a.options.repo, "repo", "R", "", "Repository owner/name or URL")
-	flags.StringVar(&a.options.cwd, "cwd", "", "Working directory for repository discovery")
-	flags.StringVar(&a.options.remote, "remote", "", "Git remote used for repository discovery")
-	flags.StringVar(&a.options.json, "json", "", "Output JSON; optionally select comma-separated fields")
+	flags.StringVar(&a.options.host, "host", "", "Gitea instance `URL`, including any base path")
+	flags.StringVar(&a.options.user, "user", "", "Account `name` on the selected instance")
+	flags.StringVar(&a.options.sudo, "sudo", "", "Perform API requests as this `user` (requires an administrator account)")
+	flags.StringVarP(&a.options.repo, "repo", "R", "", "Select a repository as `OWNER/REPO` or URL")
+	flags.StringVar(&a.options.cwd, "cwd", "", "Working `directory` for repository discovery")
+	flags.StringVar(&a.options.remote, "remote", "", "Git `remote` used for repository discovery")
+	flags.StringVar(&a.options.json, "json", "", "Output JSON with the specified comma-separated `fields`, or all fields")
 	flags.Lookup("json").NoOptDefVal = "*"
-	flags.StringVar(&a.options.jq, "jq", "", "Filter JSON with a jq expression")
+	flags.StringVarP(&a.options.jq, "jq", "q", "", "Filter JSON output using a jq `expression`; implies --json")
 	flags.BoolVar(&a.options.noInput, "no-input", false, "Disable prompts and implicit editor/browser interactions")
 	flags.BoolVar(&a.options.interactive, "interactive", false, "Allow prompts with machine output")
-	flags.BoolVar(&a.options.yes, "yes", false, "Accept confirmations without prompting")
+	flags.BoolVarP(&a.options.yes, "yes", "y", false, "Accept confirmations without prompting")
 	flags.BoolVar(&a.options.debug, "debug", false, "Log the method, URL, status, and duration of each HTTP request to stderr")
+	_ = root.RegisterFlagCompletionFunc("host", a.completeHosts)
+	_ = root.RegisterFlagCompletionFunc("user", a.completeAccounts)
+	_ = root.RegisterFlagCompletionFunc("repo", a.completeRepos())
+	_ = root.RegisterFlagCompletionFunc("remote", a.completeRemotes)
+	_ = root.RegisterFlagCompletionFunc("cwd", completeDirectories)
+	_ = root.RegisterFlagCompletionFunc("json", completeJSONFields)
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
-		if reason := cmd.Annotations["gt.text"]; reason != "" && a.options.json != "" {
-			return clierr.Wrap(clierr.Usage, fmt.Errorf("%s; --json is not supported", reason))
+		if err := a.checkOutputFlags(cmd); err != nil {
+			return err
 		}
-		if flag := cmd.Flags().Lookup("web"); flag != nil && flag.Value.String() == "true" && (a.options.json != "" || a.options.jq != "") {
-			return clierr.Wrap(clierr.Usage, errors.New("--web cannot be combined with --json or --jq"))
-		}
-		if a.options.jq != "" && a.options.json == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--jq requires --json"))
+		if err := validateEnums(cmd); err != nil {
+			return err
 		}
 		if cmd.Flags().Changed("sudo") {
 			if a.options.sudo == "" || strings.IndexFunc(a.options.sudo, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
@@ -135,9 +140,6 @@ func NewRoot(deps Dependencies) *cobra.Command {
 					return clierr.Wrap(clierr.Usage, errors.New("--sudo cannot be used with auth commands"))
 				}
 			}
-		}
-		if err := terminal.ValidateOutput(a.options.json, a.options.jq, commandOutputFields(cmd)); err != nil {
-			return clierr.Wrap(clierr.Usage, err)
 		}
 		if offline(cmd) {
 			return nil
@@ -150,15 +152,129 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	}
 	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.labelCommand(), a.milestoneCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false))
 	root.AddCommand(a.manCommand())
-	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
+	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Example: "$ gt version", Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), version.Format())
 		return err
 	}})
+	root.AddCommand(helpTopics(flags)...)
+	root.SetHelpCommand(a.helpCommand())
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
+	completionInstallHelp(root)
 	root.SetVersionTemplate("{{.Version}}\n")
+	root.SetHelpFunc(a.writeHelp)
+	root.CompletionOptions.SetDefaultShellCompDirective(cobra.ShellCompDirectiveNoFileComp)
+	root.AddGroup(
+		&cobra.Group{ID: "core", Title: "Core commands"},
+		&cobra.Group{ID: "actions", Title: "Actions commands"},
+		&cobra.Group{ID: "additional", Title: "Additional commands"},
+		&cobra.Group{ID: "alias", Title: "Alias commands"},
+	)
+	for _, cmd := range root.Commands() {
+		if cmd.Annotations[topicAnnotation] == "" {
+			cmd.GroupID = cmp.Or(rootGroups[cmd.Name()], "additional")
+		}
+	}
 	rejectUnknownSubcommands(root)
+	addVerbAliases(root)
+	completeDefaults(root)
 	return root
+}
+
+// rootGroups places the core and Actions commands in their root help groups (D26); every other
+// command is additional.
+var rootGroups = map[string]string{
+	"auth": "core", "issue": "core", "org": "core", "pr": "core", "release": "core", "repo": "core",
+	"run": "actions", "secret": "actions", "variable": "actions", "workflow": "actions",
+}
+
+// verbAliases are the gh-style short names that every command with a common verb accepts (D6).
+// Commands add other gh verbs, such as new, co, add and get, to their own Aliases.
+var verbAliases = map[string]string{"list": "ls", "delete": "rm"}
+
+// addVerbAliases gives every list and delete command its short name.
+func addVerbAliases(cmd *cobra.Command) {
+	if alias, ok := verbAliases[cmd.Name()]; ok && cmd.HasParent() && !slices.Contains(cmd.Aliases, alias) {
+		cmd.Aliases = append(cmd.Aliases, alias)
+	}
+	for _, child := range cmd.Commands() {
+		addVerbAliases(child)
+	}
+}
+
+// flagAliases makes the flags of cmd accept each key of aliases as another name of the flag it maps
+// to, without showing it in help. Renamed flags keep their old names working this way, such as the
+// plural --add-labels after the singular gh name --add-label became primary (D8).
+func flagAliases(cmd *cobra.Command, aliases map[string]string) {
+	normalize := cmd.Flags().GetNormalizeFunc()
+	cmd.Flags().SetNormalizeFunc(func(flags *pflag.FlagSet, name string) pflag.NormalizedName {
+		if to, ok := aliases[name]; ok {
+			name = to
+		}
+		return normalize(flags, name)
+	})
+}
+
+// suggestFlags adds the flags of cmd with a similar name to an unknown flag error, as in
+// "unknown flag: --lable; did you mean --label?".
+func suggestFlags(cmd *cobra.Command, err error) error {
+	name, unknown := strings.CutPrefix(err.Error(), "unknown flag: --")
+	if !unknown || len(name) < 3 {
+		return err
+	}
+	var suggestions []string
+	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+		if !flag.Hidden && (strings.HasPrefix(flag.Name, name) || editDistance(name, flag.Name) <= 2) {
+			suggestions = append(suggestions, "--"+flag.Name)
+		}
+	})
+	if len(suggestions) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w; did you mean %s?", err, strings.Join(suggestions, " or "))
+}
+
+// editDistance counts the single-character insertions, deletions and substitutions that turn a into b.
+func editDistance(a, b string) int {
+	row := make([]int, len(b)+1)
+	for j := range row {
+		row[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		diagonal := row[0]
+		row[0] = i
+		for j := 1; j <= len(b); j++ {
+			substitution := diagonal
+			if a[i-1] != b[j-1] {
+				substitution++
+			}
+			diagonal = row[j]
+			row[j] = min(row[j]+1, row[j-1]+1, substitution)
+		}
+	}
+	return row[len(b)]
+}
+
+// checkOutputFlags validates --json and --jq before a command runs. --jq alone selects every field,
+// except on commands that filter their raw JSON themselves (annotation gt.rawjson).
+func (a *application) checkOutputFlags(cmd *cobra.Command) error {
+	selected := ""
+	switch {
+	case cmd.Flags().Changed("json"):
+		if a.options.json == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--json= needs field names; use --json alone for every field"))
+		}
+		selected = "--json"
+	case a.options.jq != "" && cmd.Annotations["gt.rawjson"] == "":
+		selected, a.options.json = "--jq", "*"
+	}
+	if reason := cmd.Annotations["gt.text"]; reason != "" && selected != "" {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s; %s is not supported", reason, selected))
+	}
+	if flag := cmd.Flags().Lookup("web"); flag != nil && flag.Value.String() == "true" && (a.options.json != "" || a.options.jq != "") {
+		return clierr.Wrap(clierr.Usage, errors.New("--web cannot be combined with --json or --jq"))
+	}
+	return clierr.Wrap(clierr.Usage, terminal.ValidateOutput(a.options.json, a.options.jq, commandOutputFields(cmd)))
 }
 
 // offline reports commands that must work without valid settings.
@@ -239,11 +355,14 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 			}
 			args = joinJSONFields(root, slices.Concat(args[:commandAt], expanded))
 		}
+		if completion {
+			args = completeJSONValue(args)
+		}
 	}
 	if loadErr == nil {
 		for name, expansion := range snapshot.Preferences.Aliases {
 			if aliases.Check(name, snapshot.Preferences.Aliases, names) == nil {
-				root.AddCommand(&cobra.Command{Use: name, Short: "Alias for " + expansion, Annotations: map[string]string{"gt.alias": "true"}, RunE: func(*cobra.Command, []string) error {
+				root.AddCommand(&cobra.Command{Use: name, Short: fmt.Sprintf("Alias for %q", expansion), GroupID: "alias", Annotations: map[string]string{"gt.alias": "true"}, RunE: func(*cobra.Command, []string) error {
 					return clierr.Wrap(clierr.Usage, errors.New("alias must be expanded before execution"))
 				}})
 			}
@@ -257,11 +376,13 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 	return err
 }
 
-var jsonFieldList = regexp.MustCompile(`^[a-z_]+(,[a-z_]+)*$`)
+var jsonFieldList = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(,[A-Za-z][A-Za-z0-9_]*)*$`)
 
-// joinJSONFields accepts `--json number,title` like `--json=number,title` unless the selected command
-// does not output those fields, in which case the word stays a positional argument. A bare --json
-// still selects every field. Unknown commands, such as aliases before expansion, are joined.
+// joinJSONFields accepts `--json number,title` like `--json=number,title`. A field-shaped word after a
+// bare --json stays a positional argument only when the selected command does not output those fields
+// and accepts the word as an argument, so a misspelled field reports the available fields rather than
+// an argument count. A bare --json still selects every field. Unknown commands, such as aliases before
+// expansion, are joined.
 func joinJSONFields(root *cobra.Command, args []string) []string {
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--" {
@@ -271,12 +392,19 @@ func joinJSONFields(root *cobra.Command, args []string) []string {
 			continue
 		}
 		cmd, _, err := root.Find(slices.Concat(args[:i+1], args[i+2:]))
-		if err == nil && terminal.ValidateOutput(args[i+1], "", commandOutputFields(cmd)) != nil {
+		if err == nil && terminal.ValidateOutput(args[i+1], "", commandOutputFields(cmd)) != nil && acceptsArgs(args) {
 			continue
 		}
 		args = slices.Concat(args[:i], []string{"--json=" + args[i+1]}, args[i+2:])
 	}
 	return args
+}
+
+// acceptsArgs reports whether the command that args select accepts their positional arguments. It
+// parses a separate command tree, because parsing sets the flags of the one that runs.
+func acceptsArgs(args []string) bool {
+	cmd, rest, err := NewRoot(Dependencies{}).Find(args)
+	return err == nil && cmd.ParseFlags(rest) == nil && cmd.ValidateArgs(cmd.Flags().Args()) == nil
 }
 
 // confirm asks for confirmation under the prompt policy unless --yes was supplied.
@@ -364,6 +492,12 @@ func commandIndex(root *cobra.Command, args []string) int {
 	return len(args)
 }
 
+// configKeys are the preferences, instance settings and account settings that config get reads.
+var configKeys = []string{
+	"browser", "color", "default_host", "editor", "git_protocol", "insecure", "oauth_client_id", "pager", "prompt",
+	"remote", "ssh_agent", "ssh_certificate_principal", "ssh_host", "ssh_key", "ssh_key_fingerprint", "version",
+}
+
 func commandOutputFields(cmd *cobra.Command) []string {
 	if cmd.Name() == "status" && cmd.Parent() != nil {
 		if cmd.Parent().Name() == "pr" {
@@ -389,11 +523,7 @@ func commandOutputFields(cmd *cobra.Command) []string {
 		}
 	case "config":
 		if cmd.Name() == "get" || cmd.Name() == "list" {
-			return []string{
-				"version", "default_host", "git_protocol", "editor", "prompt", "pager", "browser", "color", "remote",
-				"ssh_host", "insecure", "oauth_client_id",
-				"ssh_key", "ssh_agent", "ssh_certificate_principal", "ssh_key_fingerprint",
-			}
+			return configKeys
 		}
 	case "gt":
 		if cmd.Name() == "doctor" {
@@ -483,7 +613,7 @@ func commandOutputFields(cmd *cobra.Command) []string {
 	return nil
 }
 
-// jsonFields lists the JSON names of T's fields, which --json can select.
+// jsonFields lists the JSON names of T's fields, which --json can select, in alphabetical order.
 func jsonFields[T any]() []string {
 	t := reflect.TypeFor[T]()
 	fields := make([]string, 0, t.NumField())
@@ -492,5 +622,6 @@ func jsonFields[T any]() []string {
 			fields = append(fields, name)
 		}
 	}
+	slices.Sort(fields)
 	return fields
 }

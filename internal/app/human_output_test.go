@@ -93,7 +93,7 @@ func TestIssueViewJSONDoesNotPage(t *testing.T) {
 	deps, out, _, pager := pagedDeps(t, server.URL, map[string]string{"PAGER": "fake-pager"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "view", "7", "-R", "alice/project", "--json=number,title", "--no-input"}))
 	require.Zero(t, pager.calls)
-	require.JSONEq(t, `{"number":7,"title":"Title"}`, out.String())
+	require.JSONEq(t, `{"number":7,"title":"Title"}`, withoutANSI(out.String()))
 }
 
 func TestConfiguredPagerOverridesPagerEnvironment(t *testing.T) {
@@ -121,10 +121,10 @@ func TestTeaPagerAndColorEnvironmentOverrides(t *testing.T) {
 	require.Contains(t, pager.input, "\x1b[38;5;196mbug\x1b[0m")
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "pager", "--show-source", "--json"}))
-	require.JSONEq(t, `{"pager":{"value":"gt-pager","source":"GITEA_CLI_PAGER"}}`, out.String())
+	require.JSONEq(t, `{"pager":{"value":"gt-pager","source":"GITEA_CLI_PAGER"}}`, withoutANSI(out.String()))
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "color", "--show-source", "--json"}))
-	require.JSONEq(t, `{"color":{"value":"always","source":"GITEA_CLI_COLOR"}}`, out.String())
+	require.JSONEq(t, `{"color":{"value":"always","source":"GITEA_CLI_COLOR"}}`, withoutANSI(out.String()))
 }
 
 func TestColorAutoUsesStdoutTTY(t *testing.T) {
@@ -308,7 +308,7 @@ func TestWriteTable(t *testing.T) {
 		},
 		{name: "empty message on a terminal", tty: true, page: listPage{Number: 1}, stderr: "no open issues in alice/x\n"},
 		{name: "nothing when empty and piped", page: listPage{Number: 1}},
-		{name: "JSON", tty: true, json: "number", items: items[:1], page: listPage{Number: 1, More: true}, out: `[{"number":12}]` + "\n"},
+		{name: "JSON", tty: true, json: "number", items: items[:1], page: listPage{Number: 1, More: true}, out: "[\n  {\n    \"number\": 12\n  }\n]\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, out, diagnostics := testDeps(t)
@@ -336,7 +336,7 @@ func TestWriteView(t *testing.T) {
 	}{
 		{name: "terminal", tty: true, want: "Login fails #1\nOpen • alice opened about 2 hours ago\n\nSteps\n\nView this issue on Gitea: https://example.org/1\n"},
 		{name: "piped", want: "title:\tLogin fails\nurl:\thttps://example.org/1\n--\nSteps\n"},
-		{name: "JSON", tty: true, json: "title", want: `{"title":"Login fails"}` + "\n"},
+		{name: "JSON", tty: true, json: "title", want: "{\n  \"title\": \"Login fails\"\n}\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, out, _ := testDeps(t)
@@ -363,7 +363,7 @@ func TestMutationFeedback(t *testing.T) {
 			deps.Streams.OutTTY = tc.tty
 			deps.Getenv = envFunc(map[string]string{"NO_COLOR": "1"})
 			a, cmd := outputApplication(deps, tc.json)
-			ref := issueRef("alice/x", 12, "Fix\x1b[2J login")
+			ref := refLabel("alice/x", 12, "Fix\x1b[2J login")
 			a.done(cmd, "Created issue %s", ref)
 			a.warn(cmd, "Issue %s is already closed", ref)
 			require.NoError(t, a.printURL(cmd, "https://example.org/12"))
@@ -387,7 +387,7 @@ func TestBatchDoneReportsEachSuccess(t *testing.T) {
 		return listed{Number: n, Title: fmt.Sprintf("Issue %d", n)}, nil
 	}
 	label := func(n int64) string { return fmt.Sprintf("#%d", n) }
-	report := func(item listed) string { return "Closed issue " + issueRef("alice/x", item.Number, item.Title) }
+	report := func(item listed) string { return "Closed issue " + refLabel("alice/x", item.Number, item.Title) }
 	for _, tc := range []struct {
 		name, json, out, stderr string
 		tty                     bool

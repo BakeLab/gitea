@@ -68,13 +68,14 @@ Alternatively, `gt auth login --host https://your-instance --oauth` authorizes g
 
 ### Shell completion
 
-If you installed from source or the package does not provide the completions with it you can add them yourself with `gt completion <shell>` command. To generate the completions run one of the following commands depending on your shell.
+If you installed from source or the package does not provide the completions with it you can add them yourself with `gt completion <shell>` command. Completion offers commands, flags, flag values such as `--state` and `--json` fields, and values from your instance such as repositories. Add the line for your shell to its startup file:
 
 ```shell
-# .bashrc
-source <(gt completion bash)
+# ~/.bashrc (on macOS, ~/.bash_profile)
+eval "$(gt completion bash)"
 
-# .zshrc
+# ~/.zshrc, after compinit
+autoload -U compinit && compinit
 source <(gt completion zsh)
 
 # fish
@@ -83,6 +84,8 @@ gt completion fish > ~/.config/fish/completions/gt.fish
 # PowerShell profile
 gt completion powershell | Out-String | Invoke-Expression
 ```
+
+The bash script needs the bash-completion package. On macOS, install `bash-completion` with Homebrew for the system bash 3.2 (or `bash-completion@2` for a Homebrew bash 4.2+), and use `eval` as above: bash 3.2 cannot `source <(...)`. Without `compinit`, zsh reports `command not found: compdef`. `gt completion <shell> --help` shows these steps and how to install the script system-wide.
 
 ### Man Page
 

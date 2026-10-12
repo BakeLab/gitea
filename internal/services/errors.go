@@ -58,6 +58,7 @@ const (
 	ReasonNoChanges = "no changes"        // the head branch has no commits the base lacks
 	ReasonDisabled  = "disabled"          // the workflow is disabled
 	ReasonCompleted = "completed"         // the run already finished
+	ReasonNotDone   = "not done"          // the run has not finished yet
 	ReasonKeyInUse  = "key in use"        // the SSH key is registered already
 	ReasonOwnsRepos = "owns repositories" // the user still owns repositories
 )
@@ -98,6 +99,8 @@ func (e *ConflictError) Error() string {
 		text = cmp.Or(subject, "the workflow") + " is disabled"
 	case ReasonCompleted:
 		text = cmp.Or(subject, "the run") + " is already completed"
+	case ReasonNotDone:
+		text = cmp.Or(subject, "the run") + " has not finished"
 	case ReasonKeyInUse:
 		text = "this SSH key is already registered"
 	case ReasonOwnsRepos:
@@ -138,13 +141,14 @@ var refusals = []struct {
 	statuses  []int
 	fragments []string
 }{
-	{ReasonArchived, nil, []string{"is archived"}},
+	{ReasonArchived, nil, []string{"repo is archived", "repository is archived", "> is archived"}},
 	{ReasonMerged, nil, []string{"already merged"}},
 	{ReasonDraft, []int{http.StatusMethodNotAllowed}, []string{"work in progress", "draft"}},
 	{ReasonOwnReview, nil, []string{"approve your own pull", "reject your own pull"}},
 	{ReasonNoChanges, nil, []string{"no changes between the head and the base"}},
 	{ReasonDisabled, nil, []string{"workflow is disabled"}},
 	{ReasonCompleted, nil, []string{"already completed"}},
+	{ReasonNotDone, []int{http.StatusBadRequest}, []string{"not done"}},
 	{ReasonKeyInUse, nil, []string{"key content has been used"}},
 	{ReasonOwnsRepos, nil, []string{"ownership of repositories"}},
 	{ReasonExists, []int{http.StatusBadRequest, http.StatusConflict, http.StatusUnprocessableEntity}, []string{"already exist", "release is has no tag"}},
@@ -337,16 +341,24 @@ func instanceResource(parts []string) Resource {
 		return Resource{Kind: "member", Key: strconv.Quote(at(3)), Scope: at(1)}
 	case at(0) == "orgs" && at(1) != "" && at(2) == "repos":
 		return Resource{Kind: "organization", Key: strconv.Quote(at(1)), Collection: "repository"}
+	case at(0) == "orgs" && at(1) != "" && at(2) == "teams":
+		return Resource{Kind: "organization", Key: strconv.Quote(at(1)), Collection: "team"}
 	case at(0) == "orgs" && at(1) != "":
 		return Resource{Kind: "organization", Key: strconv.Quote(at(1))}
+	case at(0) == "orgs":
+		return Resource{Collection: "organization"}
 	case at(0) == "users" && at(1) != "":
 		return Resource{Kind: "user", Key: strconv.Quote(at(1))}
 	case at(0) == "admin" && at(1) == "users" && at(2) != "":
 		return Resource{Kind: "user", Key: strconv.Quote(at(2))}
+	case at(0) == "admin" && at(1) == "users":
+		return Resource{Collection: "user"}
 	case at(0) == "teams" && isNumber(at(1)):
 		return Resource{Kind: "team", Key: at(1)}
 	case at(0) == "user" && at(1) == "keys" && at(2) != "":
 		return Resource{Kind: "SSH key", Key: at(2)}
+	case at(0) == "user" && at(1) == "keys":
+		return Resource{Collection: "SSH key"}
 	case at(0) == "user" && at(1) == "repos":
 		return Resource{Collection: "repository"}
 	case at(0) == "notifications" && at(1) == "threads" && at(2) != "":

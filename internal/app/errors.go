@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"syscall"
 	"time"
@@ -186,6 +187,10 @@ func conflictHint(ctx context.Context, apiErr *transport.APIError, conflict *ser
 		if conflict.Key != "" {
 			return "enable it with: gt workflow enable " + conflict.Key
 		}
+	case services.ReasonNotDone:
+		if conflict.Kind == "run" && conflict.Key != "" {
+			return "cancel it first: gt run cancel " + conflict.Key
+		}
 	case services.ReasonOwnsRepos:
 		return "transfer or delete them first"
 	}
@@ -202,7 +207,7 @@ func existsHint(ctx context.Context, apiErr *transport.APIError, conflict *servi
 		var pull struct {
 			URL string `json:"html_url"`
 		}
-		if apiErr.Lookup(ctx, "repos/"+conflict.Scope+"/pulls/"+base+"/"+head, &pull) == http.StatusOK && pull.URL != "" {
+		if apiErr.Lookup(ctx, "repos/"+conflict.Scope+"/pulls/"+url.PathEscape(base)+"/"+url.PathEscape(head), &pull) == http.StatusOK && pull.URL != "" {
 			return "see " + pull.URL
 		}
 	case "wiki page":

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,6 +74,28 @@ func TestExplainNamesResourcesAndTellsWhyRepositoriesFail(t *testing.T) {
 			require.EqualError(t, explained, tc.want)
 			require.Equal(t, clierr.ExitCode(err), clierr.ExitCode(explained))
 		})
+	}
+}
+
+func TestExplainAddsTheNextStepToRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		method, endpoint, message string
+		status                    int
+		want                      string
+	}{
+		{"PATCH", "/api/v1/repos/alice/x/pulls/3", "cannot change state of this pull request, it was already merged", 412, "pull request #3 is already merged; its state can no longer change"},
+		{"POST", "/api/v1/repos/alice/x/pulls/3/merge", "The PR is already merged", 405, "pull request #3 is already merged"},
+		{"POST", "/api/v1/repos/alice/x/pulls/5/merge", "Work in progress PRs cannot be merged", 405, "pull request #5 is a draft; mark it ready with: gt pr edit 5 --ready"},
+		{"POST", "/api/v1/repos/alice/x/pulls/1/reviews", "approve your own pull is not allowed", 422, "you can't approve or request changes on your own pull request; leave a comment instead"},
+		{"POST", "/api/v1/repos/alice/x/pulls", "Invalid PullRequest: There are no changes between the head and the base", 422, "no commits between the base and head branches; check out your feature branch or pass --head"},
+		{"POST", "/api/v1/repos/alice/x/actions/workflows/nightly.yaml/dispatches", "workflow is disabled", 403, "workflow nightly.yaml is disabled; enable it with: gt workflow enable nightly.yaml"},
+		{"DELETE", "/api/v1/repos/alice/x/actions/runs/37", "this workflow run is not done", 400, "run 37 has not finished; cancel it first: gt run cancel 37"},
+		{"POST", "/api/v1/repos/alice/x/wiki/new", "wiki page already exists [title: Home.md]", 400, `wiki page "Home" already exists in alice/x; edit it with: gt wiki edit "Home"`},
+		{"DELETE", "/api/v1/admin/users/uxadm1", "user still has ownership of repositories [uid: 7]", 422, `user "uxadm1" still owns repositories; transfer or delete them first`},
+		{"POST", "/api/v1/user/keys", "Key content has been used as non-deploy key", 422, "this SSH key is already registered"},
+	} {
+		apiErr := &transport.APIError{Status: tc.status, Method: tc.method, Endpoint: tc.endpoint, Message: tc.message, Instance: "http://localhost:3001"}
+		require.EqualError(t, Explain(context.Background(), Dependencies{}, apiErr), tc.want, tc.endpoint)
 	}
 }
 

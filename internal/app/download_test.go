@@ -10,8 +10,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +23,19 @@ type failingDownload struct{}
 
 func (failingDownload) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 
-func TestDownloadsPublishOnlyCompletePrivateFiles(t *testing.T) {
+// umaskMode returns the mode the umask leaves of 0666, as for files a shell creates.
+func umaskMode(t *testing.T) os.FileMode {
+	t.Helper()
+	probe := filepath.Join(t.TempDir(), "probe")
+	file, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY, 0o666)
+	require.NoError(t, err)
+	require.NoError(t, file.Close())
+	info, err := os.Stat(probe)
+	require.NoError(t, err)
+	return info.Mode().Perm()
+}
+
+func TestDownloadsPublishOnlyCompleteFiles(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 	var stdout bytes.Buffer
@@ -38,7 +53,7 @@ func TestDownloadsPublishOnlyCompletePrivateFiles(t *testing.T) {
 	require.NoError(t, writeDownload(cmd, bytes.NewBufferString("archive"), output))
 	info, err := os.Stat(output)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	require.Equal(t, umaskMode(t), info.Mode().Perm(), "downloads are not private files")
 	require.ErrorContains(t, writeDownload(cmd, bytes.NewBufferString("replacement"), output), "already exists")
 	data, err := os.ReadFile(output)
 	require.NoError(t, err)
@@ -46,4 +61,121 @@ func TestDownloadsPublishOnlyCompletePrivateFiles(t *testing.T) {
 	entries, err = os.ReadDir(directory)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
+
+	private := filepath.Join(directory, "response.json")
+	require.NoError(t, writeOutput(cmd, private, func(w io.Writer) error { _, err := io.WriteString(w, "{}"); return err }))
+	info, err = os.Stat(private)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "API responses stay private")
+}
+
+func TestDownloadDestinations(t *testing.T) {
+	work := t.TempDir()
+	t.Chdir(work)
+	require.NoError(t, os.Mkdir("dl", 0o755))
+	require.NoError(t, os.WriteFile("existing.txt", []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join("dl", "existing.txt"), []byte("old"), 0o644))
+	for _, tc := range []struct {
+		name  string
+		flags downloadFlags
+		file  string
+		want  string
+		skip  bool
+		err   string
+	}{
+		{name: "default name", file: "notes.txt", want: "notes.txt"},
+		{name: "--dir", flags: downloadFlags{dir: "dl"}, file: "notes.txt", want: filepath.Join("dl", "notes.txt")},
+		{name: "--output file", flags: downloadFlags{output: "renamed.txt"}, file: "notes.txt", want: "renamed.txt"},
+		{name: "--output directory", flags: downloadFlags{output: "dl"}, file: "notes.txt", want: filepath.Join("dl", "notes.txt")},
+		{name: "--output directory with slash", flags: downloadFlags{output: "dl/"}, file: "notes.txt", want: filepath.Join("dl", "notes.txt")},
+		{name: "stdout", flags: downloadFlags{output: "-"}, file: "notes.txt", want: "-"},
+		{name: "existing", file: "existing.txt", err: "existing.txt already exists; pass --clobber to replace it or --skip-existing to keep it"},
+		{name: "existing in --dir", flags: downloadFlags{dir: "dl"}, file: "existing.txt", err: filepath.Join("dl", "existing.txt") + " already exists"},
+		{name: "--clobber", flags: downloadFlags{clobber: true}, file: "existing.txt", want: "existing.txt"},
+		{name: "--skip-existing", flags: downloadFlags{skipExisting: true}, file: "existing.txt", want: "existing.txt", skip: true},
+		{name: "--skip-existing new file", flags: downloadFlags{skipExisting: true}, file: "notes.txt", want: "notes.txt"},
+		{name: "parent directory name", file: "../escape.txt", err: `cannot use "../escape.txt" as a file name; pass --output`},
+		{name: "nested name", file: "a/b.txt", err: "cannot use"},
+		{name: "dot dot", file: "..", err: "cannot use"},
+		{name: "--output and --dir", flags: downloadFlags{output: "x", dir: "dl"}, file: "notes.txt", err: "--output and --dir cannot be combined"},
+		{name: "--clobber and --skip-existing", flags: downloadFlags{clobber: true, skipExisting: true}, file: "notes.txt", err: "--clobber and --skip-existing cannot be combined"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, skip, err := tc.flags.destination(tc.file)
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+				require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, path)
+			require.Equal(t, tc.skip, skip)
+		})
+	}
+}
+
+func TestDownloadClobberReplacesTheFileCompletely(t *testing.T) {
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.WriteFile("asset.bin", []byte("old"), 0o600))
+	deps, _, _ := testDeps(t)
+	a := &application{deps: deps}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	flags := downloadFlags{clobber: true}
+	path, _, err := flags.destination("asset.bin")
+	require.NoError(t, err)
+	require.NoError(t, a.download(cmd, flags, path, strings.NewReader("new")))
+	data, err := os.ReadFile("asset.bin")
+	require.NoError(t, err)
+	require.Equal(t, "new", string(data))
+	info, err := os.Stat("asset.bin")
+	require.NoError(t, err)
+	require.Equal(t, umaskMode(t), info.Mode().Perm())
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "no temporary file is left behind")
+}
+
+func TestDownloadsToATerminalRefuseBinaryData(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+		tty              bool
+		err              string
+	}{
+		{name: "piped binary stays byte exact", body: "PK\x03\x04\x00\x01", want: "PK\x03\x04\x00\x01"},
+		{name: "terminal text", body: "hello\nworld\n", want: "hello\nworld\n", tty: true},
+		{name: "terminal text loses escapes", body: "title\x1b]0;PWNED\x07\n", want: "title]0;PWNED\n", tty: true},
+		{name: "terminal binary", body: "PK\x03\x04\x00\x01", tty: true, err: "refusing to write binary data to the terminal"},
+		{name: "terminal invalid UTF-8", body: "abc\xff\xfedef", tty: true, err: "refusing to write binary data"},
+		{name: "terminal UTF-8 cut at the sniff boundary", body: strings.Repeat("a", binarySniffLength-1) + "é", want: strings.Repeat("a", binarySniffLength-1) + "é", tty: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, out, _ := testDeps(t)
+			deps.Streams = terminal.Streams{Out: out, OutTTY: tc.tty}
+			a := &application{deps: deps}
+			cmd := &cobra.Command{}
+			cmd.SetContext(context.Background())
+			cmd.SetOut(out)
+			err := a.download(cmd, downloadFlags{output: "-"}, "-", strings.NewReader(tc.body))
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+				require.Empty(t, out.String())
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, out.String())
+		})
+	}
+}
+
+func TestDownloadFlagsRegisterGhNames(t *testing.T) {
+	var flags downloadFlags
+	cmd := &cobra.Command{}
+	flags.register(cmd)
+	require.NoError(t, cmd.Flags().Parse([]string{"-O", "file", "--clobber"}))
+	require.Equal(t, downloadFlags{output: "file", clobber: true}, flags)
+	require.NoError(t, cmd.Flags().Parse([]string{"--output-file", "legacy", "-D", "dir", "--skip-existing"}))
+	require.Equal(t, "legacy", flags.output)
+	require.Equal(t, "dir", flags.dir)
+	require.True(t, cmd.Flags().Lookup("output-file").Hidden)
 }

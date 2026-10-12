@@ -197,7 +197,7 @@ func verifyIssueAttachmentLifecycle(t *testing.T, deps Dependencies, group, repo
 	require.Equal(t, "Disposable attachment content\n", string(content))
 	info, err := os.Stat(downloaded)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	require.Equal(t, umaskMode(t), info.Mode().Perm())
 	deleted := false
 	defer func() {
 		if !deleted {

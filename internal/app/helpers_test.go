@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -290,4 +291,11 @@ func selectablesHandler(t *testing.T, push bool, next http.HandlerFunc) http.Han
 			next(w, r)
 		}
 	}
+}
+
+var ansiSequence = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// withoutANSI drops SGR color sequences, such as those in pretty JSON on a terminal.
+func withoutANSI(s string) string {
+	return ansiSequence.ReplaceAllString(s, "")
 }

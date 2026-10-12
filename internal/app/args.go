@@ -295,10 +295,11 @@ func argumentName(cmd *cobra.Command, argument string) string {
 	if group == cmd {
 		return text
 	}
-	if noun := group.Name(); noun == "pr" {
-		return "pull request " + text
+	noun := group.Name()
+	if noun == "pr" {
+		noun = "pull request"
 	}
-	return group.Name() + " " + text
+	return noun + " " + text
 }
 
 // localFlagsChanged reports whether any command-specific flag was supplied.

@@ -1,0 +1,687 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"maps"
+	"net/http"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
+	"gitea.dev/cli/internal/transport"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+)
+
+const (
+	// completionLimit caps how many values an instance completer fetches and offers.
+	completionLimit = 50
+	// completionTimeout bounds the Git and API calls behind one completion.
+	completionTimeout = 2 * time.Second
+	// enumAnnotation holds the values of an enum flag, which validation and completion share.
+	enumAnnotation = "gt.enum"
+)
+
+// enumFlag registers a string flag that accepts one of values, case-insensitively, completes them,
+// and lists them in its usage, as in "Filter by state {open|closed|all}".
+func enumFlag(cmd *cobra.Command, p *string, name, shorthand, value, usage string, values ...string) {
+	cmd.Flags().StringVarP(p, name, shorthand, value, usage+" {"+strings.Join(values, "|")+"}")
+	enumValues(cmd, name, values...)
+}
+
+// enumValues restricts the values of the existing flag name, so that validation and completion share
+// one list. A slice flag accepts and completes comma-separated values.
+func enumValues(cmd *cobra.Command, name string, values ...string) {
+	_ = cmd.Flags().SetAnnotation(name, enumAnnotation, values)
+	complete := completeValues(values...)
+	if _, ok := cmd.Flags().Lookup(name).Value.(pflag.SliceValue); ok {
+		complete = commaSeparated(complete)
+	}
+	_ = cmd.RegisterFlagCompletionFunc(name, complete)
+}
+
+// validateEnums rejects enum flag values outside their lists and stores the listed spelling of each
+// value, so that values match case-insensitively.
+func validateEnums(cmd *cobra.Command) error {
+	var err error
+	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+		allowed := flag.Annotations[enumAnnotation]
+		if err != nil || allowed == nil || !flag.Changed {
+			return
+		}
+		slice, isSlice := flag.Value.(pflag.SliceValue)
+		given := []string{flag.Value.String()}
+		if isSlice {
+			given = slice.GetSlice()
+		}
+		for i, value := range given {
+			at := slices.IndexFunc(allowed, func(v string) bool { return strings.EqualFold(v, strings.TrimSpace(value)) })
+			if at < 0 {
+				err = oneOf(flag.Name, value, allowed...)
+				return
+			}
+			given[i] = allowed[at]
+		}
+		if isSlice {
+			err = slice.Replace(given)
+		} else {
+			err = flag.Value.Set(given[0])
+		}
+	})
+	return err
+}
+
+// completeValues completes the given values.
+func completeValues(values ...string) cobra.CompletionFunc {
+	return func(_ *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		return matching(values, toComplete), cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+// matching keeps the candidates whose value starts with prefix, at most completionLimit of them.
+func matching(candidates []cobra.Completion, prefix string) []cobra.Completion {
+	result := []cobra.Completion{}
+	for _, candidate := range candidates {
+		if value, _, _ := strings.Cut(candidate, "\t"); strings.HasPrefix(value, prefix) {
+			result = append(result, candidate)
+			if len(result) == completionLimit {
+				break
+			}
+		}
+	}
+	return result
+}
+
+// commaSeparated completes the last entry of a comma-separated value with complete, without offering
+// entries that are already given, and keeps the cursor after it so that another comma can follow.
+func commaSeparated(complete cobra.CompletionFunc) cobra.CompletionFunc {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		done := toComplete[:strings.LastIndexByte(toComplete, ',')+1]
+		given := strings.Split(done, ",")
+		values, directive := complete(cmd, args, toComplete[len(done):])
+		result := make([]cobra.Completion, 0, len(values))
+		for _, value := range values {
+			if name, _, _ := strings.Cut(value, "\t"); !slices.Contains(given, name) {
+				result = append(result, done+value)
+			}
+		}
+		return result, directive | cobra.ShellCompDirectiveNoSpace
+	}
+}
+
+// mergeCompletions offers the candidates of every completer in order, each value once.
+func mergeCompletions(completers ...cobra.CompletionFunc) cobra.CompletionFunc {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		result, seen := []cobra.Completion{}, map[string]bool{}
+		for _, complete := range completers {
+			values, _ := complete(cmd, args, toComplete)
+			for _, value := range values {
+				if name, _, _ := strings.Cut(value, "\t"); !seen[name] {
+					seen[name] = true
+					result = append(result, value)
+				}
+			}
+		}
+		return matching(result, toComplete), cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+// completeJSONFields completes the comma-separated fields that --json can select for the command.
+var completeJSONFields = commaSeparated(func(cmd *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	if cmd.Annotations["gt.text"] != "" || cmd.Annotations["gt.group"] != "" {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return matching(commandOutputFields(cmd), toComplete), cobra.ShellCompDirectiveNoFileComp
+})
+
+// completeJSONValue completes the word after a bare --json as its fields. Without this, cobra completes
+// that word as a positional argument, because the value of --json is optional.
+func completeJSONValue(args []string) []string {
+	if n := len(args); n >= 2 && args[n-2] == "--json" && !strings.HasPrefix(args[n-1], "-") {
+		return slices.Concat(args[:n-2], []string{"--json=" + args[n-1]})
+	}
+	return args
+}
+
+// describe turns items into completion candidates, each a value with a one-line description. Server
+// text cannot drive the terminal: values with control characters are skipped, descriptions sanitized.
+func describe[T any](items []T, candidate func(T) (value, description string)) []cobra.Completion {
+	result := make([]cobra.Completion, 0, len(items))
+	for _, item := range items {
+		value, description := candidate(item)
+		if value == "" || terminal.SafeLine(value) != value {
+			continue
+		}
+		if description = strings.Join(strings.Fields(terminal.SafeLine(description)), " "); description != "" {
+			value = cobra.CompletionWithDesc(value, description)
+		}
+		result = append(result, value)
+	}
+	return result
+}
+
+// completionContext bounds the work behind one completion.
+func completionContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(cmd.Context(), completionTimeout)
+}
+
+// completeHosts completes the configured instances with their accounts.
+func (a *application) completeHosts(_ *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	snapshot, err := a.deps.Settings.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	hosts := slices.Sorted(maps.Keys(snapshot.Hosts.Hosts))
+	return matching(describe(hosts, func(host string) (string, string) {
+		return host, strings.Join(slices.Sorted(maps.Keys(snapshot.Hosts.Hosts[host].Users)), ", ")
+	}), toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeAccounts completes the accounts of the selected instance, or of every instance when
+// none is selected.
+func (a *application) completeAccounts(cmd *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	ctx, cancel := completionContext(cmd)
+	defer cancel()
+	snapshot, err := a.deps.Settings.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	hosts := snapshot.Hosts.Hosts
+	if t, err := a.resolveTarget(ctx, false, false); err == nil {
+		hosts = map[string]settings.Host{t.Host: hosts[t.Host]}
+	}
+	accounts := []cobra.Completion{}
+	for _, host := range slices.Sorted(maps.Keys(hosts)) {
+		accounts = append(accounts, describe(slices.Sorted(maps.Keys(hosts[host].Users)), func(user string) (string, string) {
+			if hosts[host].User == user {
+				return user, host + " (active)"
+			}
+			return user, host
+		})...)
+	}
+	return matching(accounts, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+// gitRemotes lists the remotes of the working directory with their URLs, in configuration order.
+func (a *application) gitRemotes(ctx context.Context) [][2]string {
+	out, err := a.gitProbe().Output(ctx, a.options.cwd, false, "config", "--get-regexp", `^remote\..*\.url$`)
+	if err != nil {
+		return nil
+	}
+	var remotes [][2]string
+	for line := range strings.Lines(out) {
+		if key, url, ok := strings.Cut(strings.TrimSpace(line), " "); ok {
+			remotes = append(remotes, [2]string{strings.TrimSuffix(strings.TrimPrefix(key, "remote."), ".url"), url})
+		}
+	}
+	return remotes
+}
+
+// completeRemotes completes the Git remotes of the working directory.
+func (a *application) completeRemotes(cmd *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	ctx, cancel := completionContext(cmd)
+	defer cancel()
+	return matching(describe(a.gitRemotes(ctx), func(remote [2]string) (string, string) { return remote[0], remote[1] }), toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeLocalBranches completes the branches of the local checkout.
+func (a *application) completeLocalBranches(cmd *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	ctx, cancel := completionContext(cmd)
+	defer cancel()
+	out, err := a.gitProbe().Output(ctx, a.options.cwd, false, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return matching(describe(strings.Fields(out), func(branch string) (string, string) { return branch, "local branch" }), toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeAliases completes the configured alias names with their expansions.
+func (a *application) completeAliases(_ *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	snapshot, err := a.deps.Settings.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	aliases := snapshot.Preferences.Aliases
+	return matching(describe(slices.Sorted(maps.Keys(aliases)), func(name string) (string, string) { return name, aliases[name] }), toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+// configValues lists the values of the settings that accept a fixed set.
+var configValues = map[string][]string{
+	"git_protocol": {"https", "ssh"},
+	"prompt":       {"enabled", "disabled"},
+	"color":        {"auto", "always", "never"},
+	"insecure":     {"true", "false"},
+	"ssh_agent":    {"true", "false"},
+}
+
+// completeConfig completes a setting name, then its value: the fixed values, the configured instances
+// for default_host, or the Git remotes for remote.
+func (a *application) completeConfig(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	switch {
+	case len(args) == 0:
+		return matching(configKeys, toComplete), cobra.ShellCompDirectiveNoFileComp
+	case len(args) > 1:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	case args[0] == "default_host":
+		return a.completeHosts(cmd, args, toComplete)
+	case args[0] == "remote":
+		return a.completeRemotes(cmd, args, toComplete)
+	}
+	return matching(configValues[args[0]], toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+// apiCompletion completes the values that list fetches from the selected instance; requireRepo
+// selects whether list needs a repository. It never prompts, refreshes an OAuth token or retries,
+// and gives up after completionTimeout: failures complete nothing rather than file names. Values
+// already given as arguments are not offered again.
+func (a *application) apiCompletion(requireRepo bool, list func(ctx context.Context, t target, toComplete string) ([]cobra.Completion, error)) cobra.CompletionFunc {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		ctx, cancel := completionContext(cmd)
+		defer cancel()
+		t, err := a.completionTarget(ctx, requireRepo)
+		var values []cobra.Completion
+		if err == nil {
+			values, err = list(ctx, t, toComplete)
+		}
+		if err != nil {
+			cobra.CompDebugln("gt: "+err.Error(), false)
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		values = slices.DeleteFunc(values, func(value cobra.Completion) bool {
+			name, _, _ := strings.Cut(value, "\t")
+			return slices.Contains(args, name)
+		})
+		return matching(values, toComplete), cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+// completionTarget resolves an API completion's target like resolve, but never prompts or rotates
+// credentials: an expired OAuth token or an encrypted SSH key completes nothing.
+func (a *application) completionTarget(ctx context.Context, requireRepo bool) (target, error) {
+	t, err := a.resolveTarget(ctx, requireRepo, false)
+	if err != nil {
+		return t, err
+	}
+	var signer *auth.HTTPSign
+	token := a.deps.Getenv("GITEA_TOKEN")
+	if token != "" {
+		if instance, err := settings.NormalizeHost(a.tokenInstance()); err != nil || instance != t.Host {
+			return t, errors.New("GITEA_TOKEN belongs to another instance")
+		}
+	} else {
+		account, exists := t.host.Users[t.User]
+		switch {
+		case !exists:
+			return t, errors.New("no account selected")
+		case account.Tokenless():
+			if signer, err = auth.SignerForAccount(account, nil); err != nil {
+				return t, err
+			}
+		default:
+			credential, err := a.deps.Credentials.Load(t.Host, t.User, account.CredentialStore)
+			if err != nil {
+				return t, err
+			}
+			if !credential.ExpiresAt.IsZero() && !a.deps.Now().Before(credential.ExpiresAt) {
+				return t, errors.New("access token expired")
+			}
+			token = credential.AccessToken
+		}
+	}
+	t.client = a.deps.Client(t.Host, token, t.host.Insecure)
+	if signer != nil {
+		t.client.Signer = signer
+	}
+	t.client.Retries, t.client.Sudo = 0, a.options.sudo
+	return t, nil
+}
+
+// fetchJSON decodes the response to a GET of endpoint, for values that no service lists.
+func fetchJSON(ctx context.Context, client *transport.Client, endpoint string, out any) error {
+	return services.API{Client: client}.Visit(ctx, services.APIOptions{Method: http.MethodGet, Endpoint: endpoint}, func(response *http.Response) error {
+		if response.StatusCode != http.StatusOK {
+			return nil // Visit reports the status.
+		}
+		return json.NewDecoder(response.Body).Decode(out)
+	})
+}
+
+// completeIssues completes issue numbers in state (open, closed or all) with their titles.
+func (a *application) completeIssues(state string) cobra.CompletionFunc {
+	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, _, err := services.Issues{Client: t.client, Repository: t.Repo}.List(ctx, services.ListOptions{State: state, Kind: "issues", Limit: completionLimit, Page: 1})
+		return describe(items, func(item services.Issue) (string, string) { return strconv.FormatInt(item.Number, 10), item.Title }), err
+	})
+}
+
+// completePulls completes pull request numbers in state (open, closed or all) with their titles.
+func (a *application) completePulls(state string) cobra.CompletionFunc {
+	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, _, err := services.Pulls{Client: t.client, Repository: t.Repo}.List(ctx, services.PullListOptions{State: state, Limit: completionLimit, Page: 1})
+		return describe(items, func(item services.Pull) (string, string) { return strconv.FormatInt(item.Number, 10), item.Title }), err
+	})
+}
+
+// completeLabels completes comma-separated label names of the repository and, when its owner is an
+// organization, of the organization.
+func (a *application) completeLabels() cobra.CompletionFunc {
+	return commaSeparated(a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		labels, err := services.Labels{Client: t.client, Repository: t.Repo}.List(ctx, completionLimit, 1)
+		if err != nil {
+			return nil, err
+		}
+		owner, _, _ := strings.Cut(t.Repo, "/")
+		if orgLabels, err := (services.Labels{Client: t.client, Organization: owner}).List(ctx, completionLimit, 1); err == nil {
+			labels = append(labels, orgLabels...)
+		}
+		return describe(labels, func(label services.Label) (string, string) { return label.Name, label.Description }), nil
+	}))
+}
+
+// completeMilestones completes the titles of open milestones.
+func (a *application) completeMilestones() cobra.CompletionFunc {
+	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, err := services.Milestones{Client: t.client, Repository: t.Repo}.List(ctx, "open", completionLimit, 1)
+		return describe(items, func(item services.Milestone) (string, string) { return item.Title, item.Description }), err
+	})
+}
+
+// completeUsers completes comma-separated usernames that can be assigned in the repository.
+func (a *application) completeUsers() cobra.CompletionFunc {
+	return commaSeparated(a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		type user struct {
+			Login    string `json:"login"`
+			FullName string `json:"full_name"`
+		}
+		var users []user
+		err := fetchJSON(ctx, t.client, "repos/"+t.Repo+"/assignees", &users)
+		return describe(users, func(item user) (string, string) { return item.Login, item.FullName }), err
+	}))
+}
+
+// completeBranches completes the local branches, then the repository's branches.
+func (a *application) completeBranches() cobra.CompletionFunc {
+	return mergeCompletions(a.completeLocalBranches, a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, err := services.Branches{Client: t.client}.List(ctx, t.Repo, completionLimit, 1)
+		return describe(items, func(item services.Branch) (string, string) {
+			if item.Protected {
+				return item.Name, "protected"
+			}
+			return item.Name, ""
+		}), err
+	}))
+}
+
+// completeTags completes the repository's tags.
+func (a *application) completeTags() cobra.CompletionFunc {
+	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		type tag struct {
+			Name string `json:"name"`
+		}
+		var tags []tag
+		err := fetchJSON(ctx, t.client, "repos/"+t.Repo+"/tags?limit="+strconv.Itoa(completionLimit), &tags)
+		return describe(tags, func(item tag) (string, string) { return item.Name, "" }), err
+	})
+}
+
+// completeReleases completes release tags with their titles.
+func (a *application) completeReleases() cobra.CompletionFunc {
+	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, err := services.Releases{Client: t.client, Repository: t.Repo}.List(ctx, completionLimit, 1)
+		return describe(items, func(item services.Release) (string, string) { return item.Tag, item.Title }), err
+	})
+}
+
+// completeOrgs completes the organizations of the account.
+func (a *application) completeOrgs() cobra.CompletionFunc {
+	return a.apiCompletion(false, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, _, err := services.Organizations{Client: t.client}.List(ctx, true, "", completionLimit, 1)
+		return describe(items, func(item services.Organization) (string, string) { return item.Name, item.FullName }), err
+	})
+}
+
+// completeTeams completes teams as ORG/TEAM: first the account's organizations, then the teams of the
+// organization before the slash.
+func (a *application) completeTeams() cobra.CompletionFunc {
+	orgs := a.completeOrgs()
+	teams := a.apiCompletion(false, func(ctx context.Context, t target, toComplete string) ([]cobra.Completion, error) {
+		org, _, _ := strings.Cut(toComplete, "/")
+		items, err := services.Teams{Client: t.client}.List(ctx, org, completionLimit, 1)
+		return describe(items, func(item services.Team) (string, string) {
+			return org + "/" + item.Name, strings.TrimSpace(item.Description + " (ID " + strconv.FormatInt(item.ID, 10) + ")")
+		}), err
+	})
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		if strings.Contains(toComplete, "/") {
+			return teams(cmd, args, toComplete)
+		}
+		values, directive := orgs(cmd, args, toComplete)
+		for i, value := range values {
+			name, description, _ := strings.Cut(value, "\t")
+			values[i] = cobra.CompletionWithDesc(name+"/", description)
+		}
+		return values, directive | cobra.ShellCompDirectiveNoSpace
+	}
+}
+
+// completeRepos completes repositories as OWNER/NAME: those of the Git remotes on configured
+// instances, then those of the owner before the slash, or else the account's repositories.
+func (a *application) completeRepos() cobra.CompletionFunc {
+	remotes := func(cmd *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		ctx, cancel := completionContext(cmd)
+		defer cancel()
+		snapshot, err := a.deps.Settings.Load()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		values := []cobra.Completion{}
+		for _, remote := range a.gitRemotes(ctx) {
+			if host, repo, err := settings.RepositoryURL(remote[1], snapshot.Hosts.Hosts); err == nil && snapshot.Hosts.Hosts[host].Users != nil {
+				values = append(values, cobra.CompletionWithDesc(repo, "remote "+remote[0]))
+			}
+		}
+		return matching(values, toComplete), cobra.ShellCompDirectiveNoFileComp
+	}
+	return mergeCompletions(remotes, a.apiCompletion(false, func(ctx context.Context, t target, toComplete string) ([]cobra.Completion, error) {
+		owner, _, found := strings.Cut(toComplete, "/")
+		if !found {
+			owner = ""
+		}
+		items, _, err := services.Repositories{Client: t.client}.List(ctx, services.RepositoryListOptions{Owner: owner, Limit: completionLimit, Page: 1})
+		return describe(items, func(item services.Repository) (string, string) { return item.FullName, item.Description }), err
+	}))
+}
+
+// completeWorkflows completes workflow files with their names.
+func (a *application) completeWorkflows() cobra.CompletionFunc {
+	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, err := services.Actions{Client: t.client, Repository: t.Repo}.Workflows(ctx)
+		return describe(items, func(item services.Workflow) (string, string) { return item.ID, item.Name }), err
+	})
+}
+
+// completeRuns completes the IDs of recent workflow runs with their status and title.
+func (a *application) completeRuns() cobra.CompletionFunc {
+	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, err := services.Actions{Client: t.client, Repository: t.Repo}.Runs(ctx, services.RunListOptions{Limit: completionLimit, Page: 1})
+		return describe(items, func(item services.Run) (string, string) {
+			return strconv.FormatInt(item.ID, 10), strings.Join(slices.DeleteFunc([]string{item.Status, item.Conclusion, item.Title}, func(s string) bool { return s == "" }), " · ")
+		}), err
+	})
+}
+
+// completeSecrets completes Actions secret names in the scope that scope selects; a scope without an
+// organization or account selects the repository.
+func (a *application) completeSecrets(scope func() services.ActionScope) cobra.CompletionFunc {
+	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, err := services.ActionSecrets{Client: t.client, Scope: actionScope(scope, t)}.List(ctx, completionLimit, 1)
+		return describe(items, func(item services.ActionSecret) (string, string) { return item.Name, item.Description }), err
+	})
+}
+
+// completeVariables completes Actions variable names in the scope that scope selects; a scope without
+// an organization or account selects the repository.
+func (a *application) completeVariables(scope func() services.ActionScope) cobra.CompletionFunc {
+	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, err := services.ActionVariables{Client: t.client, Scope: actionScope(scope, t)}.List(ctx, completionLimit, 1)
+		return describe(items, func(item services.ActionVariable) (string, string) { return item.Name, item.Description }), err
+	})
+}
+
+// actionScope applies the target's repository to a scope without organization or account.
+func actionScope(scope func() services.ActionScope, t target) services.ActionScope {
+	selected := scope()
+	if selected.Organization == "" && !selected.Account {
+		selected.Repository = t.Repo
+	}
+	return selected
+}
+
+// pathFlags take local file paths, like every flag whose name ends in -file.
+var pathFlags = []string{"asset", "attachment", "file", "input", "ssh-key"}
+
+// completeDefaults completes paths only where a command takes them: path flags, flags marked with
+// MarkFlagFilename, and positional arguments named file or directory in Use. Everything else without a
+// completer completes nothing, by the root's default directive, rather than file names.
+func completeDefaults(cmd *cobra.Command) {
+	for _, flags := range []*pflag.FlagSet{cmd.Flags(), cmd.PersistentFlags()} {
+		flags.VisitAll(func(flag *pflag.Flag) {
+			if _, registered := cmd.GetFlagCompletionFunc(flag.Name); registered {
+				return
+			}
+			switch {
+			case flag.Name == "dir":
+				_ = cmd.RegisterFlagCompletionFunc(flag.Name, completeDirectories)
+			case strings.HasSuffix(flag.Name, "-file") || slices.Contains(pathFlags, flag.Name) || flag.Annotations[cobra.BashCompFilenameExt] != nil:
+				_ = cmd.RegisterFlagCompletionFunc(flag.Name, completeFiles)
+			}
+		})
+	}
+	if slots := argSlots(cmd.Use); len(slots) > 0 {
+		complete := cmd.ValidArgsFunction
+		cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+			slot := slots[min(len(args), len(slots)-1)]
+			switch {
+			case len(args) >= len(slots) && !slot.variadic:
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			case slot.kind == "file":
+				return completeFiles(c, args, toComplete)
+			case slot.kind == "directory":
+				return completeDirectories(c, args, toComplete)
+			case complete != nil:
+				return complete(c, args, toComplete)
+			}
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+	}
+	for _, child := range cmd.Commands() {
+		completeDefaults(child)
+	}
+}
+
+// completeFiles leaves the completion of file paths to the shell.
+func completeFiles(*cobra.Command, []string, string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	return nil, cobra.ShellCompDirectiveDefault
+}
+
+// completeDirectories leaves the completion of directory paths to the shell.
+func completeDirectories(*cobra.Command, []string, string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	return nil, cobra.ShellCompDirectiveFilterDirs
+}
+
+// argSlot is one positional argument that a Use line declares, such as <number>, [directory] or
+// <file>...; kind is "file" or "directory" for path arguments.
+type argSlot struct {
+	kind     string
+	variadic bool
+}
+
+// argSlots parses the positional arguments of a Use line.
+func argSlots(use string) []argSlot {
+	_, rest, _ := strings.Cut(use, " ")
+	var slots []argSlot
+	depth, start := 0, 0
+	for i, r := range rest {
+		switch r {
+		case '<', '[':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '>', ']':
+			if depth--; depth != 0 {
+				continue
+			}
+			slot := argSlot{variadic: strings.HasPrefix(rest[i+1:], "...") || strings.HasSuffix(rest[start:i], "...")}
+			for name := range strings.FieldsFuncSeq(rest[start:i+1], func(r rune) bool { return strings.ContainsRune("<>[]|. ", r) }) {
+				switch {
+				case name == "file" || strings.HasSuffix(name, "-file"):
+					slot.kind = "file"
+				case name == "directory" || name == "dir":
+					slot.kind = "directory"
+				}
+			}
+			slots = append(slots, slot)
+		}
+	}
+	return slots
+}
+
+// completionInstallHelp explains how to load the completion scripts, including with macOS's bash 3.2
+// and in zsh without compinit.
+func completionInstallHelp(root *cobra.Command) {
+	completion, _, err := root.Find([]string{"completion"})
+	if err != nil || completion == root {
+		return
+	}
+	completion.Short = "Generate shell completion scripts"
+	completion.Long = `Generate shell completion scripts for gt.
+
+Completion offers commands, flags, flag values such as --state or --json fields, and values
+from the selected instance, such as repositories, issue numbers and labels. See
+gt completion <shell> --help for how to load the script in your shell.`
+	help := map[string][2]string{
+		"bash": {`Generate the completion script for bash.
+
+The script needs the bash-completion package. On macOS, install bash-completion with
+Homebrew for the system bash 3.2, or bash-completion@2 for a Homebrew bash, and load it
+as its install notes say.
+
+To load completions in every new shell, add the eval line below to ~/.bashrc (on macOS,
+~/.bash_profile). Use eval: bash 3.2, the default on macOS, cannot source <(gt completion bash).`, `# Load completions in this shell, or in every shell from ~/.bashrc
+$ eval "$(gt completion bash)"
+# Or install the script for every user (Linux, then macOS)
+$ gt completion bash > /etc/bash_completion.d/gt
+$ gt completion bash > "$(brew --prefix)/etc/bash_completion.d/gt"`},
+		"zsh": {`Generate the completion script for zsh.
+
+Completion must be initialized before the script loads: add these lines to ~/.zshrc,
+keeping an existing compinit call instead of the first line. Without compinit, zsh
+reports "command not found: compdef".`, `$ autoload -U compinit && compinit
+$ source <(gt completion zsh)
+# Or install the script into a directory of your fpath once
+$ gt completion zsh > "${fpath[1]}/_gt"`},
+		"fish": {`Generate the completion script for fish.
+
+To load completions in every new shell, install the script once.`, `$ gt completion fish > ~/.config/fish/completions/gt.fish`},
+		"powershell": {`Generate the completion script for PowerShell.
+
+To load completions in every new shell, add this line to your PowerShell profile.`, `$ gt completion powershell | Out-String | Invoke-Expression`},
+	}
+	for _, shell := range completion.Commands() {
+		shell.Long, shell.Example = help[shell.Name()][0], help[shell.Name()][1]
+		if flag := shell.Flags().Lookup("no-descriptions"); flag != nil {
+			flag.Usage = "Disable completion descriptions"
+		}
+	}
+}

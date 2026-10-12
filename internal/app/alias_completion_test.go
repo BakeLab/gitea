@@ -4,9 +4,22 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
+	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,9 +37,316 @@ func TestAliasCompletionUsesBuiltInCommandsAndFlags(t *testing.T) {
 		{[]string{"__complete", "listing", "--auth"}, "--author"},
 		{[]string{"__completeNoDesc", "--no-input", "listing", "--ba"}, "--base"},
 		{[]string{"__complete", "inspect", "7", "--j"}, "--json"},
+		{[]string{"__complete", "listing", "--json", "nu"}, "number"},
 	} {
 		out.Reset()
 		require.NoError(t, Execute(context.Background(), deps, tc.args))
 		require.Contains(t, out.String(), tc.want)
+	}
+}
+
+// complete runs `gt __complete args...` and returns the candidates and the directive.
+func complete(t *testing.T, deps Dependencies, out *bytes.Buffer, args ...string) ([]string, cobra.ShellCompDirective) {
+	t.Helper()
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, append([]string{cobra.ShellCompRequestCmd}, args...)))
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	directive, err := strconv.Atoi(strings.TrimPrefix(lines[len(lines)-1], ":"))
+	require.NoError(t, err, out.String())
+	return lines[:len(lines)-1], cobra.ShellCompDirective(directive)
+}
+
+func TestEnumFlagsShareValidationAndCompletion(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	var state string
+	var events []string
+	run := func(args ...string) error {
+		root := NewRoot(deps)
+		probe := &cobra.Command{Use: "probe", RunE: func(*cobra.Command, []string) error { return nil }}
+		enumFlag(probe, &state, "state", "s", "open", "Filter by state", "open", "closed", "all")
+		probe.Flags().StringSliceVar(&events, "events", nil, "Events to deliver")
+		enumValues(probe, "events", "push", "pull_request", "release")
+		root.AddCommand(probe)
+		root.SetArgs(args)
+		out.Reset()
+		return root.ExecuteContext(context.Background())
+	}
+	require.NoError(t, run("probe", "-s", "CLOSED", "--events", "Push,release"))
+	require.Equal(t, "closed", state)
+	require.Equal(t, []string{"push", "release"}, events)
+	err := run("probe", "--state", "merged")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, "--state must be open, closed, or all")
+	require.EqualError(t, run("probe", "--events", "push,nope"), "--events must be push, pull_request, or release")
+	require.NoError(t, run("__complete", "probe", "--state", "c"))
+	require.Equal(t, "closed\n:4\n", out.String())
+	require.NoError(t, run("__complete", "probe", "--events", "push,"))
+	require.Equal(t, "push,pull_request\npush,release\n:6\n", out.String())
+	probe := &cobra.Command{Use: "probe"}
+	enumFlag(probe, &state, "state", "s", "open", "Filter by state", "open", "closed", "all")
+	require.Equal(t, "Filter by state {open|closed|all}", probe.Flag("state").Usage)
+	require.Equal(t, "s", probe.Flag("state").Shorthand)
+}
+
+func TestJSONFieldCompletion(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	values, directive := complete(t, deps, out, "issue", "list", "--json", "")
+	require.Equal(t, jsonFields[services.Issue](), values)
+	require.Equal(t, cobra.ShellCompDirectiveNoSpace|cobra.ShellCompDirectiveNoFileComp, directive)
+	for args, want := range map[string][]string{
+		"issue list --json number,ti": {"number,title"},
+		"issue list --json=num":       {"number"},
+		"issue list --json=state,ti":  {"state,title"},
+		"pr view --json head_r":       {"head_remote_deleted", "head_repo"},
+		"version --json ":             {},
+	} {
+		values, _ := complete(t, deps, out, strings.Split(args, " ")...)
+		require.Equal(t, want, values, args)
+	}
+	values, _ = complete(t, deps, out, "issue", "list", "--json", "number,")
+	require.Contains(t, values, "number,title")
+	require.NotContains(t, values, "number,number")
+}
+
+func TestCompletionOffersPathsOnlyWherePathsAreExpected(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	for args, want := range map[string]cobra.ShellCompDirective{
+		"issue view ":                    cobra.ShellCompDirectiveNoFileComp,
+		"issue view 5 ":                  cobra.ShellCompDirectiveNoFileComp,
+		"issue list --state ":            cobra.ShellCompDirectiveNoFileComp,
+		"issue create --body-file ":      cobra.ShellCompDirectiveDefault,
+		"issue create --attachment ":     cobra.ShellCompDirectiveDefault,
+		"api --input ":                   cobra.ShellCompDirectiveDefault,
+		"auth login --ssh-key ":          cobra.ShellCompDirectiveDefault,
+		"ssh-key create ":                cobra.ShellCompDirectiveDefault,
+		"release asset upload ":          cobra.ShellCompDirectiveNoFileComp,
+		"release asset upload v1 ":       cobra.ShellCompDirectiveDefault,
+		"release asset upload v1 a.txt ": cobra.ShellCompDirectiveDefault,
+		"repo clone alice/project ":      cobra.ShellCompDirectiveFilterDirs,
+		"repo clone alice/project dir ":  cobra.ShellCompDirectiveNoFileComp,
+		"--cwd ":                         cobra.ShellCompDirectiveFilterDirs,
+		"--jq ":                          cobra.ShellCompDirectiveNoFileComp,
+	} {
+		_, directive := complete(t, deps, out, strings.Split(args, " ")...)
+		require.Equal(t, want, directive, args)
+	}
+	// No other argument or flag value falls back to file names.
+	walkCommands(NewRoot(deps), func(cmd *cobra.Command) {
+		if !cmd.HasParent() || !cmd.IsAvailableCommand() {
+			return
+		}
+		path := strings.Fields(cmd.CommandPath())[1:]
+		slots := argSlots(cmd.Use)
+		_, directive := complete(t, deps, out, append(path, "")...)
+		require.Equal(t, len(slots) > 0 && slots[0].kind == "file", directive == cobra.ShellCompDirectiveDefault, "%s <TAB>: %d", cmd.CommandPath(), directive)
+		for _, flags := range []*pflag.FlagSet{cmd.LocalNonPersistentFlags(), cmd.PersistentFlags()} {
+			flags.VisitAll(func(flag *pflag.Flag) {
+				if flag.NoOptDefVal != "" || flag.Hidden {
+					return
+				}
+				_, directive := complete(t, deps, out, append(path, "--"+flag.Name, "")...)
+				path := strings.HasSuffix(flag.Name, "-file") || slices.Contains(pathFlags, flag.Name)
+				require.Equal(t, path, directive == cobra.ShellCompDirectiveDefault, "%s --%s <TAB>: %d", cmd.CommandPath(), flag.Name, directive)
+			})
+		}
+	})
+}
+
+func TestArgSlots(t *testing.T) {
+	for use, want := range map[string][]argSlot{
+		"list":                                 {},
+		"view <number>":                        {{}},
+		"upload <tag> <file>...":               {{}, {kind: "file", variadic: true}},
+		"clone <repository> [directory]":       {{}, {kind: "directory"}},
+		"create <public-key-file>":             {{kind: "file"}},
+		"review [<number> | <url> | <branch>]": {{}},
+		"man [command...]":                     {{variadic: true}},
+		"set <key> <value>":                    {{}, {}},
+	} {
+		require.Equal(t, want, append([]argSlot{}, argSlots(use)...), use)
+	}
+}
+
+func TestOfflineCompletions(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	deps.Git = &fakeGit{results: map[string]string{
+		`config --get-regexp ^remote\..*\.url$`:             "remote.origin.url https://gitea.example.com/alice/project.git\nremote.my.fork.url git@gitea.example.com:bob/project.git\n",
+		"for-each-ref --format=%(refname:short) refs/heads": "main\nfeature/login\n",
+	}}
+	configureAccounts(t, deps, "https://gitea.example.com", "alice", "alice", "bob")
+	require.NoError(t, Execute(context.Background(), deps, []string{"alias", "set", "co", "pr checkout"}))
+	for args, want := range map[string][]string{
+		"--host ":   {"https://gitea.example.com\talice, bob"},
+		"--user ":   {"alice\thttps://gitea.example.com (active)", "bob\thttps://gitea.example.com"},
+		"--remote ": {"origin\thttps://gitea.example.com/alice/project.git", "my.fork\tgit@gitea.example.com:bob/project.git"},
+	} {
+		values, directive := complete(t, deps, out, strings.Split(args, " ")...)
+		require.Equal(t, want, values, args)
+		require.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive, args)
+	}
+	a := &application{deps: deps}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	for _, tc := range []struct {
+		complete cobra.CompletionFunc
+		args     []string
+		prefix   string
+		want     []string
+	}{
+		{a.completeAliases, nil, "", []string{"co\tpr checkout"}},
+		{a.completeConfig, nil, "git", []string{"git_protocol"}},
+		{a.completeConfig, []string{"color"}, "a", []string{"auto", "always"}},
+		{a.completeConfig, []string{"default_host"}, "", []string{"https://gitea.example.com\talice, bob"}},
+		{a.completeConfig, []string{"color", "auto"}, "", []string{}},
+		{a.completeLocalBranches, nil, "f", []string{"feature/login\tlocal branch"}},
+	} {
+		values, _ := tc.complete(cmd, tc.args, tc.prefix)
+		require.Equal(t, tc.want, append([]string{}, values...), "%v %q", tc.args, tc.prefix)
+	}
+}
+
+func TestRepositoryCompletionUsesRemotesAndInstance(t *testing.T) {
+	var tokens []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokens = append(tokens, r.Header.Get("Authorization"))
+		switch r.URL.Path {
+		case "/api/v1/user/repos", "/api/v1/users/alice/repos":
+			_, _ = w.Write([]byte(`[{"full_name":"alice/project","description":"Demo"},{"full_name":"alice/other"},{"full_name":"alice/x\u001b[2J"}]`))
+		case "/api/v1/users/alice":
+			_, _ = w.Write([]byte(`{"id":1,"login":"alice"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	deps.Git = &fakeGit{results: map[string]string{
+		`config --get-regexp ^remote\..*\.url$`: "remote.origin.url " + server.URL + "/alice/project.git\nremote.github.url https://github.com/cli/cli.git\n",
+	}}
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	values, directive := complete(t, deps, out, "-R", "")
+	require.Equal(t, []string{"alice/project\tremote origin", "alice/other"}, values)
+	require.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+	require.Equal(t, []string{"token alice-token"}, tokens)
+	// An owner before the slash lists that owner's repositories.
+	values, _ = complete(t, deps, out, "issue", "list", "-R", "alice/o")
+	require.Equal(t, []string{"alice/other"}, values)
+	require.Contains(t, tokens, "token alice-token")
+}
+
+func TestAPICompletionNeverRefreshesOrFails(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	now := time.Now()
+	deps.Now = func() time.Time { return now }
+	require.NoError(t, testManager(t, deps).Register(server.URL, "alice", settings.StoreFile, settings.AuthOAuth, auth.HostOptions{}, auth.Credential{AccessToken: "expired", RefreshToken: "refresh", ExpiresAt: now.Add(-time.Minute)}))
+	values, directive := complete(t, deps, out, "-R", "")
+	require.Empty(t, values)
+	require.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+	require.Zero(t, requests, "an expired OAuth token must not be refreshed while completing")
+	credential, err := deps.Credentials.Load(server.URL, "alice", settings.StoreFile)
+	require.NoError(t, err)
+	require.Equal(t, "refresh", credential.RefreshToken)
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	values, directive = complete(t, deps, out, "-R", "")
+	require.Empty(t, values)
+	require.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+	require.Equal(t, 1, requests, "completion requests are not retried")
+}
+
+func TestInstanceCompletions(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/pulls":
+			require.Equal(t, "open", r.URL.Query().Get("state"))
+			_, _ = w.Write([]byte(`[{"number":13,"title":"Add login support"},{"number":2,"title":"Fix\u001b]0;pwned\u0007 docs"},{"number":17,"title":"Improve greeting"}]`))
+		case "/api/v1/repos/alice/project/labels":
+			_, _ = w.Write([]byte(`[{"id":1,"name":"bug","description":"Something is broken"},{"id":2,"name":"docs"},{"id":3,"name":"bad\u001b[31m"}]`))
+		case "/api/v1/orgs/alice/labels":
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/v1/repos/alice/project/assignees":
+			_, _ = w.Write([]byte(`[{"login":"alice","full_name":"Alice"},{"login":"bob"}]`))
+		case "/api/v1/user/orgs":
+			_, _ = w.Write([]byte(`[{"id":4,"username":"acme","full_name":"Acme Inc"}]`))
+		case "/api/v1/orgs/acme/teams":
+			_, _ = w.Write([]byte(`[{"id":2,"name":"developers","description":"Developers"}]`))
+		case "/api/v1/repos/alice/project/issues":
+			require.Equal(t, "issues", r.URL.Query().Get("type"))
+			_, _ = w.Write([]byte(`[{"number":4,"title":"Crash when config is missing"}]`))
+		case "/api/v1/repos/alice/project/milestones":
+			_, _ = w.Write([]byte(`[{"id":1,"title":"v1.0","description":"First release"}]`))
+		case "/api/v1/repos/alice/project/branches":
+			_, _ = w.Write([]byte(`[{"name":"main","protected":true},{"name":"docs/guide"}]`))
+		case "/api/v1/repos/alice/project/tags":
+			_, _ = w.Write([]byte(`[{"name":"v0.1.0"}]`))
+		case "/api/v1/repos/alice/project/releases":
+			_, _ = w.Write([]byte(`[{"id":1,"tag_name":"v0.1.0","name":"First release"}]`))
+		case "/api/v1/repos/alice/project/actions/workflows":
+			_, _ = w.Write([]byte(`{"total_count":1,"workflows":[{"id":"ci.yml","name":"CI"}]}`))
+		case "/api/v1/repos/alice/project/actions/runs":
+			_, _ = w.Write([]byte(`{"workflow_runs":[{"id":47,"status":"completed","conclusion":"failure","display_title":"Add workflows"}]}`))
+		case "/api/v1/repos/alice/project/actions/secrets":
+			_, _ = w.Write([]byte(`[{"name":"DEPLOY_TOKEN","description":"Deploy key"}]`))
+		case "/api/v1/orgs/acme/actions/variables":
+			_, _ = w.Write([]byte(`[{"name":"REGION","data":"eu"}]`))
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+			w.WriteHeader(http.StatusTeapot)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	a := &application{deps: deps}
+	a.options.repo = "alice/project"
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	for _, tc := range []struct {
+		name      string
+		complete  cobra.CompletionFunc
+		args      []string
+		prefix    string
+		want      []string
+		directive cobra.ShellCompDirective
+	}{
+		{"pulls by prefix", a.completePulls("open"), nil, "1", []string{"13\tAdd login support", "17\tImprove greeting"}, cobra.ShellCompDirectiveNoFileComp},
+		{"pulls skip given arguments and sanitize titles", a.completePulls("open"), []string{"13", "17"}, "", []string{"2\tFix]0;pwned docs"}, cobra.ShellCompDirectiveNoFileComp},
+		{"labels are comma-separated", a.completeLabels(), nil, "bug,", []string{"bug,docs"}, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp},
+		{"labels with descriptions", a.completeLabels(), nil, "b", []string{"bug\tSomething is broken"}, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp},
+		{"users", a.completeUsers(), nil, "", []string{"alice\tAlice", "bob"}, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp},
+		{"teams start with organizations", a.completeTeams(), nil, "", []string{"acme/\tAcme Inc"}, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp},
+		{"teams of an organization", a.completeTeams(), nil, "acme/d", []string{"acme/developers\tDevelopers (ID 2)"}, cobra.ShellCompDirectiveNoFileComp},
+		{"issues", a.completeIssues("open"), nil, "", []string{"4\tCrash when config is missing"}, cobra.ShellCompDirectiveNoFileComp},
+		{"milestones", a.completeMilestones(), nil, "", []string{"v1.0\tFirst release"}, cobra.ShellCompDirectiveNoFileComp},
+		{"branches", a.completeBranches(), nil, "", []string{"main\tprotected", "docs/guide"}, cobra.ShellCompDirectiveNoFileComp},
+		{"tags", a.completeTags(), nil, "v", []string{"v0.1.0"}, cobra.ShellCompDirectiveNoFileComp},
+		{"releases", a.completeReleases(), nil, "", []string{"v0.1.0\tFirst release"}, cobra.ShellCompDirectiveNoFileComp},
+		{"workflows", a.completeWorkflows(), nil, "", []string{"ci.yml\tCI"}, cobra.ShellCompDirectiveNoFileComp},
+		{"runs", a.completeRuns(), nil, "4", []string{"47\tcompleted · failure · Add workflows"}, cobra.ShellCompDirectiveNoFileComp},
+		{"repository secrets", a.completeSecrets(func() services.ActionScope { return services.ActionScope{} }), nil, "", []string{"DEPLOY_TOKEN\tDeploy key"}, cobra.ShellCompDirectiveNoFileComp},
+		{"organization variables", a.completeVariables(func() services.ActionScope { return services.ActionScope{Organization: "acme"} }), nil, "", []string{"REGION"}, cobra.ShellCompDirectiveNoFileComp},
+	} {
+		values, directive := tc.complete(cmd, tc.args, tc.prefix)
+		require.Equal(t, tc.want, values, tc.name)
+		require.Equal(t, tc.directive, directive, tc.name)
+	}
+}
+
+func TestCompletionInstallHelp(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	for shell, want := range map[string]string{
+		"bash":       "$ eval \"$(gt completion bash)\"\n",
+		"zsh":        "$ autoload -U compinit && compinit\n",
+		"fish":       "$ gt completion fish > ~/.config/fish/completions/gt.fish\n",
+		"powershell": "$ gt completion powershell | Out-String | Invoke-Expression\n",
+	} {
+		out.Reset()
+		require.NoError(t, Execute(context.Background(), deps, []string{"completion", shell, "--help"}))
+		require.Contains(t, out.String(), want, shell)
+		require.NotContains(t, out.String(), "source <(gt completion bash)\n", shell)
 	}
 }
