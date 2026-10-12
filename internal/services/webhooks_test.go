@@ -133,7 +133,7 @@ func TestWebhookScopesSelectEndpoints(t *testing.T) {
 			service := Webhooks{Client: client, Scope: tc.scope}
 			items, err := service.List(context.Background(), 10, 2)
 			require.NoError(t, err)
-			require.Equal(t, []Webhook{{ID: 3, Type: "gitea", Events: []string{}}}, items)
+			require.Equal(t, []Webhook{{ID: 3, Type: "gitea", Events: []string{}}}, items.Items)
 			require.NoError(t, service.Delete(context.Background(), 3))
 			require.Equal(t, []string{"GET " + tc.path + "?limit=10&page=2", "DELETE " + tc.path + "/3"}, requests)
 		})
@@ -142,9 +142,32 @@ func TestWebhookScopesSelectEndpoints(t *testing.T) {
 
 func TestWebhookFromMapsTimestamps(t *testing.T) {
 	hook := decode[gitea.Hook](t, `{"id":1,"type":"gitea","active":true,"events":["push"],"branch_filter":"main",
-		"created_at":"2026-10-01T12:00:00Z","updated_at":"2026-10-02T12:00:00+02:00","config":{"url":"https://private.invalid"}}`)
+		"created_at":"2026-10-01T12:00:00Z","updated_at":"2026-10-02T12:00:00+02:00","config":{"url":"https://hooks.invalid/ci","content_type":"form"}}`)
 	require.Equal(t, Webhook{
-		ID: 1, Type: "gitea", Active: true, Events: []string{"push"}, BranchFilter: "main",
+		ID: 1, Type: "gitea", URL: "https://hooks.invalid/ci", ContentType: "form", Active: true, Events: []string{"push"}, BranchFilter: "main",
 		CreatedAt: "2026-10-01T12:00:00Z", UpdatedAt: "2026-10-02T12:00:00+02:00",
-	}, webhookFrom(hook))
+	}, webhookFrom(hook, false))
+}
+
+func TestWebhookFromSortsEvents(t *testing.T) {
+	hook := decode[gitea.Hook](t, `{"id":1,"type":"gitea","events":["push","issues","issue_label","create"]}`)
+	require.Equal(t, []string{"create", "issue_label", "issues", "push"}, webhookFrom(hook, false).Events)
+}
+
+func TestWebhookFromRedactsDeliveryURLs(t *testing.T) {
+	for _, tc := range []struct{ adapter, raw, want string }{
+		{"gitea", "https://ci.example.com/hooks/gitea", "https://ci.example.com/hooks/gitea"},
+		{"gitea", "https://user:pass@ci.example.com/hook?token=private", "https://ci.example.com/hook?…"},
+		{"packagist", "https://packagist.org/api/update-package?username=a&apiToken=private", "https://packagist.org/api/update-package?…"},
+		{"slack", "https://hooks.slack.com/services/T0/B0/private", "https://hooks.slack.com/…"},
+		{"discord", "https://discord.com/api/webhooks/1/private", "https://discord.com/…"},
+		{"telegram", "https://api.telegram.org/botprivate/sendMessage?chat_id=1", "https://api.telegram.org/…?…"},
+		{"matrix", "https://matrix.example.com/_matrix/client/v3/rooms/!room/send/m.room.message", "https://matrix.example.com/_matrix/client/v3/rooms/!room/send/m.room.message"},
+	} {
+		t.Run(tc.adapter, func(t *testing.T) {
+			hook := &gitea.Hook{ID: 1, Type: tc.adapter, Config: map[string]string{"url": tc.raw}}
+			require.Equal(t, tc.want, webhookFrom(hook, false).URL)
+			require.Equal(t, tc.raw, webhookFrom(hook, true).URL)
+		})
+	}
 }

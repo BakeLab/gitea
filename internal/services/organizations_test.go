@@ -82,10 +82,11 @@ func TestOrganizationListSelectsScopeAndPage(t *testing.T) {
 				w.Header().Set("X-Total-Count", "7")
 				_, _ = w.Write([]byte(`[{"id":1,"username":"legacy"},{"id":2,"name":"acme"}]`))
 			}))
-			items, more, err := (Organizations{Client: client}).List(context.Background(), tc.mine, tc.username, 2, 3)
+			items, err := (Organizations{Client: client}).List(context.Background(), tc.mine, tc.username, 2, 3)
 			require.NoError(t, err)
-			require.True(t, more)
-			require.Equal(t, []string{"legacy", "acme"}, []string{items[0].Name, items[1].Name})
+			require.True(t, items.More)
+			require.Equal(t, 7, items.Total)
+			require.Equal(t, []string{"legacy", "acme"}, []string{items.Items[0].Name, items.Items[1].Name})
 		})
 	}
 }
@@ -111,20 +112,53 @@ func TestOrganizationMembershipRequests(t *testing.T) {
 	var requests []string
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
-		if r.Method == http.MethodGet {
-			_, _ = w.Write([]byte(`[{"id":2,"login":"bob","full_name":"Bob"}]`))
-			return
-		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	service := Organizations{Client: client}
-	members, err := service.Members(context.Background(), "acme", true, 10, 1)
+	member, err := service.IsMember(context.Background(), "acme", "bob")
 	require.NoError(t, err)
-	require.Equal(t, []OrganizationMember{{ID: 2, Username: "bob", FullName: "Bob"}}, members)
+	require.True(t, member)
 	require.NoError(t, service.SetMemberPublic(context.Background(), "acme", "bob", true))
 	require.NoError(t, service.RemoveMember(context.Background(), "acme", "bob"))
 	require.Equal(t, []string{
-		"GET /api/v1/orgs/acme/public_members", "PUT /api/v1/orgs/acme/public_members/bob",
-		"DELETE /api/v1/orgs/acme/members/bob",
+		"GET /api/v1/orgs/acme/members/bob", "PUT /api/v1/orgs/acme/public_members/bob", "DELETE /api/v1/orgs/acme/members/bob",
 	}, requests)
+}
+
+func TestOrganizationMembersCheckEachMembership(t *testing.T) {
+	// Gitea lists concealed members among the public ones to administrators; only the check of
+	// each membership tells them apart.
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/orgs/acme/members", "/api/v1/orgs/acme/public_members":
+			w.Header().Set("X-Total-Count", "2")
+			_, _ = w.Write([]byte(`[{"id":1,"login":"alice"},{"id":2,"login":"bob","full_name":"Bob"}]`))
+		case "/api/v1/orgs/acme/public_members/alice":
+			w.WriteHeader(http.StatusNoContent)
+		case "/api/v1/orgs/acme/public_members/bob":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	alice, bob := OrganizationMember{ID: 1, Username: "alice"}, OrganizationMember{ID: 2, Username: "bob", FullName: "Bob"}
+	public, concealed := alice, bob
+	public.Visibility, concealed.Visibility = MembershipPublic, MembershipConcealed
+	for name, tc := range map[string]struct {
+		opts    MemberListOptions
+		want    []OrganizationMember
+		counted bool
+	}{
+		"names":      {MemberListOptions{}, []OrganizationMember{alice, bob}, true},
+		"visibility": {MemberListOptions{Visibility: true}, []OrganizationMember{public, concealed}, true},
+		"public":     {MemberListOptions{Public: true}, []OrganizationMember{public}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tc.opts.Limit, tc.opts.Page = 10, 1
+			members, err := (Organizations{Client: client}).Members(context.Background(), "acme", tc.opts)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, members.Items)
+			require.Equal(t, tc.counted, members.Counted)
+		})
+	}
 }

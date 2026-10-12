@@ -20,13 +20,13 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"admin", "user", "create", "account", "--email", "invalid", "--password", "local-password"}, "--email must contain one email address"},
+		{[]string{"admin", "user", "create", "account", "--email", "invalid", "--password", "local-password"}, "--email: enter one email address"},
 		{[]string{"admin", "user", "create", "account", "--email", "account@example.test", "--password", "one", "--password-file", "-"}, "--password and --password-file are mutually exclusive"},
 		{[]string{"admin", "user", "create", "account", "--email", "account@example.test", "--password-file", ""}, "--password-file must name a file or -"},
 		{[]string{"admin", "user", "create", "account", "--email", "account@example.test", "--password", "local-password", "--visibility", "invalid"}, "--visibility must be public, limited, or private"},
 		{[]string{"admin", "user", "create", "account", "--username", "different"}, "supply username as an argument or --username, not both"},
 		{[]string{"admin", "user", "edit", "account"}, "supply account fields to edit"},
-		{[]string{"admin", "user", "edit", "account", "--email="}, "--email must contain one email address"},
+		{[]string{"admin", "user", "edit", "account", "--email="}, "--email: enter one email address"},
 		{[]string{"admin", "user", "edit", "account", "--max-repo-creation", "-2"}, "--max-repo-creation must be -1 or nonnegative"},
 		{[]string{"admin", "user", "edit", "account", "--password="}, "missing password: supply --password-file or --password"},
 		{[]string{"admin", "user", "view", "bad/account"}, "invalid account username"},
@@ -205,11 +205,15 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"status", "--limit=0"}, `"--limit" flag: must be 1..100`},
 		{[]string{"status", "--json=token"}, "unknown JSON field \"token\""},
 		{[]string{"team", "create", "org", "--name", "Developers", "--permission", "owner"}, "--permission must be read, write, or admin"},
-		{[]string{"team", "create", "org", "--name", "Developers", "--unit", "repo.unknown=write"}, "--unit requires repo.* keys with none, read, or write access"},
-		{[]string{"team", "create", "org", "--name", "Developers", "--unit", "repo.code=write", "--permission", "admin"}, "--unit needs a nonempty policy and cannot restrict administrator access"},
+		{[]string{"team", "create", "org", "--name", "Developers", "--unit", "repo.unknown=write"}, `unknown unit "repo.unknown"; use one of repo.code`},
+		{[]string{"team", "create", "org", "--name", "Developers", "--unit", "repo.ext_wiki=write"}, "--unit repo.ext_wiki=write: access must be none, read"},
+		{[]string{"team", "create", "org/Developers", "--name", "Developers"}, "supply the team name once"},
+		{[]string{"team", "create", "org", "--name", "Developers", "--unit", "repo.code=write", "--permission", "admin"}, "--unit cannot restrict administrator access"},
 		{[]string{"team", "edit", "1"}, "supply team fields to edit"},
 		{[]string{"team", "edit", "1", "--unit="}, "must be formatted as key=value"},
-		{[]string{"team", "member", "add", "invalid", "alice"}, "invalid resource number \"invalid\""},
+		{[]string{"team", "member", "add", "invalid", "alice"}, `invalid team "invalid": use ORG/TEAM, such as acme/developers, or a team ID`},
+		{[]string{"team", "view", "acme/"}, `invalid team "acme/"`},
+		{[]string{"team", "repo", "add", "2", "service", "-R", "acme/service"}, "--repo is not used by gt team repo add"},
 		{[]string{"time", "create", "1", "0s"}, "duration must be nonzero whole seconds, for example 1h25m"},
 		{[]string{"time", "create", "1", "1ms"}, "duration must be nonzero whole seconds, for example 1h25m"},
 		{[]string{"time", "list", "--issue", "0"}, "--issue must be positive"},
@@ -286,8 +290,8 @@ func TestPromptedCreateSubmitsWithoutConfirmation(t *testing.T) {
 	}{
 		{[]string{"secret", "set", "TOKEN"}, nil, "private", "PUT /api/v1/repos/alice/project/actions/secrets/TOKEN"},
 		{[]string{"variable", "set", "MODE"}, map[string]string{"Variable value": "fast"}, "", "POST /api/v1/repos/alice/project/actions/variables/MODE"},
-		{[]string{"webhook", "create"}, map[string]string{"url": "https://hooks.test/path"}, "", "POST /api/v1/repos/alice/project/hooks"},
-		{[]string{"team", "create", "acme"}, map[string]string{"name": "Developers"}, "", "POST /api/v1/orgs/acme/teams"},
+		{[]string{"webhook", "create"}, map[string]string{"Payload URL": "https://hooks.test/path"}, "", "POST /api/v1/repos/alice/project/hooks"},
+		{[]string{"team", "create", "acme"}, map[string]string{"Team name": "Developers"}, "", "POST /api/v1/orgs/acme/teams"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			var writes []string

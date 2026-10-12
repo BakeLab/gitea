@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -32,7 +33,7 @@ func organization(ctx context.Context, client *transport.Client, owner string) (
 	org, _, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) (*gitea.Organization, *gitea.Response, error) {
 		return c.Organizations.GetOrg(ctx, owner)
 	})
-	if failure, ok := errors.AsType[*transport.APIError](err); ok && failure.Status == http.StatusNotFound {
+	if statusNotFound(err) {
 		return 0, false, nil
 	}
 	if err != nil {
@@ -42,6 +43,12 @@ func organization(ctx context.Context, client *transport.Client, owner string) (
 		return 0, false, fmt.Errorf("cannot verify the identity of organization %s", owner)
 	}
 	return org.ID, true, nil
+}
+
+// statusNotFound reports whether err is a 404 response.
+func statusNotFound(err error) bool {
+	failure, ok := errors.AsType[*transport.APIError](err)
+	return ok && failure.Status == http.StatusNotFound
 }
 
 // OrganizationOptions permits explicit empty and false preference updates.
@@ -59,9 +66,8 @@ type OrganizationOptions struct {
 type Organizations struct{ Client *transport.Client }
 
 // List selects public organizations, your organizations, or a named user's organizations.
-// It reports whether more organizations follow the selected page.
-func (s Organizations) List(ctx context.Context, mine bool, username string, limit, page int) ([]Organization, bool, error) {
-	orgs, more, err := listWindow(limit, page, func(limit, page int) ([]*gitea.Organization, http.Header, error) {
+func (s Organizations) List(ctx context.Context, mine bool, username string, limit, page int) (Page[Organization], error) {
+	orgs, err := listPage(limit, page, func(limit, page int) ([]*gitea.Organization, http.Header, error) {
 		orgs, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Organization, *gitea.Response, error) {
 			opts := gitea.ListOrgsOptions{ListOptions: listOptions(limit, page)}
 			switch {
@@ -74,10 +80,12 @@ func (s Organizations) List(ctx context.Context, mine bool, username string, lim
 		})
 		return orgs, headerOf(resp), err
 	})
-	if err != nil {
-		return nil, false, err
-	}
-	return convertAll(orgs, organizationFrom), more, nil
+	return convertPage(orgs, organizationFrom), err
+}
+
+// convertPage maps a page of SDK items onto gt results.
+func convertPage[S, T any](page Page[*S], convert func(*S) T) Page[T] {
+	return Page[T]{Items: convertAll(page.Items, convert), More: page.More, Total: page.Total, Counted: page.Counted}
 }
 
 // View retrieves a named organization.
@@ -89,6 +97,56 @@ func (s Organizations) View(ctx context.Context, name string) (Organization, err
 		return Organization{}, err
 	}
 	return organizationFrom(org), nil
+}
+
+// OrganizationSize counts what an organization holds; a count the account cannot read is nil.
+type OrganizationSize struct {
+	Members, Teams, Repositories *int
+}
+
+// Size counts the members, teams and repositories of an organization.
+func (s Organizations) Size(ctx context.Context, name string) (OrganizationSize, error) {
+	first := listOptions(1, 1)
+	counts := []func(context.Context, *gitea.Client) (*gitea.Response, error){
+		func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+			_, resp, err := c.Organizations.ListOrgMembership(ctx, name, gitea.ListOrgMembershipOption{ListOptions: first})
+			return resp, err
+		},
+		func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+			_, resp, err := c.Organizations.ListOrgTeams(ctx, name, gitea.ListTeamsOptions{ListOptions: first})
+			return resp, err
+		},
+		func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+			_, resp, err := c.Repositories.ListOrgRepos(ctx, name, gitea.ListOrgReposOptions{ListOptions: first})
+			return resp, err
+		},
+	}
+	totals := make([]*int, len(counts))
+	for i, count := range counts {
+		total, err := listTotal(ctx, s.Client, count)
+		if ctx.Err() != nil {
+			return OrganizationSize{}, ctx.Err()
+		}
+		if err == nil {
+			totals[i] = total
+		}
+	}
+	return OrganizationSize{Members: totals[0], Teams: totals[1], Repositories: totals[2]}, nil
+}
+
+// listTotal returns the collection size a list request reports, or nil when the server does not count it.
+func listTotal(ctx context.Context, client *transport.Client, list func(context.Context, *gitea.Client) (*gitea.Response, error)) (*int, error) {
+	_, resp, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) (struct{}, *gitea.Response, error) {
+		resp, err := list(ctx, c)
+		return struct{}{}, resp, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, total, counted := pageHints(headerOf(resp)); counted {
+		return &total, nil
+	}
+	return nil, nil
 }
 
 // Create creates an organization owned by the selected account.
@@ -128,21 +186,107 @@ type OrganizationMember struct {
 	ID       int64  `json:"id"`
 	Username string `json:"username"`
 	FullName string `json:"full_name"`
+	// Visibility of an organization membership is public or concealed; team members have none.
+	Visibility string `json:"visibility,omitempty"`
 }
 
-// Members lists visible members in an organization.
-func (s Organizations) Members(ctx context.Context, name string, public bool, limit, page int) ([]OrganizationMember, error) {
-	users, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.User, *gitea.Response, error) {
-		opts := gitea.ListOrgMembershipOption{ListOptions: listOptions(limit, page)}
-		if public {
-			return c.Organizations.ListPublicOrgMembership(ctx, name, opts)
-		}
-		return c.Organizations.ListOrgMembership(ctx, name, opts)
+// Membership visibilities.
+const (
+	MembershipPublic    = "public"
+	MembershipConcealed = "concealed"
+)
+
+// MemberListOptions selects a page of organization members.
+type MemberListOptions struct {
+	// Public lists only public memberships, and Visibility reports the visibility of each one.
+	// Gitea lists concealed members as public to administrators, so both check each membership on
+	// its own, and Public drops the server's total, which counts concealed members too.
+	Public, Visibility bool
+	Limit, Page        int
+}
+
+// Members lists the members of an organization.
+func (s Organizations) Members(ctx context.Context, name string, opts MemberListOptions) (Page[OrganizationMember], error) {
+	users, err := listPage(opts.Limit, opts.Page, func(limit, page int) ([]*gitea.User, http.Header, error) {
+		users, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.User, *gitea.Response, error) {
+			list := gitea.ListOrgMembershipOption{ListOptions: listOptions(limit, page)}
+			if opts.Public {
+				return c.Organizations.ListPublicOrgMembership(ctx, name, list)
+			}
+			return c.Organizations.ListOrgMembership(ctx, name, list)
+		})
+		return users, headerOf(resp), err
+	})
+	members := convertPage(users, memberFrom)
+	if err != nil || !(opts.Public || opts.Visibility) {
+		return members, err
+	}
+	public := make([]bool, len(members.Items))
+	err = concurrently(len(members.Items), func(i int) (err error) {
+		public[i], err = s.IsPublicMember(ctx, name, members.Items[i].Username)
+		return err
 	})
 	if err != nil {
-		return nil, err
+		return Page[OrganizationMember]{}, err
 	}
-	return convertAll(users, memberFrom), nil
+	shown := members.Items[:0]
+	for i, member := range members.Items {
+		member.Visibility = MembershipConcealed
+		if public[i] {
+			member.Visibility = MembershipPublic
+		}
+		if !opts.Public || public[i] {
+			shown = append(shown, member)
+		}
+	}
+	members.Items = shown
+	members.Counted = members.Counted && !opts.Public
+	return members, nil
+}
+
+// concurrentRequests bounds the requests that concurrently keeps in flight.
+const concurrentRequests = 8
+
+// concurrently runs request for each index 0..n-1 with a few requests in flight, and returns their
+// errors joined.
+func concurrently(n int, request func(i int) error) error {
+	errs := make([]error, n)
+	slots := make(chan struct{}, concurrentRequests)
+	var wg sync.WaitGroup
+	for i := range n {
+		slots <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-slots }()
+			errs[i] = request(i)
+		})
+	}
+	wg.Wait()
+	return errors.Join(errs...)
+}
+
+// IsMember reports whether username belongs to the organization.
+func (s Organizations) IsMember(ctx context.Context, name, username string) (bool, error) {
+	return s.check(ctx, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+		_, resp, err := c.Organizations.CheckOrgMembership(ctx, name, username)
+		return resp, err
+	})
+}
+
+// IsPublicMember reports whether username's membership of the organization is public.
+func (s Organizations) IsPublicMember(ctx context.Context, name, username string) (bool, error) {
+	return s.check(ctx, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+		_, resp, err := c.Organizations.CheckPublicOrgMembership(ctx, name, username)
+		return resp, err
+	})
+}
+
+// check runs a membership check that answers no with a 404.
+func (s Organizations) check(ctx context.Context, op func(context.Context, *gitea.Client) (*gitea.Response, error)) (bool, error) {
+	err := do(ctx, s.Client, op)
+	if statusNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // RemoveMember removes an organization member and their organization access.

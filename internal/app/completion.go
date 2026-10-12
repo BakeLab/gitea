@@ -445,8 +445,8 @@ func (a *application) completeReleases() cobra.CompletionFunc {
 // completeOrgs completes the organizations of the account.
 func (a *application) completeOrgs() cobra.CompletionFunc {
 	return a.apiCompletion(false, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
-		items, _, err := services.Organizations{Client: t.client}.List(ctx, true, "", completionLimit, 1)
-		return describe(items, func(item services.Organization) (string, string) { return item.Name, item.FullName }), err
+		items, err := services.Organizations{Client: t.client}.List(ctx, true, "", completionLimit, 1)
+		return describe(items.Items, func(item services.Organization) (string, string) { return item.Name, item.FullName }), err
 	})
 }
 
@@ -457,7 +457,7 @@ func (a *application) completeTeams() cobra.CompletionFunc {
 	teams := a.apiCompletion(false, func(ctx context.Context, t target, toComplete string) ([]cobra.Completion, error) {
 		org, _, _ := strings.Cut(toComplete, "/")
 		items, err := services.Teams{Client: t.client}.List(ctx, org, completionLimit, 1)
-		return describe(items, func(item services.Team) (string, string) {
+		return describe(items.Items, func(item services.Team) (string, string) {
 			return org + "/" + item.Name, strings.TrimSpace(item.Description + " (ID " + strconv.FormatInt(item.ID, 10) + ")")
 		}), err
 	})

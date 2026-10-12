@@ -49,6 +49,8 @@ type View struct {
 	Meta   string
 	Fields []Field
 	Body   string
+	// Bodyless resources, such as webhooks, have no body: the view ends with the fields and URL.
+	Bodyless bool
 	// Kind names the resource in the footer, such as "issue".
 	Kind, URL string
 }
@@ -67,6 +69,9 @@ func (v View) Render(d Display) string {
 		}
 		if v.URL != "" {
 			b.WriteString("url:\t" + SafeLine(v.URL) + "\n")
+		}
+		if v.Bodyless {
+			return b.String()
 		}
 		body := SafeText(v.Body)
 		b.WriteString("--\n" + body)
@@ -106,16 +111,18 @@ func (v View) Render(d Display) string {
 		b.WriteString(Cell{Bold: true}.style(label, d, false) + strings.Repeat(" ", labelWidth+2-runewidth.StringWidth(label)) + field.text(d) + "\n")
 	}
 
-	body := strings.TrimSpace(v.Body)
-	switch {
-	case body == "":
-		body = muted("No description provided")
-	case d.Markdown:
-		body = Markdown(body, d)
-	default:
-		body = SafeText(body)
+	if !v.Bodyless {
+		body := strings.TrimSpace(v.Body)
+		switch {
+		case body == "":
+			body = muted("No description provided")
+		case d.Markdown:
+			body = Markdown(body, d)
+		default:
+			body = SafeText(body)
+		}
+		b.WriteString("\n" + body + "\n")
 	}
-	b.WriteString("\n" + body + "\n")
 	if v.URL != "" {
 		kind := "View on Gitea: "
 		if v.Kind != "" {

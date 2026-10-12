@@ -4,17 +4,25 @@
 package services
 
 import (
+	"cmp"
 	"context"
 	"maps"
+	"net/http"
+	"net/url"
+	"slices"
+	"strconv"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
 )
 
-// Webhook is safe webhook metadata. Delivery URLs and credentials are omitted.
+// Webhook is webhook metadata. Its delivery URL omits credentials unless revealed; signing secrets
+// and authorization headers are never returned.
 type Webhook struct {
 	ID           int64    `json:"id"`
 	Type         string   `json:"type"`
+	URL          string   `json:"url"`
+	ContentType  string   `json:"content_type"`
 	Active       bool     `json:"active"`
 	Events       []string `json:"events"`
 	BranchFilter string   `json:"branch_filter"`
@@ -22,14 +30,52 @@ type Webhook struct {
 	UpdatedAt    string   `json:"updated_at"`
 }
 
-func webhookFrom(hook *gitea.Hook) Webhook {
-	events := hook.Events
+// WebhookEvents are the events that webhooks accept. issues and pull_request select every event of
+// their group; issues_only and pull_request_only select the events of the issue or pull request itself.
+var WebhookEvents = []string{
+	"create", "delete", "fork", "push",
+	"issues", "issues_only", "issue_assign", "issue_label", "issue_milestone", "issue_comment",
+	"pull_request", "pull_request_only", "pull_request_assign", "pull_request_label", "pull_request_milestone",
+	"pull_request_comment", "pull_request_review", "pull_request_sync", "pull_request_review_request",
+	"wiki", "repository", "release", "package", "status", "workflow_run", "workflow_job",
+}
+
+// WebhookTypes are the adapters that deliver webhooks.
+var WebhookTypes = []string{"gitea", "gogs", "slack", "discord", "dingtalk", "telegram", "msteams", "feishu", "matrix", "wechatwork", "packagist"}
+
+// tokenPaths are the adapters whose delivery URL paths carry access tokens.
+var tokenPaths = []string{"slack", "discord", "telegram", "msteams", "feishu"}
+
+// redactURL drops the credentials a delivery URL may carry: user information, the query, and the
+// path of adapters with a token in it. "…" marks what was dropped.
+func redactURL(raw, adapter string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	path := parsed.EscapedPath()
+	if slices.Contains(tokenPaths, adapter) && path != "" && path != "/" {
+		path = "/…"
+	}
+	redacted := parsed.Scheme + "://" + parsed.Host + path
+	if parsed.RawQuery != "" {
+		redacted += "?…"
+	}
+	return redacted
+}
+
+func webhookFrom(hook *gitea.Hook, reveal bool) Webhook {
+	events := slices.Sorted(slices.Values(hook.Events))
 	if events == nil {
 		events = []string{}
 	}
+	address := hook.Config["url"]
+	if !reveal {
+		address = redactURL(address, hook.Type)
+	}
 	return Webhook{
-		ID: hook.ID, Type: hook.Type, Active: hook.Active, Events: events, BranchFilter: hook.BranchFilter,
-		CreatedAt: timestamp(hook.Created), UpdatedAt: timestamp(hook.Updated),
+		ID: hook.ID, Type: hook.Type, URL: address, ContentType: hook.Config["content_type"], Active: hook.Active,
+		Events: events, BranchFilter: hook.BranchFilter, CreatedAt: timestamp(hook.Created), UpdatedAt: timestamp(hook.Updated),
 	}
 }
 
@@ -53,30 +99,36 @@ type WebhookOptions struct {
 type Webhooks struct {
 	Client *transport.Client
 	Scope  WebhookScope
+	// RevealURL returns delivery URLs whole, with the credentials they may carry.
+	RevealURL bool
+}
+
+func (s Webhooks) from(hook *gitea.Hook) Webhook {
+	return webhookFrom(hook, s.RevealURL)
 }
 
 // List returns a page of hook metadata.
-func (s Webhooks) List(ctx context.Context, limit, page int) ([]Webhook, error) {
-	hooks, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Hook, *gitea.Response, error) {
-		opts := gitea.ListHooksOptions{ListOptions: listOptions(limit, page)}
-		switch {
-		case s.Scope.Global:
-			return c.Hooks.ListGlobalHooks(ctx, gitea.ListGlobalHooksOptions{ListOptions: opts.ListOptions})
-		case s.Scope.Account:
-			return c.Hooks.ListMyHooks(ctx, opts)
-		case s.Scope.Organization != "":
-			return c.Hooks.ListOrgHooks(ctx, s.Scope.Organization, opts)
-		}
-		owner, name, err := splitRepository(s.Scope.Repository)
-		if err != nil {
-			return nil, nil, err
-		}
-		return c.Hooks.ListRepoHooks(ctx, owner, name, opts)
+func (s Webhooks) List(ctx context.Context, limit, page int) (Page[Webhook], error) {
+	hooks, err := listPage(limit, page, func(limit, page int) ([]*gitea.Hook, http.Header, error) {
+		hooks, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Hook, *gitea.Response, error) {
+			opts := gitea.ListHooksOptions{ListOptions: listOptions(limit, page)}
+			switch {
+			case s.Scope.Global:
+				return c.Hooks.ListGlobalHooks(ctx, gitea.ListGlobalHooksOptions{ListOptions: opts.ListOptions})
+			case s.Scope.Account:
+				return c.Hooks.ListMyHooks(ctx, opts)
+			case s.Scope.Organization != "":
+				return c.Hooks.ListOrgHooks(ctx, s.Scope.Organization, opts)
+			}
+			owner, name, err := splitRepository(s.Scope.Repository)
+			if err != nil {
+				return nil, nil, err
+			}
+			return c.Hooks.ListRepoHooks(ctx, owner, name, opts)
+		})
+		return hooks, headerOf(resp), err
 	})
-	if err != nil {
-		return nil, err
-	}
-	return convertAll(hooks, webhookFrom), nil
+	return convertPage(hooks, s.from), err
 }
 
 func (s Webhooks) get(ctx context.Context, id int64) (*gitea.Hook, error) {
@@ -95,7 +147,7 @@ func (s Webhooks) get(ctx context.Context, id int64) (*gitea.Hook, error) {
 		}
 		return c.Hooks.GetRepoHook(ctx, owner, name, id)
 	})
-	return hook, err
+	return hook, Classify(err, "webhook", strconv.FormatInt(id, 10), cmp.Or(s.Scope.Repository, s.Scope.Organization))
 }
 
 // View retrieves hook metadata without exposing its delivery configuration.
@@ -104,7 +156,7 @@ func (s Webhooks) View(ctx context.Context, id int64) (Webhook, error) {
 	if err != nil {
 		return Webhook{}, err
 	}
-	return webhookFrom(hook), nil
+	return s.from(hook), nil
 }
 
 // Create registers a new webhook.
@@ -136,7 +188,7 @@ func (s Webhooks) Create(ctx context.Context, opts WebhookOptions) (Webhook, err
 	if err != nil {
 		return Webhook{}, err
 	}
-	return webhookFrom(hook), nil
+	return s.from(hook), nil
 }
 
 // Edit preserves settings that Gitea replaces rather than patching individually.
@@ -189,7 +241,7 @@ func (s Webhooks) Edit(ctx context.Context, id int64, opts WebhookOptions) (Webh
 	if err != nil {
 		return Webhook{}, err
 	}
-	return webhookFrom(hook), nil
+	return s.from(hook), nil
 }
 
 // Delete removes a webhook from the selected scope.

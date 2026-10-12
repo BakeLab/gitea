@@ -102,10 +102,10 @@ func TestTeamAccessRequests(t *testing.T) {
 	service := Teams{Client: client}
 	members, err := service.Members(context.Background(), 3, 5, 2)
 	require.NoError(t, err)
-	require.Equal(t, []OrganizationMember{{ID: 2, Username: "bob"}}, members)
+	require.Equal(t, []OrganizationMember{{ID: 2, Username: "bob"}}, members.Items)
 	repos, err := service.Repositories(context.Background(), 3, 5, 1)
 	require.NoError(t, err)
-	require.Equal(t, "https://gitea.test/acme/project", repos[0].URL)
+	require.Equal(t, "https://gitea.test/acme/project", repos.Items[0].URL)
 	require.NoError(t, service.SetMember(context.Background(), 3, "bob", false))
 	require.NoError(t, service.SetRepository(context.Background(), 3, "acme/project", true))
 	require.Equal(t, []string{
@@ -117,4 +117,51 @@ func TestTeamAccessRequests(t *testing.T) {
 func TestTeamFromKeepsAbsentValuesEmpty(t *testing.T) {
 	item := teamFrom(decode[gitea.Team](t, `{"id":1,"name":"Owners","permission":"owner","organization":null,"units_map":null}`))
 	require.Equal(t, Team{ID: 1, Name: "Owners", Permission: "owner", Units: map[string]string{}}, item)
+}
+
+func TestTeamAccessSummarizesUnits(t *testing.T) {
+	for _, tc := range []struct {
+		permission string
+		units      map[string]string
+		want       string
+	}{
+		{"owner", UnitPolicy("write"), "owner"},
+		{"admin", nil, "admin"},
+		{"none", UnitPolicy("write"), "write"},
+		{"none", UnitPolicy("read"), "read"},
+		{"none", map[string]string{"repo.code": "write", "repo.issues": "write", "repo.pulls": "write", "repo.wiki": "none", "repo.ext_wiki": "read"}, "write (code, issues, pulls)"},
+		{"none", map[string]string{"repo.code": "write", "repo.wiki": "read"}, "custom"},
+		{"none", map[string]string{"repo.ext_issues": "read"}, "none"},
+	} {
+		require.Equal(t, tc.want, Team{Permission: tc.permission, Units: tc.units}.Access(), "%v", tc.units)
+	}
+}
+
+func TestTeamFindSearchesTheOrganization(t *testing.T) {
+	var queries []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/orgs/nope/teams/search" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		require.Equal(t, "/api/v1/orgs/acme/teams/search", r.URL.Path)
+		queries = append(queries, r.URL.Query().Get("q"))
+		if r.URL.Query().Get("page") != "1" {
+			_, _ = w.Write([]byte(`{"ok":true,"data":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"data":[{"id":2,"name":"dev"},{"id":3,"name":"Dev"},{"id":4,"name":"devops"}]}`))
+	}))
+	service := Teams{Client: client}
+	team, err := service.Find(context.Background(), "acme", "devops")
+	require.NoError(t, err)
+	require.Equal(t, Team{ID: 4, Name: "devops", Organization: "acme", Units: map[string]string{}}, team)
+	team, err = service.Find(context.Background(), "acme", "3")
+	require.NoError(t, err)
+	require.Equal(t, "Dev", team.Name)
+	_, err = service.Find(context.Background(), "acme", "DEV")
+	require.EqualError(t, err, `team "DEV" is ambiguous in acme (IDs 2, 3); pass an ID`)
+	_, err = service.Find(context.Background(), "nope", "dev")
+	require.EqualError(t, err, `organization "nope" not found`)
+	require.Equal(t, []string{"devops", "devops", "", "", "DEV", "DEV"}, queries)
 }

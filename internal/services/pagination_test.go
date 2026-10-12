@@ -71,14 +71,14 @@ func TestListsCollectPagesBeyondServerPageSize(t *testing.T) {
 				want = append(want, int64(id))
 			}
 			client := transport.New(server.URL, "", false)
-			orgs, more, err := (Organizations{Client: client}).List(context.Background(), true, "", tc.limit, tc.page)
+			orgs, err := (Organizations{Client: client}).List(context.Background(), true, "", tc.limit, tc.page)
 			require.NoError(t, err)
 			got := []int64{}
-			for _, item := range orgs {
+			for _, item := range orgs.Items {
 				got = append(got, item.ID)
 			}
 			require.Equal(t, want, got)
-			require.Equal(t, tc.total > tc.page*tc.limit, more)
+			require.Equal(t, tc.total > tc.page*tc.limit, orgs.More)
 			require.LessOrEqual(t, *requests, tc.limit/min(tc.limit, tc.maxItems)+2)
 			repos, more, err := (Repositories{Client: client}).List(context.Background(), RepositoryListOptions{Limit: tc.limit, Page: tc.page})
 			require.NoError(t, err)

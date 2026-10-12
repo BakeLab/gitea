@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"net/http"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -27,15 +28,15 @@ func sshKeyFrom(key *gitea.PublicKey) SSHKey {
 // SSHKeys manages public keys for the authenticated account.
 type SSHKeys struct{ Client *transport.Client }
 
-// List returns a non-nil page of public keys.
-func (s SSHKeys) List(ctx context.Context, limit, page int) ([]SSHKey, error) {
-	keys, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.PublicKey, *gitea.Response, error) {
-		return c.Users.ListMyPublicKeys(ctx, gitea.ListPublicKeysOptions{ListOptions: listOptions(limit, page)})
+// List returns a page of public keys.
+func (s SSHKeys) List(ctx context.Context, limit, page int) (Page[SSHKey], error) {
+	keys, err := listPage(limit, page, func(limit, page int) ([]*gitea.PublicKey, http.Header, error) {
+		keys, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.PublicKey, *gitea.Response, error) {
+			return c.Users.ListMyPublicKeys(ctx, gitea.ListPublicKeysOptions{ListOptions: listOptions(limit, page)})
+		})
+		return keys, headerOf(resp), err
 	})
-	if err != nil {
-		return nil, err
-	}
-	return convertAll(keys, sshKeyFrom), nil
+	return convertPage(keys, sshKeyFrom), err
 }
 
 // View retrieves a public key by ID.

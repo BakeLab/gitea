@@ -6,6 +6,9 @@ package services
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -68,15 +71,24 @@ func visibilityOf(visibility *string) *gitea.VisibleType {
 // AdminUsers provides administrator account operations.
 type AdminUsers struct{ Client *transport.Client }
 
-// List returns a page of users visible to the instance administrator.
-func (s AdminUsers) List(ctx context.Context, limit, page int) ([]AdminUser, error) {
-	users, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.User, *gitea.Response, error) {
-		return c.Admin.ListUsers(ctx, gitea.AdminListUsersOptions{ListOptions: listOptions(limit, page)})
+// List returns a page of the users whose username, full name or email contains query, or of
+// every user without one.
+func (s AdminUsers) List(ctx context.Context, query string, limit, page int) (Page[AdminUser], error) {
+	users, err := listPage(limit, page, func(limit, page int) ([]*gitea.User, http.Header, error) {
+		users, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.User, *gitea.Response, error) {
+			return c.Admin.ListUsers(ctx, gitea.AdminListUsersOptions{ListOptions: listOptions(limit, page), Query: query})
+		})
+		return users, headerOf(resp), err
 	})
-	if err != nil {
-		return nil, err
-	}
-	return convertAll(users, adminUserFrom), nil
+	return convertPage(users, adminUserFrom), err
+}
+
+// Search finds accounts whose name contains query; unlike List it needs no administrator rights.
+func (s AdminUsers) Search(ctx context.Context, query string, limit int) ([]AdminUser, error) {
+	users, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.User, *gitea.Response, error) {
+		return c.Users.SearchUsers(ctx, gitea.SearchUsersOption{ListOptions: listOptions(limit, 1), KeyWord: query})
+	})
+	return convertAll(users, adminUserFrom), err
 }
 
 func (s AdminUsers) get(ctx context.Context, username string) (*gitea.User, error) {
@@ -144,9 +156,17 @@ func (s AdminUsers) Edit(ctx context.Context, username string, opts AdminUserOpt
 	return s.View(ctx, username)
 }
 
-// Delete removes an account. Gitea enforces ownership constraints.
-func (s AdminUsers) Delete(ctx context.Context, username string) error {
-	return do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
-		return c.Admin.DeleteUser(ctx, username)
-	})
+// Delete removes an account. Gitea refuses to delete users who own repositories or organizations
+// unless purge also deletes what they own.
+func (s AdminUsers) Delete(ctx context.Context, username string, purge bool) error {
+	var err error
+	if purge {
+		// TODO(sdk): DeleteUser needs a purge option.
+		err = sendJSON(ctx, s.Client, http.MethodDelete, "admin/users/"+url.PathEscape(username)+"?purge=true", nil, nil)
+	} else {
+		err = do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+			return c.Admin.DeleteUser(ctx, username)
+		})
+	}
+	return Classify(err, "user", strconv.Quote(username), "")
 }

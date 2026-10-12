@@ -422,11 +422,6 @@ const (
 	pr review cancel-request
 `
 	examplesToWrite = `
-	admin user create
-	admin user delete
-	admin user edit
-	admin user list
-	admin user view
 	alias delete
 	alias list
 	alias set
@@ -488,15 +483,6 @@ const (
 	notification unpin
 	notification view
 	notification watch
-	org create
-	org delete
-	org edit
-	org list
-	org member list
-	org member private
-	org member public
-	org member remove
-	org view
 	pr attachment delete
 	pr attachment download
 	pr attachment edit
@@ -571,22 +557,7 @@ const (
 	secret delete
 	secret list
 	secret set
-	ssh-key create
-	ssh-key delete
-	ssh-key list
-	ssh-key view
 	status
-	team create
-	team delete
-	team edit
-	team list
-	team member add
-	team member list
-	team member remove
-	team repo add
-	team repo list
-	team repo remove
-	team view
 	time create
 	time delete
 	time list
@@ -595,11 +566,6 @@ const (
 	variable list
 	variable set
 	variable view
-	webhook create
-	webhook delete
-	webhook edit
-	webhook list
-	webhook view
 	wiki create
 	wiki delete
 	wiki edit
@@ -613,8 +579,6 @@ const (
 	workflow view
 `
 	longsToWrite = `
-	admin
-	admin user
 	alias
 	auth
 	branch
@@ -625,8 +589,6 @@ const (
 	milestone
 	milestone issue
 	notification
-	org
-	org member
 	pr
 	pr attachment
 	pr comment
@@ -637,13 +599,8 @@ const (
 	run artifact
 	search
 	secret
-	ssh-key
-	team
-	team member
-	team repo
 	time
 	variable
-	webhook
 	wiki
 	workflow
 `

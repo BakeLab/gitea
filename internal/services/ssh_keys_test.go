@@ -28,11 +28,11 @@ func TestSSHKeyListPaginatesAndMapsKeys(t *testing.T) {
 	service := SSHKeys{Client: client}
 	keys, err := service.List(context.Background(), 20, 1)
 	require.NoError(t, err)
-	require.Equal(t, []SSHKey{{ID: 3, Title: "laptop", Key: "ssh-ed25519 AAAA", Fingerprint: "SHA256:abc", CreatedAt: "2026-10-01T12:00:00Z", ReadOnly: true}}, keys)
+	require.Equal(t, []SSHKey{{ID: 3, Title: "laptop", Key: "ssh-ed25519 AAAA", Fingerprint: "SHA256:abc", CreatedAt: "2026-10-01T12:00:00Z", ReadOnly: true}}, keys.Items)
 	keys, err = service.List(context.Background(), 20, 2)
 	require.NoError(t, err)
-	require.NotNil(t, keys)
-	require.Empty(t, keys)
+	require.NotNil(t, keys.Items)
+	require.Empty(t, keys.Items)
 }
 
 func TestSSHKeyViewCreateAndDelete(t *testing.T) {

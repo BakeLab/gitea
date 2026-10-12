@@ -62,6 +62,18 @@ func TestViewRender(t *testing.T) {
 			Display{TTY: true},
 			"Home\n\nNo description provided\n",
 		},
+		{
+			"bodyless for people",
+			View{Title: "laptop", Fields: []Field{{Label: "Type", Value: "ssh-ed25519"}}, Bodyless: true, URL: "https://example.org/keys"},
+			Display{TTY: true},
+			"laptop\nType: ssh-ed25519\n\nView on Gitea: https://example.org/keys\n",
+		},
+		{
+			"bodyless when piped",
+			View{Title: "laptop", Fields: []Field{{Label: "Type", Value: "ssh-ed25519"}}, Bodyless: true, URL: "https://example.org/keys"},
+			Display{},
+			"title:\tlaptop\ntype:\tssh-ed25519\nurl:\thttps://example.org/keys\n",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, tc.view.Render(tc.d))
