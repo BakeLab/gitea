@@ -35,8 +35,6 @@ const (
 // ref is a parsed reference argument.
 type ref struct {
 	Number int64
-	// Job is the job of a run URL ending in /jobs/M, else 0.
-	Job int64
 	// Repo is the repository the reference names, as a repository argument (a URL,
 	// [HOST/]OWNER/REPO or NAME); it is empty for N and #N.
 	Repo string
@@ -57,6 +55,10 @@ func parseRef(raw string, kind refKind) (ref, error) {
 	if !hashed {
 		repo, value = "", raw
 	}
+	// Only a repository before # makes a reference, so a branch such as fix#12 stays a branch.
+	if repo != "" && !repositoryLike(repo) {
+		return ref{}, errNotRef
+	}
 	n, err := strconv.ParseInt(value, 10, 64)
 	if err != nil && !hashed {
 		return ref{}, errNotRef
@@ -65,6 +67,12 @@ func parseRef(raw string, kind refKind) (ref, error) {
 		return ref{}, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid %s %q: use %s", kind.noun(), raw, kind.forms()))
 	}
 	return ref{Number: n, Repo: repo}, nil
+}
+
+// repositoryLike reports whether raw has the form OWNER/REPO or HOST/OWNER/REPO.
+func repositoryLike(raw string) bool {
+	pieces := strings.Split(raw, "/")
+	return len(pieces) >= 2 && settings.ValidSlug(strings.Join(pieces[len(pieces)-2:], "/"))
 }
 
 func parseRefURL(raw string, kind refKind) (ref, error) {
@@ -92,10 +100,9 @@ func parseRefURL(raw string, kind refKind) (ref, error) {
 		result := ref{}
 		switch {
 		case kind == runRef && at(i) == "actions" && at(i+1) == "runs" && positive(i+2) > 0:
+			// Since Gitea 1.26 the web URL holds the run ID, which the API takes too; a trailing
+			// /jobs/M only selects a job on the web page.
 			result.Number = positive(i + 2)
-			if at(i+3) == "jobs" {
-				result.Job = positive(i + 4)
-			}
 		case kind != runRef && (at(i) == "issues" || at(i) == "pulls") && positive(i+1) > 0:
 			result.Number = positive(i + 1)
 		default:
@@ -223,9 +230,10 @@ func (a *application) pullSelector(cmd *cobra.Command, args []string) (target, i
 	return t, n, nil
 }
 
-// currentPull finds the pull request of the checked-out branch: the one pr checkout recorded,
-// else the open pull request whose head is the branch's upstream (and the upstream remote's
-// owner), else one whose head has the local branch's name, else N from a pr/N branch.
+// currentPull finds the pull request of the checked-out branch: the one pr checkout recorded
+// while it is open, else the open pull request whose head is the branch's upstream (and the
+// upstream remote's owner), else one whose head has the local branch's name, else N from a pr/N
+// branch, else the recorded pull request even though it is no longer open.
 func (a *application) currentPull(ctx context.Context) (target, int64, error) {
 	branch, err := git.CurrentBranchConfig(ctx, a.gitProbe(), a.options.cwd)
 	if err != nil {
@@ -235,10 +243,16 @@ func (a *application) currentPull(ctx context.Context) (target, int64, error) {
 	if err != nil {
 		return t, 0, err
 	}
+	service := services.Pulls{Client: t.client, Repository: t.Repo}
+	// A recorded pull request that was merged or closed only counts when no open one has the branch.
+	recorded := int64(0)
 	if branch.PullNumber > 0 && (branch.BaseRemote == "" || a.remoteOwns(ctx, t, branch.BaseRemote)) {
-		return t, branch.PullNumber, nil
+		if pull, err := service.View(ctx, branch.PullNumber); err != nil || pull.State == "open" {
+			return t, branch.PullNumber, nil
+		}
+		recorded = branch.PullNumber
 	}
-	pulls, err := (services.Pulls{Client: t.client, Repository: t.Repo}).ListOpen(ctx)
+	pulls, err := service.ListOpen(ctx)
 	if err != nil {
 		return t, 0, err
 	}
@@ -260,6 +274,9 @@ func (a *application) currentPull(ctx context.Context) (target, int64, error) {
 		if n, err := strconv.ParseInt(number, 10, 64); err == nil && n > 0 {
 			return t, n, nil
 		}
+	}
+	if recorded > 0 {
+		return t, recorded, nil
 	}
 	return t, 0, fmt.Errorf("no open pull request for branch %q in %s; pass a number, URL or branch", branch.Name, t.Repo)
 }

@@ -84,3 +84,15 @@ func TestGitCredentialEnvironmentTokenIsScopedAndNeverPersisted(t *testing.T) {
 		require.Empty(t, out.String())
 	}
 }
+
+func TestGitCredentialEnvironmentTokenAcceptsABareHost(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Fatalf("unexpected request %s", r.URL.Path) }))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	require.NoError(t, testManager(t, deps).Register(server.URL, "alice", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "stored-token"}))
+	host := strings.TrimPrefix(server.URL, "http://")
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": host, "GITEA_TOKEN": "environment-token"})
+	deps.Streams.In = strings.NewReader("protocol=http\nhost=" + host + "\npath=alice/project.git\n\n")
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "git-credential", "get"}))
+	require.Equal(t, "username=alice\npassword=environment-token\n\n", out.String())
+}

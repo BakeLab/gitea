@@ -40,6 +40,9 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 			return err
 		}
 		environmentHost := a.tokenInstance()
+		if resolved, err := settings.ResolveHost(environmentHost, snapshot.Hosts.Hosts); environmentHost != "" && err == nil {
+			environmentHost = resolved
+		}
 		instance, err := auth.MatchGitInstance(request, snapshot.Hosts.Hosts, a.options.host, environmentHost)
 		if err != nil {
 			return clierr.Wrap(clierr.Usage, err)
@@ -64,11 +67,7 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 		}
 		credential := auth.Credential{}
 		token := a.deps.Getenv("GITEA_TOKEN")
-		environmentMatches := false
-		if environmentHost != "" {
-			normalized, err := settings.NormalizeHost(environmentHost)
-			environmentMatches = err == nil && normalized == instance
-		}
+		environmentMatches := environmentHost != "" && environmentHost == instance
 		if token != "" && environmentMatches {
 			actual, err := services.CurrentAccount(cmd.Context(), a.deps.Client(instance, token, host.Insecure))
 			if err != nil {

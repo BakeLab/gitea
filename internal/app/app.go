@@ -203,14 +203,14 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	return root
 }
 
-// rootGroups places the core and Actions commands in their root help groups (D26); every other
+// rootGroups places the core and Actions commands in their root help groups; every other
 // command is additional.
 var rootGroups = map[string]string{
 	"auth": "core", "issue": "core", "org": "core", "pr": "core", "release": "core", "repo": "core",
 	"run": "actions", "secret": "actions", "variable": "actions", "workflow": "actions",
 }
 
-// verbAliases are the gh-style short names that every command with a common verb accepts (D6).
+// verbAliases are the gh-style short names that every command with a common verb accepts.
 // Commands add other gh verbs, such as new, co, add and get, to their own Aliases.
 var verbAliases = map[string]string{"list": "ls", "delete": "rm"}
 
@@ -227,7 +227,7 @@ func addVerbAliases(cmd *cobra.Command) {
 }
 
 // acceptPlurals lets the flags of cmd be named in the plural, such as --add-labels for the gh name
-// --add-label (D8), without showing the plural in help.
+// --add-label, without showing the plural in help.
 func acceptPlurals(cmd *cobra.Command) {
 	names := map[string]bool{}
 	cmd.Flags().VisitAll(func(flag *pflag.Flag) { names[flag.Name] = true })

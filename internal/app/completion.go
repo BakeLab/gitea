@@ -303,7 +303,7 @@ func (a *application) completionTarget(ctx context.Context, requireRepo bool) (t
 	var signer *auth.HTTPSign
 	token := a.deps.Getenv("GITEA_TOKEN")
 	if token != "" {
-		if instance, err := settings.NormalizeHost(a.tokenInstance()); err != nil || instance != t.Host {
+		if instance, err := settings.ResolveHost(a.tokenInstance(), t.hosts()); err != nil || instance != t.Host {
 			return t, errors.New("GITEA_TOKEN belongs to another instance")
 		}
 	} else {

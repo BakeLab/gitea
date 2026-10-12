@@ -161,7 +161,7 @@ $ gt pr checkout 13 --update`
 	return cmd
 }
 
-// checkoutBranchName names the local branch for a pull request (D13): its head branch name when
+// checkoutBranchName names the local branch for a pull request: its head branch name when
 // that is free or already at the head, else OWNER/BRANCH for a fork, else pr/NUMBER. A branch that
 // an earlier checkout of the same pull request created is reused, so that --update can advance it.
 func (a *application) checkoutBranchName(ctx context.Context, t target, pull services.Pull) string {

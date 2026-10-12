@@ -259,7 +259,8 @@ func extractZip(ctx context.Context, body io.Reader, dir string, clobber, skipEx
 	return nil
 }
 
-// extractFile writes one archive entry to path with the permissions the umask allows.
+// extractFile writes one archive entry to path with its permission bits, such as an executable's,
+// as far as the umask allows; special bits such as setuid are dropped.
 func extractFile(entry *zip.File, path string, clobber, skipExisting bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o777); err != nil {
 		return err
@@ -268,7 +269,7 @@ func extractFile(entry *zip.File, path string, clobber, skipExisting bool) error
 	if clobber {
 		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
 	}
-	file, err := os.OpenFile(path, flags, 0o666)
+	file, err := os.OpenFile(path, flags, cmp.Or(entry.Mode().Perm(), 0o666))
 	if errors.Is(err, os.ErrExist) && skipExisting {
 		return nil
 	}

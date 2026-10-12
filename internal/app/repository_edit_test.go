@@ -5,7 +5,9 @@ package app
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -62,4 +64,25 @@ func TestRepositoryEditReportsTheChangedSettings(t *testing.T) {
 	require.Equal(t, []string{"PATCH /api/v1/repos/alice/project", "PUT /api/v1/repos/alice/project/topics/cli", "PUT /api/v1/repos/alice/project/topics/go", "DELETE /api/v1/repos/alice/project/topics/old"}, requests)
 	require.Empty(t, out.String())
 	require.Equal(t, "✓ Edited repository alice/project (add-topic, description, remove-topic, visibility)\n", diagnostics.String())
+}
+
+func TestRepositoryEditArchivesAfterTheOtherChanges(t *testing.T) {
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		request := r.Method + " " + r.URL.Path
+		if strings.Contains(string(data), `"archived":true`) {
+			request += " archived"
+		}
+		requests = append(requests, request)
+		_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "edit", "alice/project", "-d", "CLI", "--archived", "--add-topic", "cli", "--yes"}))
+	require.Equal(t, []string{
+		"PATCH /api/v1/repos/alice/project",
+		"PUT /api/v1/repos/alice/project/topics/cli",
+		"PATCH /api/v1/repos/alice/project archived",
+	}, requests)
 }

@@ -19,13 +19,13 @@ func (s Labels) Scope() string {
 	return s.Repository
 }
 
-// finder addresses the labels of the scope by ID or name (D10); byName matches numeric values as
+// finder addresses the labels of the scope by ID or name; byName matches numeric values as
 // names only.
 func (s Labels) finder(byName bool) NameOrID[Label] {
 	return NameOrID[Label]{Kind: "label", Scope: s.Scope(), ID: func(l Label) int64 { return l.ID }, Name: func(l Label) string { return l.Name }, ByName: byName}
 }
 
-// Find returns the labels of the scope that raws address, each by ID or name (D10); byName matches
+// Find returns the labels of the scope that raws address, each by ID or name; byName matches
 // numeric values as names only.
 func (s Labels) Find(ctx context.Context, raws []string, byName bool) ([]Label, error) {
 	items, err := s.All(ctx)

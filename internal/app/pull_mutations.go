@@ -107,7 +107,7 @@ func (a *application) pullStateCommand(closing bool) *cobra.Command {
 			a.done(cmd, "%s pull request %s", done, ref)
 		}
 		if deleteBranch {
-			a.deleteHead(cmd, service, item, false)
+			a.deleteHead(cmd, service, item, false, true)
 		}
 		return a.jsonResult(cmd, item)
 	}}
@@ -124,9 +124,9 @@ $ gt pr close 13 -c "Superseded by #15" --delete-branch`
 }
 
 // deleteHead deletes the head branch of a merged or closed pull request on Gitea, unless it is
-// gone, and then locally, reporting each step. merging tells that Gitea deleted it as part of
-// the merge.
-func (a *application) deleteHead(cmd *cobra.Command, service services.Pulls, item services.Pull, merging bool) {
+// gone, and then locally when local is set, reporting each step. merging tells that Gitea deleted
+// it as part of the merge.
+func (a *application) deleteHead(cmd *cobra.Command, service services.Pulls, item services.Pull, merging, local bool) {
 	switch {
 	case item.HeadRemoteDeleted && merging:
 		a.done(cmd, "Deleted remote branch %s", item.Head)
@@ -141,7 +141,9 @@ func (a *application) deleteHead(cmd *cobra.Command, service services.Pulls, ite
 			a.done(cmd, "Deleted remote branch %s", item.Head)
 		}
 	}
-	a.deleteLocalHead(cmd, item)
+	if local {
+		a.deleteLocalHead(cmd, item)
+	}
 }
 
 // deleteLocalHead deletes the checked-out branch when it is at the head of the pull request,
@@ -311,6 +313,9 @@ the base branch.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.co
 		} else if !slices.Contains(repoSettings.Styles, method) {
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("%s merges are disabled in %s; use one of: %s", method, t.Repo, strings.Join(repoSettings.Styles, ", ")))
 		}
+		// The repository setting deletes the branch on Gitea only; the local branch goes when
+		// --delete-branch or the form asks for it.
+		deleteLocal := deleteBranch
 		if !cmd.Flags().Changed("delete-branch") {
 			deleteBranch = repoSettings.DeleteBranch
 		}
@@ -328,6 +333,9 @@ the base branch.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.co
 				return err
 			}
 			method, deleteBranch = values.Method, values.DeleteBranch
+			if askDelete {
+				deleteLocal = deleteBranch
+			}
 		} else if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: header + "?", DefaultYes: true, NonTTY: "merge " + t.Repo + "#" + fmt.Sprint(n)}); err != nil {
 			return err
 		}
@@ -349,7 +357,7 @@ the base branch.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.co
 		} else {
 			a.done(cmd, "%s pull request %s", mergeVerbs[method], ref)
 			if deleteBranch {
-				a.deleteHead(cmd, service, merged, true)
+				a.deleteHead(cmd, service, merged, true, deleteLocal)
 			}
 		}
 		return a.jsonResult(cmd, merged)
@@ -361,7 +369,7 @@ the base branch.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.co
 	cmd.Flags().BoolVar(&style.merge, "merge", false, "Create a merge commit")
 	cmd.Flags().BoolVar(&style.squash, "squash", false, "Squash the commits into one commit and merge it")
 	cmd.Flags().BoolVar(&style.rebase, "rebase", false, "Rebase the commits onto the base branch")
-	cmd.Flags().BoolVarP(&deleteBranch, "delete-branch", "d", false, "Delete the head branch after merging (default: the repository setting)")
+	cmd.Flags().BoolVarP(&deleteBranch, "delete-branch", "d", false, "Delete the head branch on Gitea and locally after merging (default: the repository setting, on Gitea only)")
 	cmd.Flags().BoolVar(&auto, "auto", false, "Merge once the required checks succeed")
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Merge commit title")
 	cmd.Flags().StringVarP(&message, "message", "b", "", "Merge commit message")

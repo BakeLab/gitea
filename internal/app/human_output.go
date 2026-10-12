@@ -133,19 +133,20 @@ func writeView[T any](a *application, cmd *cobra.Command, item T, view func(T) t
 // done reports a completed mutation on stderr, such as "✓ Closed issue alice/x#5 (Fix login)",
 // when people read stdout: on a TTY and without --json.
 func (a *application) done(cmd *cobra.Command, format string, args ...any) {
+	if !a.deps.Streams.OutTTY || a.options.json != "" {
+		return
+	}
 	a.feedback(cmd, "✓", "green", format, args...)
 }
 
-// warn reports a mutation that had nothing to do, such as "! Issue alice/x#5 (Fix login) is already
-// closed", under the same conditions as done.
+// warn reports on stderr a mutation that had nothing to do, such as "! Issue alice/x#5 (Fix login)
+// is already closed", or a part of one that failed. Unlike done it is never silenced, so scripts
+// and --json callers still learn about partial failures.
 func (a *application) warn(cmd *cobra.Command, format string, args ...any) {
 	a.feedback(cmd, "!", "yellow", format, args...)
 }
 
 func (a *application) feedback(cmd *cobra.Command, icon, color, format string, args ...any) {
-	if !a.deps.Streams.OutTTY || a.options.json != "" {
-		return
-	}
 	fmt.Fprintln(cmd.ErrOrStderr(), terminal.Colorize(color, icon, a.colorEnabled())+" "+terminal.SafeLine(fmt.Sprintf(format, args...)))
 }
 

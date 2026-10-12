@@ -158,6 +158,24 @@ func TestSyncBranchRefusesWhatItCannotFastForward(t *testing.T) {
 	}
 }
 
+func TestSyncBranchRefusesABranchCheckedOutInAnotherWorktree(t *testing.T) {
+	f := newSyncFixture(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	f.git(f.work, "worktree", "add", linked, "main")
+	before := f.git(f.work, "rev-parse", "main")
+	_, err := f.sync("main")
+	require.ErrorContains(t, err, "main is checked out in the worktree")
+	require.Equal(t, before, f.git(f.work, "rev-parse", "main"))
+	require.Equal(t, "experiment", f.git(f.work, "branch", "--show-current"))
+}
+
+func TestWorktreeWithBranch(t *testing.T) {
+	porcelain := "worktree /src\nHEAD abc\nbranch refs/heads/experiment\n\nworktree /linked\nHEAD def\nbranch refs/heads/main\n\nworktree /detached\nHEAD 123\ndetached\n"
+	require.Equal(t, "/linked", worktreeWithBranch(porcelain, "refs/heads/main"))
+	require.Equal(t, "/src", worktreeWithBranch(porcelain, "refs/heads/experiment"))
+	require.Empty(t, worktreeWithBranch(porcelain, "refs/heads/other"))
+}
+
 func TestSyncBranchValidatesItsInput(t *testing.T) {
 	f := newSyncFixture(t)
 	_, err := SyncBranch(context.Background(), f.runner, SyncOptions{Directory: f.work, Remote: "origin"})

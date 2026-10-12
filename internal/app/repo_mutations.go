@@ -171,7 +171,11 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 					return err
 				}
 			}
-			repo := t.Repo
+			// Gitea refuses topic changes on an archived repository, so archiving comes last.
+			repo, archive := t.Repo, options.Archived != nil && *options.Archived
+			if archive {
+				options.Archived = nil
+			}
 			if options != (services.RepositoryEdit{}) {
 				item, err := service.Edit(cmd.Context(), t.Repo, options)
 				if err != nil {
@@ -187,6 +191,11 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 			for _, topic := range removeTopics {
 				if err := service.RemoveTopic(cmd.Context(), repo, topic); err != nil {
 					return fmt.Errorf("remove topic %q: %w", topic, err)
+				}
+			}
+			if archive {
+				if _, err := service.Edit(cmd.Context(), repo, services.RepositoryEdit{Archived: &archive}); err != nil {
+					return err
 				}
 			}
 			var edited []string

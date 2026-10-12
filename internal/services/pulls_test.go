@@ -326,3 +326,40 @@ func TestPullFromToleratesMissingBranches(t *testing.T) {
 	require.Equal(t, Pull{Number: 1, Assignees: []string{}, Labels: []Label{}, Reviewers: []string{}, ReviewerTeams: []string{}},
 		pullFrom(decode[gitea.PullRequest](t, `{"number":1,"head":null,"base":null}`)))
 }
+
+func TestPullClientFiltersStopReadingOncePageIsFull(t *testing.T) {
+	requests := 0
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		items := make([]string, 0, 50)
+		for i := range 50 {
+			items = append(items, `{"number":`+strconv.Itoa((page-1)*50+i+1)+`,"draft":true}`)
+		}
+		w.Header().Set("X-Total-Count", "5000")
+		_, _ = w.Write([]byte("[" + strings.Join(items, ",") + "]"))
+	}))
+	page, err := (Pulls{Client: client, Repository: "alice/project"}).ListPage(context.Background(), PullListOptions{State: "open", Draft: true, Limit: 30, Page: 2})
+	require.NoError(t, err)
+	require.Equal(t, 2, requests)
+	require.Len(t, page.Items, 30)
+	require.EqualValues(t, 31, page.Items[0].Number)
+	require.True(t, page.More)
+	require.False(t, page.Counted)
+}
+
+func TestPullClientFiltersCountWhenEveryPullWasRead(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") != "1" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"number":1,"draft":true},{"number":2},{"number":3,"draft":true}]`))
+	}))
+	page, err := (Pulls{Client: client, Repository: "alice/project"}).ListPage(context.Background(), PullListOptions{State: "open", Draft: true, Limit: 2, Page: 1})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 2)
+	require.False(t, page.More)
+	require.True(t, page.Counted)
+	require.Equal(t, 2, page.Total)
+}

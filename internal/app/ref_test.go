@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -25,14 +26,13 @@ func TestParseRefAcceptsNumbersQualifiedNumbersAndURLs(t *testing.T) {
 		{raw: " 12 ", want: ref{Number: 12}},
 		{raw: "alice/project#12", want: ref{Number: 12, Repo: "alice/project"}},
 		{raw: "localhost:3001/alice/project#12", want: ref{Number: 12, Repo: "localhost:3001/alice/project"}},
-		{raw: "project#12", want: ref{Number: 12, Repo: "project"}},
 		{raw: "https://gitea.com/alice/project/issues/3", want: ref{Number: 3, Repo: "https://gitea.com/alice/project"}},
 		{raw: "https://gitea.com/alice/project/issues/3#issuecomment-79", want: ref{Number: 3, Repo: "https://gitea.com/alice/project"}},
 		{raw: "http://localhost:3001/base/alice/project/pulls/7/files?style=split", kind: pullRef, want: ref{Number: 7, Repo: "http://localhost:3001/base/alice/project"}},
 		{raw: "https://gitea.com/alice/issues/issues/4", want: ref{Number: 4, Repo: "https://gitea.com/alice/issues"}},
 		{raw: "https://gitea.com/alice/project/pulls/7", kind: issueRef, want: ref{Number: 7, Repo: "https://gitea.com/alice/project"}},
 		{raw: "https://gitea.com/alice/project/actions/runs/34", kind: runRef, want: ref{Number: 34, Repo: "https://gitea.com/alice/project"}},
-		{raw: "https://gitea.com/alice/project/actions/runs/34/jobs/2", kind: runRef, want: ref{Number: 34, Job: 2, Repo: "https://gitea.com/alice/project"}},
+		{raw: "https://gitea.com/alice/project/actions/runs/34/jobs/2", kind: runRef, want: ref{Number: 34, Repo: "https://gitea.com/alice/project"}},
 		{raw: "#34", kind: runRef, want: ref{Number: 34}},
 		{raw: "0", err: `invalid issue "0": use a number, #number, OWNER/REPO#number or URL`},
 		{raw: "#abc", kind: pullRef, err: `invalid pull request "#abc"`},
@@ -51,7 +51,7 @@ func TestParseRefAcceptsNumbersQualifiedNumbersAndURLs(t *testing.T) {
 		require.NoError(t, err, tc.raw)
 		require.Equal(t, tc.want, got, tc.raw)
 	}
-	for _, branch := range []string{"feature/login", "bob:fix", "main"} {
+	for _, branch := range []string{"feature/login", "bob:fix", "main", "fix#12", "project#12", "bob:fix#3"} {
 		_, err := parseRef(branch, pullRef)
 		require.ErrorIs(t, err, errNotRef, branch)
 	}
@@ -59,10 +59,18 @@ func TestParseRefAcceptsNumbersQualifiedNumbersAndURLs(t *testing.T) {
 
 // refApplication returns an application authenticated against a server listing the open pull
 // requests #3 (feat/one in alice/project), #4 (feat/two), #17 (fix in bob/project) and two
-// pull requests from branch dup.
+// pull requests from branch dup. Viewing one pull request finds it open, except the merged #30.
 func refApplication(t *testing.T, gitResults map[string]string) (*application, string) {
 	t.Helper()
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if number, ok := strings.CutPrefix(r.URL.Path, "/api/v1/repos/alice/project/pulls/"); ok {
+			state := "open"
+			if number == "30" {
+				state = "closed"
+			}
+			_, _ = w.Write([]byte(`{"number":` + number + `,"state":"` + state + `","merged":true}`))
+			return
+		}
 		require.Equal(t, "/api/v1/repos/alice/project/pulls", r.URL.Path)
 		writeFirstPage(w, r, `[
 			{"number":3,"head":{"ref":"feat/one","repo":{"full_name":"alice/project"}}},
@@ -111,6 +119,8 @@ func TestPullSelectorDefaultsToTheCheckedOutBranch(t *testing.T) {
 	}{
 		{"recorded by pr checkout", branch("pr/17", map[string]string{"gitea-cli-pr": "17", "gitea-cli-base-remote": "origin", "remote": "pulls/bob/project", "merge": "refs/heads/fix"}), 17, ""},
 		{"head branch name kept by pr checkout", branch("fix", map[string]string{"gitea-cli-pr": "17", "gitea-cli-base-remote": "origin"}), 17, ""},
+		{"recorded but merged, the head branch has a newer one", branch("fix", map[string]string{"gitea-cli-pr": "30", "gitea-cli-base-remote": "origin"}), 17, ""},
+		{"recorded but merged, no open one", branch("gone", map[string]string{"gitea-cli-pr": "30", "gitea-cli-base-remote": "origin"}), 30, ""},
 		{"recorded for another repository", branch("pr/9", map[string]string{"gitea-cli-pr": "9", "gitea-cli-base-remote": "fork", "remote": "fork", "merge": "refs/heads/fix"}), 17, ""},
 		{"upstream branch and owner", branch("local", map[string]string{"remote": "origin", "merge": "refs/heads/feat/one"}), 3, ""},
 		{"upstream owner tells forks apart", branch("dup", map[string]string{"remote": "pulls/carol/project", "merge": "refs/heads/dup"}), 21, ""},
@@ -153,6 +163,7 @@ func TestPullSelectorAcceptsNumbersURLsAndBranches(t *testing.T) {
 		{"bob:fix", 17, ""},
 		{"alice:fix", 0, `no open pull request for branch "alice:fix" in alice/project; pass a number, URL or branch`},
 		{"carol:dup", 21, ""},
+		{"fix#12", 0, `no open pull request for branch "fix#12" in alice/project`},
 		{"dup", 0, "several open pull requests"},
 		{serverURL + "/alice/project", 0, "is not a pull request URL"},
 	} {

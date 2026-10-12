@@ -176,24 +176,42 @@ func (s Pulls) List(ctx context.Context, options PullListOptions) ([]Pull, bool,
 }
 
 // ListPage is List that also reports how many pull requests match, when the server counts them
-// or every pull request was read for a filter without a server equivalent.
+// or every pull request was read for a filter without a server equivalent. Such a filter reads
+// pages only until one pull request past the requested page matches.
 func (s Pulls) ListPage(ctx context.Context, options PullListOptions) (Page[Pull], error) {
 	if !options.filtered() {
 		return s.listPage(ctx, options)
+	}
+	if options.Limit <= 0 || options.Page <= 0 {
+		return Page[Pull]{}, errors.New("limit and page must be positive")
 	}
 	query := options
 	if query.State == "merged" {
 		query.State = "closed"
 	}
-	all, err := listAll(func(page int) ([]Pull, error) {
+	matching, wanted := []Pull{}, options.Page*options.Limit+1
+	for page := 1; ; page++ {
+		if page > maxListPages {
+			return Page[Pull]{}, fmt.Errorf("listing exceeded %d pages", maxListPages)
+		}
 		query.Limit, query.Page = 50, page
 		window, err := s.listPage(ctx, query)
-		return window.Items, err
-	})
-	if err != nil {
-		return Page[Pull]{}, err
+		if err != nil {
+			return Page[Pull]{}, err
+		}
+		for _, item := range window.Items {
+			if options.matches(item) {
+				matching = append(matching, item)
+			}
+		}
+		if len(matching) >= wanted {
+			items, err := pageOf(matching, options.Limit, options.Page)
+			return Page[Pull]{Items: items, More: true}, err
+		}
+		if len(window.Items) == 0 || (!window.More && len(window.Items) < query.Limit) {
+			break
+		}
 	}
-	matching := slices.DeleteFunc(all, func(item Pull) bool { return !options.matches(item) })
 	items, err := pageOf(matching, options.Limit, options.Page)
 	if err != nil {
 		return Page[Pull]{}, err

@@ -528,7 +528,7 @@ type metadataFlags struct {
 }
 
 // register adds the flags under their gh names, --add-label and so on, and keeps the plural
-// names working (D8).
+// names working.
 func (f *metadataFlags) register(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	flags.StringSliceVar(&f.addLabels, "add-label", nil, "Add labels by `name`; prefix repo: or org: to disambiguate")

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -69,6 +70,29 @@ func TestPullMergeUsesTheRepositoryDefaults(t *testing.T) {
 	require.Equal(t, true, payload["delete_branch_after_merge"])
 	require.Empty(t, out.String())
 	require.Empty(t, diagnostics.String())
+}
+
+func TestPullMergeKeepsTheLocalBranchWithoutTheFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		local bool
+	}{
+		{"repository default", nil, false},
+		{"flag", []string{"--delete-branch"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var payload map[string]any
+			server := newAuthenticatedServer(mergeServer(t, openPull, &payload))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			fake := &fakeGit{results: map[string]string{"symbolic-ref --short HEAD": "feature"}}
+			deps.Git = fake
+			require.NoError(t, Execute(context.Background(), deps, append([]string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, tc.flags...)))
+			require.Equal(t, true, payload["delete_branch_after_merge"])
+			require.Equal(t, tc.local, slices.Contains(fake.calls, "rev-parse --verify refs/heads/feature^{commit}"), fake.calls)
+		})
+	}
 }
 
 func TestPullMergeAsksForTheMethodAndBranchDeletion(t *testing.T) {

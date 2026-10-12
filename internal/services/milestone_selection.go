@@ -14,7 +14,7 @@ func (s Milestones) All(ctx context.Context) ([]Milestone, error) {
 }
 
 // Find returns the milestones that raws address among the open and closed milestones, each by ID
-// or title (D10); byName matches numeric values as titles only.
+// or title; byName matches numeric values as titles only.
 func (s Milestones) Find(ctx context.Context, raws []string, byName bool) ([]Milestone, error) {
 	items, err := s.All(ctx)
 	if err != nil {

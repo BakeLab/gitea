@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -125,6 +126,31 @@ func TestRunDownloadExtractsArtifactsByName(t *testing.T) {
 		_, err = os.Stat(filepath.Join(filepath.Dir(dir), "escape"))
 		require.ErrorIs(t, err, os.ErrNotExist)
 	})
+}
+
+func TestExtractZipKeepsPermissionBits(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no permission bits")
+	}
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	for name, mode := range map[string]os.FileMode{"bin/tool": 0o755, "setuid": 0o755 | os.ModeSetuid, "data": 0o644} {
+		header := &zip.FileHeader{Name: name}
+		header.SetMode(mode)
+		file, err := writer.CreateHeader(header)
+		require.NoError(t, err)
+		_, err = file.Write([]byte(name))
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+	dir := t.TempDir()
+	require.NoError(t, extractZip(context.Background(), &archive, dir, false, false))
+	for name, executable := range map[string]bool{"bin/tool": true, "setuid": true, "data": false} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		require.NoError(t, err)
+		require.Equal(t, executable, info.Mode().Perm()&0o100 != 0, name)
+		require.Zero(t, info.Mode()&os.ModeSetuid, name)
+	}
 }
 
 // filepathReplace puts dir in place of {dir} in text.

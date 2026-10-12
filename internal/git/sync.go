@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // SyncOptions selects the local branch to fast-forward and the remote whose branch of the same name it follows.
@@ -29,7 +30,9 @@ type SyncResult struct {
 // SyncBranch fast-forwards the local branch to the remote's branch of the same name, creating it
 // when it is missing, and never changes which branch is checked out. The checked-out branch merges
 // with --ff-only and needs a clean working tree; another branch moves with update-ref, which fails
-// if the branch changed meanwhile. A branch that already contains the remote history is kept.
+// if the branch changed meanwhile. A branch that already contains the remote history is kept. A
+// branch checked out in another linked worktree is refused, since moving it would leave that
+// worktree's files behind its HEAD.
 func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResult, error) {
 	run := func(args ...string) (string, error) { return runner.Output(ctx, opts.Directory, opts.Prompt, args...) }
 	if opts.Remote == "" || opts.Branch == "" {
@@ -47,6 +50,15 @@ func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResul
 		return SyncResult{}, err
 	}
 	checkedOut := head == ref
+	if !checkedOut {
+		worktrees, err := run("worktree", "list", "--porcelain")
+		if err != nil {
+			return SyncResult{}, err
+		}
+		if path := worktreeWithBranch(worktrees, ref); path != "" {
+			return SyncResult{}, fmt.Errorf("%s is checked out in the worktree %s; sync it from there", opts.Branch, path)
+		}
+	}
 	if checkedOut {
 		status, err := run("status", "--porcelain=v1", "--untracked-files=normal")
 		if err != nil {
@@ -113,6 +125,21 @@ func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResul
 		return SyncResult{}, errors.New("HEAD changed during sync; inspect the working tree before retrying")
 	}
 	return result, nil
+}
+
+// worktreeWithBranch returns the path of the worktree in git worktree list --porcelain output
+// that has ref checked out, or "" when none has.
+func worktreeWithBranch(porcelain, ref string) string {
+	path := ""
+	for line := range strings.Lines(porcelain) {
+		line = strings.TrimRight(line, "\r\n")
+		if value, ok := strings.CutPrefix(line, "worktree "); ok {
+			path = value
+		} else if line == "branch "+ref {
+			return path
+		}
+	}
+	return ""
 }
 
 // optional returns "" without an error for a Git command that exits with status 1 to report

@@ -359,8 +359,8 @@ func TestMutationFeedback(t *testing.T) {
 		tty                     bool
 	}{
 		{name: "terminal", tty: true, out: "https://example.org/12\n", stderr: "✓ Created issue alice/x#12 (Fix[2J login)\n! Issue alice/x#12 (Fix[2J login) is already closed\n"},
-		{name: "piped", out: "https://example.org/12\n"},
-		{name: "JSON", tty: true, json: "number"},
+		{name: "piped", out: "https://example.org/12\n", stderr: "! Issue alice/x#12 (Fix[2J login) is already closed\n"},
+		{name: "JSON", tty: true, json: "number", stderr: "! Issue alice/x#12 (Fix[2J login) is already closed\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, out, diagnostics := testDeps(t)

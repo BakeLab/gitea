@@ -328,3 +328,14 @@ func TestCompletionInstallHelp(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"completion", "bash", "--help"}))
 	require.Contains(t, out.String(), "$ eval \"$(gt completion bash)\"\n")
 }
+
+func TestCompletionTargetAcceptsABareTokenHost(t *testing.T) {
+	deps, _, _ := testDeps(t)
+	instance := "http://127.0.0.1:3999"
+	require.NoError(t, testManager(t, deps).Register(instance, "alice", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "stored-token"}))
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": "127.0.0.1:3999", "GITEA_TOKEN": "environment-token"})
+	a := &application{deps: deps}
+	resolved, err := a.completionTarget(context.Background(), false)
+	require.NoError(t, err)
+	require.Equal(t, instance, resolved.Host)
+}
