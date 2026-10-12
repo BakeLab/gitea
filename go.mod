@@ -2,7 +2,7 @@ module gitea.dev/tea
 
 go 1.27.0
 
-toolchain go1.27.1
+toolchain go1.27.2
 
 require (
 	charm.land/huh/v2 v2.0.3
