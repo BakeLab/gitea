@@ -17,7 +17,8 @@ import (
 
 var labelColor = regexp.MustCompile(`^[0-9a-fA-F]{6}$`)
 
-// parseLabelFile reads "#color name ;description" rows, skipping blank and comment rows.
+// parseLabelFile reads "#color name ;description ;flags" rows, skipping blank and comment rows. The
+// description and the flags, a comma-separated list of exclusive and archived, are optional.
 func parseLabelFile(r io.Reader) ([]services.LabelOptions, error) {
 	var labels []services.LabelOptions
 	scanner := bufio.NewScanner(r)
@@ -43,6 +44,14 @@ func parseLabelRow(text string, line int) (services.LabelOptions, bool, error) {
 	raw := strings.TrimSpace(text)
 	parts := strings.SplitN(raw, ";", 2)
 	fields := strings.Fields(parts[0])
+	var exclusive, archived bool
+	if len(parts) == 2 {
+		if at := strings.LastIndex(parts[1], ";"); at >= 0 {
+			if flags, ok := labelFlags(parts[1][at+1:]); ok {
+				exclusive, archived, parts[1] = flags["exclusive"], flags["archived"], parts[1][:at]
+			}
+		}
+	}
 	// Rows start with an optional "#" before the color, as Gitea's label templates do.
 	if raw == "" || strings.HasPrefix(raw, "#") && !labelColor.MatchString(strings.TrimPrefix(fields[0], "#")) {
 		return services.LabelOptions{}, false, nil
@@ -57,15 +66,49 @@ func parseLabelRow(text string, line int) (services.LabelOptions, bool, error) {
 	if !labelColor.MatchString(color) {
 		return services.LabelOptions{}, false, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid color on row %d", line))
 	}
-	return services.LabelOptions{Name: &name, Color: &color, Description: &description}, true, nil
+	label := services.LabelOptions{Name: &name, Color: &color, Description: &description}
+	if exclusive {
+		label.Exclusive = &exclusive
+	}
+	if archived {
+		label.Archived = &archived
+	}
+	return label, true, nil
+}
+
+// labelFlags parses the flags field of a label row, such as "exclusive,archived".
+func labelFlags(field string) (map[string]bool, bool) {
+	flags := map[string]bool{}
+	for flag := range strings.SplitSeq(field, ",") {
+		flag = strings.TrimSpace(flag)
+		if flag != "exclusive" && flag != "archived" {
+			return nil, false
+		}
+		flags[flag] = true
+	}
+	return flags, true
 }
 
 // formatLabel renders a label as a label file row, rejecting labels the row cannot reproduce.
 func formatLabel(label services.Label) (string, error) {
 	color := strings.TrimPrefix(label.Color, "#")
-	row := fmt.Sprintf("#%s %s ;%s", color, label.Name, label.Description)
+	row := fmt.Sprintf("#%s %s", color, label.Name)
+	var flags []string
+	if label.Exclusive {
+		flags = append(flags, "exclusive")
+	}
+	if label.Archived {
+		flags = append(flags, "archived")
+	}
+	if label.Description != "" || len(flags) > 0 {
+		row += " ;" + label.Description
+	}
+	if len(flags) > 0 {
+		row += " ;" + strings.Join(flags, ",")
+	}
 	parsed, ok, err := parseLabelRow(row, 1)
-	if err != nil || !ok || strings.ContainsAny(row, "\r\n") || *parsed.Name != label.Name || *parsed.Color != color || *parsed.Description != label.Description {
+	if err != nil || !ok || strings.ContainsAny(row, "\r\n") || *parsed.Name != label.Name || *parsed.Color != color ||
+		*parsed.Description != label.Description || (parsed.Exclusive != nil) != label.Exclusive || (parsed.Archived != nil) != label.Archived {
 		return "", errors.New("label cannot be represented in the import format; use label export --json to preserve its text")
 	}
 	return row + "\n", nil

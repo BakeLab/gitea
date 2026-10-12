@@ -15,6 +15,8 @@ import (
 // IssueEditFormChoices supplies current issue values and selectable options for edit.
 // Current values missing from the options stay selectable.
 type IssueEditFormChoices struct {
+	// Heading names the edited issue above the form, such as "Editing alice/x#2 (Fix login)".
+	Heading            string
 	Title, Body        string
 	Assignees          []string
 	Milestone          *IssueMilestoneChoice
@@ -60,7 +62,7 @@ func (p *FormPrompter) EditIssue(ctx context.Context, choices IssueEditFormChoic
 	for _, label := range choices.Labels {
 		fields.labels = append(fields.labels, label.ID)
 	}
-	groups := fields.groups(choices.EditBody, choices.CanPush, withCurrent(choices.AvailableAssignees, choices.Assignees...), milestones, withCurrent(choices.AvailableLabels, choices.Labels...))
+	groups := fields.groups(choices.Heading, choices.EditBody, choices.CanPush, withCurrent(choices.AvailableAssignees, choices.Assignees...), milestones, withCurrent(choices.AvailableLabels, choices.Labels...))
 	if err := p.runForm(ctx, huh.NewForm(groups...)); err != nil {
 		return IssueEditFormValues{}, err
 	}

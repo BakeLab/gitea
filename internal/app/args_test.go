@@ -19,6 +19,8 @@ func TestParseRunTime(t *testing.T) {
 		expected time.Time
 	}{
 		{"24h", now.Add(-24 * time.Hour)},
+		{"7d", now.Add(-7 * 24 * time.Hour)},
+		{"2w", now.Add(-14 * 24 * time.Hour)},
 		{"0s", now},
 		{"2028-01-01", time.Date(2028, 1, 1, 0, 0, 0, 0, plus2)},
 		{"2028-01-01T00:30:00+02:00", time.Date(2027, 12, 31, 22, 30, 0, 0, time.UTC)},
@@ -28,7 +30,7 @@ func TestParseRunTime(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, result.Equal(tc.expected), tc.input)
 	}
-	for _, input := range []string{"", "-24h", "not-a-date", "2028-02-30"} {
+	for _, input := range []string{"", "-24h", "not-a-date", "2028-02-30", "-1d", "1.5w"} {
 		_, err := parseRunTime(input, now)
 		require.Error(t, err, input)
 	}
@@ -85,8 +87,8 @@ func TestArgumentErrorsShowTheUsageLine(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"issue", "view"}, "missing issue number\nUsage: gt issue view <number> [flags]\nRun 'gt issue view --help' for more information."},
-		{[]string{"issue", "view", "1", "2"}, "too many arguments\nUsage: gt issue view <number> [flags]"},
+		{[]string{"issue", "view"}, "missing issue number\nUsage: gt issue view {<number> | <url>} [flags]\nRun 'gt issue view --help' for examples."},
+		{[]string{"issue", "view", "1", "2"}, "too many arguments\nUsage: gt issue view {<number> | <url>} [flags]"},
 		{[]string{"issue", "list", "extra"}, "unexpected argument \"extra\"\nUsage: gt issue list [flags]"},
 		{[]string{"pr", "checkout"}, "missing pull request number\nUsage: gt pr checkout {<number> | <url> | <branch>} [flags]"},
 		{[]string{"run", "view"}, "missing run ID\nUsage: gt run view [<run-id>] [flags]"},

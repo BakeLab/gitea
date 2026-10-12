@@ -4,9 +4,12 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,8 +18,336 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+	"gitea.dev/cli/internal/transport"
 	"github.com/spf13/cobra"
 )
+
+// issueArguments is the ARGUMENTS help of commands that take issue references.
+const issueArguments = `An issue can be supplied as argument in any of the following formats:
+- by number, e.g. "123" or "#123"
+- by URL, e.g. "https://gitea.com/OWNER/REPO/issues/123"
+- by repository and number, e.g. "OWNER/REPO#123"`
+
+func (a *application) issueCommand() *cobra.Command {
+	group := &cobra.Command{Use: "issue", Short: "Manage issues", Long: `Work with the issues of a repository: list, view and create them, edit, close or reopen
+one or more, and comment on them. Gitea lists pull requests among issues, so most issue
+commands also accept a pull request number.`}
+	group.AddCommand(a.issueListCommand(), a.issueViewCommand(), a.issueCreateCommand(), a.issueEditCommand(),
+		a.issueStateCommand("close"), a.issueStateCommand("reopen"), a.issueAttachmentCommand(issueRef), a.commentCommand(issueRef))
+	return group
+}
+
+func (a *application) issueListCommand() *cobra.Command {
+	opts := services.ListOptions{Page: 1}
+	var labels []string
+	var updated timeRange
+	var web bool
+	cmd := &cobra.Command{Use: "list", Short: "List issues in a repository", Long: `List the issues of a repository, newest first. Filters combine: an issue must match all of them.
+Labels and milestones must exist in the repository.`, Example: `$ gt issue list --label bug --state all
+$ gt issue list --assignee @me --json number,title
+# Issues and pull requests in a milestone, as tab-separated values
+$ gt issue list --kind all --milestone v1.0 | cut -f1,2
+$ gt issue list --search "login" --web`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+		var err error
+		if opts.Since, opts.Before, err = updated.parse(a.deps.Now()); err != nil {
+			return err
+		}
+		if err := requireNames("label", "", labels); err != nil {
+			return err
+		}
+		milestones, err := nameFilter("milestone", opts.Milestones)
+		if err != nil {
+			return err
+		}
+		target, err := a.resolve(cmd.Context(), true)
+		if err != nil {
+			if errors.Is(err, errRepositoryRequired) {
+				return clierr.Wrap(clierr.Usage, errors.New("repository required: use --repo owner/name, or gt search issue for instance-wide results"))
+			}
+			return err
+		}
+		opts.Assignee, opts.Author, opts.Mentions = target.expandMe(opts.Assignee), target.expandMe(opts.Author), target.expandMe(opts.Mentions)
+		if web {
+			return a.openBrowser(cmd, issuesURL(target, opts))
+		}
+		filtered := opts.Search+opts.Assignee+opts.Author+opts.Mentions != "" || len(labels)+len(milestones) > 0 || opts.Since != nil || opts.Before != nil
+		if opts.Labels, opts.Milestones, err = issueFilters(cmd, target, labels, milestones); err != nil {
+			return err
+		}
+		page, err := (services.Issues{Client: target.client, Repository: target.Repo}).ListPage(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+		return writeTable(a, cmd, page.Items, issueListSpec("in "+target.Repo, opts.State, opts.Kind, filtered), servicePage(page, opts.Page))
+	}}
+	enumFlag(cmd, &opts.State, "state", "s", "open", "Filter by state", "open", "closed", "all")
+	enumFlag(cmd, &opts.Kind, "kind", "", "issues", "List issues, pull requests or both", "issues", "pulls", "all")
+	pageFlags(cmd, &opts.Limit, &opts.Page)
+	flags := cmd.Flags()
+	flags.StringVarP(&opts.Search, "search", "S", "", "Search issue titles and bodies")
+	flags.StringVarP(&opts.Assignee, "assignee", "a", "", "Filter by assignee; @me for yourself")
+	flags.StringVarP(&opts.Author, "author", "A", "", "Filter by author; @me for yourself")
+	flags.StringVar(&opts.Mentions, "mentions", "", "Filter by mentioned user; @me for yourself")
+	flags.StringSliceVarP(&labels, "label", "l", nil, "Filter by label `names`")
+	flags.StringVarP(&opts.Milestones, "milestone", "m", "", "Filter by milestone `titles` or IDs, comma-separated")
+	updated.register(cmd, "since", "Updated since a date, timestamp, or duration ago", "until", "Updated before a date, timestamp, or duration ago")
+	flags.BoolVarP(&web, "web", "w", false, "Open the issue list in the browser")
+	_ = cmd.RegisterFlagCompletionFunc("label", a.completeLabels())
+	_ = cmd.RegisterFlagCompletionFunc("milestone", commaSeparated(a.completeMilestones()))
+	for _, name := range []string{"assignee", "author", "mentions"} {
+		_ = cmd.RegisterFlagCompletionFunc(name, a.completeUsers())
+	}
+	return cmd
+}
+
+// issuesURL is the web page of the repository's issues or pull requests in state, searched for
+// the --search text.
+func issuesURL(t target, opts services.ListOptions) string {
+	section := "issues"
+	if opts.Kind == "pulls" {
+		section = "pulls"
+	}
+	query := url.Values{"state": {opts.State}}
+	if opts.Search != "" {
+		query.Set("q", opts.Search)
+	}
+	return strings.TrimRight(t.Host, "/") + "/" + t.Repo + "/" + section + "?" + query.Encode()
+}
+
+// issueListSpec describes issue tables of the issues where, such as "in alice/x": STATE shows on a
+// terminal unless only open issues are listed, and KIND when issues and pull requests are; piped
+// tables always have both.
+func issueListSpec(where, state, kind string, filtered bool) listSpec[services.Issue] {
+	what := map[string]string{"issues": "issues", "pulls": "pull requests", "all": "issues and pull requests"}[kind]
+	if state != "all" {
+		what = state + " " + what
+	}
+	empty := "no " + what
+	if filtered {
+		empty += " match your filters"
+	}
+	return listSpec[services.Issue]{
+		Columns: []terminal.Column{
+			{Header: "ID", Prefix: "#"},
+			{Header: "Title", Flex: true},
+			{Header: "Labels", Flex: true},
+			{Header: "State", PipedOnly: state == "open"},
+			{Header: "Kind", PipedOnly: kind != "all"},
+			{Header: "Author"},
+			{Header: "Updated"},
+		},
+		Row:     issueRow,
+		Empty:   empty + " " + where,
+		Context: what + " " + where,
+	}
+}
+
+func issueRow(item services.Issue) []terminal.Cell {
+	labels := make([]string, len(item.Labels))
+	for i, label := range item.Labels {
+		labels[i] = label.Name
+	}
+	return []terminal.Cell{
+		{Text: strconv.FormatInt(item.Number, 10), Link: item.URL, Color: stateColors[item.State]},
+		{Text: item.Title},
+		{Text: strings.Join(labels, ", ")},
+		{Text: item.State, Color: stateColors[item.State]},
+		{Text: item.Kind},
+		{Text: item.Author},
+		{Time: terminal.ParseTime(item.UpdatedAt)},
+	}
+}
+
+func (a *application) issueViewCommand() *cobra.Command {
+	var web, comments bool
+	cmd := &cobra.Command{Use: "view {<number> | <url>}", Short: "View an issue", Long: `Display the title, body and other information about an issue. With --comments, the
+conversation follows the body.`, Example: `$ gt issue view 12
+$ gt issue view 12 --comments
+$ gt issue view https://gitea.com/OWNER/REPO/issues/12 --web`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+		target, n, err := a.resolveRef(cmd, args[0], issueRef)
+		if err != nil {
+			return err
+		}
+		service := services.Issues{Client: target.client, Repository: target.Repo}
+		item, err := service.View(cmd.Context(), n)
+		if err != nil {
+			return err
+		}
+		if web {
+			return a.openBrowser(cmd, item.URL)
+		}
+		if a.options.json != "" {
+			return a.writeJSON(cmd, item)
+		}
+		dependencies, err := service.Dependencies(cmd.Context(), n)
+		if err != nil {
+			return err
+		}
+		return a.writeDiscussion(cmd, target, issueView(item, target.Repo, dependencies), comments)
+	}}
+	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the issue in the browser")
+	cmd.Flags().BoolVarP(&comments, "comments", "c", false, "View issue comments")
+	cmd.ValidArgsFunction = a.completeIssueArgs("open", false)
+	return cmd
+}
+
+// completeIssueArgs completes issue numbers in state for the first argument, or for every
+// argument when variadic.
+func (a *application) completeIssueArgs(state string, variadic bool) cobra.CompletionFunc {
+	complete := a.completeIssues(state)
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		if len(args) > 0 && !variadic {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return complete(cmd, args, toComplete)
+	}
+}
+
+func (a *application) issueCreateCommand() *cobra.Command {
+	var title, body, bodyFile, deadline, templateName, ref, milestone string
+	var useEditor, web bool
+	var assignees, labelNames, attachmentPaths []string
+	cmd := &cobra.Command{Use: "create", Aliases: []string{"new"}, Short: "Create an issue", Long: `Create an issue in a repository. Without flags on a terminal, a form asks for the title and
+body, then optionally for assignees, a milestone, labels and a due date. The new issue's URL
+is printed, so scripts can capture it.`, Example: `$ gt issue create
+$ gt issue create --title "Crash on start" --body "Steps to reproduce…" --label bug --milestone v1.0
+$ gt issue create -t "Update docs" -F notes.md -a @me
+# Start from a repository issue template, or continue in the browser
+$ gt issue create --template "Bug report"
+$ gt issue create --title "Idea" --web`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
+		var draft terminal.Draft
+		defer finishDraft(&draft, &runErr)
+		if err := validateBodySources(cmd); err != nil {
+			return err
+		}
+		milestone, _, err := milestoneFlag(cmd, milestone)
+		if err != nil {
+			return err
+		}
+		if err := requireNames("label", "", labelNames); err != nil {
+			return err
+		}
+		if err := requireNames("assignee", "", assignees); err != nil {
+			return err
+		}
+		if cmd.Flags().Changed("template") && strings.TrimSpace(templateName) == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--template cannot be empty"))
+		}
+		files, err := openRegularFiles(attachmentPaths)
+		defer closeFiles(files)
+		if err != nil {
+			return err
+		}
+		var due *time.Time
+		if cmd.Flags().Changed("deadline") {
+			if due, _, err = parseDeadline(deadline); err != nil {
+				return err
+			}
+		}
+		prompt := a.canPrompt()
+		if !localFlagsChanged(cmd) && prompt && a.deps.IssueForm != nil {
+			return a.createIssueInteractively(cmd)
+		}
+		var target target
+		var templateBody string
+		if cmd.Flags().Changed("template") || web {
+			if target, err = a.resolve(cmd.Context(), true); err != nil {
+				return err
+			}
+		}
+		if cmd.Flags().Changed("template") {
+			template, err := issueTemplate(cmd.Context(), services.Issues{Client: target.client, Repository: target.Repo}, strings.TrimSpace(templateName))
+			if err != nil {
+				return err
+			}
+			if !cmd.Flags().Changed("title") {
+				title = template.Title
+			}
+			templateBody = issueTemplateBody(template)
+		}
+		if web {
+			if body, err = a.readBody(cmd, body, bodyFile); err != nil {
+				return err
+			}
+			query := url.Values{"title": {title}, "body": {cmp.Or(body, templateBody)}}
+			return a.openBrowser(cmd, strings.TrimRight(target.Host, "/")+"/"+target.Repo+"/issues/new?"+query.Encode())
+		}
+		if bodyFile == "-" && title == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--body-file - requires --title; stdin cannot also supply a prompt"))
+		}
+		if _, err := a.requireInput(cmd, &title, "title", "Title", nil); err != nil {
+			return err
+		}
+		if target.client == nil {
+			if target, err = a.resolve(cmd.Context(), true); err != nil {
+				return err
+			}
+		}
+		service := services.Issues{Client: target.client, Repository: target.Repo}
+		switch {
+		case useEditor:
+			draft, err = a.editDraft(cmd, templateBody)
+			body = draft.Body
+		case cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file"):
+			body, err = a.readBody(cmd, body, bodyFile)
+		default:
+			body = templateBody
+		}
+		if err != nil {
+			return err
+		}
+		var milestoneValue int64
+		if milestone != "" {
+			if milestoneValue, err = milestoneID(cmd, target, milestone); err != nil {
+				return err
+			}
+		}
+		labelIDs, err := (services.Labels{Client: target.client, Repository: target.Repo}).ResolveIssueNames(cmd.Context(), labelNames)
+		if err != nil {
+			return err
+		}
+		target.expandMeAll(assignees)
+		item, err := service.Create(cmd.Context(), services.IssueOptions{Title: title, Body: body, Deadline: due, Ref: ref, Assignees: assignees, Milestone: milestoneValue, Labels: labelIDs})
+		if err != nil {
+			return err
+		}
+		var failures []error
+		for _, file := range files {
+			if _, err := service.UploadAttachment(cmd.Context(), item.Number, filepath.Base(file.Name()), file); err != nil {
+				failures = append(failures, fmt.Errorf("issue %d created; attachment %s upload failed: %w", item.Number, filepath.Base(file.Name()), err))
+			}
+		}
+		return errors.Join(append(failures, a.created(cmd, target, item))...)
+	}}
+	flags := cmd.Flags()
+	flags.StringVarP(&title, "title", "t", "", "Issue title")
+	flags.StringVarP(&body, "body", "b", "", "Issue body")
+	flags.StringVarP(&bodyFile, "body-file", "F", "", "Read body from `file`, or - for stdin")
+	flags.BoolVarP(&useEditor, "editor", "e", false, "Compose the issue body in the configured editor")
+	flags.StringSliceVarP(&labelNames, "label", "l", nil, "Add labels by `name`; prefix repo: or org: to disambiguate")
+	flags.StringSliceVarP(&assignees, "assignee", "a", nil, "Assign people by their `login`; @me for yourself")
+	flags.StringVarP(&milestone, "milestone", "m", "", "Add the issue to a milestone by `title` or ID")
+	flagAliases(cmd, map[string]string{"milestone-name": "milestone"})
+	flags.StringVarP(&templateName, "template", "T", "", "Start from the repository issue template with this `name`")
+	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to")
+	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339, or Unix timestamp")
+	flags.StringArrayVar(&attachmentPaths, "attachment", nil, "`File` to attach after creation (repeatable)")
+	flags.BoolVarP(&web, "web", "w", false, "Continue in the browser with the new-issue page")
+	_ = cmd.RegisterFlagCompletionFunc("label", a.completeLabels())
+	_ = cmd.RegisterFlagCompletionFunc("assignee", a.completeUsers())
+	_ = cmd.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
+	_ = cmd.RegisterFlagCompletionFunc("ref", a.completeBranches())
+	return cmd
+}
+
+// created reports a new issue: as JSON, or its URL on stdout after a ✓ line for people.
+func (a *application) created(cmd *cobra.Command, t target, item services.Issue) error {
+	if a.options.json != "" {
+		return a.writeJSON(cmd, item)
+	}
+	a.done(cmd, "Created issue %s", refLabel(t.Repo, item.Number, item.Title))
+	return a.printURL(cmd, item.URL)
+}
 
 func (a *application) createIssueInteractively(cmd *cobra.Command) (runErr error) {
 	target, err := a.resolve(cmd.Context(), true)
@@ -28,9 +359,10 @@ func (a *application) createIssueInteractively(cmd *cobra.Command) (runErr error
 	if err != nil {
 		return err
 	}
-	choices := terminal.IssueFormChoices{
-		CanPush: selectables.CanPush, Assignees: selectables.Assignees,
-		EditBody: a.bodyEditor(cmd),
+	choices := terminal.IssueFormChoices{CanPush: selectables.CanPush, Assignees: selectables.Assignees}
+	// Without an editor the body is a field of the form, asked for right after the title.
+	if preferences, err := a.preferences(); err != nil || preferences.Editor != "" {
+		choices.EditBody = a.bodyEditor(cmd)
 	}
 	for _, template := range selectables.Templates {
 		choices.Templates = append(choices.Templates, terminal.IssueTemplateChoice{Name: template.Name, About: template.About, Title: template.Title, Body: issueTemplateBody(template)})
@@ -41,16 +373,13 @@ func (a *application) createIssueInteractively(cmd *cobra.Command) (runErr error
 	if err != nil {
 		return err
 	}
-	if err := a.confirm(cmd, "Create issue on "+target.Repo+": "+values.Title); err != nil {
-		return err
-	}
 	item, err := service.Create(cmd.Context(), services.IssueOptions{
 		Title: values.Title, Body: values.Body, Assignees: values.Assignees, Milestone: values.Milestone, Labels: values.Labels, Deadline: values.Deadline,
 	})
 	if err != nil {
 		return err
 	}
-	return writeRecord(a, cmd, item, issueRecord)
+	return a.created(cmd, target, item)
 }
 
 // issueTemplateBody seeds a body from markdown content, or from the description of form templates.
@@ -80,20 +409,83 @@ func issueTemplate(ctx context.Context, service services.Issues, name string) (s
 	return services.IssueTemplate{}, fmt.Errorf("issue template %q does not exist; available: %s", name, strings.Join(names, ", "))
 }
 
-// validateMilestoneFlags checks --milestone and --milestone-name before any request.
-func validateMilestoneFlags(cmd *cobra.Command, name string, id int64) error {
-	if cmd.Flags().Changed("milestone-name") {
-		if cmd.Flags().Changed("milestone") {
-			return clierr.Wrap(clierr.Usage, errors.New("--milestone and --milestone-name are mutually exclusive"))
-		}
-		if strings.TrimSpace(name) == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--milestone-name cannot be empty; use --milestone=0 for none"))
-		}
+// issueStateCommand closes or reopens issues, reporting those already in that state instead of
+// changing them.
+func (a *application) issueStateCommand(verb string) *cobra.Command {
+	var comment string
+	state, past, completeState, short := "closed", "Closed", "open", "Close issues"
+	if verb == "reopen" {
+		state, past, completeState, short = "open", "Reopened", "closed", "Reopen issues"
 	}
-	if id < 0 {
-		return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a positive ID, or 0 for none"))
+	cmd := &cobra.Command{Use: verb + " {<number> | <url>}...", Short: short, Example: fmt.Sprintf(`$ gt issue %[1]s 12
+$ gt issue %[1]s 12 13 --comment "Done in #14"`, verb), Annotations: map[string]string{"gt.arguments": issueArguments}, Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+		target, numbers, err := a.resolveRefs(cmd, args, issueRef)
+		if err != nil {
+			return err
+		}
+		service := services.Issues{Client: target.client, Repository: target.Repo}
+		comments := services.Comments{Client: target.client, Repository: target.Repo}
+		results, failures := applyBatch(cmd, numbers, issueLabel, func(n int64) (services.Issue, error) {
+			current, err := service.View(cmd.Context(), n)
+			if err != nil {
+				return current, itemError(err, target.Repo)
+			}
+			if current.State == state || (state == "closed" && current.State == "merged") {
+				a.warn(cmd, "%s %s is already %s", titleCase(discussionNoun(current.Kind)), refLabel(target.Repo, n, current.Title), current.State)
+				return current, nil
+			}
+			if comment != "" {
+				if _, err := comments.Create(cmd.Context(), n, comment); err != nil {
+					return current, itemError(err, target.Repo)
+				}
+			}
+			item, err := service.SetState(cmd.Context(), n, state)
+			if err != nil {
+				return item, itemError(err, target.Repo)
+			}
+			a.done(cmd, "%s %s %s", past, discussionNoun(item.Kind), refLabel(target.Repo, n, item.Title))
+			return item, nil
+		}, func(services.Issue) {})
+		var err2 error
+		if a.options.json != "" {
+			err2 = writeBatchJSON(a, cmd, len(numbers), results)
+		}
+		return errors.Join(append(failures, err2)...)
+	}}
+	cmd.Flags().StringVarP(&comment, "comment", "c", "", "Leave a comment before the issue is "+state)
+	cmd.ValidArgsFunction = a.completeIssueArgs(completeState, true)
+	return cmd
+}
+
+// discussionNoun names an issue of kind in messages: "issue" or "pull request".
+func discussionNoun(kind string) string {
+	if kind == services.KindPull {
+		return "pull request"
 	}
-	return nil
+	return "issue"
+}
+
+// milestoneFlag reads -m/--milestone, a milestone title or ID, before any request: value is
+// "" when the flag is absent, and remove reports 0 or --remove-milestone, which clear it.
+func milestoneFlag(cmd *cobra.Command, value string) (selected string, remove bool, err error) {
+	remove, _ = cmd.Flags().GetBool("remove-milestone")
+	switch {
+	case !cmd.Flags().Changed("milestone"):
+		return "", remove, nil
+	case remove:
+		return "", false, clierr.Wrap(clierr.Usage, errors.New("--milestone and --remove-milestone cannot be combined"))
+	case strings.TrimSpace(value) == "":
+		return "", false, clierr.Wrap(clierr.Usage, errors.New("--milestone needs a title or ID; use --remove-milestone to clear it"))
+	case strings.TrimSpace(value) == "0":
+		return "", true, nil
+	}
+	return strings.TrimSpace(value), false, nil
+}
+
+// milestoneID resolves a milestone title or ID in the target repository.
+func milestoneID(cmd *cobra.Command, t target, raw string) (int64, error) {
+	milestone, err := (services.Milestones{Client: t.client, Repository: t.Repo}).FindOne(cmd.Context(), raw, false)
+	return milestone.ID, err
 }
 
 func milestoneChoices(items []services.Milestone) []terminal.IssueMilestoneChoice {
@@ -114,25 +506,75 @@ func labelChoices(items []services.Label) []terminal.IssueLabelChoice {
 
 func issueLabel(n int64) string { return fmt.Sprintf("issue %d", n) }
 
+// itemError words the failure of one item of a batch, which the batch prefixes with the item, such
+// as "issue 9: not found in alice/x".
+func itemError(err error, scope string) error {
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusNotFound {
+		return explain(err, "not found in %s", scope)
+	}
+	return services.ClassifyRequest(err)
+}
+
+// nameFilter splits a comma-separated filter of kind, trimming entries and rejecting blanks.
+func nameFilter(kind, raw string) ([]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	names := strings.Split(raw, ",")
+	return names, requireNames(kind, "", names)
+}
+
+// issueFilters checks the label and milestone filters of an issue listing in the target repository
+// and returns them as query values. Gitea ignores labels and milestones it cannot find, and lists
+// every issue when no filter value is left, so unknown names are errors.
+func issueFilters(cmd *cobra.Command, t target, labels, milestones []string) (labelQuery, milestoneQuery string, err error) {
+	if len(labels) > 0 {
+		if err := (services.Labels{Client: t.client, Repository: t.Repo}).RequireFilterNames(cmd.Context(), labels); err != nil {
+			return "", "", err
+		}
+	}
+	var ids []string
+	if len(milestones) > 0 {
+		if ids, err = (services.Milestones{Client: t.client, Repository: t.Repo}).FilterIDs(cmd.Context(), milestones); err != nil {
+			return "", "", err
+		}
+	}
+	return strings.Join(labels, ","), strings.Join(ids, ","), nil
+}
+
 // metadataFlags are the label and assignee flags shared by issue and pull request edits.
 type metadataFlags struct {
 	setLabels, addLabels, removeLabels          []string
 	setAssignees, addAssignees, removeAssignees []string
 }
 
+// register adds the flags under their gh names, --add-label and so on, and keeps the plural
+// names working (D8).
 func (f *metadataFlags) register(cmd *cobra.Command) {
-	cmd.Flags().StringSliceVar(&f.setLabels, "set-labels", nil, "Replace labels by exact name; repo:/org: disambiguate; empty clears")
-	cmd.Flags().StringSliceVar(&f.addLabels, "add-labels", nil, "Add labels by exact name; repo:/org: disambiguate")
-	cmd.Flags().StringSliceVar(&f.removeLabels, "remove-labels", nil, "Remove labels by exact name; repo:/org: disambiguate")
-	cmd.Flags().StringSliceVar(&f.setAssignees, "set-assignees", nil, "Replace assignees; an empty value clears")
-	cmd.Flags().StringSliceVar(&f.addAssignees, "add-assignees", nil, "Add assignees")
-	cmd.Flags().StringSliceVar(&f.removeAssignees, "remove-assignees", nil, "Remove assignees")
+	flags := cmd.Flags()
+	flags.StringSliceVar(&f.addLabels, "add-label", nil, "Add labels by `name`; prefix repo: or org: to disambiguate")
+	flags.StringSliceVar(&f.removeLabels, "remove-label", nil, "Remove labels by `name`")
+	flags.StringSliceVar(&f.setLabels, "set-labels", nil, "Replace all labels; an empty value clears them")
+	flags.StringSliceVar(&f.addAssignees, "add-assignee", nil, "Add assignees by `login`; @me for yourself")
+	flags.StringSliceVar(&f.removeAssignees, "remove-assignee", nil, "Remove assignees by `login`; @me for yourself")
+	flags.StringSliceVar(&f.setAssignees, "set-assignees", nil, "Replace all assignees; an empty value clears them")
+	flagAliases(cmd, map[string]string{"add-labels": "add-label", "remove-labels": "remove-label", "add-assignees": "add-assignee", "remove-assignees": "remove-assignee"})
+}
+
+// completeMetadataFlags completes the label and assignee flags of metadataFlags.
+func (a *application) completeMetadataFlags(cmd *cobra.Command) {
+	for _, name := range []string{"add-label", "remove-label", "set-labels"} {
+		_ = cmd.RegisterFlagCompletionFunc(name, a.completeLabels())
+	}
+	for _, name := range []string{"add-assignee", "remove-assignee", "set-assignees"} {
+		_ = cmd.RegisterFlagCompletionFunc(name, a.completeUsers())
+	}
 }
 
 func (f *metadataFlags) validate(cmd *cobra.Command) error {
-	for _, kind := range []string{"assignees", "labels"} {
-		if cmd.Flags().Changed("set-"+kind) && (cmd.Flags().Changed("add-"+kind) || cmd.Flags().Changed("remove-"+kind)) {
-			return clierr.Wrap(clierr.Usage, fmt.Errorf("--set-%[1]s cannot be combined with --add-%[1]s or --remove-%[1]s", kind))
+	for _, kind := range []string{"assignee", "label"} {
+		if cmd.Flags().Changed("set-"+kind+"s") && (cmd.Flags().Changed("add-"+kind) || cmd.Flags().Changed("remove-"+kind)) {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--set-%[1]ss cannot be combined with --add-%[1]s or --remove-%[1]s", kind))
 		}
 	}
 	if err := requireNames("assignee", "; use --set-assignees= to clear", f.setAssignees, f.addAssignees, f.removeAssignees); err != nil {
@@ -152,8 +594,11 @@ func (f *metadataFlags) incremental() bool {
 }
 
 // resolve maps set flags to replacements, and add and remove flags to changes that the service
-// merges with each item's current state.
+// merges with each item's current state. @me names the account gt acts as.
 func (f *metadataFlags) resolve(cmd *cobra.Command, t target) (labels *[]int64, assignees *[]string, changes *services.MetadataChanges, err error) {
+	t.expandMeAll(f.setAssignees)
+	t.expandMeAll(f.addAssignees)
+	t.expandMeAll(f.removeAssignees)
 	resolver := services.Labels{Client: t.client, Repository: t.Repo}
 	if cmd.Flags().Changed("set-labels") {
 		ids, err := resolver.ResolveIssueNames(cmd.Context(), f.setLabels)
@@ -177,246 +622,4 @@ func (f *metadataFlags) resolve(cmd *cobra.Command, t target) (labels *[]int64, 
 		return nil, nil, nil, err
 	}
 	return labels, assignees, changes, nil
-}
-
-func issueRecord(item services.Issue) terminal.Record {
-	return numberedRecord(item.Number, item.Title, item.URL)
-}
-
-func issueRow(item services.Issue) []terminal.Cell {
-	return []terminal.Cell{{Text: strconv.FormatInt(item.Number, 10), Link: item.URL}, {Text: item.Title}, {Text: item.State, Color: stateColors[item.State]}, {Text: item.Author}}
-}
-
-func (a *application) issueCommand() *cobra.Command {
-	group := &cobra.Command{Use: "issue", Short: "Work with repository issues"}
-	opts := services.ListOptions{State: "open", Limit: 30, Page: 1}
-	var updated timeRange
-	list := &cobra.Command{Use: "list", Short: "List repository issues", Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := oneOf("state", opts.State, "open", "closed", "all"); err != nil {
-			return err
-		}
-		if err := oneOf("kind", opts.Kind, "issues", "pulls", "all"); err != nil {
-			return err
-		}
-		var err error
-		if opts.Since, opts.Before, err = updated.parse(a.deps.Now()); err != nil {
-			return err
-		}
-		labelNames, err := labelFilter(opts.Labels)
-		if err != nil {
-			return err
-		}
-		target, err := a.resolve(cmd.Context(), true)
-		if err != nil {
-			if errors.Is(err, errRepositoryRequired) {
-				return clierr.Wrap(clierr.Usage, errors.New("repository required: use --repo owner/name, or gt search issue for instance-wide results"))
-			}
-			return err
-		}
-		if len(labelNames) > 0 {
-			if err := (services.Labels{Client: target.client, Repository: target.Repo}).RequireFilterNames(cmd.Context(), labelNames); err != nil {
-				return err
-			}
-			opts.Labels = strings.Join(labelNames, ",")
-		}
-		items, more, err := (services.Issues{Client: target.client, Repository: target.Repo}).List(cmd.Context(), opts)
-		if err != nil {
-			return err
-		}
-		if err := writeList(a, cmd, items, issueRow); err != nil {
-			return err
-		}
-		return a.morePagesHint(cmd, more, opts.Page)
-	}}
-	list.Flags().StringVar(&opts.State, "state", "open", "Issue state: open, closed, all")
-	list.Flags().StringVar(&opts.Kind, "kind", "issues", "Resource kind: issues, pulls, or all")
-	pageFlags(list, &opts.Limit, &opts.Page)
-	list.Flags().StringVar(&opts.Search, "search", "", "Search issue titles and bodies")
-	list.Flags().StringVar(&opts.Assignee, "assignee", "", "Filter by assigned username")
-	list.Flags().StringVar(&opts.Labels, "label", "", "Filter by comma-separated label names")
-	list.Flags().StringVar(&opts.Milestones, "milestone", "", "Filter by comma-separated milestone names or IDs")
-	list.Flags().StringVar(&opts.Author, "author", "", "Filter by author username")
-	list.Flags().StringVar(&opts.Mentions, "mentions", "", "Filter by mentioned username")
-	updated.register(list, "since", "Updated since a date, timestamp, or duration ago", "until", "Updated before a date, timestamp, or duration ago")
-	group.AddCommand(list)
-	var web, comments bool
-	view := &cobra.Command{Use: "view <number>", Short: "View a repository issue", Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		n, err := number(args[0])
-		if err != nil {
-			return err
-		}
-		target, err := a.resolve(cmd.Context(), true)
-		if err != nil {
-			return err
-		}
-		service := services.Issues{Client: target.client, Repository: target.Repo}
-		item, err := service.View(cmd.Context(), n)
-		if err != nil {
-			return err
-		}
-		if web {
-			return a.openBrowser(cmd, item.URL)
-		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
-		dependencies, err := service.Dependencies(cmd.Context(), n)
-		if err != nil {
-			return err
-		}
-		return a.writeDiscussion(cmd, target, issueView(item, target.Repo, dependencies), comments)
-	}}
-	view.Flags().BoolVar(&web, "web", false, "Open the issue in a browser")
-	view.Flags().BoolVarP(&comments, "comments", "c", false, "View issue comments")
-	group.AddCommand(view)
-	var title, body, bodyFile, deadline, templateName string
-	var useEditor bool
-	var ref string
-	var assignees, labelNames, attachmentPaths []string
-	var milestone int64
-	var milestoneName string
-	create := &cobra.Command{Use: "create", Short: "Create a repository issue", Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
-		var draft terminal.Draft
-		defer finishDraft(&draft, &runErr)
-		if err := validateBodySources(cmd); err != nil {
-			return err
-		}
-		if err := validateMilestoneFlags(cmd, milestoneName, milestone); err != nil {
-			return err
-		}
-		if err := requireNames("label", "", labelNames); err != nil {
-			return err
-		}
-		if err := requireNames("assignee", "", assignees); err != nil {
-			return err
-		}
-		if cmd.Flags().Changed("template") && strings.TrimSpace(templateName) == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--template cannot be empty"))
-		}
-		files, err := openRegularFiles(attachmentPaths)
-		defer closeFiles(files)
-		if err != nil {
-			return err
-		}
-		var due *time.Time
-		if cmd.Flags().Changed("deadline") {
-			due, _, err = parseDeadline(deadline)
-			if err != nil {
-				return err
-			}
-		}
-		snapshot, err := a.deps.Settings.Load()
-		if err != nil {
-			return err
-		}
-		policy := a.policy(snapshot)
-		if !localFlagsChanged(cmd) && policy.CanPrompt(a.deps.Streams) && a.deps.IssueForm != nil {
-			return a.createIssueInteractively(cmd)
-		}
-		var resolved target
-		var templateBody string
-		if cmd.Flags().Changed("template") {
-			if resolved, err = a.resolve(cmd.Context(), true); err != nil {
-				return err
-			}
-			template, err := issueTemplate(cmd.Context(), services.Issues{Client: resolved.client, Repository: resolved.Repo}, strings.TrimSpace(templateName))
-			if err != nil {
-				return err
-			}
-			if !cmd.Flags().Changed("title") {
-				title = template.Title
-			}
-			templateBody = issueTemplateBody(template)
-		}
-		if bodyFile == "-" && title == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--body-file - requires --title; stdin cannot also supply a prompt"))
-		}
-		prompted, err := a.require(cmd, &title, "title")
-		if err != nil {
-			return err
-		}
-		switch {
-		case useEditor:
-			draft, err = a.editDraft(cmd, templateBody)
-			body = draft.Body
-		case cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file"):
-			body, err = a.readBody(cmd, body, bodyFile)
-		default:
-			body = templateBody
-		}
-		if err != nil {
-			return err
-		}
-		target := resolved
-		if target.client == nil {
-			if target, err = a.resolve(cmd.Context(), true); err != nil {
-				return err
-			}
-		}
-		if cmd.Flags().Changed("milestone-name") {
-			milestone, err = (services.Milestones{Client: target.client, Repository: target.Repo}).ResolveName(cmd.Context(), milestoneName)
-			if err != nil {
-				return err
-			}
-		}
-		labelIDs, err := (services.Labels{Client: target.client, Repository: target.Repo}).ResolveIssueNames(cmd.Context(), labelNames)
-		if err != nil {
-			return err
-		}
-		if prompted {
-			if err := a.confirm(cmd, "Create issue on "+target.Repo+": "+title); err != nil {
-				return err
-			}
-		}
-		service := services.Issues{Client: target.client, Repository: target.Repo}
-		item, err := service.Create(cmd.Context(), services.IssueOptions{Title: title, Body: body, Deadline: due, Ref: ref, Assignees: assignees, Milestone: milestone, Labels: labelIDs})
-		if err != nil {
-			return err
-		}
-		var failures []error
-		for _, file := range files {
-			if _, err := service.UploadAttachment(cmd.Context(), item.Number, filepath.Base(file.Name()), file); err != nil {
-				failures = append(failures, fmt.Errorf("issue %d created; attachment %s upload failed: %w", item.Number, filepath.Base(file.Name()), err))
-			}
-		}
-		if err := writeRecord(a, cmd, item, issueRecord); err != nil {
-			return err
-		}
-		return errors.Join(failures...)
-	}}
-	create.Flags().StringVar(&title, "title", "", "Issue title")
-	create.Flags().StringVar(&ref, "ref", "", "Referenced branch or tag")
-	create.Flags().StringSliceVar(&labelNames, "label", nil, "Apply labels by exact name; use repo: or org: to disambiguate")
-	create.Flags().StringSliceVar(&assignees, "assignee", nil, "Assign users by username")
-	create.Flags().StringVar(&milestoneName, "milestone-name", "", "Milestone by exact title; conflicts with --milestone")
-	create.Flags().Int64Var(&milestone, "milestone", 0, "Milestone ID")
-	create.Flags().StringVar(&deadline, "deadline", "", "Due date: YYYY-MM-DD, RFC3339, or Unix timestamp")
-	create.Flags().StringVar(&body, "body", "", "Issue body")
-	create.Flags().StringVar(&bodyFile, "body-file", "", "Read body from a file, or - for stdin")
-	create.Flags().BoolVar(&useEditor, "editor", false, "Compose the issue body in the configured editor")
-	create.Flags().StringVar(&templateName, "template", "", "Seed title and body from the repository issue template with this name")
-	create.Flags().StringArrayVar(&attachmentPaths, "attachment", nil, "File to attach after creation (repeatable)")
-	group.AddCommand(create)
-	for _, action := range []string{"close", "reopen"} {
-		group.AddCommand(&cobra.Command{Use: action + " <number>...", Short: titleCase(action) + " repository issues", Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
-			numbers, err := resourceNumbers(args)
-			if err != nil {
-				return err
-			}
-			target, err := a.resolve(cmd.Context(), true)
-			if err != nil {
-				return err
-			}
-			state := "closed"
-			if action == "reopen" {
-				state = "open"
-			}
-			service := services.Issues{Client: target.client, Repository: target.Repo}
-			return batch(a, cmd, numbers, issueLabel, func(n int64) (services.Issue, error) {
-				return service.SetState(cmd.Context(), n, state)
-			}, issueRow)
-		}})
-	}
-	group.AddCommand(a.issueAttachmentCommand(), a.commentCommand(), a.issueEditCommand())
-	return group
 }

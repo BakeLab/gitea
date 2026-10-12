@@ -45,7 +45,24 @@ func (s Labels) orgEndpoint() string { return "orgs/" + url.PathEscape(s.Organiz
 
 // List returns scoped labels without merging unrelated organization labels.
 func (s Labels) List(ctx context.Context, limit, page int) ([]Label, error) {
-	labels, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Label, *gitea.Response, error) {
+	labels, _, err := s.list(ctx, limit, page)
+	if err != nil {
+		return nil, err
+	}
+	return convertAll(labels, labelFrom), nil
+}
+
+// ListPage is List with the number of labels in the scope, as the server counts them.
+func (s Labels) ListPage(ctx context.Context, limit, page int) (Page[Label], error) {
+	labels, err := listPage(limit, page, func(limit, page int) ([]*gitea.Label, http.Header, error) {
+		labels, resp, err := s.list(ctx, limit, page)
+		return labels, headerOf(resp), err
+	})
+	return Page[Label]{Items: convertAll(labels.Items, labelFrom), More: labels.More, Total: labels.Total, Counted: labels.Counted}, err
+}
+
+func (s Labels) list(ctx context.Context, limit, page int) ([]*gitea.Label, *gitea.Response, error) {
+	return call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Label, *gitea.Response, error) {
 		if s.Organization != "" {
 			return c.Organizations.ListOrgLabels(ctx, s.Organization, gitea.ListOrgLabelsOptions{ListOptions: listOptions(limit, page)})
 		}
@@ -55,10 +72,6 @@ func (s Labels) List(ctx context.Context, limit, page int) ([]Label, error) {
 		}
 		return c.Repositories.ListRepoLabels(ctx, owner, repo, gitea.ListLabelsOptions{ListOptions: listOptions(limit, page)})
 	})
-	if err != nil {
-		return nil, err
-	}
-	return convertAll(labels, labelFrom), nil
 }
 
 // All returns every label in the scope.
@@ -191,6 +204,21 @@ func (s Milestones) List(ctx context.Context, state string, limit, page int) ([]
 		return nil, err
 	}
 	return convertAll(milestones, milestoneFrom), nil
+}
+
+// ListPage is List with the number of milestones in state, as the server counts them.
+func (s Milestones) ListPage(ctx context.Context, state string, limit, page int) (Page[Milestone], error) {
+	owner, repo, err := splitRepository(s.Repository)
+	if err != nil {
+		return Page[Milestone]{}, err
+	}
+	milestones, err := listPage(limit, page, func(limit, page int) ([]*gitea.Milestone, http.Header, error) {
+		milestones, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Milestone, *gitea.Response, error) {
+			return c.Repositories.ListMilestones(ctx, owner, repo, gitea.ListMilestoneOption{ListOptions: listOptions(limit, page), State: gitea.StateType(state)})
+		})
+		return milestones, headerOf(resp), err
+	})
+	return Page[Milestone]{Items: convertAll(milestones.Items, milestoneFrom), More: milestones.More, Total: milestones.Total, Counted: milestones.Counted}, err
 }
 
 // Create creates one milestone.
@@ -375,13 +403,13 @@ func mergeUnique[T any](current, add, remove []T, equal func(T, T) bool) []T {
 }
 
 // RemoveMilestone refuses to clear an issue belonging to another milestone.
-func (s Issues) RemoveMilestone(ctx context.Context, n, id int64) (Issue, error) {
+func (s Issues) RemoveMilestone(ctx context.Context, n int64, milestone Milestone) (Issue, error) {
 	current, err := s.View(ctx, n)
 	if err != nil {
 		return Issue{}, err
 	}
-	if current.Milestone == nil || current.Milestone.ID != id {
-		return Issue{}, fmt.Errorf("issue is not assigned to milestone %d", id)
+	if current.Milestone == nil || current.Milestone.ID != milestone.ID {
+		return Issue{}, fmt.Errorf("#%d is not in milestone %q", n, milestone.Title)
 	}
 	cleared := int64(0)
 	return s.Edit(ctx, n, IssueEdit{Milestone: &cleared})

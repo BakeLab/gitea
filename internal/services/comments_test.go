@@ -57,7 +57,7 @@ func TestRemoveMilestoneRejectsDifferentMembership(t *testing.T) {
 		_, _ = w.Write([]byte(`{"milestone":{"id":9}}`))
 	}))
 	service := Issues{Client: client, Repository: "alice/project"}
-	_, err := service.RemoveMilestone(context.Background(), 7, 8)
-	require.ErrorContains(t, err, "not assigned to milestone 8")
+	_, err := service.RemoveMilestone(context.Background(), 7, Milestone{ID: 8, Title: "v1.0"})
+	require.EqualError(t, err, `#7 is not in milestone "v1.0"`)
 	require.Zero(t, mutations)
 }

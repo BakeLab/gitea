@@ -23,6 +23,9 @@ func TestLabelFileRoundTrip(t *testing.T) {
 		{Name: "bug", Color: "ff0000", Description: "Something is broken"},
 		{Name: "kind/feature request", Color: "#00FF00", Description: "Wanted; maybe"},
 		{Name: "#hash", Color: "0000ff"},
+		{Name: "priority/high", Color: "7057ff", Exclusive: true},
+		{Name: "old", Color: "cccccc", Description: "Retired; kept", Exclusive: true, Archived: true},
+		{Name: "flag-like", Color: "cccccc", Description: "ends in;archived text"},
 	} {
 		row, err := formatLabel(label)
 		require.NoError(t, err, label.Name)
@@ -32,6 +35,19 @@ func TestLabelFileRoundTrip(t *testing.T) {
 		require.Equal(t, label.Name, *parsed[0].Name)
 		require.Equal(t, strings.TrimPrefix(label.Color, "#"), *parsed[0].Color)
 		require.Equal(t, label.Description, *parsed[0].Description)
+		require.Equal(t, label.Exclusive, parsed[0].Exclusive != nil && *parsed[0].Exclusive, row)
+		require.Equal(t, label.Archived, parsed[0].Archived != nil && *parsed[0].Archived, row)
+	}
+	for label, row := range map[services.Label]string{
+		{Name: "good first issue", Color: "7057ff"}:                            "#7057ff good first issue\n",
+		{Name: "bug", Color: "ee0701", Description: "Broken"}:                  "#ee0701 bug ;Broken\n",
+		{Name: "priority/high", Color: "7057ff", Exclusive: true}:              "#7057ff priority/high ; ;exclusive\n",
+		{Name: "old", Color: "cccccc", Description: "Retired", Archived: true}: "#cccccc old ;Retired ;archived\n",
+		{Name: "both", Color: "cccccc", Exclusive: true, Archived: true}:       "#cccccc both ; ;exclusive,archived\n",
+	} {
+		formatted, err := formatLabel(label)
+		require.NoError(t, err)
+		require.Equal(t, row, formatted)
 	}
 	for _, label := range []services.Label{
 		{Name: "", Color: "ff0000"},
@@ -51,6 +67,10 @@ func TestLabelImportAcceptsColorPrefixedRows(t *testing.T) {
 	var created []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/repos/alice/project/labels", r.URL.Path)
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		payload, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		var label struct{ Name string }
@@ -66,5 +86,5 @@ func TestLabelImportAcceptsColorPrefixedRows(t *testing.T) {
 	require.Len(t, created, 2)
 	requirePayload(t, `{"name":"bug","color":"ee0701","description":"Something is not working"}`, strings.NewReader(created[0]))
 	requirePayload(t, `{"name":"enhancement","color":"84b6eb"}`, strings.NewReader(created[1]))
-	require.Equal(t, "1\tbug\t\t\n2\tenhancement\t\t\n", out.String())
+	require.Empty(t, out.String())
 }

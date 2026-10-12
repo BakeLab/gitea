@@ -604,12 +604,12 @@ func argSlots(use string) []argSlot {
 	depth, start := 0, 0
 	for i, r := range rest {
 		switch r {
-		case '<', '[':
+		case '<', '[', '{':
 			if depth == 0 {
 				start = i
 			}
 			depth++
-		case '>', ']':
+		case '>', ']', '}':
 			if depth--; depth != 0 {
 				continue
 			}

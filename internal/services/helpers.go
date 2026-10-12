@@ -64,13 +64,6 @@ type Page[T any] struct {
 	Counted bool
 }
 
-// listWindow returns items [(page-1)*limit, page*limit) even when the server caps its page size
-// below limit (MAX_RESPONSE_ITEMS), and reports whether the collection continues past them.
-func listWindow[T any](limit, page int, fetch func(limit, page int) ([]T, http.Header, error)) ([]T, bool, error) {
-	window, err := listPage(limit, page, fetch)
-	return window.Items, window.More, err
-}
-
 // listPage is listWindow that also reports the collection size the server counted.
 func listPage[T any](limit, page int, fetch func(limit, page int) ([]T, http.Header, error)) (Page[T], error) {
 	items, headers, err := fetch(limit, page)

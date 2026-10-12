@@ -23,6 +23,10 @@ func TestCommentEditorDraftLifecycle(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			requests := 0
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					_, _ = w.Write([]byte(`{"number":3,"title":"Crash"}`))
+					return
+				}
 				requests++
 				var options struct{ Body string }
 				require.NoError(t, json.NewDecoder(r.Body).Decode(&options))

@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"testing"
+	"time"
 
 	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
@@ -21,6 +23,8 @@ func TestAttachmentCommandsShareIssueAssetsAndPagination(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"id":1,"name":"one"},{"id":2,"name":"two"}]`))
 		case "/api/v1/repos/alice/project/issues/1/assets/1":
 			_, _ = w.Write([]byte(`{"id":1,"name":"one"}`))
+		case "/api/v1/repos/alice/project/issues/1":
+			_, _ = w.Write([]byte(`{"number":1,"pull_request":{}}`))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -43,6 +47,14 @@ func TestAttachmentRenameAndConfirmedDeletion(t *testing.T) {
 	for _, group := range []string{"issue", "pr"} {
 		mutations := 0
 		server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/issues/1" {
+				_, _ = w.Write([]byte(`{"number":1,"pull_request":{}}`))
+				return
+			}
+			if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/issues/1/assets/1" {
+				_, _ = w.Write([]byte(`{"id":1,"name":"log.txt"}`))
+				return
+			}
 			require.Equal(t, "/api/v1/repos/alice/project/issues/1/assets/1", r.URL.Path)
 			mutations++
 			if r.Method == http.MethodPatch {
@@ -74,4 +86,50 @@ func TestAttachmentRenameAndConfirmedDeletion(t *testing.T) {
 		require.Equal(t, 2, mutations)
 		server.Close()
 	}
+}
+
+func TestAttachmentTablesDownloadsAndDoneLines(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/issues/1/assets":
+			_, _ = w.Write([]byte(`[{"id":9,"name":"crash.log","size":2048,"download_count":3,"created_at":"2026-10-11T18:00:00Z","browser_download_url":"https://example.org/a/9"}]`))
+		case "GET /api/v1/repos/alice/project/issues/1/assets/9":
+			_, _ = w.Write([]byte(`{"id":9,"name":"crash.log","size":5,"uuid":"abc"}`))
+		case "GET /attachments/abc":
+			_, _ = w.Write([]byte("hello"))
+		case "DELETE /api/v1/repos/alice/project/issues/1/assets/9":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	deps.Now = func() time.Time { return time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC) }
+	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
+	plainOutput(t, deps)
+	run := func(tty bool, args ...string) error {
+		out.Reset()
+		diagnostics.Reset()
+		deps.Streams.OutTTY = tty
+		return Execute(context.Background(), deps, append(args, "-R", "alice/project", "--no-input"))
+	}
+	require.NoError(t, run(true, "issue", "attachment", "list", "1"))
+	require.Equal(t, "Showing 1 of 1 attachments on alice/project#1\n\n"+
+		"ID  NAME       SIZE     DOWNLOADS  CREATED\n"+
+		"9   crash.log  2.0 KiB  3          about 2 hours ago\n", out.String())
+	t.Chdir(t.TempDir())
+	require.NoError(t, run(true, "issue", "attachment", "download", "1", "9"))
+	require.Equal(t, "✓ Downloaded crash.log (5 B) to crash.log\n", diagnostics.String())
+	data, err := os.ReadFile("crash.log")
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(data))
+	require.ErrorContains(t, run(true, "issue", "attachment", "download", "1", "9"), "crash.log already exists; pass --clobber to replace it or --skip-existing to keep it")
+	require.NoError(t, run(true, "issue", "attachment", "download", "1", "9", "--skip-existing"))
+	require.Equal(t, "! Skipped attachment 9 (crash.log) on alice/project#1: crash.log exists\n", diagnostics.String())
+	require.NoError(t, run(false, "issue", "attachment", "download", "1", "9", "-O", "-"))
+	require.Equal(t, "hello", out.String())
+	require.EqualError(t, run(true, "issue", "attachment", "delete", "1", "9"), "confirmation required to delete attachment 9 (crash.log) on alice/project#1; rerun with --yes")
+	require.NoError(t, run(true, "issue", "attachment", "delete", "1", "9", "--yes"))
+	require.Equal(t, "✓ Deleted attachment 9 (crash.log) on alice/project#1\n", diagnostics.String())
 }

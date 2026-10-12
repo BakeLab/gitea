@@ -34,7 +34,7 @@ $ gt pr merge --squash --delete-branch`
 	group.AddCommand(a.pullListCommand(), a.pullViewCommand())
 	a.addPullMutations(group)
 	group.AddCommand(a.pullEditCommand(), a.pullReadyCommand())
-	group.AddCommand(a.issueAttachmentCommand(), a.commentCommand())
+	group.AddCommand(a.issueAttachmentCommand(pullRef), a.commentCommand(pullRef))
 	return group
 }
 

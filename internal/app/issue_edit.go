@@ -5,7 +5,6 @@ package app
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -15,47 +14,51 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// errNothingToEdit is the shared answer to edit commands without anything to change.
+var errNothingToEdit = clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --title (see --help)"))
+
 func (a *application) issueEditCommand() *cobra.Command {
-	var title, body, file string
-	var useEditor bool
-	var deadline string
-	var ref string
-	var milestone int64
-	var milestoneName string
+	var title, body, file, deadline, ref, milestone string
+	var useEditor, removeMilestone bool
 	var metadata metadataFlags
-	cmd := &cobra.Command{Use: "edit <number>...", Short: "Edit issue content, assignees, and milestone", Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+	cmd := &cobra.Command{Use: "edit {<number> | <url>}...", Short: "Edit issues: title, body, labels, assignees, milestone, deadline", Long: `Edit one or more issues. Without flags on a terminal, a form edits one issue at a time,
+starting from its current values. Label and assignee flags add to or remove from each issue's
+current values; the --set flags replace them.`, Example: `$ gt issue edit 12 --title "Crash on start" --add-label bug
+$ gt issue edit 12 13 --add-assignee @me --milestone v1.0
+$ gt issue edit 12 --remove-label wontfix --remove-milestone
+$ gt issue edit 12 --body-file notes.md`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var draft terminal.Draft
 		defer finishDraft(&draft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
 			return err
 		}
-		numbers, err := resourceNumbers(args)
-		if err != nil {
-			return err
-		}
-		snapshot, err := a.deps.Settings.Load()
-		if err != nil {
-			return err
-		}
+		prompt := a.canPrompt()
 		if !localFlagsChanged(cmd) {
-			if a.policy(snapshot).CanPrompt(a.deps.Streams) && a.deps.IssueEditForm != nil {
-				return a.editIssuesInteractively(cmd, numbers)
+			if !prompt || a.deps.IssueEditForm == nil {
+				return errNothingToEdit
 			}
-			return clierr.Wrap(clierr.Usage, errors.New("supply an edit flag; see gt issue edit --help"))
+			target, numbers, err := a.resolveRefs(cmd, args, issueRef)
+			if err != nil {
+				return err
+			}
+			return a.editIssuesInteractively(cmd, target, numbers)
 		}
-		if useEditor && len(numbers) != 1 {
+		if useEditor && len(args) != 1 {
 			return clierr.Wrap(clierr.Usage, errors.New("--editor requires one issue"))
 		}
-		if err := validateMilestoneFlags(cmd, milestoneName, milestone); err != nil {
+		milestone, removeMilestone, err := milestoneFlag(cmd, milestone)
+		if err != nil {
 			return err
 		}
 		opts := services.IssueEdit{}
+		if removeMilestone {
+			opts.Milestone = new(int64)
+		}
 		if cmd.Flags().Changed("ref") {
 			opts.Ref = &ref
 		}
 		if cmd.Flags().Changed("deadline") {
-			opts.Deadline, opts.RemoveDeadline, err = parseDeadline(deadline)
-			if err != nil {
+			if opts.Deadline, opts.RemoveDeadline, err = parseDeadline(deadline); err != nil {
 				return err
 			}
 		}
@@ -66,31 +69,27 @@ func (a *application) issueEditCommand() *cobra.Command {
 			opts.Title = &title
 		}
 		if cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") {
-			body, err = a.readBody(cmd, body, file)
-			if err != nil {
+			if body, err = a.readBody(cmd, body, file); err != nil {
 				return err
 			}
 			opts.Body = &body
 		}
-		if cmd.Flags().Changed("milestone") {
-			opts.Milestone = &milestone
-		}
 		if err := metadata.validate(cmd); err != nil {
 			return err
 		}
-		if opts == (services.IssueEdit{}) && !useEditor && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone-name") {
-			return clierr.Wrap(clierr.Usage, errors.New("supply an edit flag; see gt issue edit --help"))
+		if opts == (services.IssueEdit{}) && !useEditor && !metadata.changed(cmd) && milestone == "" {
+			return errNothingToEdit
 		}
-		target, err := a.resolve(cmd.Context(), true)
+		target, numbers, err := a.resolveRefs(cmd, args, issueRef)
 		if err != nil {
 			return err
 		}
-		if cmd.Flags().Changed("milestone-name") {
-			milestone, err = (services.Milestones{Client: target.client, Repository: target.Repo}).ResolveName(cmd.Context(), milestoneName)
+		if milestone != "" {
+			id, err := milestoneID(cmd, target, milestone)
 			if err != nil {
 				return err
 			}
-			opts.Milestone = &milestone
+			opts.Milestone = &id
 		}
 		if opts.Labels, opts.Assignees, opts.Changes, err = metadata.resolve(cmd, target); err != nil {
 			return err
@@ -101,46 +100,56 @@ func (a *application) issueEditCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			draft, err = a.editDraft(cmd, current.Body)
-			if err != nil {
+			if draft, err = a.editDraft(cmd, current.Body); err != nil {
 				return err
 			}
 			opts.Body = &draft.Body
 		}
-		return batch(a, cmd, numbers, issueLabel, func(n int64) (services.Issue, error) {
-			return service.Edit(cmd.Context(), n, opts)
-		}, issueRow)
+		return batchDone(a, cmd, numbers, issueLabel, func(n int64) (services.Issue, error) {
+			item, err := service.Edit(cmd.Context(), n, opts)
+			return item, itemError(err, target.Repo)
+		}, editedIssue(target))
 	}}
-	cmd.Flags().StringVar(&title, "title", "", "Issue title")
-	cmd.Flags().StringVar(&ref, "ref", "", "Referenced branch or tag; empty clears")
-	cmd.Flags().StringVar(&deadline, "deadline", "", "Due date: YYYY-MM-DD, RFC3339, or Unix timestamp; empty clears")
-	cmd.Flags().StringVar(&body, "body", "", "Issue body (empty clears)")
-	cmd.Flags().StringVar(&file, "body-file", "", "Read body from file, or - for stdin")
-	cmd.Flags().BoolVar(&useEditor, "editor", false, "Edit the current issue body in the configured editor")
-	cmd.Flags().StringVar(&milestoneName, "milestone-name", "", "Milestone by exact title; conflicts with --milestone")
-	cmd.Flags().Int64Var(&milestone, "milestone", 0, "Milestone ID; 0 clears")
+	flags := cmd.Flags()
+	flags.StringVarP(&title, "title", "t", "", "New title")
+	flags.StringVarP(&body, "body", "b", "", "New body; empty clears it")
+	flags.StringVarP(&file, "body-file", "F", "", "Read the body from `file`, or - for stdin")
+	flags.BoolVarP(&useEditor, "editor", "e", false, "Edit the current body in the configured editor")
 	metadata.register(cmd)
+	flags.StringVarP(&milestone, "milestone", "m", "", "Move the issue to a milestone by `title` or ID")
+	flags.BoolVar(&removeMilestone, "remove-milestone", false, "Remove the issue from its milestone")
+	flagAliases(cmd, map[string]string{"milestone-name": "milestone"})
+	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to; empty clears it")
+	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339, or Unix timestamp; empty clears it")
+	a.completeMetadataFlags(cmd)
+	_ = cmd.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
+	_ = cmd.RegisterFlagCompletionFunc("ref", a.completeBranches())
+	cmd.ValidArgsFunction = a.completeIssueArgs("open", true)
 	return cmd
 }
 
-func (a *application) editIssuesInteractively(cmd *cobra.Command, numbers []int64) error {
-	target, err := a.resolve(cmd.Context(), true)
-	if err != nil {
-		return err
+// editedIssue words the done line of an issue edit.
+func editedIssue(t target) func(services.Issue) string {
+	return func(item services.Issue) string {
+		return "Edited " + discussionNoun(item.Kind) + " " + refLabel(t.Repo, item.Number, item.Title)
 	}
+}
+
+func (a *application) editIssuesInteractively(cmd *cobra.Command, target target, numbers []int64) error {
 	service := services.Issues{Client: target.client, Repository: target.Repo}
 	selectables, err := service.CreateSelectables(cmd.Context())
 	if err != nil {
 		return err
 	}
 	milestones, labels := milestoneChoices(selectables.Milestones), labelChoices(selectables.Labels)
-	return batch(a, cmd, numbers, issueLabel, func(n int64) (item services.Issue, err error) {
+	return batchDone(a, cmd, numbers, issueLabel, func(n int64) (item services.Issue, err error) {
 		current, err := service.View(cmd.Context(), n)
 		if err != nil {
-			return item, err
+			return item, itemError(err, target.Repo)
 		}
 		choices := terminal.IssueEditFormChoices{
-			Title: current.Title, Body: current.Body, Assignees: current.Assignees,
+			Heading: "Editing " + refLabel(target.Repo, n, current.Title),
+			Title:   current.Title, Body: current.Body, Assignees: current.Assignees,
 			CanPush: selectables.CanPush, AvailableAssignees: selectables.Assignees, Milestones: milestones, AvailableLabels: labels,
 			EditBody: a.bodyEditor(cmd),
 		}
@@ -158,9 +167,6 @@ func (a *application) editIssuesInteractively(cmd *cobra.Command, numbers []int6
 		if err != nil {
 			return item, abortBatch{err}
 		}
-		if err := a.confirm(cmd, fmt.Sprintf("Edit issue %s#%d: %s", target.Repo, n, values.Title)); err != nil {
-			return item, abortBatch{err}
-		}
 		opts := services.IssueEdit{Title: &values.Title, Body: &values.Body}
 		if selectables.CanPush {
 			// Non-nil slices: an empty selection must clear rather than be omitted.
@@ -174,6 +180,7 @@ func (a *application) editIssuesInteractively(cmd *cobra.Command, numbers []int6
 				opts.RemoveDeadline = &values.ClearDeadline
 			}
 		}
-		return service.Edit(cmd.Context(), n, opts)
-	}, issueRow)
+		item, err = service.Edit(cmd.Context(), n, opts)
+		return item, itemError(err, target.Repo)
+	}, editedIssue(target))
 }

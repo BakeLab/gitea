@@ -42,6 +42,8 @@ type IssueFormChoices struct {
 	Labels     []IssueLabelChoice
 	CanPush    bool
 	EditBody   BodyEditor
+	// AskNext asks "What's next?" after the title and body, offering metadata only on request.
+	AskNext bool
 }
 
 // IssueFormValues holds interactively collected issue create fields.
@@ -87,6 +89,7 @@ func (p *FormPrompter) CreateIssue(ctx context.Context, choices IssueFormChoices
 			title, body = choices.Templates[selected].Title, choices.Templates[selected].Body
 		}
 	}
+	choices.AskNext = true
 	return p.collectIssueProperties(ctx, title, body, choices)
 }
 
@@ -98,14 +101,25 @@ type issueFields struct {
 	labels                []int64
 }
 
-// groups builds title/body and, when canPush, assignee/milestone/label/due-date fields. The labels
-// name no resource, as issues and pull requests share them.
-func (f *issueFields) groups(editBody BodyEditor, canPush bool, assignees []string, milestones []IssueMilestoneChoice, labels []IssueLabelChoice) []*huh.Group {
+// groups builds the content group, titled heading, and the metadata groups. The labels name no
+// resource, as issues and pull requests share them.
+func (f *issueFields) groups(heading string, editBody BodyEditor, canPush bool, assignees []string, milestones []IssueMilestoneChoice, labels []IssueLabelChoice) []*huh.Group {
+	return append([]*huh.Group{f.content(heading, editBody)}, f.metadata(canPush, assignees, milestones, labels)...)
+}
+
+// content asks for the title and, without editBody, the body.
+func (f *issueFields) content(heading string, editBody BodyEditor) *huh.Group {
 	fields := []huh.Field{titleField(&f.title)}
 	if editBody == nil {
 		fields = append(fields, bodyField(BodyTitle, &f.body))
 	}
-	groups := []*huh.Group{huh.NewGroup(fields...)}
+	return huh.NewGroup(fields...).Title(heading)
+}
+
+// metadata asks for assignees, a milestone, labels and a due date, which only people who can push
+// may set.
+func (f *issueFields) metadata(canPush bool, assignees []string, milestones []IssueMilestoneChoice, labels []IssueLabelChoice) []*huh.Group {
+	var groups []*huh.Group
 	if !canPush {
 		return groups
 	}
@@ -161,10 +175,42 @@ func parseDueDate(value string) (*time.Time, error) {
 	return &parsed, nil
 }
 
+// What the create form does after the title and body.
+const (
+	nextSubmit = iota
+	nextMetadata
+	nextCancel
+)
+
+// collectIssueProperties asks for the title and, without EditBody, the body, then the metadata. With
+// AskNext it asks whether to submit, add metadata first, or cancel, like gh, in between. EditBody
+// collects the body once the form is submitted.
 func (p *FormPrompter) collectIssueProperties(ctx context.Context, title, body string, choices IssueFormChoices) (IssueFormValues, error) {
 	fields := issueFields{title: title, body: body}
-	if err := p.runForm(ctx, huh.NewForm(fields.groups(choices.EditBody, choices.CanPush, choices.Assignees, choices.Milestones, choices.Labels)...)); err != nil {
+	metadata := fields.metadata(choices.CanPush, choices.Assignees, choices.Milestones, choices.Labels)
+	groups := []*huh.Group{fields.content("", choices.EditBody)}
+	next := nextMetadata
+	if choices.AskNext {
+		options := []huh.Option[int]{huh.NewOption("Submit", nextSubmit)}
+		if len(metadata) > 0 {
+			options = append(options, huh.NewOption("Add metadata", nextMetadata))
+		}
+		next = nextSubmit
+		options = append(options, huh.NewOption("Cancel", nextCancel))
+		groups = append(groups, huh.NewGroup(huh.NewSelect[int]().Title("What's next?").Options(options...).Value(&next)))
+	} else {
+		groups, metadata = append(groups, metadata...), nil
+	}
+	if err := p.runForm(ctx, huh.NewForm(groups...)); err != nil {
 		return IssueFormValues{}, err
+	}
+	switch {
+	case next == nextCancel:
+		return IssueFormValues{}, ErrCanceled
+	case next == nextMetadata && len(metadata) > 0:
+		if err := p.runForm(ctx, huh.NewForm(metadata...)); err != nil {
+			return IssueFormValues{}, err
+		}
 	}
 	values := IssueFormValues{Title: strings.TrimSpace(fields.title), Assignees: fields.assignees, Milestone: fields.milestone, Labels: fields.labels}
 	var err error

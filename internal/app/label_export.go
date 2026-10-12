@@ -7,18 +7,23 @@ import (
 	"io"
 	"strings"
 
-	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
-func (a *application) labelExportCommand(service func(*cobra.Command) (services.Labels, error)) *cobra.Command {
+func (a *application) labelExportCommand(scope labelScope) *cobra.Command {
 	var output string
-	command := &cobra.Command{Use: "export", Short: "Export all labels in the selected scope", Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := validateDownloadDestination(output); err != nil {
-			return err
+	command := &cobra.Command{Use: "export", Short: "Export labels to a label file", Long: `Write every label as a row of a label file, the format gt label import reads, to standard
+output or to a new file.`, Example: `$ gt label export > labels.txt
+$ gt label export --org acme --output labels.txt
+# Copy the labels of one repository to another
+$ gt label export -R alice/old | gt label import - -R alice/new`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+		if output != "" {
+			if err := validateDownloadDestination(output); err != nil {
+				return err
+			}
 		}
-		labels, err := service(cmd)
+		labels, err := scope(cmd)
 		if err != nil {
 			return err
 		}
@@ -42,6 +47,7 @@ func (a *application) labelExportCommand(service func(*cobra.Command) (services.
 			return err
 		})
 	}}
-	command.Flags().StringVar(&output, "output-file", "", "New export file, or - for stdout")
+	command.Flags().StringVarP(&output, "output", "O", "", "Write to a new `file` instead of standard output")
+	flagAliases(command, map[string]string{"output-file": "output"})
 	return command
 }

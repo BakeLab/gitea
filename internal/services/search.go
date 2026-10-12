@@ -6,8 +6,8 @@ package services
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	gitea "gitea.dev/sdk"
@@ -25,6 +25,7 @@ type SearchItem struct {
 	State      string `json:"state"`
 	Type       string `json:"type"`
 	Repository string `json:"repository"`
+	Author     string `json:"author"`
 	CreatedAt  string `json:"created_at"`
 	UpdatedAt  string `json:"updated_at"`
 }
@@ -39,12 +40,18 @@ type DiscussionSearchOptions struct {
 
 // Search searches one repository or accessible repositories across the selected instance.
 func (s Issues) Search(ctx context.Context, opts DiscussionSearchOptions) ([]SearchItem, error) {
+	page, err := s.SearchPage(ctx, opts)
+	return page.Items, err
+}
+
+// SearchPage is Search with what the server reports about further results.
+func (s Issues) SearchPage(ctx context.Context, opts DiscussionSearchOptions) (Page[SearchItem], error) {
 	kind, resultType := gitea.IssueTypeIssue, "issue"
 	if opts.Pulls {
 		kind, resultType = gitea.IssueTypePull, "pr"
 	}
 	if opts.Team != "" && opts.Owner == "" {
-		return nil, fmt.Errorf("team search requires an organization owner")
+		return Page[SearchItem]{}, fmt.Errorf("team search requires an organization owner")
 	}
 	search := s.searchInstance
 	if s.Repository != "" {
@@ -52,33 +59,34 @@ func (s Issues) Search(ctx context.Context, opts DiscussionSearchOptions) ([]Sea
 	}
 	issues, err := search(ctx, opts, kind)
 	if err != nil {
-		return nil, err
+		return Page[SearchItem]{}, err
 	}
-	return convertAll(issues, func(issue *gitea.Issue) SearchItem {
+	items := convertAll(issues.Items, func(issue *gitea.Issue) SearchItem {
 		repository := s.Repository
 		if issue.Repository != nil {
 			repository = issue.Repository.FullName
 		}
 		return SearchItem{
-			ID: issue.ID, Number: issue.Index, Title: issue.Title, Body: issue.Body, URL: issue.HTMLURL, State: string(issue.State),
-			Type: resultType, Repository: repository, CreatedAt: timestamp(issue.Created), UpdatedAt: timestamp(issue.Updated),
+			ID: issue.ID, Number: issue.Index, Title: issue.Title, Body: issue.Body, URL: issue.HTMLURL, State: discussionState(issue),
+			Type: resultType, Repository: repository, Author: login(issue.Poster), CreatedAt: timestamp(issue.Created), UpdatedAt: timestamp(issue.Updated),
 		}
-	}), nil
+	})
+	return Page[SearchItem]{Items: items, More: issues.More, Total: issues.Total, Counted: issues.Counted}, nil
 }
 
-func (s Issues) searchRepository(ctx context.Context, opts DiscussionSearchOptions, kind gitea.IssueType) ([]*gitea.Issue, error) {
+func (s Issues) searchRepository(ctx context.Context, opts DiscussionSearchOptions, kind gitea.IssueType) (Page[*gitea.Issue], error) {
 	if opts.ReviewRequested || opts.Reviewed {
-		return nil, &CapabilityError{Feature: "repository-scoped review search", Reason: "Gitea supports review filters on instance-wide search only; omit --repo or GITEA_CLI_REPO"}
+		return Page[*gitea.Issue]{}, &CapabilityError{Feature: "repository-scoped review search", Reason: "Gitea supports review filters on instance-wide search only; omit --repo or GITEA_CLI_REPO"}
 	}
 	if opts.Team != "" {
-		return nil, &CapabilityError{Feature: "repository-scoped team search", Reason: "Gitea supports team filters on instance-wide search only; omit --repo or GITEA_CLI_REPO"}
+		return Page[*gitea.Issue]{}, &CapabilityError{Feature: "repository-scoped team search", Reason: "Gitea supports team filters on instance-wide search only; omit --repo or GITEA_CLI_REPO"}
 	}
 	owner, repo, err := splitRepository(s.Repository)
 	if err != nil {
-		return nil, err
+		return Page[*gitea.Issue]{}, err
 	}
 	query := gitea.ListIssueOption{
-		ListOptions: listOptions(opts.Limit, opts.Page), State: gitea.StateType(opts.State), Type: kind, KeyWord: opts.Query,
+		State: gitea.StateType(opts.State), Type: kind, KeyWord: opts.Query,
 		Labels: filterValues(opts.Labels), Milestones: filterValues(opts.Milestones), CreatedBy: opts.Author, Owner: opts.Owner,
 	}
 	if opts.Since != nil {
@@ -90,7 +98,7 @@ func (s Issues) searchRepository(ctx context.Context, opts DiscussionSearchOptio
 	if opts.Authored || opts.Assigned || opts.Mentioned {
 		account, err := CurrentAccount(ctx, s.Client)
 		if err != nil {
-			return nil, err
+			return Page[*gitea.Issue]{}, err
 		}
 		if opts.Authored {
 			query.CreatedBy = account
@@ -102,14 +110,17 @@ func (s Issues) searchRepository(ctx context.Context, opts DiscussionSearchOptio
 			query.MentionedBy = account
 		}
 	}
-	issues, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Issue, *gitea.Response, error) {
-		return c.Issues.ListRepoIssues(ctx, owner, repo, query)
+	return listPage(opts.Limit, opts.Page, func(limit, page int) ([]*gitea.Issue, http.Header, error) {
+		query.ListOptions = listOptions(limit, page)
+		issues, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Issue, *gitea.Response, error) {
+			return c.Issues.ListRepoIssues(ctx, owner, repo, query)
+		})
+		return issues, headerOf(resp), err
 	})
-	return issues, err
 }
 
-func (s Issues) searchInstance(ctx context.Context, opts DiscussionSearchOptions, kind gitea.IssueType) ([]*gitea.Issue, error) {
-	query := url.Values{"q": {opts.Query}, "state": {opts.State}, "type": {string(kind)}, "limit": {strconv.Itoa(opts.Limit)}, "page": {strconv.Itoa(opts.Page)}}
+func (s Issues) searchInstance(ctx context.Context, opts DiscussionSearchOptions, kind gitea.IssueType) (Page[*gitea.Issue], error) {
+	query := url.Values{"q": {opts.Query}, "state": {opts.State}, "type": {string(kind)}}
 	for key, value := range map[string]string{"owner": opts.Owner, "team": opts.Team, "created_by": opts.Author, "labels": opts.Labels, "milestones": opts.Milestones} {
 		if value != "" {
 			query.Set(key, value)
@@ -125,8 +136,6 @@ func (s Issues) searchInstance(ctx context.Context, opts DiscussionSearchOptions
 			query.Set(key, "true")
 		}
 	}
-	var issues []*gitea.Issue
 	// TODO(sdk): ListIssueOption lacks the assigned, created, mentioned, review_requested and reviewed flags.
-	err := getJSON(ctx, s.Client, "repos/issues/search?"+query.Encode(), &issues)
-	return issues, err
+	return rawPage[*gitea.Issue](ctx, s.Client, "repos/issues/search", query, opts.Limit, opts.Page)
 }

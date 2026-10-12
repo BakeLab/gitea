@@ -5,6 +5,9 @@ package services
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"strconv"
 	"time"
 
 	"gitea.dev/cli/internal/transport"
@@ -19,15 +22,19 @@ type TrackedTime struct {
 	User        string `json:"user"`
 	Repository  string `json:"repository"`
 	IssueNumber int64  `json:"issue_number"`
+	IssueTitle  string `json:"issue_title"`
 	IssueURL    string `json:"issue_url"`
 }
 
 // trackedTimeFrom falls back to repository when the record does not name its issue's repository.
 func trackedTimeFrom(record *gitea.TrackedTime, repository string) TrackedTime {
-	result := TrackedTime{ID: record.ID, Seconds: record.Time, CreatedAt: timestamp(record.Created), User: record.UserName, Repository: repository}
+	result := TrackedTime{ID: record.ID, Seconds: record.Time, User: record.UserName, Repository: repository}
+	if !record.Created.IsZero() {
+		// Gitea returns the creation time of a new record with nanoseconds, but whole seconds in listings.
+		result.CreatedAt = record.Created.Format(time.RFC3339)
+	}
 	if record.Issue != nil {
-		result.IssueNumber = record.Issue.Index
-		result.IssueURL = record.Issue.HTMLURL
+		result.IssueNumber, result.IssueTitle, result.IssueURL = record.Issue.Index, record.Issue.Title, record.Issue.HTMLURL
 		if record.Issue.Repository != nil {
 			result.Repository = record.Issue.Repository.FullName
 		}
@@ -52,30 +59,54 @@ type Times struct {
 
 // List returns a non-nil page of tracked time records.
 func (s Times) List(ctx context.Context, opts TimeOptions) ([]TrackedTime, error) {
-	query := gitea.ListTrackedTimesOptions{ListOptions: listOptions(opts.Limit, opts.Page), User: opts.Username}
+	page, err := s.ListPage(ctx, opts)
+	return page.Items, err
+}
+
+// ListPage is List with the number of records, as the server counts them.
+func (s Times) ListPage(ctx context.Context, opts TimeOptions) (Page[TrackedTime], error) {
+	query := gitea.ListTrackedTimesOptions{User: opts.Username}
 	if opts.Since != nil {
 		query.Since = *opts.Since
 	}
 	if opts.Before != nil {
 		query.Before = *opts.Before
 	}
-	records, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.TrackedTime, *gitea.Response, error) {
-		if opts.Mine {
-			return c.Issues.ListMyTrackedTimes(ctx, query)
-		}
-		owner, repo, err := splitRepository(s.Repository)
-		if err != nil {
-			return nil, nil, err
-		}
-		if opts.Issue != 0 {
-			return c.Issues.ListIssueTrackedTimes(ctx, owner, repo, opts.Issue, query)
-		}
-		return c.Issues.ListRepoTrackedTimes(ctx, owner, repo, query)
+	records, err := listPage(opts.Limit, opts.Page, func(limit, page int) ([]*gitea.TrackedTime, http.Header, error) {
+		query.ListOptions = listOptions(limit, page)
+		records, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.TrackedTime, *gitea.Response, error) {
+			if opts.Mine {
+				return c.Issues.ListMyTrackedTimes(ctx, query)
+			}
+			owner, repo, err := splitRepository(s.Repository)
+			if err != nil {
+				return nil, nil, err
+			}
+			if opts.Issue != 0 {
+				return c.Issues.ListIssueTrackedTimes(ctx, owner, repo, opts.Issue, query)
+			}
+			return c.Issues.ListRepoTrackedTimes(ctx, owner, repo, query)
+		})
+		return records, headerOf(resp), err
+	})
+	items := convertAll(records.Items, func(record *gitea.TrackedTime) TrackedTime { return trackedTimeFrom(record, s.Repository) })
+	return Page[TrackedTime]{Items: items, More: records.More, Total: records.Total, Counted: records.Counted}, err
+}
+
+// Find returns the tracked time record id on issue n.
+func (s Times) Find(ctx context.Context, n, id int64) (TrackedTime, error) {
+	records, err := listAll(func(page int) ([]TrackedTime, error) {
+		return s.List(ctx, TimeOptions{Issue: n, Limit: 50, Page: page})
 	})
 	if err != nil {
-		return nil, err
+		return TrackedTime{}, err
 	}
-	return convertAll(records, func(record *gitea.TrackedTime) TrackedTime { return trackedTimeFrom(record, s.Repository) }), nil
+	for _, record := range records {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+	return TrackedTime{}, NotFound("tracked time", strconv.FormatInt(id, 10), fmt.Sprintf("%s#%d", s.Repository, n))
 }
 
 // Create records a nonzero number of seconds on one issue.

@@ -407,24 +407,6 @@ func acceptsArgs(args []string) bool {
 	return err == nil && cmd.ParseFlags(rest) == nil && cmd.ValidateArgs(cmd.Flags().Args()) == nil
 }
 
-// confirm asks for confirmation under the prompt policy unless --yes was supplied.
-func (a *application) confirm(cmd *cobra.Command, description string) error {
-	s, err := a.deps.Settings.Load()
-	if err != nil {
-		return err
-	}
-	return terminal.Confirm(cmd.Context(), description, a.options.yes, a.deps.Streams, a.policy(s), a.deps.Prompter)
-}
-
-// require prompts for a missing required value under the prompt policy.
-func (a *application) require(cmd *cobra.Command, value *string, flag string) (bool, error) {
-	s, err := a.deps.Settings.Load()
-	if err != nil {
-		return false, err
-	}
-	return terminal.Require(cmd.Context(), value, flag, a.deps.Streams, a.policy(s), a.deps.Prompter)
-}
-
 func (a *application) policy(snapshot settings.Snapshot) terminal.Policy {
 	return terminal.Policy{Enabled: snapshot.Preferences.Prompt == "enabled", NoInput: a.options.noInput, Machine: a.options.json != "", Interactive: a.options.interactive}
 }
@@ -544,6 +526,9 @@ func commandOutputFields(cmd *cobra.Command) []string {
 	case "comment":
 		return jsonFields[services.Comment]()
 	case "issue":
+		if cmd.Name() == "comment" {
+			return jsonFields[services.Comment]()
+		}
 		return jsonFields[services.Issue]()
 	case "review":
 		if cmd.Name() == "request" || cmd.Name() == "cancel-request" {
@@ -563,6 +548,8 @@ func commandOutputFields(cmd *cobra.Command) []string {
 			return jsonFields[services.Review]()
 		case "clean":
 			return jsonFields[git.CleanResult]()
+		case "comment":
+			return jsonFields[services.Comment]()
 		}
 		return jsonFields[services.Pull]()
 	case "repo":

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 
 	gitea "gitea.dev/sdk"
 )
@@ -36,9 +37,16 @@ func (s Issues) Attachment(ctx context.Context, number, id int64) (IssueAttachme
 }
 
 func (s Issues) attachment(ctx context.Context, number, id int64) (*gitea.Attachment, error) {
-	return repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Attachment, *gitea.Response, error) {
+	attachment, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Attachment, *gitea.Response, error) {
 		return c.Issues.GetIssueAttachment(ctx, owner, repo, number, id)
 	})
+	return attachment, s.attachmentError(err, number, id)
+}
+
+// attachmentError names attachment id of issue number in a failure; Gitea answers 404 both for a
+// missing issue and a missing attachment.
+func (s Issues) attachmentError(err error, number, id int64) error {
+	return Classify(err, "attachment", strconv.FormatInt(id, 10), fmt.Sprintf("%s#%d", s.Repository, number))
 }
 
 // RenameAttachment changes the filename without replacing its content.
@@ -47,16 +55,16 @@ func (s Issues) RenameAttachment(ctx context.Context, number, id int64, name str
 		return c.Issues.EditIssueAttachment(ctx, owner, repo, number, id, gitea.EditAttachmentOptions{Name: name})
 	})
 	if err != nil {
-		return IssueAttachment{}, err
+		return IssueAttachment{}, s.attachmentError(err, number, id)
 	}
 	return IssueAttachment(assetFrom(attachment)), nil
 }
 
 // DeleteAttachment removes one attachment from its owning issue.
 func (s Issues) DeleteAttachment(ctx context.Context, number, id int64) error {
-	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+	return s.attachmentError(repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
 		return c.Issues.DeleteIssueAttachment(ctx, owner, repo, number, id)
-	})
+	}), number, id)
 }
 
 // UploadAttachment streams a file to its owning issue or pull request.
@@ -65,11 +73,13 @@ func (s Issues) UploadAttachment(ctx context.Context, number int64, name string,
 	return IssueAttachment(asset), err
 }
 
-// DownloadAttachment opens an attachment stream scoped to its instance and issue.
-func (s Issues) DownloadAttachment(ctx context.Context, number, id int64) (io.ReadCloser, error) {
+// DownloadAttachment opens an attachment stream scoped to its instance and issue, and returns the
+// attachment's metadata.
+func (s Issues) DownloadAttachment(ctx context.Context, number, id int64) (IssueAttachment, io.ReadCloser, error) {
 	attachment, err := s.attachment(ctx, number, id)
 	if err != nil {
-		return nil, err
+		return IssueAttachment{}, nil, err
 	}
-	return downloadAttachment(ctx, s.Client, attachment)
+	body, err := downloadAttachment(ctx, s.Client, attachment)
+	return IssueAttachment(assetFrom(attachment)), body, err
 }

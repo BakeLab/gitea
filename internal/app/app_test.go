@@ -200,7 +200,7 @@ func TestRawJSONCommandsKeepJQToThemselves(t *testing.T) {
 func TestUnknownFlagsSuggestSimilarFlags(t *testing.T) {
 	requireUsageBeforeRequests(t, "unknown flag: --lable; did you mean --label?", "issue", "list", "--lable", "bug")
 	requireUsageBeforeRequests(t, "unknown flag: --stat; did you mean --state?", "issue", "list", "--stat", "open")
-	requireUsageBeforeRequests(t, "unknown flag: --add-label; did you mean --add-labels?", "issue", "edit", "1", "--add-label", "bug")
+	requireUsageBeforeRequests(t, "unknown flag: --add-lable; did you mean --add-label?", "issue", "edit", "1", "--add-lable", "bug")
 	deps, _, _ := testDeps(t)
 	err := Execute(context.Background(), deps, []string{"issue", "list", "--zzzzzz"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
@@ -251,7 +251,7 @@ func TestCommandHelpShowsRelevantFlagsOnly(t *testing.T) {
 	for _, want := range []string{
 		"\nUSAGE\n  gt issue list [flags]\n",
 		"\nALIASES\n  gt issue ls\n",
-		"\nFLAGS\n      --assignee string ",
+		"\nFLAGS\n  -a, --assignee string ",
 		"\nINHERITED FLAGS\n  -R, --repo OWNER/REPO ",
 		"\n      --json fields ",
 		"\n  -q, --jq expression ",
@@ -265,7 +265,7 @@ func TestCommandHelpShowsRelevantFlagsOnly(t *testing.T) {
 	}
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "--help"}))
-	require.Contains(t, out.String(), "\nFLAGS\n  -L, --limit int    Maximum number of results (1..1000) (default 30)\n      --org string ")
+	require.Contains(t, out.String(), "\nFLAGS\n  -L, --limit int          Maximum number of results (1..1000) (default 30)\n      --org organization ")
 	for _, args := range [][]string{{"version", "--help"}, {"alias", "list", "--help"}, {"auth", "status", "--help"}} {
 		out.Reset()
 		require.NoError(t, Execute(context.Background(), deps, args))
@@ -323,7 +323,7 @@ func TestHelpTopicsAndUnknownTopics(t *testing.T) {
 	values, _ := complete(t, deps, out, "help", "e")
 	require.Equal(t, []string{"environment\tEnvironment variables and global flags", "exit-codes\tExit codes used by gt"}, values)
 	values, _ = complete(t, deps, out, "help", "issue", "l")
-	require.Equal(t, []string{"list\tList repository issues"}, values)
+	require.Equal(t, []string{"list\tList issues in a repository"}, values)
 }
 
 func TestVerbAndFlagAliases(t *testing.T) {
@@ -418,65 +418,7 @@ const (
 	shortsToFix = `
 `
 	examplesToWrite = `
-	issue attachment delete
-	issue attachment download
-	issue attachment edit
-	issue attachment list
-	issue attachment upload
-	issue attachment view
-	issue close
-	issue comment create
-	issue comment delete
-	issue comment edit
-	issue comment list
-	issue comment view
-	issue create
-	issue edit
-	issue list
-	issue reopen
-	issue view
-	label create
-	label delete
-	label edit
-	label export
-	label list
-	milestone close
-	milestone create
-	milestone delete
-	milestone edit
-	milestone issue add
-	milestone issue list
-	milestone issue remove
-	milestone list
-	milestone reopen
-	milestone view
-	pr attachment delete
-	pr attachment download
-	pr attachment edit
-	pr attachment list
-	pr attachment upload
-	pr attachment view
-	pr comment create
-	pr comment delete
-	pr comment edit
-	pr comment list
-	pr comment view
-	search issue
-	search pr
-	time create
-	time delete
-	time list
-	time reset
 `
 	longsToWrite = `
-	issue
-	issue attachment
-	issue comment
-	label
-	milestone
-	milestone issue
-	pr attachment
-	pr comment
-	time
 `
 )

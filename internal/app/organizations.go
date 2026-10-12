@@ -23,11 +23,6 @@ var visibilities = []string{"public", "limited", "private"}
 // visibilityColors color the visibility of organizations and accounts.
 var visibilityColors = map[string]string{"public": "green", "limited": "yellow", "private": "red"}
 
-// servicePage places a page of a service listing for writeTable.
-func servicePage[T any](page services.Page[T], number int) listPage {
-	return listPage{Number: number, More: page.More, Total: page.Total, Counted: page.Counted}
-}
-
 // jsonResult writes the result of a mutation when --json asks for it; people get a done line instead.
 func (a *application) jsonResult(cmd *cobra.Command, item any) error {
 	if a.options.json == "" {

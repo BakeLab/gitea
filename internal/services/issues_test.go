@@ -27,7 +27,7 @@ func TestIssueListSendsTypePageSizeAndFilters(t *testing.T) {
 	items, more, err := service.List(context.Background(), ListOptions{State: "open", Limit: 1, Page: 3})
 	require.NoError(t, err)
 	require.False(t, more)
-	require.Equal(t, []Issue{{Author: "bob", ID: 1, Number: 2, Title: "Bug", Labels: []Label{}, Assignees: []string{}}}, items)
+	require.Equal(t, []Issue{{Author: "bob", ID: 1, Number: 2, Kind: KindIssue, Title: "Bug", Labels: []Label{}, Assignees: []string{}}}, items)
 	since := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 	_, _, err = service.List(context.Background(), ListOptions{
 		Kind: "all", Limit: 30, Page: 1, Search: "crash", Assignee: "carol", Labels: "bug,ui", Milestones: "v1",
@@ -75,6 +75,25 @@ func TestIssueDependenciesMapReferencesAndTreatMissingSupportAsNone(t *testing.T
 	dependencies, err = service.Dependencies(context.Background(), 7)
 	require.NoError(t, err)
 	require.Equal(t, IssueDependencies{}, dependencies)
+}
+
+func TestDiscussionsTellPullRequestsAndMergesApart(t *testing.T) {
+	list := `[{"number":1,"state":"open"},{"number":2,"state":"closed","pull_request":{"merged":false}},` +
+		`{"number":3,"state":"closed","pull_request":{"merged":true}},{"number":4,"state":"open","pull_request":{"merged":false}}]`
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(list))
+	}))
+	want := []struct{ kind, state string }{{KindIssue, "open"}, {KindPull, "closed"}, {KindPull, "merged"}, {KindPull, "open"}}
+	issues, _, err := (Issues{Client: client, Repository: "alice/project"}).List(context.Background(), ListOptions{Kind: "all", State: "all", Limit: 30, Page: 1})
+	require.NoError(t, err)
+	found, err := (Issues{Client: client, Repository: "alice/project"}).Search(context.Background(), DiscussionSearchOptions{State: "all", Limit: 30, Page: 1})
+	require.NoError(t, err)
+	require.Len(t, issues, len(want))
+	for i, item := range want {
+		require.Equal(t, item.kind, issues[i].Kind, issues[i].Number)
+		require.Equal(t, item.state, issues[i].State, issues[i].Number)
+		require.Equal(t, item.state, found[i].State, found[i].Number)
+	}
 }
 
 func TestIssueTemplatesAcceptCheckboxOptionObjects(t *testing.T) {

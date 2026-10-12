@@ -6,12 +6,10 @@ package app
 import (
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
 
+	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
-	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 )
 
@@ -208,19 +206,6 @@ func writeBatchJSON[T any](a *application, cmd *cobra.Command, selections int, r
 	return nil
 }
 
-// batch applies run to each selection like batchDone, for commands that predate it: its human
-// output is one table of the results.
-func batch[K, T any](a *application, cmd *cobra.Command, keys []K, label func(K) string, run func(K) (T, error), row func(T) []terminal.Cell) error {
-	results, failures := applyBatch(cmd, keys, label, run, func(T) {})
-	var err error
-	if a.options.json == "" {
-		err = a.writeHuman(cmd, legacyTable(a, cmd, results, row))
-	} else {
-		err = writeBatchJSON(a, cmd, len(keys), results)
-	}
-	return errors.Join(append(failures, err)...)
-}
-
 // batchDone applies a mutation to each selection like batch, reporting each success with a done
 // line from report, such as "Closed issue alice/x#5 (Fix login)", and the results as JSON.
 func batchDone[K, T any](a *application, cmd *cobra.Command, keys []K, label func(K) string, run func(K) (T, error), report func(T) string) error {
@@ -232,104 +217,8 @@ func batchDone[K, T any](a *application, cmd *cobra.Command, keys []K, label fun
 	return errors.Join(append(failures, err)...)
 }
 
-// writeList writes items as a JSON array, or as one table through the pager. List commands move
-// to writeTable.
-func writeList[T any](a *application, cmd *cobra.Command, items []T, row func(T) []terminal.Cell) error {
-	if a.options.json != "" {
-		return a.writeJSON(cmd, items)
-	}
-	return a.writeHuman(cmd, legacyTable(a, cmd, items, row))
-}
-
-// writeItem writes one item as a JSON object, or as its list row. Views move to writeView, and
-// mutations to done and printURL.
-func writeItem[T any](a *application, cmd *cobra.Command, item T, row func(T) []terminal.Cell) error {
-	if a.options.json != "" {
-		return a.writeJSON(cmd, item)
-	}
-	return a.writeHuman(cmd, legacyTable(a, cmd, []T{item}, row))
-}
-
-// legacyColumns gives lists that still render through writeList a header row and a flexible
-// column, keyed by command path without the root. Their owners replace an entry with a listSpec.
-var legacyColumns = map[string][]terminal.Column{
-	"issue list": numberedColumns,
-}
-
-// numberedColumns head the rows of issueRow and pullRow.
-var numberedColumns = []terminal.Column{{Header: "ID", Prefix: "#"}, {Header: "Title", Flex: true}, {Header: "State"}, {Header: "Author"}}
-
-// legacyTable renders rows of commands that predate listSpec: tab-separated when piped, and on a
-// TTY fit to the terminal width by truncating their widest column, unless legacyColumns names
-// their columns.
-func legacyTable[T any](a *application, cmd *cobra.Command, items []T, row func(T) []terminal.Cell) string {
-	rows := make([][]terminal.Cell, len(items))
-	for i, item := range items {
-		rows[i] = row(item)
-	}
-	columns, ok := legacyColumns[strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()+" ")]
-	if !ok {
-		columns = widestFlex(rows)
-	}
-	return terminal.Table(columns, rows, a.display())
-}
-
-// widestFlex makes the column with the widest cell flexible.
-func widestFlex(rows [][]terminal.Cell) []terminal.Column {
-	var widths []int
-	for _, row := range rows {
-		for i, cell := range row {
-			if i == len(widths) {
-				widths = append(widths, 0)
-			}
-			widths[i] = max(widths[i], runewidth.StringWidth(terminal.SafeLine(cell.Text)))
-		}
-	}
-	columns := make([]terminal.Column, len(widths))
-	if len(widths) > 0 {
-		columns[slices.Index(widths, slices.Max(widths))].Flex = true
-	}
-	return columns
-}
-
-// writeRecord writes one item as a JSON object, or as a human-readable record.
-func writeRecord[T any](a *application, cmd *cobra.Command, item T, record func(T) terminal.Record) error {
-	if a.options.json != "" {
-		return a.writeJSON(cmd, item)
-	}
-	return a.writeHuman(cmd, record(item).Render(a.colorEnabled()))
-}
-
-// writeRecords writes items as a JSON array, or as consecutive human-readable records.
-func writeRecords[T any](a *application, cmd *cobra.Command, items []T, record func(T) terminal.Record) error {
-	if a.options.json != "" {
-		return a.writeJSON(cmd, items)
-	}
-	color := a.colorEnabled()
-	var text strings.Builder
-	for _, item := range items {
-		text.WriteString(record(item).Render(color))
-	}
-	return a.writeHuman(cmd, text.String())
-}
-
-// numberedRecord heads an issue or pull request with its emphasized number and title.
-func numberedRecord(number int64, title, url string) terminal.Record {
-	return terminal.Record{Heading: []terminal.Cell{{Text: fmt.Sprintf("#%d", number), Bold: true}, {Text: title}}, Lines: []string{url}}
-}
-
 // stateColors colors issue, pull request and milestone states with the terminal's own palette.
 var stateColors = map[string]string{"open": "green", "closed": "red", "merged": "magenta", "draft": "muted"}
-
-// table renders rows aligned like a TTY table without header or truncation, for commands that
-// predate listSpec and compose their own output.
-func table[T any](items []T, row func(T) []terminal.Cell, color bool) string {
-	rows := make([][]terminal.Cell, len(items))
-	for i, item := range items {
-		rows[i] = row(item)
-	}
-	return terminal.Table(nil, rows, terminal.Display{TTY: true, Color: color, TrueColor: true, Links: color})
-}
 
 // morePagesHint tells human readers on stderr that the listing continues past this page.
 func (a *application) morePagesHint(cmd *cobra.Command, more bool, page int) error {
@@ -351,4 +240,9 @@ func yesNo(value bool) string {
 // shortSHA abbreviates a commit ID to seven characters, as Gitea and Git show them.
 func shortSHA(sha string) string {
 	return sha[:min(len(sha), 7)]
+}
+
+// servicePage places a page of a service listing for writeTable.
+func servicePage[T any](page services.Page[T], number int) listPage {
+	return listPage{Number: number, More: page.More, Total: page.Total, Counted: page.Counted}
 }

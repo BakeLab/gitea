@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,4 +64,37 @@ func TestSearchIssueAcceptsFlexibleTimeBounds(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"search", "issue", "--since", "24h", "--before", "2026-10-05T12:00:00Z", "--json"}))
 	require.JSONEq(t, `[]`, out.String())
 	require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, []string{"search", "issue", "--since", "invalid"})))
+}
+
+func TestSearchTables(t *testing.T) {
+	var queries []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/repos/issues/search", r.URL.Path)
+		queries = append(queries, r.URL.RawQuery)
+		if r.URL.Query().Get("q") == "nothing" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		w.Header().Set("X-Total-Count", "7")
+		_, _ = w.Write([]byte(`[{"number":14,"title":"Merged","state":"closed","pull_request":{"merged":true},"user":{"login":"bob"},"updated_at":"2026-10-11T18:00:00Z","repository":{"full_name":"alice/project"}},` +
+			`{"number":3,"title":"Open","state":"open","user":{"login":"alice"},"updated_at":"2026-10-10T20:00:00Z","repository":{"full_name":"acme/service"}}]`))
+	}))
+	defer server.Close()
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	deps.Now = func() time.Time { return time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC) }
+	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
+	plainOutput(t, deps)
+	deps.Streams.OutTTY = true
+	require.NoError(t, Execute(context.Background(), deps, []string{"search", "prs", "login", "-s", "all", "-L", "2", "--author", "@me"}))
+	host := strings.TrimPrefix(server.URL, "http://")
+	require.Equal(t, "Showing 2 of 7 pull requests matching \"login\" on "+host+" · next: --page 2\n\n"+
+		"REPO#ID           TITLE   STATE   AUTHOR  UPDATED\n"+
+		"alice/project#14  Merged  merged  bob     about 2 hours ago\n"+
+		"acme/service#3    Open    open    alice   about 1 day ago\n", out.String())
+	require.Contains(t, queries[0], "created_by=alice")
+	require.Contains(t, queries[0], "type=pulls")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"search", "issues", "nothing"}))
+	require.Empty(t, out.String())
+	require.Equal(t, "no open issues matching \"nothing\" on "+host+"\n", diagnostics.String())
 }

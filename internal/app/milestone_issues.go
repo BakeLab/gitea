@@ -4,102 +4,89 @@
 package app
 
 import (
-	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
-	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"github.com/spf13/cobra"
 )
 
-// milestoneSelector validates a milestone ID or, with byName, a title before any request.
-func milestoneSelector(selector string, byName bool) (int64, error) {
-	if byName {
-		if strings.TrimSpace(selector) == "" {
-			return 0, clierr.Wrap(clierr.Usage, errors.New("milestone name cannot be empty"))
-		}
-		return 0, nil
-	}
-	return number(selector)
-}
-
-// existingMilestone resolves a title, or confirms that an ID exists.
-func existingMilestone(ctx context.Context, milestones services.Milestones, selector string, id int64, byName bool) (int64, error) {
-	if byName {
-		return milestones.ResolveName(ctx, selector)
-	}
-	_, err := milestones.View(ctx, id)
-	return id, err
-}
-
 func (a *application) milestoneIssueCommand() *cobra.Command {
-	group := &cobra.Command{Use: "issue", Short: "Manage milestone issues and pull requests"}
-	opts := services.ListOptions{}
+	group := &cobra.Command{Use: "issue", Short: "Manage the issues and pull requests of a milestone", Long: `List the issues and pull requests in a milestone, or add them to it and remove them from
+it. Milestones are addressed by title or ID; issues and pull requests by number or URL.`}
+	opts := services.ListOptions{Page: 1}
 	var byName bool
-	list := &cobra.Command{Use: "list <id-or-name>", Short: "List issues and pull requests in a milestone", Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := milestoneSelector(args[0], byName)
-		if err != nil {
-			return err
-		}
-		if err := oneOf("state", opts.State, "open", "closed", "all"); err != nil {
-			return err
-		}
-		if err := oneOf("kind", opts.Kind, "all", "issues", "pulls"); err != nil {
-			return err
-		}
+	list := &cobra.Command{Use: "list <milestone>", Short: "List issues and pull requests in a milestone", Example: `$ gt milestone issue list v1.0
+$ gt milestone issue list v1.0 --state all --kind issues`, Annotations: map[string]string{"gt.arguments": milestoneArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		target, err := a.resolve(cmd.Context(), true)
 		if err != nil {
 			return err
 		}
-		id, err = existingMilestone(cmd.Context(), services.Milestones{Client: target.client, Repository: target.Repo}, args[0], id, byName)
+		milestone, err := findMilestone(cmd, services.Milestones{Client: target.client, Repository: target.Repo}, args[0], byName)
 		if err != nil {
 			return err
 		}
-		opts.Milestones = strconv.FormatInt(id, 10)
-		items, more, err := (services.Issues{Client: target.client, Repository: target.Repo}).List(cmd.Context(), opts)
+		opts.Milestones = strconv.FormatInt(milestone.ID, 10)
+		page, err := (services.Issues{Client: target.client, Repository: target.Repo}).ListPage(cmd.Context(), opts)
 		if err != nil {
 			return err
 		}
-		if err := writeList(a, cmd, items, issueRow); err != nil {
-			return err
-		}
-		return a.morePagesHint(cmd, more, opts.Page)
+		where := fmt.Sprintf("in milestone %q of %s", milestone.Title, target.Repo)
+		return writeTable(a, cmd, page.Items, issueListSpec(where, opts.State, opts.Kind, false), servicePage(page, opts.Page))
 	}}
 	pageFlags(list, &opts.Limit, &opts.Page)
-	list.Flags().StringVar(&opts.State, "state", "open", "open, closed, or all")
-	list.Flags().StringVar(&opts.Kind, "kind", "all", "all, issues, or pulls")
-	list.Flags().BoolVar(&byName, "by-name", false, "Select by exact milestone title instead of ID")
+	enumFlag(list, &opts.State, "state", "s", "open", "Filter by state", "open", "closed", "all")
+	enumFlag(list, &opts.Kind, "kind", "", "all", "List issues, pull requests or both", "issues", "pulls", "all")
+	list.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
+	list.ValidArgsFunction = a.completeMilestoneArgs(false)
 	group.AddCommand(list)
 	for _, verb := range []string{"add", "remove"} {
 		var byName bool
-		command := &cobra.Command{Use: verb + " <id-or-name> <number>...", Short: titleCase(verb) + " issues or pull requests in a milestone", Args: usageArgs(cobra.MinimumNArgs(2)), RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := milestoneSelector(args[0], byName)
+		short, preposition, past := "Add issues or pull requests to a milestone", "to", "Added"
+		if verb == "remove" {
+			short, preposition, past = "Remove issues or pull requests from a milestone", "from", "Removed"
+		}
+		command := &cobra.Command{Use: verb + " <milestone> {<number> | <url>}...", Short: short, Example: fmt.Sprintf(`$ gt milestone issue %[1]s v1.0 12
+$ gt milestone issue %[1]s v1.0 12 13 '#14'`, verb), Annotations: map[string]string{"gt.arguments": milestoneArguments + "\n\n" + issueArguments}, Args: usageArgs(cobra.MinimumNArgs(2)), RunE: func(cmd *cobra.Command, args []string) error {
+			target, numbers, err := a.resolveRefs(cmd, args[1:], issueRef)
 			if err != nil {
 				return err
 			}
-			numbers, err := resourceNumbers(args[1:])
-			if err != nil {
-				return err
-			}
-			target, err := a.resolve(cmd.Context(), true)
-			if err != nil {
-				return err
-			}
-			id, err = existingMilestone(cmd.Context(), services.Milestones{Client: target.client, Repository: target.Repo}, args[0], id, byName)
+			milestone, err := findMilestone(cmd, services.Milestones{Client: target.client, Repository: target.Repo}, args[0], byName)
 			if err != nil {
 				return err
 			}
 			service := services.Issues{Client: target.client, Repository: target.Repo}
-			return batch(a, cmd, numbers, issueLabel, func(n int64) (services.Issue, error) {
+			results, failures := applyBatch(cmd, numbers, issueLabel, func(n int64) (item services.Issue, err error) {
 				if verb == "remove" {
-					return service.RemoveMilestone(cmd.Context(), n, id)
+					item, err = service.RemoveMilestone(cmd.Context(), n, milestone)
+				} else {
+					item, err = service.Edit(cmd.Context(), n, services.IssueEdit{Milestone: &milestone.ID})
 				}
-				return service.Edit(cmd.Context(), n, services.IssueEdit{Milestone: &id})
-			}, issueRow)
+				return item, itemError(err, target.Repo)
+			}, func(services.Issue) {})
+			if len(results) > 0 {
+				changed := make([]string, len(results))
+				for i, item := range results {
+					changed[i] = "#" + strconv.FormatInt(item.Number, 10)
+				}
+				a.done(cmd, "%s %s %s %s", past, strings.Join(changed, ", "), preposition, milestoneName(target, milestone))
+			}
+			if a.options.json != "" {
+				failures = append(failures, writeBatchJSON(a, cmd, len(numbers), results))
+			}
+			return errors.Join(failures...)
 		}}
-		command.Flags().BoolVar(&byName, "by-name", false, "Select by exact milestone title instead of ID")
+		command.Flags().BoolVar(&byName, "by-name", false, "Match a numeric milestone argument as a title rather than an ID")
+		milestones, issues := a.completeMilestones(), a.completeIssues("open")
+		command.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+			if len(args) == 0 {
+				return milestones(cmd, args, toComplete)
+			}
+			return issues(cmd, args, toComplete)
+		}
 		group.AddCommand(command)
 	}
 	return group

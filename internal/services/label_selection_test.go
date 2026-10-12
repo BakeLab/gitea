@@ -66,7 +66,7 @@ func TestIssueLabelsCombineScopesWithoutSilentlyChoosingDuplicates(t *testing.T)
 	}))
 	service := Labels{Client: client, Repository: "company/project"}
 	_, err := service.ResolveIssueNames(context.Background(), []string{"bug"})
-	require.ErrorContains(t, err, "ambiguous")
+	require.EqualError(t, err, `label "bug" is ambiguous in company/project (IDs 1, 2); pass an ID`)
 	ids, err := service.ResolveIssueNames(context.Background(), []string{"org:bug", "repo:bug", "shared", "shared"})
 	require.NoError(t, err)
 	require.Equal(t, []int64{2, 1, 3}, ids)

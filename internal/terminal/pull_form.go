@@ -101,7 +101,7 @@ func (p *FormPrompter) CreatePull(ctx context.Context, choices PullFormChoices) 
 		}
 		switch next {
 		case pullMetadata:
-			groups := fields.groups(noBody, true, choices.Assignees, choices.Milestones, choices.Labels)[1:]
+			groups := fields.metadata(true, choices.Assignees, choices.Milestones, choices.Labels)
 			if err := p.runForm(ctx, huh.NewForm(groups...)); err != nil {
 				return values, err
 			}
@@ -123,9 +123,6 @@ func (p *FormPrompter) CreatePull(ctx context.Context, choices PullFormChoices) 
 	values.Head = branches.head(choices.BaseOwner)
 	return values, nil
 }
-
-// noBody keeps the body out of issueFields.groups, which the pull request form asks separately.
-func noBody(context.Context, string) (Draft, error) { return Draft{}, nil }
 
 // pullBranchFields are the branches of a new pull request.
 type pullBranchFields struct {

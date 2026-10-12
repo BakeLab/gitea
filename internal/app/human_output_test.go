@@ -66,8 +66,8 @@ func TestLabelListAppliesColorAndPagesWithNoInput(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
 	require.Equal(t, 1, pager.calls)
 	require.Equal(t, "fake-pager", pager.command)
-	require.Contains(t, pager.input, "\x1b[38;2;255;0;0mbug\x1b[0m")
-	require.Contains(t, pager.input, "\x1b[38;2;0;255;0mdocs\x1b[0m")
+	require.Contains(t, pager.input, "\x1b[38;2;255;0;0m● ff0000\x1b[0m")
+	require.Contains(t, pager.input, "\x1b[38;2;0;255;0m● 00ff00\x1b[0m")
 	require.Equal(t, "PAGED:"+pager.input, out.String())
 	require.Empty(t, diagnostics.String())
 }
@@ -78,7 +78,7 @@ func TestIssueListRespectsColorNeverAndStillPages(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _, pager := pagedDeps(t, server.URL, nil, "color", "never", "pager", "configured-pager")
-	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "list", "-R", "alice/project", "--no-input"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "list", "-R", "alice/project", "--state", "all", "--no-input"}))
 	require.Equal(t, 1, pager.calls)
 	require.Equal(t, "configured-pager", pager.command)
 	require.NotContains(t, pager.input, "\x1b[")
@@ -120,7 +120,7 @@ func TestTeaPagerAndColorEnvironmentOverrides(t *testing.T) {
 	deps, out, _, pager := pagedDeps(t, server.URL, env, "pager", "configured-pager", "color", "never")
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
 	require.Equal(t, "gt-pager", pager.command)
-	require.Contains(t, pager.input, "\x1b[38;5;196mbug\x1b[0m")
+	require.Contains(t, pager.input, "\x1b[38;5;196m● ff0000\x1b[0m")
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "pager", "--show-source", "--json"}))
 	require.JSONEq(t, `{"pager":{"value":"gt-pager","source":"GITEA_CLI_PAGER"}}`, withoutANSI(out.String()))
@@ -137,12 +137,12 @@ func TestColorAutoUsesStdoutTTY(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	deps.Streams.OutTTY = false
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
-	require.Equal(t, "1\tbug\tff0000\t\n", out.String())
+	require.Equal(t, "1\tbug\tff0000\t\t\n", out.String())
 
 	out.Reset()
 	deps.Streams.OutTTY = true
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
-	require.Contains(t, out.String(), "\x1b[38;5;196mbug\x1b[0m")
+	require.Contains(t, out.String(), "\x1b[38;5;196m● ff0000\x1b[0m")
 }
 
 func TestMultiItemHumanOutputPagesOnce(t *testing.T) {
@@ -151,8 +151,8 @@ func TestMultiItemHumanOutputPagesOnce(t *testing.T) {
 	}
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v1/repos/alice/project/milestones/3":
-			_, _ = w.Write([]byte(`{"id":3,"title":"v1"}`))
+		case "/api/v1/repos/alice/project/milestones":
+			writeMilestones(w, r, `[{"id":3,"title":"v1"}]`)
 		case "/api/v1/repos/alice/project/issues":
 			_, _ = w.Write([]byte("[" + issue(1) + "," + issue(2) + "]"))
 		case "/api/v1/repos/alice/project/issues/1", "/api/v1/repos/alice/project/issues/2":
@@ -172,10 +172,10 @@ func TestMultiItemHumanOutputPagesOnce(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"milestone", "issue", "list", "3"}, "1  Issue 1  closed\n2  Issue 2  closed\n"},
-		{[]string{"issue", "close", "1", "2"}, "1  Issue 1  closed\n2  Issue 2  closed\n"},
 		{[]string{"branch", "list"}, "Showing 2 of 2 branches in alice/project\n\nNAME            COMMIT  PROTECTED  UPDATED  MESSAGE\nmain (default)  abc\ndev             def\n"},
-		{[]string{"issue", "comment", "list", "5"}, "1 alice\none\n\n2 bob\ntwo\n\n"},
+		{[]string{"milestone", "issue", "list", "3"}, "Showing 2 of 2 open issues and pull requests in milestone \"v1\" of alice/project\n\n" +
+			"ID  TITLE    LABELS  KIND   AUTHOR  UPDATED\n#1  Issue 1          issue\n#2  Issue 2          issue\n"},
+		{[]string{"issue", "comment", "list", "5"}, "#1  alice\n  one\n\n#2  bob\n  two\n"},
 	} {
 		t.Run(tc.args[0]+" "+tc.args[1], func(t *testing.T) {
 			deps, out, _, pager := pagedDeps(t, server.URL, nil, "pager", "fake-pager", "color", "never", "hyperlinks", "never")
@@ -224,21 +224,27 @@ func TestListsFitTheTerminalAndSplitWhenPiped(t *testing.T) {
 			`{"number":5,"title":"支持中文路径 (support CJK paths)","state":"open","user":{"login":""}}]`))
 	}))
 	defer server.Close()
-	for _, group := range []string{"issue"} {
+	for group, want := range map[string][2]string{
+		"issue": {
+			"6\tA very long issue title that keeps going and going to see how list output handles wrapping\t\topen\tissue\talice\t\n" +
+				"5\t支持中文路径 (support CJK paths)\t\topen\tissue\t\t\n",
+			"Showing 2 of 2 open issues in alice/project\n\n" +
+				"ID  TITLE                  LABELS  AUTHOR  UPDATED\n" +
+				"#6  A very long issue ti…          alice\n" +
+				"#5  支持中文路径 (suppor…\n",
+		},
+	} {
 		t.Run(group, func(t *testing.T) {
 			deps, out, _ := serverDeps(t, server.URL)
 			args := []string{group, "list", "-R", "alice/project"}
 			require.NoError(t, Execute(context.Background(), deps, args))
-			require.Equal(t, "6\tA very long issue title that keeps going and going to see how list output handles wrapping\topen\talice\n"+
-				"5\t支持中文路径 (support CJK paths)\topen\t\n", out.String())
+			require.Equal(t, want[0], out.String())
 
 			out.Reset()
 			deps.Streams.OutTTY, deps.Streams.Width = true, 50
 			deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
 			require.NoError(t, Execute(context.Background(), deps, args))
-			require.Equal(t, "ID  TITLE                            STATE  AUTHOR\n"+
-				"#6  A very long issue title that k…  open   alice\n"+
-				"#5  支持中文路径 (support CJK path…  open\n", stripLinks(out.String()))
+			require.Equal(t, want[1], stripLinks(out.String()))
 			for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
 				require.LessOrEqual(t, runewidth.StringWidth(stripLinks(line)), 50, line)
 			}

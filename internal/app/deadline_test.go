@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestDeadlineInputAndExplicitClearing(t *testing.T) {
 		for _, tc := range []struct{ value, payload string }{
 			{"2028-01-15", `{"due_date":"2028-01-15T00:00:00Z"}`},
 			{"2028-01-15T00:30:00+02:00", `{"due_date":"2028-01-15T00:30:00+02:00"}`},
-			{"01/15/2028", `{"due_date":"2028-01-15T00:00:00Z"}`},
+			{"Jan 15 2028", `{"due_date":"2028-01-15T00:00:00Z"}`},
 			{"1704067200000", `{"due_date":"2024-01-01T00:00:00Z"}`},
 			{"1704067200", `{"due_date":"2024-01-01T00:00:00Z"}`},
 			{"", `{"unset_due_date":true}`},
@@ -37,6 +38,14 @@ func TestDeadlineInputAndExplicitClearing(t *testing.T) {
 				require.NoError(t, Execute(context.Background(), deps, []string{family, "edit", "1", "-R", "owner/repo", "--deadline=" + tc.value, "--json=number,due_date"}))
 				require.JSONEq(t, `{"number":1,"due_date":null}`, out.String())
 			})
+		}
+	}
+}
+
+func TestAmbiguousNumericDeadlinesAreRejected(t *testing.T) {
+	for _, value := range []string{"03/04/2026", "04/03/2026", "01/15/2028", "15.01.2028", "3/4/26"} {
+		for _, command := range [][]string{{"issue", "edit", "1"}, {"issue", "create", "--title", "x"}, {"milestone", "create", "--title", "x"}} {
+			requireUsageBeforeRequests(t, fmt.Sprintf("invalid --deadline %q: the order of day and month is ambiguous; use YYYY-MM-DD", value), append(command, "--deadline="+value)...)
 		}
 	}
 }

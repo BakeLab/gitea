@@ -46,6 +46,7 @@ func TestIssueEditImplicitInteractiveForm(t *testing.T) {
 	deps, out, diagnostics := serverDeps(t, server.URL)
 	deps.IssueEditForm = issueEditFormFunc(func(_ context.Context, choices terminal.IssueEditFormChoices) (terminal.IssueEditFormValues, error) {
 		require.NotNil(t, choices.EditBody)
+		require.Equal(t, "Editing alice/project#5 (Old)", choices.Heading)
 		calls++
 		require.Equal(t, "Old", choices.Title)
 		require.Equal(t, "Old body", choices.Body)
@@ -64,7 +65,7 @@ func TestIssueEditImplicitInteractiveForm(t *testing.T) {
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "5", "-R", "alice/project", "--json=number,title", "--interactive"}))
 	require.Equal(t, 1, calls)
-	require.Len(t, prompt.confirmations, 1)
+	require.Empty(t, prompt.confirmations)
 	require.Equal(t, "Edited", patchPayload["title"])
 	require.Equal(t, "New body", patchPayload["body"])
 	require.Equal(t, []any{"bob"}, patchPayload["assignees"])

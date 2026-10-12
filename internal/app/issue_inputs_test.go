@@ -16,6 +16,10 @@ import (
 func TestIssueCreationMetadataAndReferenceClearing(t *testing.T) {
 	calls := 0
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/milestones" {
+			writeMilestones(w, r, `[{"id":4,"title":"Release"}]`)
+			return
+		}
 		calls++
 		if calls == 1 {
 			require.Equal(t, http.MethodPost, r.Method)

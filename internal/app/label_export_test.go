@@ -42,7 +42,7 @@ func TestLabelExportReadsAllPagesAndPublishesOnlyCompleteFiles(t *testing.T) {
 	require.Equal(t, []string{"1", "2", "3"}, pages)
 	data, err := os.ReadFile(output)
 	require.NoError(t, err)
-	require.Equal(t, "#ff0000 good first issue ;Help wanted\n#00ff00 bug ;\n", string(data))
+	require.Equal(t, "#ff0000 good first issue ;Help wanted\n#00ff00 bug\n", string(data))
 	require.NoError(t, os.Remove(output))
 	fail = true
 	require.Error(t, Execute(context.Background(), deps, args))

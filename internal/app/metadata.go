@@ -4,9 +4,10 @@
 package app
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
-	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,344 +18,384 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func (a *application) labelCommand() *cobra.Command {
-	group := &cobra.Command{Use: "label", Short: "Manage repository or organization labels"}
-	var org string
-	group.PersistentFlags().StringVar(&org, "org", "", "Manage organization labels instead of repository labels")
-	service := func(cmd *cobra.Command) (services.Labels, error) {
-		if org != "" && a.options.repo != "" {
-			return services.Labels{}, clierr.Wrap(clierr.Usage, errors.New("--org and --repo are mutually exclusive"))
-		}
-		t, err := a.resolve(cmd.Context(), org == "")
-		return services.Labels{Client: t.client, Repository: t.Repo, Organization: org}, err
-	}
-	group.AddCommand(a.labelExportCommand(service))
-	var limit, page int
-	list := &cobra.Command{Use: "list", Short: "List labels in the selected scope", Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		s, err := service(cmd)
-		if err != nil {
-			return err
-		}
-		items, err := s.List(cmd.Context(), limit, page)
-		if err != nil {
-			return err
-		}
-		return writeList(a, cmd, items, labelRow)
-	}}
-	pageFlags(list, &limit, &page)
-	group.AddCommand(list)
-	for _, verb := range []string{"create", "edit"} {
-		var name, color, description, file string
-		var exclusive, archived bool
-		command := &cobra.Command{Use: verb, Short: titleCase(verb) + " a label"}
-		if verb == "edit" {
-			command.Use += " <id>"
-			command.Args = argsExact(1)
-		} else {
-			command.Args = argsExact(0)
-		}
-		command.Flags().StringVar(&name, "name", "", "Label name")
-		command.Flags().StringVar(&color, "color", "", "Six-digit RGB color")
-		command.Flags().StringVar(&description, "description", "", "Label description")
-		command.Flags().BoolVar(&exclusive, "exclusive", false, "Only one label from this exclusive group may be applied")
-		command.Flags().BoolVar(&archived, "archived", false, "Archive the label so it cannot be newly applied")
-		if verb == "create" {
-			command.Flags().StringVar(&file, "file", "", "Import color/name rows with optional ;description")
-		}
-		command.RunE = func(cmd *cobra.Command, args []string) error {
-			opts := services.LabelOptions{}
-			var imported []services.LabelOptions
-			var id int64
-			if verb == "edit" {
-				var err error
-				id, err = number(args[0])
-				if err != nil {
-					return err
-				}
-			}
-			if file != "" {
-				if cmd.Flags().Changed("name") || cmd.Flags().Changed("color") || cmd.Flags().Changed("description") || cmd.Flags().Changed("exclusive") || cmd.Flags().Changed("archived") {
-					return clierr.Wrap(clierr.Usage, errors.New("--file cannot be combined with label fields"))
-				}
-				f, err := os.Open(file)
-				if err != nil {
-					return err
-				}
-				defer f.Close()
-				if imported, err = parseLabelFile(f); err != nil {
-					return err
-				}
-			} else {
-				if verb == "create" {
-					if _, err := a.require(cmd, &name, "name"); err != nil {
-						return err
-					}
-					if _, err := a.require(cmd, &color, "color"); err != nil {
-						return err
-					}
-				}
-				if verb == "create" || cmd.Flags().Changed("name") {
-					if name == "" {
-						return clierr.Wrap(clierr.Usage, errors.New("label name cannot be empty"))
-					}
-					opts.Name = &name
-				}
-				if verb == "create" || cmd.Flags().Changed("color") {
-					color = strings.TrimPrefix(color, "#")
-					if !labelColor.MatchString(color) {
-						return clierr.Wrap(clierr.Usage, errors.New("--color requires six hexadecimal digits"))
-					}
-					opts.Color = &color
-				}
-				if verb == "create" || cmd.Flags().Changed("description") {
-					opts.Description = &description
-				}
-				if verb == "create" || cmd.Flags().Changed("exclusive") {
-					opts.Exclusive = &exclusive
-				}
-				if cmd.Flags().Changed("archived") {
-					opts.Archived = &archived
-				}
-				if opts.Name == nil && opts.Color == nil && opts.Description == nil && opts.Exclusive == nil && opts.Archived == nil {
-					return clierr.Wrap(clierr.Usage, errors.New("supply label fields to edit"))
-				}
-			}
-			s, err := service(cmd)
-			if err != nil {
-				return err
-			}
-			if file != "" {
-				results := []services.Label{}
-				var failures []error
-				for _, row := range imported {
-					item, err := s.Create(cmd.Context(), row)
-					if err != nil {
-						failures = append(failures, fmt.Errorf("label %s: %w", *row.Name, err))
-						continue
-					}
-					results = append(results, item)
-				}
-				return errors.Join(append(failures, writeList(a, cmd, results, labelRow))...)
-			}
-			var item services.Label
-			if verb == "create" {
-				item, err = s.Create(cmd.Context(), opts)
-			} else {
-				item, err = s.Edit(cmd.Context(), id, opts)
-			}
-			if err != nil {
-				return err
-			}
-			return writeItem(a, cmd, item, labelRow)
-		}
-		group.AddCommand(command)
-	}
-	group.AddCommand(&cobra.Command{Use: "delete <id>", Short: "Delete a label", Annotations: textOutput("label deletion does not return a resource"), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := number(args[0])
-		if err != nil {
-			return err
-		}
-		s, err := service(cmd)
-		if err != nil {
-			return err
-		}
-		if err := a.confirm(cmd, "Delete label "+args[0]); err != nil {
-			return err
-		}
-		return s.Delete(cmd.Context(), id)
-	}})
-	return group
-}
+// milestoneArguments is the ARGUMENTS help of commands that take milestones.
+const milestoneArguments = `A milestone can be supplied by its title, such as "v1.0", or by its ID. A number is an ID
+first, then a title; --by-name matches it as a title only.`
+
+// milestoneService returns the milestones of the repository a milestone command targets.
+type milestoneService func(*cobra.Command) (services.Milestones, target, error)
 
 func (a *application) milestoneCommand() *cobra.Command {
-	group := &cobra.Command{Use: "milestone", Short: "Manage repository milestones"}
-	service := func(cmd *cobra.Command) (services.Milestones, error) {
+	group := &cobra.Command{Use: "milestone", Short: "Manage milestones", Long: `Work with the milestones of a repository and the issues and pull requests in them.
+Milestones are addressed by title or ID.`}
+	service := func(cmd *cobra.Command) (services.Milestones, target, error) {
 		t, err := a.resolve(cmd.Context(), true)
-		return services.Milestones{Client: t.client, Repository: t.Repo}, err
+		return services.Milestones{Client: t.client, Repository: t.Repo}, t, err
 	}
-	var limit, page int
-	var state string
-	list := &cobra.Command{Use: "list", Short: "List milestones", Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := oneOf("state", state, "open", "closed", "all"); err != nil {
-			return err
-		}
-		s, err := service(cmd)
-		if err != nil {
-			return err
-		}
-		items, err := s.List(cmd.Context(), state, limit, page)
-		if err != nil {
-			return err
-		}
-		return writeList(a, cmd, items, milestoneRow)
-	}}
-	pageFlags(list, &limit, &page)
-	list.Flags().StringVar(&state, "state", "open", "open, closed, all")
-	group.AddCommand(list)
-	for _, verb := range []string{"view", "create", "edit", "delete"} {
-		var title, description, descriptionFile, deadline, createState string
-		var byName, useEditor bool
-		command := &cobra.Command{Use: verb, Short: titleCase(verb) + " a milestone"}
-		if verb == "create" {
-			command.Args = argsExact(0)
-		} else {
-			command.Use += " <id-or-name>"
-			command.Flags().BoolVar(&byName, "by-name", false, "Select by exact milestone title instead of ID")
-			command.Args = argsExact(1)
-		}
-		if verb == "create" || verb == "edit" {
-			command.Flags().StringVar(&title, "title", "", "Milestone title")
-			command.Flags().StringVar(&description, "description", "", "Milestone description")
-			command.Flags().StringVar(&descriptionFile, "description-file", "", "Read description from file, or - for stdin")
-			command.Flags().BoolVar(&useEditor, "editor", false, "Edit the milestone description in the configured editor")
-			command.Flags().StringVar(&deadline, "deadline", "", "Due date: YYYY-MM-DD, RFC3339, or Unix timestamp; empty clears")
-		}
-		if verb == "create" {
-			command.Flags().StringVar(&createState, "state", "open", "Milestone state: open or closed")
-		}
-		command.RunE = func(cmd *cobra.Command, args []string) (runErr error) {
-			var editorDraft terminal.Draft
-			defer finishDraft(&editorDraft, &runErr)
-			if verb == "create" || verb == "edit" {
-				if err := validateTextSources(cmd, "description", "description-file"); err != nil {
-					return err
-				}
-			}
-			opts := services.MilestoneOptions{}
-			var id int64
-			if verb != "create" {
-				var err error
-				if id, err = milestoneSelector(args[0], byName); err != nil {
-					return err
-				}
-			}
-			var interactiveDeadline *time.Time
-			descriptionChanged := false
-			if verb == "create" {
-				if err := oneOf("state", createState, "open", "closed"); err != nil {
-					return err
-				}
-				opts.State = &createState
-				snapshot, err := a.deps.Settings.Load()
-				if err != nil {
-					return err
-				}
-				policy := a.policy(snapshot)
-				if !localFlagsChanged(cmd) && policy.CanPrompt(a.deps.Streams) && a.deps.MilestoneForm != nil {
-					values, err := a.deps.MilestoneForm.CreateMilestone(cmd.Context())
-					if err != nil {
-						return err
-					}
-					title, description = values.Title, values.Description
-					interactiveDeadline = values.Deadline
-					descriptionChanged = true
-				} else if _, err := a.require(cmd, &title, "title"); err != nil {
-					return err
-				}
-			}
-			if (verb == "create" || verb == "edit") && !useEditor {
-				var err error
-				description, err = a.readTextSource(cmd, description, descriptionFile, "description", "description-file")
-				if err != nil {
-					return err
-				}
-				if cmd.Flags().Changed("description") || cmd.Flags().Changed("description-file") {
-					descriptionChanged = true
-				}
-			}
-			if cmd.Flags().Changed("title") && strings.TrimSpace(title) == "" {
-				return clierr.Wrap(clierr.Usage, errors.New("milestone title cannot be empty"))
-			}
-			if verb == "create" || cmd.Flags().Changed("title") {
-				opts.Title = &title
-			}
-			if cmd.Flags().Changed("deadline") || interactiveDeadline != nil {
-				date := time.Time{}
-				if interactiveDeadline != nil {
-					date = *interactiveDeadline
-				} else if deadline != "" {
-					parsed, _, err := parseDeadline(deadline)
-					if err != nil {
-						return err
-					}
-					date = *parsed
-				}
-				normalized := date.Format(time.RFC3339)
-				opts.Deadline = &normalized
-			}
-
-			if verb == "edit" && opts.Title == nil && !descriptionChanged && !useEditor && opts.Deadline == nil {
-				return clierr.Wrap(clierr.Usage, errors.New("supply milestone fields to edit"))
-			}
-			s, err := service(cmd)
-			if err != nil {
-				return err
-			}
-			if byName {
-				id, err = s.ResolveName(cmd.Context(), args[0])
-				if err != nil {
-					return err
-				}
-			}
-			if verb == "delete" {
-				if err := a.confirm(cmd, "Delete milestone "+args[0]); err != nil {
-					return err
-				}
-				if a.options.json != "" {
-					item, err := s.View(cmd.Context(), id)
-					if err != nil {
-						return err
-					}
-					if err := s.Delete(cmd.Context(), id); err != nil {
-						return err
-					}
-					return writeItem(a, cmd, item, milestoneRow)
-				}
-				return s.Delete(cmd.Context(), id)
-			}
-			if useEditor {
-				initial := ""
-				if verb == "edit" {
-					current, viewErr := s.View(cmd.Context(), id)
-					if viewErr != nil {
-						return viewErr
-					}
-					initial = current.Description
-				}
-				editorDraft, err = a.editDraft(cmd, initial)
-				if err != nil {
-					return err
-				}
-				description = editorDraft.Body
-				descriptionChanged = true
-			}
-			if verb == "create" || descriptionChanged {
-				opts.Description = &description
-			}
-			var item services.Milestone
-			if verb == "view" {
-				item, err = s.View(cmd.Context(), id)
-			} else if verb == "create" {
-				item, err = s.Create(cmd.Context(), opts)
-			} else {
-				item, err = s.Edit(cmd.Context(), id, opts)
-			}
-			if err != nil {
-				return err
-			}
-			return writeItem(a, cmd, item, milestoneRow)
-		}
-		group.AddCommand(command)
-	}
-	group.AddCommand(a.milestoneStateCommand("close", service), a.milestoneStateCommand("reopen", service))
-	group.AddCommand(a.milestoneIssueCommand())
+	group.AddCommand(a.milestoneListCommand(service), a.milestoneViewCommand(service), a.milestoneCreateCommand(service), a.milestoneEditCommand(service),
+		a.milestoneDeleteCommand(service), a.milestoneStateCommand("close", service), a.milestoneStateCommand("reopen", service), a.milestoneIssueCommand())
 	return group
 }
 
-func labelRow(item services.Label) []terminal.Cell {
-	return []terminal.Cell{{Text: strconv.FormatInt(item.ID, 10)}, {Text: item.Name, Color: item.Color}, {Text: item.Color, Color: item.Color}, {Text: item.Description}}
+func (a *application) milestoneListCommand(service milestoneService) *cobra.Command {
+	var limit, page int
+	var state string
+	cmd := &cobra.Command{Use: "list", Short: "List milestones", Long: "List the milestones of a repository: open ones first, then by due date.", Example: `$ gt milestone list
+$ gt milestone list --state all --json title,due_on,open_issues,closed_issues`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+		s, t, err := service(cmd)
+		if err != nil {
+			return err
+		}
+		items, err := s.ListPage(cmd.Context(), state, limit, page)
+		if err != nil {
+			return err
+		}
+		slices.SortStableFunc(items.Items, compareMilestones)
+		what := "milestones in " + t.Repo
+		if state != "all" {
+			what = state + " " + what
+		}
+		return writeTable(a, cmd, items.Items, listSpec[services.Milestone]{
+			Columns: []terminal.Column{{Header: "ID"}, {Header: "Title", Flex: true}, {Header: "State", PipedOnly: state == "open"}, {Header: "Due"}, {Header: "Progress"}},
+			Row:     milestoneRow, Empty: "no " + what, Context: what,
+		}, servicePage(items, page))
+	}}
+	pageFlags(cmd, &limit, &page)
+	enumFlag(cmd, &state, "state", "s", "open", "Filter by state", "open", "closed", "all")
+	return cmd
+}
+
+// compareMilestones orders open milestones first, then by due date, those without one last.
+func compareMilestones(x, y services.Milestone) int {
+	if x.State != y.State {
+		return cmp.Compare(boolOrder(x.State != "open"), boolOrder(y.State != "open"))
+	}
+	if x.Deadline == nil || y.Deadline == nil {
+		return cmp.Compare(boolOrder(x.Deadline == nil), boolOrder(y.Deadline == nil))
+	}
+	return terminal.ParseTime(*x.Deadline).Compare(terminal.ParseTime(*y.Deadline))
+}
+
+func boolOrder(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func milestoneRow(item services.Milestone) []terminal.Cell {
-	return []terminal.Cell{{Text: strconv.FormatInt(item.ID, 10)}, {Text: item.Title}, {Text: item.State, Color: stateColors[item.State]}}
+	due := terminal.Cell{}
+	if item.Deadline != nil {
+		due.Time = terminal.ParseTime(*item.Deadline)
+	}
+	return []terminal.Cell{
+		{Text: strconv.FormatInt(item.ID, 10), Color: stateColors[item.State]},
+		{Text: item.Title},
+		{Text: item.State, Color: stateColors[item.State]},
+		due,
+		{Text: milestoneProgress(item)},
+	}
+}
+
+// milestoneProgress summarizes the closed issues of a milestone: "3/5 (60%)".
+func milestoneProgress(item services.Milestone) string {
+	total := item.OpenIssues + item.ClosedIssues
+	if total == 0 {
+		return "0/0"
+	}
+	return fmt.Sprintf("%d/%d (%d%%)", item.ClosedIssues, total, item.ClosedIssues*100/total)
+}
+
+// milestoneName names a milestone in messages: `milestone "v1.0" in alice/x`.
+func milestoneName(t target, item services.Milestone) string {
+	return fmt.Sprintf("milestone %q in %s", item.Title, t.Repo)
+}
+
+// milestoneURL is the web page of a milestone, which the API does not return.
+func milestoneURL(t target, item services.Milestone) string {
+	return strings.TrimRight(t.Host, "/") + "/" + t.Repo + "/milestone/" + strconv.FormatInt(item.ID, 10)
+}
+
+func milestoneView(t target, now time.Time) func(services.Milestone) terminal.View {
+	return func(item services.Milestone) terminal.View {
+		total := item.OpenIssues + item.ClosedIssues
+		meta := []string{fmt.Sprintf("%d of %d closed", item.ClosedIssues, total)}
+		if total > 0 {
+			meta[0] += fmt.Sprintf(" (%d%%)", item.ClosedIssues*100/total)
+		}
+		due := ""
+		if item.Deadline != nil {
+			deadline := terminal.ParseTime(*item.Deadline)
+			due = terminal.Timestamp(deadline)
+			meta = append([]string{"due " + deadline.Format("Jan 2, 2006") + " (" + terminal.RelativeTime(now, deadline) + ")"}, meta...)
+		}
+		return terminal.View{
+			Title: item.Title, ID: "#" + strconv.FormatInt(item.ID, 10),
+			Badges: []terminal.Cell{{Text: titleCase(item.State), Color: stateColors[item.State]}}, Meta: strings.Join(meta, " • "),
+			Fields: []terminal.Field{
+				{Label: "State", Value: item.State, PipedOnly: true},
+				{Label: "Due", Value: due, PipedOnly: true},
+				{Label: "Progress", Value: milestoneProgress(item), PipedOnly: true},
+			},
+			Body: item.Description, Kind: "milestone", URL: milestoneURL(t, item),
+		}
+	}
+}
+
+func (a *application) milestoneViewCommand(service milestoneService) *cobra.Command {
+	var byName, web bool
+	cmd := &cobra.Command{Use: "view <milestone>", Short: "View a milestone", Example: `$ gt milestone view v1.0
+$ gt milestone view 3 --web`, Annotations: map[string]string{"gt.arguments": milestoneArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+		s, t, err := service(cmd)
+		if err != nil {
+			return err
+		}
+		item, err := findMilestone(cmd, s, args[0], byName)
+		if err != nil {
+			return err
+		}
+		if web {
+			return a.openBrowser(cmd, milestoneURL(t, item))
+		}
+		return writeView(a, cmd, item, milestoneView(t, a.deps.Now()))
+	}}
+	cmd.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
+	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the milestone in the browser")
+	cmd.ValidArgsFunction = a.completeMilestoneArgs(false)
+	return cmd
+}
+
+// milestoneFields are the fields of milestone create and edit.
+type milestoneFields struct {
+	title, description, descriptionFile, deadline string
+	useEditor                                     bool
+}
+
+func (f *milestoneFields) register(cmd *cobra.Command) {
+	flags := cmd.Flags()
+	flags.StringVarP(&f.title, "title", "t", "", "Milestone title")
+	flags.StringVarP(&f.description, "description", "d", "", "Milestone description")
+	flags.StringVarP(&f.descriptionFile, "description-file", "F", "", "Read the description from `file`, or - for stdin")
+	flags.BoolVarP(&f.useEditor, "editor", "e", false, "Write the description in the configured editor")
+	flags.StringVar(&f.deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339, or Unix timestamp; empty clears it")
+}
+
+// milestoneOptions returns the fields that were passed, reading the description and checking the
+// rest before any request. Callers run the editor for --editor.
+func (a *application) milestoneOptions(cmd *cobra.Command, f *milestoneFields) (services.MilestoneOptions, error) {
+	var opts services.MilestoneOptions
+	if cmd.Flags().Changed("title") {
+		if strings.TrimSpace(f.title) == "" {
+			return opts, clierr.Wrap(clierr.Usage, errors.New("milestone title cannot be empty"))
+		}
+		opts.Title = &f.title
+	}
+	if cmd.Flags().Changed("deadline") {
+		date := time.Time{}
+		if f.deadline != "" {
+			parsed, _, err := parseDeadline(f.deadline)
+			if err != nil {
+				return opts, err
+			}
+			date = *parsed
+		}
+		normalized := date.Format(time.RFC3339)
+		opts.Deadline = &normalized
+	}
+	if cmd.Flags().Changed("description") || cmd.Flags().Changed("description-file") {
+		description, err := a.readTextSource(cmd, f.description, f.descriptionFile, "description", "description-file")
+		if err != nil {
+			return opts, err
+		}
+		opts.Description = &description
+	}
+	return opts, nil
+}
+
+// formOptions turns milestone form values into options.
+func formOptions(values terminal.MilestoneFormValues) services.MilestoneOptions {
+	deadline := time.Time{}
+	if values.Deadline != nil {
+		deadline = *values.Deadline
+	}
+	normalized := deadline.Format(time.RFC3339)
+	return services.MilestoneOptions{Title: &values.Title, Description: &values.Description, Deadline: &normalized}
+}
+
+func (a *application) milestoneCreateCommand(service milestoneService) *cobra.Command {
+	var fields milestoneFields
+	var state string
+	cmd := &cobra.Command{Use: "create [<title>]", Aliases: []string{"new"}, Short: "Create a milestone", Long: `Create a milestone. Without flags on a terminal, a form asks for the title, description
+and due date. The new milestone's URL is printed, so scripts can capture it.`, Example: `$ gt milestone create v1.0 --deadline 2026-12-31 --description "First release"
+$ gt milestone create --title v2.0 --editor`, Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+		if err := validateTextSources(cmd, "description", "description-file"); err != nil {
+			return err
+		}
+		if len(args) == 1 {
+			if cmd.Flags().Changed("title") {
+				return clierr.Wrap(clierr.Usage, errors.New("pass the title as an argument or --title, not both"))
+			}
+			if err := cmd.Flags().Set("title", args[0]); err != nil {
+				return err
+			}
+		}
+		prompt := a.canPrompt()
+		var opts services.MilestoneOptions
+		var draft terminal.Draft
+		var err error
+		defer finishDraft(&draft, &runErr)
+		if !localFlagsChanged(cmd) && prompt && a.deps.MilestoneForm != nil {
+			values, err := a.deps.MilestoneForm.EditMilestone(cmd.Context(), "", terminal.MilestoneFormValues{})
+			if err != nil {
+				return err
+			}
+			opts = formOptions(values)
+		} else {
+			if opts, err = a.milestoneOptions(cmd, &fields); err != nil {
+				return err
+			}
+			if _, err := a.requireInput(cmd, &fields.title, "title", "Milestone title", nil); err != nil {
+				return err
+			}
+			opts.Title = &fields.title
+			if fields.useEditor {
+				if draft, err = a.editDraft(cmd, ""); err != nil {
+					return err
+				}
+				opts.Description = &draft.Body
+			}
+		}
+		opts.State = &state
+		s, t, err := service(cmd)
+		if err != nil {
+			return err
+		}
+		item, err := s.Create(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+		if a.options.json != "" {
+			return a.writeJSON(cmd, item)
+		}
+		a.done(cmd, "Created %s", milestoneName(t, item))
+		return a.printURL(cmd, milestoneURL(t, item))
+	}}
+	fields.register(cmd)
+	enumFlag(cmd, &state, "state", "", "open", "State of the new milestone", "open", "closed")
+	return cmd
+}
+
+func (a *application) milestoneEditCommand(service milestoneService) *cobra.Command {
+	var fields milestoneFields
+	var byName bool
+	cmd := &cobra.Command{Use: "edit <milestone>", Short: "Edit a milestone", Long: `Edit the title, description or due date of a milestone. Without flags on a terminal, a form
+starts from the current values.`, Example: `$ gt milestone edit v1.0 --title v1.0.0 --deadline 2027-01-31
+$ gt milestone edit v1.0 --deadline=
+$ gt milestone edit 3 --editor`, Annotations: map[string]string{"gt.arguments": milestoneArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+		if err := validateTextSources(cmd, "description", "description-file"); err != nil {
+			return err
+		}
+		prompt := a.canPrompt()
+		form := !localFlagsChanged(cmd) && prompt && a.deps.MilestoneForm != nil
+		if !form && !localFlagsChanged(cmd) {
+			return errNothingToEdit
+		}
+		var opts services.MilestoneOptions
+		var draft terminal.Draft
+		var err error
+		defer finishDraft(&draft, &runErr)
+		if !form {
+			if opts, err = a.milestoneOptions(cmd, &fields); err != nil || (opts == (services.MilestoneOptions{}) && !fields.useEditor) {
+				return cmp.Or(err, errNothingToEdit)
+			}
+		}
+		s, t, err := service(cmd)
+		if err != nil {
+			return err
+		}
+		current, err := findMilestone(cmd, s, args[0], byName)
+		if err != nil {
+			return err
+		}
+		switch {
+		case form:
+			values := terminal.MilestoneFormValues{Title: current.Title, Description: current.Description}
+			if current.Deadline != nil {
+				deadline := terminal.ParseTime(*current.Deadline)
+				values.Deadline = &deadline
+			}
+			if values, err = a.deps.MilestoneForm.EditMilestone(cmd.Context(), "Editing "+milestoneName(t, current), values); err != nil {
+				return err
+			}
+			opts = formOptions(values)
+		case fields.useEditor:
+			if draft, err = a.editDraft(cmd, current.Description); err != nil {
+				return err
+			}
+			opts.Description = &draft.Body
+		}
+		item, err := s.Edit(cmd.Context(), current.ID, opts)
+		if err != nil {
+			return err
+		}
+		if a.options.json != "" {
+			return a.writeJSON(cmd, item)
+		}
+		a.done(cmd, "Edited %s", milestoneName(t, item))
+		return nil
+	}}
+	fields.register(cmd)
+	cmd.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
+	cmd.ValidArgsFunction = a.completeMilestoneArgs(false)
+	return cmd
+}
+
+func (a *application) milestoneDeleteCommand(service milestoneService) *cobra.Command {
+	var byName bool
+	cmd := &cobra.Command{Use: "delete <milestone>", Short: "Delete a milestone", Long: "Delete a milestone. Its issues and pull requests stay, without a milestone.", Example: `$ gt milestone delete v0.9
+$ gt milestone delete 7 --yes`, Annotations: map[string]string{"gt.confirm": "true", "gt.arguments": milestoneArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+		s, t, err := service(cmd)
+		if err != nil {
+			return err
+		}
+		item, err := findMilestone(cmd, s, args[0], byName)
+		if err != nil {
+			return err
+		}
+		name := fmt.Sprintf("milestone %q (ID %d) from %s", item.Title, item.ID, t.Repo)
+		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + name + "?", NonTTY: "delete " + name}); err != nil {
+			return err
+		}
+		if err := s.Delete(cmd.Context(), item.ID); err != nil {
+			return err
+		}
+		if a.options.json != "" {
+			return a.writeJSON(cmd, item)
+		}
+		a.done(cmd, "Deleted milestone %q from %s", item.Title, t.Repo)
+		return nil
+	}}
+	cmd.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
+	cmd.ValidArgsFunction = a.completeMilestoneArgs(false)
+	return cmd
+}
+
+// findMilestone resolves a milestone argument, a title or an ID.
+func findMilestone(cmd *cobra.Command, s services.Milestones, raw string, byName bool) (services.Milestone, error) {
+	if strings.TrimSpace(raw) == "" {
+		return services.Milestone{}, clierr.Wrap(clierr.Usage, errors.New("milestone title or ID cannot be empty"))
+	}
+	return s.FindOne(cmd.Context(), raw, byName)
+}
+
+// completeMilestoneArgs completes milestone titles for the first argument, or for every argument
+// when variadic.
+func (a *application) completeMilestoneArgs(variadic bool) cobra.CompletionFunc {
+	complete := a.completeMilestones()
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		if len(args) > 0 && !variadic {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return complete(cmd, args, toComplete)
+	}
 }

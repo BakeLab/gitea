@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
@@ -17,16 +18,57 @@ import (
 
 func trackedDuration(seconds int64) time.Duration { return time.Duration(seconds) * time.Second }
 
+// parseSpent reads time spent in whole seconds, written like 1h25m or "1h 25m".
+func parseSpent(raw string) (int64, error) {
+	duration, err := time.ParseDuration(strings.Join(strings.Fields(raw), ""))
+	switch {
+	case err != nil:
+		return 0, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid duration %q: use h, m and s units such as 1h25m", raw))
+	case duration <= 0:
+		return 0, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid duration %q: time spent must be positive, such as 1h25m", raw))
+	case duration%time.Second != 0:
+		return 0, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid duration %q: use whole seconds, such as 1h25m", raw))
+	}
+	return int64(duration / time.Second), nil
+}
+
+// spent formats tracked seconds for people: "1h 30m", "15m", "45s".
+func spent(seconds int64) string {
+	d := trackedDuration(seconds)
+	var parts []string
+	for _, unit := range []struct {
+		size   time.Duration
+		suffix string
+	}{{time.Hour, "h"}, {time.Minute, "m"}, {time.Second, "s"}} {
+		if n := d / unit.size; n > 0 && (unit.size != time.Second || seconds < 3600) {
+			parts = append(parts, strconv.FormatInt(int64(n), 10)+unit.suffix)
+		}
+		d %= unit.size
+	}
+	if len(parts) == 0 {
+		return "0s"
+	}
+	return strings.Join(parts, " ")
+}
+
 func (a *application) timeCommand() *cobra.Command {
-	group := &cobra.Command{Use: "time", Short: "Track time spent on issues and pull requests"}
+	group := &cobra.Command{Use: "time", Short: "Track time spent on issues and pull requests", Long: `Log the time spent on issues and pull requests, list it for a repository, an issue or
+yourself across repositories, and delete it.`}
+	group.AddCommand(a.timeListCommand(), a.timeCreateCommand(), a.timeDeleteCommand(), a.timeResetCommand())
+	return group
+}
+
+func (a *application) timeListCommand() *cobra.Command {
 	opts := services.TimeOptions{}
 	var tracked timeRange
 	var total bool
-	list := &cobra.Command{Use: "list", Short: "List repository or account time records", Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		if opts.Issue < 0 || (cmd.Flags().Changed("issue") && opts.Issue == 0) {
-			return clierr.Wrap(clierr.Usage, errors.New("--issue must be positive"))
-		}
-		if (opts.Mine && (cmd.Flags().Changed("issue") || opts.Username != "")) || (opts.Issue != 0 && opts.Username != "") {
+	var issue string
+	cmd := &cobra.Command{Use: "list", Short: "List tracked time", Long: `List the time tracked in a repository, on one issue with --issue, or by yourself across
+repositories with --mine. On a terminal, the total of the listed time follows the table.`, Example: `$ gt time list
+$ gt time list --issue 12
+$ gt time list --mine --since 168h
+$ gt time list --username @me --json issue_number,seconds`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+		if (opts.Mine && (issue != "" || opts.Username != "")) || (issue != "" && opts.Username != "") {
 			return clierr.Wrap(clierr.Usage, errors.New("--mine, --issue and --username select mutually exclusive scopes"))
 		}
 		if total && a.options.json != "" {
@@ -36,89 +78,152 @@ func (a *application) timeCommand() *cobra.Command {
 		if opts.Since, opts.Before, err = tracked.parse(a.deps.Now()); err != nil {
 			return err
 		}
-		target, err := a.resolve(cmd.Context(), !opts.Mine)
+		var target target
+		if issue != "" {
+			target, opts.Issue, err = a.resolveRef(cmd, issue, issueRef)
+		} else {
+			target, err = a.resolve(cmd.Context(), !opts.Mine)
+		}
+		if errors.Is(err, errRepositoryRequired) {
+			return clierr.Wrap(clierr.Usage, errors.New("repository required: use --repo owner/name, or --mine for your time across repositories"))
+		}
 		if err != nil {
 			return err
 		}
-		items, err := (services.Times{Client: target.client, Repository: target.Repo}).List(cmd.Context(), opts)
+		opts.Username = target.expandMe(opts.Username)
+		page, err := (services.Times{Client: target.client, Repository: target.Repo}).ListPage(cmd.Context(), opts)
 		if err != nil {
 			return err
 		}
-		if !total {
-			return writeList(a, cmd, items, trackedTimeRow)
+		where := "in " + target.Repo
+		switch {
+		case opts.Mine:
+			where = "by " + target.login()
+		case opts.Issue != 0:
+			where = fmt.Sprintf("on %s#%d", target.Repo, opts.Issue)
 		}
-		var sum int64
-		for _, item := range items {
-			sum += item.Seconds
+		spec := listSpec[services.TrackedTime]{
+			Columns: []terminal.Column{{Header: "ID"}, {Header: "Issue", Flex: true}, {Header: "User"}, {Header: "Spent"}, {Header: "When"}},
+			Row:     trackedTimeRow(target.Repo), Empty: "no time tracked " + where, Context: "time records " + where,
 		}
-		return a.writeHuman(cmd, table(items, trackedTimeRow, a.colorEnabled())+fmt.Sprintf("Total on this page: %s\n", trackedDuration(sum)))
+		return a.writeTimes(cmd, page, opts.Page, spec, total)
 	}}
-	list.Flags().BoolVar(&opts.Mine, "mine", false, "List your time across repositories")
-	list.Flags().Int64Var(&opts.Issue, "issue", 0, "List time on one issue or pull request")
-	list.Flags().StringVar(&opts.Username, "username", "", "Filter repository time by username")
-	pageFlags(list, &opts.Limit, &opts.Page)
-	tracked.register(list, "from", "Only time tracked since a date, timestamp, or duration ago", "until", "Only time tracked before a date, timestamp, or duration ago")
-	list.Flags().BoolVar(&total, "total", false, "Print the time summed across the returned page")
-	group.AddCommand(list)
-	group.AddCommand(&cobra.Command{Use: "create <number> <duration>", Short: "Record spent time, for example 1h25m", Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) error {
-		n, err := number(args[0])
-		if err != nil {
-			return err
-		}
-		duration, err := time.ParseDuration(args[1])
-		if err != nil || duration == 0 || duration%time.Second != 0 {
-			return clierr.Wrap(clierr.Usage, errors.New("duration must be nonzero whole seconds, for example 1h25m"))
-		}
-		target, err := a.resolve(cmd.Context(), true)
-		if err != nil {
-			return err
-		}
-		item, err := (services.Times{Client: target.client, Repository: target.Repo}).Create(cmd.Context(), n, int64(duration/time.Second))
-		if err != nil {
-			return err
-		}
-		return writeItem(a, cmd, item, trackedTimeRow)
-	}})
-	for _, verb := range []string{"delete", "reset"} {
-		use := verb + " <number>"
-		count := 1
-		if verb == "delete" {
-			use += " <time-id>"
-			count = 2
-		}
-		group.AddCommand(&cobra.Command{Use: use, Short: titleCase(verb) + " tracked time on an issue", Annotations: textOutput("time " + verb + " does not return a resource"), Args: argsExact(count), RunE: func(cmd *cobra.Command, args []string) error {
-			n, err := number(args[0])
-			if err != nil {
-				return err
-			}
-			var id int64
-			if verb == "delete" {
-				id, err = number(args[1])
-				if err != nil {
-					return err
-				}
-			}
-			target, err := a.resolve(cmd.Context(), true)
-			if err != nil {
-				return err
-			}
-			subject := target.Repo + " #" + args[0]
-			if verb == "delete" {
-				subject = "entry " + args[1] + " on " + subject
-			}
-			if err := a.confirm(cmd, verb+" tracked time "+subject); err != nil {
-				return err
-			}
-			service := services.Times{Client: target.client, Repository: target.Repo}
-			if verb == "delete" {
-				return service.Delete(cmd.Context(), n, id)
-			}
-			return service.Reset(cmd.Context(), n)
-		}})
-	}
-	return group
+	cmd.Flags().BoolVar(&opts.Mine, "mine", false, "List your time across repositories")
+	cmd.Flags().StringVar(&issue, "issue", "", "List the time on one issue or pull request, by `number` or URL")
+	cmd.Flags().StringVar(&opts.Username, "username", "", "List the time of one `user`; @me for yourself")
+	pageFlags(cmd, &opts.Limit, &opts.Page)
+	tracked.register(cmd, "since", "Only time tracked since a date, timestamp, or duration ago", "until", "Only time tracked before a date, timestamp, or duration ago")
+	flagAliases(cmd, map[string]string{"from": "since"})
+	cmd.Flags().BoolVar(&total, "total", false, "Print the total of the listed time also when piped")
+	_ = cmd.RegisterFlagCompletionFunc("issue", a.completeIssues("all"))
+	_ = cmd.RegisterFlagCompletionFunc("username", a.completeUsers())
+	return cmd
 }
 
-func trackedTimeRow(item services.TrackedTime) []terminal.Cell {
-	return terminal.Row(strconv.FormatInt(item.ID, 10), fmt.Sprintf("%s#%d", item.Repository, item.IssueNumber), item.User, trackedDuration(item.Seconds).String(), item.CreatedAt)
+// writeTimes writes tracked time like writeTable, followed on a terminal, or with total, by the sum
+// of the listed time.
+func (a *application) writeTimes(cmd *cobra.Command, page services.Page[services.TrackedTime], number int, spec listSpec[services.TrackedTime], total bool) error {
+	d := a.display()
+	if a.options.json != "" || len(page.Items) == 0 || (!d.TTY && !total) {
+		return writeTable(a, cmd, page.Items, spec, servicePage(page, number))
+	}
+	var sum int64
+	rows := make([][]terminal.Cell, len(page.Items))
+	for i, item := range page.Items {
+		sum += item.Seconds
+		rows[i] = spec.Row(item)
+	}
+	text := terminal.Table(spec.Columns, rows, d) + "Total: " + spent(sum) + "\n"
+	if d.TTY {
+		text = showing(len(page.Items), servicePage(page, number), spec.Context) + "\n\n" + text
+	}
+	return a.writeHuman(cmd, text)
+}
+
+// trackedTimeRow shows a record in repo; records of other repositories name theirs.
+func trackedTimeRow(repo string) func(services.TrackedTime) []terminal.Cell {
+	return func(item services.TrackedTime) []terminal.Cell {
+		issue := "#" + strconv.FormatInt(item.IssueNumber, 10)
+		if !strings.EqualFold(item.Repository, repo) {
+			issue = item.Repository + issue
+		}
+		return []terminal.Cell{
+			{Text: strconv.FormatInt(item.ID, 10)},
+			{Text: strings.TrimSpace(issue + " " + item.IssueTitle)},
+			{Text: item.User},
+			{Text: spent(item.Seconds)},
+			{Time: terminal.ParseTime(item.CreatedAt)},
+		}
+	}
+}
+
+func (a *application) timeCreateCommand() *cobra.Command {
+	return &cobra.Command{Use: "create {<number> | <url>} <duration>", Aliases: []string{"add", "log"}, Short: "Log time spent on an issue", Long: `Log time spent on an issue or pull request. The duration uses h, m and s units, such as
+1h25m or "1h 25m".`, Example: `$ gt time create 12 1h25m
+$ gt time add 12 "1h 30m"
+$ gt time log https://gitea.com/OWNER/REPO/issues/12 45m`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: argsExact(2), ValidArgsFunction: a.completeIssueArgs("open", false), RunE: func(cmd *cobra.Command, args []string) error {
+		seconds, err := parseSpent(args[1])
+		if err != nil {
+			return err
+		}
+		target, n, err := a.resolveRef(cmd, args[0], issueRef)
+		if err != nil {
+			return err
+		}
+		item, err := (services.Times{Client: target.client, Repository: target.Repo}).Create(cmd.Context(), n, seconds)
+		if err != nil {
+			return err
+		}
+		if a.options.json != "" {
+			return a.writeJSON(cmd, item)
+		}
+		a.done(cmd, "Logged %s on %s", spent(item.Seconds), strings.TrimSuffix(refLabel(target.Repo, n, item.IssueTitle), " ()"))
+		return nil
+	}}
+}
+
+func (a *application) timeDeleteCommand() *cobra.Command {
+	return &cobra.Command{Use: "delete {<number> | <url>} <time-id>", Short: "Delete a time record", Example: `# Find the record with gt time list --issue 12
+$ gt time delete 12 8`, Annotations: map[string]string{"gt.text": "time delete does not return a resource", "gt.confirm": "true", "gt.arguments": issueArguments}, Args: argsExact(2), ValidArgsFunction: a.completeIssueArgs("all", false), RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := number(args[1])
+		if err != nil {
+			return err
+		}
+		target, n, err := a.resolveRef(cmd, args[0], issueRef)
+		if err != nil {
+			return err
+		}
+		service := services.Times{Client: target.client, Repository: target.Repo}
+		record, err := service.Find(cmd.Context(), n, id)
+		if err != nil {
+			return err
+		}
+		subject := fmt.Sprintf("%s logged by %s on %s#%d", spent(record.Seconds), record.User, target.Repo, n)
+		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + "?", NonTTY: "delete " + subject}); err != nil {
+			return err
+		}
+		if err := service.Delete(cmd.Context(), n, id); err != nil {
+			return err
+		}
+		a.done(cmd, "Deleted %s", subject)
+		return nil
+	}}
+}
+
+func (a *application) timeResetCommand() *cobra.Command {
+	return &cobra.Command{Use: "reset {<number> | <url>}", Short: "Delete all time logged on an issue", Example: "$ gt time reset 12 --yes", Annotations: map[string]string{"gt.text": "time reset does not return a resource", "gt.confirm": "true", "gt.arguments": issueArguments}, Args: argsExact(1), ValidArgsFunction: a.completeIssueArgs("all", false), RunE: func(cmd *cobra.Command, args []string) error {
+		target, n, err := a.resolveRef(cmd, args[0], issueRef)
+		if err != nil {
+			return err
+		}
+		subject := fmt.Sprintf("all time logged on %s#%d", target.Repo, n)
+		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + "?", NonTTY: "delete " + subject}); err != nil {
+			return err
+		}
+		if err := (services.Times{Client: target.client, Repository: target.Repo}).Reset(cmd.Context(), n); err != nil {
+			return err
+		}
+		a.done(cmd, "Deleted %s", subject)
+		return nil
+	}}
 }

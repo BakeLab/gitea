@@ -49,13 +49,13 @@ func TestIssueCreateImplicitInteractiveForm(t *testing.T) {
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--json=number,url", "--interactive"}))
 	require.Equal(t, 1, form.calls)
-	require.NotNil(t, form.choices.EditBody)
+	require.Nil(t, form.choices.EditBody, "without an editor the form asks for the body")
 	require.True(t, form.choices.CanPush)
 	require.Equal(t, []string{"alice", "bob"}, form.choices.Assignees)
 	require.Equal(t, []terminal.IssueMilestoneChoice{{Title: "Release", ID: 4}}, form.choices.Milestones)
 	require.Equal(t, []terminal.IssueLabelChoice{{Name: "bug", ID: 2}, {Name: "docs", ID: 3}}, form.choices.Labels)
 	require.Equal(t, []terminal.IssueTemplateChoice{{Name: "Bug", About: "Report", Title: "bug: ", Body: "## Steps"}}, form.choices.Templates)
-	require.Len(t, prompt.confirmations, 1)
+	require.Empty(t, prompt.confirmations)
 	require.Equal(t, "Interactive", createPayload["title"])
 	require.Equal(t, "Body text", createPayload["body"])
 	require.Equal(t, []any{"alice"}, createPayload["assignees"])
@@ -79,6 +79,7 @@ func TestIssueCreateInteractiveDraftSurvivesSubmissionFailure(t *testing.T) {
 		Title: "Interactive", Body: "saved body", Draft: terminal.Draft{Path: path, Body: "saved body"},
 	}}
 	deps, out, _ := serverDeps(t, server.URL)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "chosen-editor"})
 	deps.IssueForm = form
 	deps.Prompter = &scriptedPrompter{accept: true}
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true

@@ -5,6 +5,8 @@ package services
 
 import (
 	"context"
+	"path"
+	"strconv"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -18,13 +20,27 @@ type Comment struct {
 	Author    string `json:"author"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+	// IssueNumber is the issue or pull request the comment is on.
+	IssueNumber int64 `json:"issue_number"`
+	// Pull reports a comment on a pull request rather than an issue.
+	Pull bool `json:"-"`
 }
 
 func commentFrom(comment *gitea.Comment) Comment {
 	return Comment{
 		ID: comment.ID, Body: comment.Body, URL: comment.HTMLURL, Author: login(comment.Poster),
-		CreatedAt: timestamp(comment.Created), UpdatedAt: timestamp(comment.Updated),
+		CreatedAt: timestamp(comment.Created), UpdatedAt: timestamp(comment.Updated), Pull: comment.PRURL != "",
+		IssueNumber: discussionNumber(comment.IssueURL + comment.PRURL),
 	}
+}
+
+// discussionNumber reads the number from the web URL of an issue or pull request, or returns 0.
+func discussionNumber(url string) int64 {
+	n, err := strconv.ParseInt(path.Base(url), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // Comments implements discussion comments under their owning repository resource.

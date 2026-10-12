@@ -308,3 +308,12 @@ func rawMarkdown(t *testing.T, deps Dependencies) {
 		return nil
 	}))
 }
+
+// plainOutput keeps terminal output free of rendered Markdown and hyperlinks so it compares as text.
+func plainOutput(t *testing.T, deps Dependencies) {
+	t.Helper()
+	require.NoError(t, deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
+		s.Preferences.Markdown, s.Preferences.Hyperlinks = "raw", "never"
+		return nil
+	}))
+}

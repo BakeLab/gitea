@@ -62,15 +62,6 @@ func trimNames(lists ...[]string) {
 	}
 }
 
-// labelFilter splits a comma-separated label filter, trimming entries and rejecting blanks.
-func labelFilter(raw string) ([]string, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	names := strings.Split(raw, ",")
-	return names, requireNames("label", "", names)
-}
-
 // oneOf rejects an enum flag value outside allowed, which needs at least two entries.
 func oneOf(flag, value string, allowed ...string) error {
 	if slices.Contains(allowed, value) {
@@ -122,7 +113,7 @@ func (f positiveInt) Set(raw string) error {
 }
 
 func parseRunTime(value string, now time.Time) (*time.Time, error) {
-	if duration, err := time.ParseDuration(value); err == nil {
+	if duration, err := durationAgo(value); err == nil {
 		if duration < 0 {
 			return nil, errors.New("relative duration cannot be negative")
 		}
@@ -135,6 +126,20 @@ func parseRunTime(value string, now time.Time) (*time.Time, error) {
 		}
 	}
 	return nil, errors.New("use a date, RFC3339 timestamp, or duration such as 24h")
+}
+
+// durationAgo parses a duration like time.ParseDuration, and also whole days and weeks: 7d, 2w.
+func durationAgo(value string) (time.Duration, error) {
+	for unit, size := range map[string]time.Duration{"d": 24 * time.Hour, "w": 7 * 24 * time.Hour} {
+		if count, ok := strings.CutSuffix(value, unit); ok {
+			n, err := strconv.Atoi(count)
+			if err != nil {
+				return 0, err
+			}
+			return time.Duration(n) * size, nil
+		}
+	}
+	return time.ParseDuration(value)
 }
 
 // timeRange is a pair of lower and upper time bound flags.
