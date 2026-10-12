@@ -4,12 +4,15 @@
 package app
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,6 +21,8 @@ func TestArtifactDownloadsValidateDestinationAndKeepBinaryOutputClean(t *testing
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/actions/artifacts/9":
+			_, _ = w.Write([]byte(`{"id":9,"name":"build"}`))
 		case "/api/v1/repos/owner/repo/actions/artifacts/9/zip":
 			require.Equal(t, "token token", r.Header.Get("Authorization"))
 			http.Redirect(w, r, "/signed?signature=private", http.StatusFound)
@@ -31,24 +36,130 @@ func TestArtifactDownloadsValidateDestinationAndKeepBinaryOutputClean(t *testing
 	}))
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
-	args := []string{"run", "artifact", "download", "9", "-R", "owner/repo", "--output-file", "-"}
-	require.NoError(t, Execute(context.Background(), deps, args))
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "artifact", "download", "9", "-R", "owner/repo", "--output-file", "-"}))
 	require.Equal(t, []byte{0x50, 0x4b, 0, 0xff}, out.Bytes())
 	require.Empty(t, diagnostics.String())
-	output := filepath.Join(t.TempDir(), "artifact.zip")
-	args[len(args)-1] = output
+
+	dir := t.TempDir()
 	out.Reset()
+	args := []string{"run", "artifact", "download", "#9", "-R", "owner/repo", "--dir", dir}
 	require.NoError(t, Execute(context.Background(), deps, args))
-	data, err := os.ReadFile(output)
+	data, err := os.ReadFile(filepath.Join(dir, "build.zip"))
 	require.NoError(t, err)
 	require.Equal(t, []byte{0x50, 0x4b, 0, 0xff}, data)
 	require.Empty(t, out.String())
 	before := requests
-	err = Execute(context.Background(), deps, args)
-	require.ErrorContains(t, err, "already exists")
+	err = Execute(context.Background(), deps, append(args, "--output", filepath.Join(dir, "build.zip")))
+	require.ErrorContains(t, err, "--output and --dir cannot be combined")
+	err = Execute(context.Background(), deps, []string{"run", "artifact", "download", "9", "-R", "owner/repo", "--output", filepath.Join(dir, "build.zip")})
+	require.ErrorContains(t, err, "already exists; pass --clobber")
 	require.Equal(t, before, requests)
-	args[len(args)-1] = "-"
-	err = Execute(context.Background(), deps, append(args, "--json"))
+	err = Execute(context.Background(), deps, []string{"run", "artifact", "download", "9", "-R", "owner/repo", "-O", "-", "--json"})
 	require.ErrorContains(t, err, "binary")
 	require.Equal(t, before, requests)
+}
+
+// zipOf returns a ZIP archive of files, by name.
+func zipOf(t *testing.T, files map[string]string) string {
+	t.Helper()
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	for name, content := range files {
+		file, err := writer.Create(name)
+		require.NoError(t, err)
+		_, err = file.Write([]byte(content))
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+	return archive.String()
+}
+
+func TestRunDownloadExtractsArtifactsByName(t *testing.T) {
+	server, _ := actionsAPI(t, map[string]string{
+		"GET actions/runs/29/artifacts": `{"total_count":3,"artifacts":[{"id":1,"name":"build","size_in_bytes":3},{"id":2,"name":"coverage"},{"id":3,"name":"old","expired":true}]}`,
+		"GET actions/artifacts/1/zip":   zipOf(t, map[string]string{"bin/gt": "gt", "README": "read me"}),
+		"GET actions/artifacts/2/zip":   zipOf(t, map[string]string{"cover.out": "100%"}),
+		"GET actions/artifacts/4/zip":   zipOf(t, map[string]string{"../escape": "x"}),
+	})
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		files map[string]string
+		err   string
+		out   string
+	}{
+		{
+			"every artifact in its own directory", nil,
+			map[string]string{"build/bin/gt": "gt", "build/README": "read me", "coverage/cover.out": "100%"},
+			"",
+			"✓ Downloaded artifact build to {dir}/build\n✓ Downloaded artifact coverage to {dir}/coverage\n! Artifact old has expired; skipped\n",
+		},
+		{"one artifact into the directory", []string{"-n", "coverage"}, map[string]string{"cover.out": "100%"}, "", "✓ Downloaded artifact coverage to {dir}\n"},
+		{
+			"archives",
+			[]string{"--zip", "--name", "build,coverage"},
+			map[string]string{"build.zip": "", "coverage.zip": ""},
+			"",
+			"✓ Downloaded artifact build to {dir}/build.zip\n✓ Downloaded artifact coverage to {dir}/coverage.zip\n",
+		},
+		{"unknown name", []string{"-n", "docs"}, nil, `artifact "docs" not found in run 29 (artifacts: build, coverage, old)`, ""},
+		{"expired", []string{"-n", "old"}, nil, "the artifacts of run 29 have expired", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			deps, _, diagnostics := actionsDeps(t, server.URL, true)
+			err := Execute(context.Background(), deps, append([]string{"run", "download", "29", "-R", "alice/project", "-D", dir}, tc.args...))
+			if tc.err != "" {
+				require.EqualError(t, err, tc.err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, filepathReplace(tc.out, dir), diagnostics.String())
+			for name, content := range tc.files {
+				data, err := os.ReadFile(filepath.Join(dir, name))
+				require.NoError(t, err, name)
+				if content != "" {
+					require.Equal(t, content, string(data), name)
+				}
+			}
+		})
+	}
+	t.Run("existing files and unsafe paths", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "cover.out"), []byte("mine"), 0o600))
+		deps, _, _ := actionsDeps(t, server.URL, false)
+		err := Execute(context.Background(), deps, []string{"run", "download", "29", "-R", "alice/project", "-D", dir, "-n", "coverage"})
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+		require.ErrorContains(t, err, "cover.out already exists; pass --clobber to replace it or --skip-existing to keep it")
+		require.NoError(t, Execute(context.Background(), deps, []string{"run", "download", "29", "-R", "alice/project", "-D", dir, "-n", "coverage", "--skip-existing"}))
+		data, err := os.ReadFile(filepath.Join(dir, "cover.out"))
+		require.NoError(t, err)
+		require.Equal(t, "mine", string(data))
+		require.NoError(t, Execute(context.Background(), deps, []string{"run", "download", "29", "-R", "alice/project", "-D", dir, "-n", "coverage", "--clobber"}))
+		data, err = os.ReadFile(filepath.Join(dir, "cover.out"))
+		require.NoError(t, err)
+		require.Equal(t, "100%", string(data))
+		require.ErrorContains(t, extractZip(context.Background(), bytes.NewReader([]byte(zipOf(t, map[string]string{"../escape": "x"}))), dir, false, false), `refusing to extract "../escape"`)
+		_, err = os.Stat(filepath.Join(filepath.Dir(dir), "escape"))
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+}
+
+// filepathReplace puts dir in place of {dir} in text.
+func filepathReplace(text, dir string) string {
+	return string(bytes.ReplaceAll([]byte(text), []byte("{dir}"), []byte(dir)))
+}
+
+func TestArtifactListShowsSizesAndExpiry(t *testing.T) {
+	server, _ := actionsAPI(t, map[string]string{
+		"GET actions/runs/29/artifacts": `{"total_count":2,"artifacts":[{"id":1,"name":"build","size_in_bytes":3145728,"expires_at":"2028-03-01T12:00:00Z"},{"id":3,"name":"old","size_in_bytes":13,"expired":true,"expires_at":"2027-12-01T12:00:00Z"}]}`,
+	})
+	for tty, want := range map[bool]string{
+		true:  "Showing 2 of 2 artifacts of run 29\n\nID  NAME   SIZE     EXPIRES\n1   build  3.0 MiB  in about 2 months\n3   old    13 B     expired\n",
+		false: "1\tbuild\t3145728\t2028-03-01T12:00:00Z\tfalse\n3\told\t13\t2027-12-01T12:00:00Z\ttrue\n",
+	} {
+		deps, out, _ := actionsDeps(t, server.URL, tty)
+		require.NoError(t, Execute(context.Background(), deps, []string{"run", "artifact", "list", "29", "-R", "alice/project"}))
+		require.Equal(t, want, out.String(), "tty=%t", tty)
+	}
 }

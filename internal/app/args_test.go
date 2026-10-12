@@ -89,7 +89,7 @@ func TestArgumentErrorsShowTheUsageLine(t *testing.T) {
 		{[]string{"issue", "view", "1", "2"}, "too many arguments\nUsage: gt issue view <number> [flags]"},
 		{[]string{"issue", "list", "extra"}, "unexpected argument \"extra\"\nUsage: gt issue list [flags]"},
 		{[]string{"pr", "checkout"}, "missing pull request number\nUsage: gt pr checkout <number> [flags]"},
-		{[]string{"run", "view"}, "missing run ID\nUsage: gt run view <id> [flags]"},
+		{[]string{"run", "view"}, "missing run ID\nUsage: gt run view [<run-id>] [flags]"},
 		{[]string{"release", "asset", "download", "v1"}, "missing asset ID\nUsage: gt release asset download <tag> <asset-id> [flags]"},
 		{[]string{"repo", "clone"}, "missing repository\nUsage: gt repo clone <repository> [directory] [flags]"},
 	} {

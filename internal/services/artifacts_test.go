@@ -25,16 +25,16 @@ func TestArtifactListingProjectsMetadataAndEmptyArrays(t *testing.T) {
 		_, _ = w.Write([]byte(`{"artifacts":[{"id":9,"name":"build","size_in_bytes":128,"url":"https://example.test/artifact","expired":false,"expires_at":null,"workflow_run":{"head_sha":"excluded"},"archive_download_url":"excluded"}]}`))
 	}))
 	service := Actions{Client: client, Repository: "owner/repo"}
-	items, err := service.Artifacts(context.Background(), 7, 20, 1)
+	page, err := service.Artifacts(context.Background(), 7, 20, 1)
 	require.NoError(t, err)
-	require.Len(t, items, 1)
-	data, err := json.Marshal(items)
+	require.Len(t, page.Items, 1)
+	data, err := json.Marshal(page.Items)
 	require.NoError(t, err)
 	require.JSONEq(t, `[{"id":9,"name":"build","size_in_bytes":128,"url":"https://example.test/artifact","expired":false,"created_at":"","updated_at":"","expires_at":null}]`, string(data))
-	items, err = service.Artifacts(context.Background(), 7, 20, 2)
+	page, err = service.Artifacts(context.Background(), 7, 20, 2)
 	require.NoError(t, err)
-	require.Empty(t, items)
-	require.NotNil(t, items)
+	require.Empty(t, page.Items)
+	require.NotNil(t, page.Items)
 }
 
 func TestArtifactFromMapsServerFields(t *testing.T) {

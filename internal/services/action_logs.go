@@ -11,29 +11,78 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
 )
 
-// Job identifies one workflow job without exposing server-specific metadata.
+// Job identifies one workflow job without exposing server-specific metadata. StartedAt and
+// CompletedAt are nil until the job starts and completes.
 type Job struct {
-	RunAttempt int64  `json:"run_attempt"`
-	ID         int64  `json:"id"`
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
+	RunAttempt  int64    `json:"run_attempt"`
+	ID          int64    `json:"id"`
+	Name        string   `json:"name"`
+	Status      string   `json:"status"`
+	Conclusion  string   `json:"conclusion"`
+	URL         string   `json:"url"`
+	Labels      []string `json:"labels"`
+	CreatedAt   string   `json:"created_at"`
+	StartedAt   *string  `json:"started_at"`
+	CompletedAt *string  `json:"completed_at"`
+	Steps       []Step   `json:"steps"`
 }
 
-// Jobs lists every page of jobs in the selected run.
+// Step is one step of a job. StartedAt and CompletedAt are nil until the step starts and completes.
+type Step struct {
+	Number      int64   `json:"number"`
+	Name        string  `json:"name"`
+	Status      string  `json:"status"`
+	Conclusion  string  `json:"conclusion"`
+	StartedAt   *string `json:"started_at"`
+	CompletedAt *string `json:"completed_at"`
+}
+
+// Completed reports whether the job finished, whatever its conclusion.
+func (j Job) Completed() bool { return completedActionStatus(j.Status) }
+
+// Jobs lists every job in the selected run.
 func (s Actions) Jobs(ctx context.Context, run int64) ([]Job, error) {
-	return listAll(func(page int) ([]Job, error) { return s.jobsPage(ctx, run, 100, page) })
+	jobs := []Job{}
+	for page := 1; page <= maxListPages; page++ {
+		window, err := s.JobsPage(ctx, run, 100, page)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, window.Items...)
+		if !window.More || len(window.Items) == 0 {
+			return jobs, nil
+		}
+	}
+	return nil, fmt.Errorf("listing exceeded %d pages", maxListPages)
 }
 
 // JobsPage lists a page of jobs in the selected run.
-func (s Actions) JobsPage(ctx context.Context, run int64, limit, page int) ([]Job, error) {
-	return s.jobsPage(ctx, run, limit, page)
+func (s Actions) JobsPage(ctx context.Context, run int64, limit, page int) (Page[Job], error) {
+	window, err := listPage(limit, page, func(limit, page int) ([]*gitea.ActionsWorkflowJob, http.Header, error) {
+		response, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.ActionsWorkflowJobsResponse, *gitea.Response, error) {
+			owner, repo, err := splitRepository(s.Repository)
+			if err != nil {
+				return nil, nil, err
+			}
+			return c.Actions.ListRepoJobsByRun(ctx, owner, repo, run, gitea.ListRepoActionsJobsOptions{ListOptions: listOptions(limit, page)})
+		})
+		if err != nil {
+			return nil, headerOf(resp), err
+		}
+		return response.Jobs, headerOf(resp), nil
+	})
+	if err != nil {
+		return Page[Job]{}, err
+	}
+	return Page[Job]{Items: convertAll(window.Items, jobFrom), More: window.More, Total: window.Total, Counted: window.Counted}, nil
 }
 
 // WaitForFirstJob polls a freshly dispatched run until the server has created its first job.
@@ -55,24 +104,44 @@ func (s Actions) WaitForFirstJob(ctx context.Context, run int64, interval time.D
 	}
 }
 
-func (s Actions) jobsPage(ctx context.Context, run int64, limit, page int) ([]Job, error) {
-	response, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.ActionsWorkflowJobsResponse, *gitea.Response, error) {
-		return c.Actions.ListRepoJobsByRun(ctx, owner, repo, run, gitea.ListRepoActionsJobsOptions{ListOptions: listOptions(limit, page)})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return convertAll(response.Jobs, jobFrom), nil
-}
-
 func jobFrom(job *gitea.ActionsWorkflowJob) Job {
-	return Job{RunAttempt: job.RunAttempt, ID: job.ID, Name: job.Name, Status: job.Status, Conclusion: job.Conclusion}
+	return Job{
+		RunAttempt: job.RunAttempt, ID: job.ID, Name: job.Name, Status: job.Status, Conclusion: job.Conclusion,
+		URL: job.HTMLURL, Labels: append([]string{}, job.Labels...), CreatedAt: timestamp(job.CreatedAt),
+		StartedAt: actionTime(job.StartedAt), CompletedAt: actionTime(job.CompletedAt), Steps: convertAll(job.Steps, stepFrom),
+	}
 }
 
-// JobLogs streams a job's plain-text logs within the selected instance.
+func stepFrom(step *gitea.ActionsWorkflowStep) Step {
+	return Step{
+		Number: step.Number, Name: step.Name, Status: step.Status, Conclusion: step.Conclusion,
+		StartedAt: actionTime(step.StartedAt), CompletedAt: actionTime(step.CompletedAt),
+	}
+}
+
+// actionTime is runTime for SDK times.
+func actionTime(t time.Time) *string {
+	if t.Unix() <= 0 {
+		return nil
+	}
+	value := timestamp(t)
+	return &value
+}
+
+// Started reports whether the job has started, so that it has logs.
+func (j Job) Started() bool { return j.StartedAt != nil }
+
+// ErrJobNotStarted reports a job without logs because no runner has started it.
+var ErrJobNotStarted = errors.New("job not started")
+
+// JobLogs streams a job's plain-text logs within the selected instance. A job that has not
+// started fails with ErrJobNotStarted.
 func (s Actions) JobLogs(ctx context.Context, id int64) (io.ReadCloser, error) {
 	// TODO(sdk): GetRepoRunJobLogs buffers the whole log; a reader variant would allow streaming.
 	response, err := s.Client.Do(ctx, http.MethodGet, fmt.Sprintf("%sjobs/%d/logs", s.endpoint(), id), nil, nil)
+	if api, ok := errors.AsType[*transport.APIError](err); ok && api.Status == http.StatusNotFound && strings.Contains(api.Message, "not started") {
+		return nil, fmt.Errorf("job %d: %w", id, ErrJobNotStarted)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +178,8 @@ func (s Actions) FollowJobLogs(ctx context.Context, run, id int64, interval time
 		attempt = current.RunAttempt
 		logs, err := s.JobLogs(ctx, id)
 		if err != nil {
-			if api, ok := errors.AsType[*transport.APIError](err); ok && api.Status == http.StatusNotFound && offset == 0 && (current.Status == "queued" || current.Status == "waiting" || current.Status == "pending") {
+			api, ok := errors.AsType[*transport.APIError](err)
+			if offset == 0 && !completedActionStatus(current.Status) && (errors.Is(err, ErrJobNotStarted) || ok && api.Status == http.StatusNotFound) {
 				if err := sleepCtx(ctx, interval); err != nil {
 					return err
 				}
@@ -160,9 +230,11 @@ func (s Actions) FollowJobLogs(ctx context.Context, run, id int64, interval time
 	}
 }
 
-// RunLogsArchive streams the server's ZIP archive without extracting its entries.
+// RunLogsArchive streams the server's ZIP archive without extracting its entries. A run without
+// logs, such as one that never started, is reported as not found.
 func (s Actions) RunLogsArchive(ctx context.Context, run int64) (io.ReadCloser, error) {
-	return repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (io.ReadCloser, *gitea.Response, error) {
+	body, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (io.ReadCloser, *gitea.Response, error) {
 		return c.Actions.GetRepoRunLogsReader(ctx, owner, repo, run)
 	})
+	return body, Classify(err, "logs of run", strconv.FormatInt(run, 10), s.Repository)
 }

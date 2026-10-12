@@ -110,11 +110,20 @@ func TestJobsPageMapsJobsAndSendsPagination(t *testing.T) {
 		require.Equal(t, "/api/v1/repos/owner/repo/actions/runs/7/jobs", r.URL.Path)
 		require.Equal(t, "20", r.URL.Query().Get("limit"))
 		require.Equal(t, "3", r.URL.Query().Get("page"))
-		_, _ = w.Write([]byte(`{"total_count":1,"jobs":[{"id":9,"run_attempt":2,"name":"build","status":"completed","conclusion":"success","runner_name":"excluded"}]}`))
+		w.Header().Set("X-Total-Count", "41")
+		_, _ = w.Write([]byte(`{"total_count":41,"jobs":[{"id":9,"run_attempt":2,"name":"build","status":"completed","conclusion":"success","runner_name":"excluded",
+			"labels":["ubuntu-latest"],"html_url":"https://gitea.test/owner/repo/actions/runs/7/jobs/9","created_at":"2028-01-01T00:00:00Z",
+			"started_at":"2028-01-01T00:00:01Z","completed_at":"1970-01-01T00:00:00Z",
+			"steps":[{"number":1,"name":"Set up job","status":"completed","conclusion":"success","started_at":"2028-01-01T00:00:01Z","completed_at":"2028-01-01T00:00:02Z"}]}]}`))
 	}))
 	jobs, err := (Actions{Client: client, Repository: "owner/repo"}).JobsPage(context.Background(), 7, 20, 3)
 	require.NoError(t, err)
-	require.Equal(t, []Job{{RunAttempt: 2, ID: 9, Name: "build", Status: "completed", Conclusion: "success"}}, jobs)
+	started, stepStarted, stepCompleted := "2028-01-01T00:00:01Z", "2028-01-01T00:00:01Z", "2028-01-01T00:00:02Z"
+	require.Equal(t, Page[Job]{Items: []Job{{
+		RunAttempt: 2, ID: 9, Name: "build", Status: "completed", Conclusion: "success", URL: "https://gitea.test/owner/repo/actions/runs/7/jobs/9",
+		Labels: []string{"ubuntu-latest"}, CreatedAt: "2028-01-01T00:00:00Z", StartedAt: &started,
+		Steps: []Step{{Number: 1, Name: "Set up job", Status: "completed", Conclusion: "success", StartedAt: &stepStarted, CompletedAt: &stepCompleted}},
+	}}, Total: 41, Counted: true}, jobs)
 }
 
 func TestRunLogsArchiveStreams(t *testing.T) {
@@ -151,7 +160,8 @@ func TestWaitForFirstJobPollsUntilJobsExist(t *testing.T) {
 	defer cancel()
 	job, err := service.WaitForFirstJob(ctx, 7, time.Millisecond)
 	require.NoError(t, err)
-	require.Equal(t, Job{ID: 11, Name: "build"}, job)
+	require.Equal(t, int64(11), job.ID)
+	require.Equal(t, "build", job.Name)
 	_, err = service.WaitForFirstJob(ctx, 7, 0)
 	require.ErrorContains(t, err, "interval must be positive")
 }

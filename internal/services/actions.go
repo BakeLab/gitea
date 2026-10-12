@@ -5,71 +5,43 @@ package services
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
+	"path"
+	"slices"
 	"strconv"
-	"time"
+	"strings"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
+	"gopkg.in/yaml.v3"
 )
 
-// Workflow is the stable command representation of an Actions workflow.
+// Workflow is the stable command representation of an Actions workflow. ID is its file name,
+// such as ci.yml.
 type Workflow struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Path  string `json:"path"`
 	State string `json:"state"`
+	URL   string `json:"url"`
 }
 
 func workflowFrom(workflow *gitea.ActionsWorkflow) Workflow {
-	return Workflow{ID: workflow.ID, Name: workflow.Name, Path: workflow.Path, State: workflow.State}
+	return Workflow{ID: workflow.ID, Name: workflow.Name, Path: workflow.Path, State: workflow.State, URL: workflow.HTMLURL}
 }
 
-// Run is the stable command representation of an Actions run.
-type Run struct {
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
-	StartedAt   string `json:"started_at"`
-	CompletedAt string `json:"completed_at"`
-	ID          int64  `json:"id"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	Conclusion  string `json:"conclusion"`
-	URL         string `json:"url"`
-	Branch      string `json:"branch"`
-	Event       string `json:"event,omitempty"`
-	Actor       string `json:"actor,omitempty"`
-	Commit      string `json:"commit,omitempty"`
-	Attempt     int64  `json:"attempt,omitempty"`
-}
-type runResponse struct {
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
-	StartedAt    string `json:"started_at"`
-	CompletedAt  string `json:"completed_at"`
-	ID           int64  `json:"id"`
-	DisplayTitle string `json:"display_title"`
-	Status       string `json:"status"`
-	Conclusion   string `json:"conclusion"`
-	HTMLURL      string `json:"html_url"`
-	HeadBranch   string `json:"head_branch"`
-	Event        string `json:"event"`
-	HeadSHA      string `json:"head_sha"`
-	RunAttempt   int64  `json:"run_attempt"`
-	Actor        struct {
-		Login string `json:"login"`
-	} `json:"actor"`
-}
+// Enabled reports whether the workflow runs; Gitea reports a disabled one as disabled_manually.
+func (w Workflow) Enabled() bool { return !strings.HasPrefix(w.State, "disabled") }
 
-func (r runResponse) result() Run {
-	return Run{
-		ID: r.ID, Title: r.DisplayTitle, Status: r.Status, Conclusion: r.Conclusion, URL: r.HTMLURL, Branch: r.HeadBranch,
-		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, StartedAt: r.StartedAt, CompletedAt: r.CompletedAt,
-		Event: r.Event, Actor: r.Actor.Login, Commit: r.HeadSHA, Attempt: r.RunAttempt,
+// Label names the workflow for people: "CI (ci.yml)".
+func (w Workflow) Label() string {
+	if w.Name == "" || w.Name == w.ID {
+		return w.ID
 	}
+	return w.Name + " (" + w.ID + ")"
 }
 
 // DispatchResult identifies a workflow run created by dispatch when the server returns details.
@@ -97,11 +69,50 @@ func (s Actions) Workflows(ctx context.Context) ([]Workflow, error) {
 	return convertAll(response.Workflows, workflowFrom), nil
 }
 
-// Workflow retrieves one workflow definition.
+// Workflow retrieves one workflow definition by its file name.
 func (s Actions) Workflow(ctx context.Context, id string) (Workflow, error) {
 	return repoConvert(ctx, s.Client, s.Repository, workflowFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.ActionsWorkflow, *gitea.Response, error) {
 		return c.Actions.GetRepoWorkflow(ctx, owner, repo, id)
 	})
+}
+
+// FindWorkflow returns the workflow that raw names in the repository: its file name, path, file
+// name without extension, or name, matched exactly and then case-insensitively.
+func (s Actions) FindWorkflow(ctx context.Context, raw string) (Workflow, error) {
+	items, err := s.Workflows(ctx)
+	if err != nil {
+		return Workflow{}, err
+	}
+	return FindWorkflow(items, raw, s.Repository)
+}
+
+// FindWorkflow returns the workflow among items that raw names, like Actions.FindWorkflow. It
+// fails with a *NotFoundError when none matches and lists the files when several names match.
+func FindWorkflow(items []Workflow, raw, scope string) (Workflow, error) {
+	raw = strings.TrimSpace(raw)
+	keys := func(w Workflow) []string {
+		return []string{w.ID, w.Path, strings.TrimSuffix(w.ID, path.Ext(w.ID)), w.Name}
+	}
+	for _, fold := range []bool{false, true} {
+		var matches []Workflow
+		for _, item := range items {
+			if slices.ContainsFunc(keys(item), func(key string) bool { return key == raw || (fold && strings.EqualFold(key, raw)) }) {
+				matches = append(matches, item)
+			}
+		}
+		switch len(matches) {
+		case 0:
+			continue
+		case 1:
+			return matches[0], nil
+		}
+		files := make([]string, len(matches))
+		for i, match := range matches {
+			files[i] = match.ID
+		}
+		return Workflow{}, fmt.Errorf("workflow %q is ambiguous in %s (%s); pass the file name", raw, scope, strings.Join(files, ", "))
+	}
+	return Workflow{}, NotFound("workflow", strconv.Quote(raw), scope)
 }
 
 // Dispatch triggers a workflow and reports the run it created.
@@ -109,8 +120,11 @@ func (s Actions) Dispatch(ctx context.Context, id, ref string, inputs map[string
 	details, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.RunDetails, *gitea.Response, error) {
 		return c.Actions.DispatchRepoWorkflow(ctx, owner, repo, id, gitea.CreateActionsWorkflowDispatchOption{Ref: ref, Inputs: inputs}, true)
 	})
+	if api, ok := errors.AsType[*transport.APIError](err); ok && api.Status == http.StatusNotFound && strings.Contains(api.Message, "ref") {
+		return DispatchResult{}, &NotFoundError{Kind: "ref", Key: strconv.Quote(ref), Scope: s.Repository, Err: err}
+	}
 	if err != nil {
-		return DispatchResult{}, err
+		return DispatchResult{}, Classify(err, "workflow", id, s.Repository)
 	}
 	return DispatchResult{ID: details.WorkflowRunID, URL: details.HTMLURL}, nil
 }
@@ -125,180 +139,104 @@ func (s Actions) SetWorkflowEnabled(ctx context.Context, id string, enabled bool
 	})
 }
 
-// RunListOptions supplies server-side run filters and pagination.
-type RunListOptions struct {
-	Since, Until                           *time.Time
-	Limit, Page                            int
-	Branch, Event, Actor, Commit, Workflow string
-	Statuses                               []string
+// WorkflowFile returns the workflow's YAML definition at ref, a branch, tag or commit, or on the
+// default branch when ref is empty.
+func (s Actions) WorkflowFile(ctx context.Context, workflow Workflow, ref string) ([]byte, error) {
+	contents, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.ContentsResponse, *gitea.Response, error) {
+		return c.Repositories.GetContents(ctx, owner, repo, ref, workflow.Path)
+	})
+	if api, ok := errors.AsType[*transport.APIError](err); ok && api.Status == http.StatusNotFound {
+		// Gitea reports an unknown ref as "object does not exist [id: REF, rel_path: ]".
+		if ref != "" && strings.Contains(api.Message, "[id: "+ref+",") {
+			return nil, &NotFoundError{Kind: "ref", Key: strconv.Quote(ref), Scope: s.Repository, Err: err}
+		}
+		return nil, &NotFoundError{Kind: "workflow file", Key: workflow.Path, Scope: s.Repository, Err: err}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if contents.Content == nil {
+		return nil, fmt.Errorf("%s is not a file in %s", workflow.Path, s.Repository)
+	}
+	data, err := base64.StdEncoding.DecodeString(*contents.Content)
+	if err != nil {
+		return nil, fmt.Errorf("invalid contents of %s: %w", workflow.Path, err)
+	}
+	return data, nil
 }
 
-// Validate rejects unsupported status filters before performing API requests.
-func (o RunListOptions) Validate() error {
-	if o.Limit < 1 || o.Limit > 100 || o.Page < 1 || o.Page > int(^uint(0)>>1)/o.Limit {
-		return errors.New("invalid pagination")
+// WorkflowInput is one input that a workflow's workflow_dispatch trigger declares.
+type WorkflowInput struct {
+	Name, Description string
+	// Type is string, choice, boolean, number or environment; empty means string.
+	Type, Default string
+	Required      bool
+	Options       []string
+}
+
+// ErrNoDispatch reports a workflow that has no workflow_dispatch trigger.
+var ErrNoDispatch = errors.New("workflow has no workflow_dispatch trigger")
+
+// DispatchInputs parses the inputs that the workflow_dispatch trigger of a workflow definition
+// declares, in their order. It fails with ErrNoDispatch when the workflow cannot be dispatched.
+func DispatchInputs(definition []byte) ([]WorkflowInput, error) {
+	var workflow struct {
+		On yaml.Node `yaml:"on"`
 	}
-	for _, status := range o.Statuses {
-		switch status {
-		case "pending", "waiting", "requested", "action_required", "queued", "in_progress", "completed", "failure", "success", "skipped", "neutral", "cancelled", "timed_out": //nolint:misspell // Gitea API spelling.
-		default:
-			return fmt.Errorf("unsupported run status %q; see gt run list --help", status)
+	if err := yaml.Unmarshal(definition, &workflow); err != nil {
+		return nil, fmt.Errorf("invalid workflow definition: %w", err)
+	}
+	on := workflow.On
+	switch on.Kind {
+	case yaml.ScalarNode:
+		if on.Value == "workflow_dispatch" {
+			return []WorkflowInput{}, nil
+		}
+	case yaml.SequenceNode:
+		if slices.ContainsFunc(on.Content, func(event *yaml.Node) bool { return event.Value == "workflow_dispatch" }) {
+			return []WorkflowInput{}, nil
+		}
+	case yaml.MappingNode:
+		if trigger := mappingValue(&on, "workflow_dispatch"); trigger != nil {
+			return dispatchInputs(mappingValue(trigger, "inputs"))
+		}
+	}
+	return nil, ErrNoDispatch
+}
+
+func dispatchInputs(node *yaml.Node) ([]WorkflowInput, error) {
+	inputs := []WorkflowInput{}
+	if node == nil || node.Kind != yaml.MappingNode {
+		return inputs, nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		var spec struct {
+			Description string    `yaml:"description"`
+			Type        string    `yaml:"type"`
+			Default     yaml.Node `yaml:"default"`
+			Required    bool      `yaml:"required"`
+			Options     []string  `yaml:"options"`
+		}
+		if err := node.Content[i+1].Decode(&spec); err != nil {
+			return nil, fmt.Errorf("invalid workflow input %s: %w", node.Content[i].Value, err)
+		}
+		inputs = append(inputs, WorkflowInput{
+			Name: node.Content[i].Value, Description: spec.Description, Type: spec.Type,
+			Default: spec.Default.Value, Required: spec.Required, Options: spec.Options,
+		})
+	}
+	return inputs, nil
+}
+
+// mappingValue returns the value of key in a YAML mapping, or nil.
+func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
 		}
 	}
 	return nil
-}
-
-const maxRunScanPages = 50
-
-// Runs lists a page of runs.
-func (s Actions) Runs(ctx context.Context, opts RunListOptions) ([]Run, error) {
-	if err := opts.Validate(); err != nil {
-		return nil, err
-	}
-	if opts.Since != nil || opts.Until != nil {
-		first, last := (opts.Page-1)*opts.Limit, opts.Page*opts.Limit
-		result := []Run{}
-		matched := 0
-		for page := 1; page <= maxRunScanPages; page++ {
-			scan := opts
-			scan.Limit = 100
-			scan.Page = page
-			items, err := s.runsPage(ctx, scan)
-			if err != nil {
-				return nil, err
-			}
-			if len(items) == 0 {
-				return result, nil
-			}
-			for _, item := range items {
-				if item.StartedAt == "" {
-					continue
-				}
-				started, err := time.Parse(time.RFC3339Nano, item.StartedAt)
-				if err != nil {
-					return nil, errors.New("server returned an invalid run start timestamp")
-				}
-				if opts.Since != nil && started.Before(*opts.Since) || opts.Until != nil && started.After(*opts.Until) {
-					continue
-				}
-				if matched >= first {
-					result = append(result, item)
-				}
-				matched++
-				if matched >= last {
-					return result, nil
-				}
-			}
-		}
-		return nil, fmt.Errorf("time filters scanned %d runs without exhausting the history; narrow the search with --branch, --workflow or --status", maxRunScanPages*100)
-	}
-	return s.runsPage(ctx, opts)
-}
-
-func (s Actions) runsPage(ctx context.Context, opts RunListOptions) ([]Run, error) {
-	var response struct {
-		Runs []runResponse `json:"workflow_runs"`
-	}
-	query := url.Values{"limit": {strconv.Itoa(opts.Limit)}, "page": {strconv.Itoa(opts.Page)}}
-	for key, value := range map[string]string{"branch": opts.Branch, "event": opts.Event, "actor": opts.Actor, "head_sha": opts.Commit} {
-		if value != "" {
-			query.Set(key, value)
-		}
-	}
-	for _, status := range opts.Statuses {
-		query.Add("status", status)
-	}
-	endpoint := s.endpoint() + "runs"
-	if opts.Workflow != "" {
-		endpoint = s.endpoint() + "workflows/" + url.PathEscape(opts.Workflow) + "/runs"
-	}
-	// TODO(sdk): ListRepoActionsRunsOptions takes one status and ActionsWorkflowRun lacks created_at/updated_at.
-	if err := getJSON(ctx, s.Client, endpoint+"?"+query.Encode(), &response); err != nil {
-		return nil, err
-	}
-	result := make([]Run, 0, len(response.Runs))
-	for _, item := range response.Runs {
-		result = append(result, item.result())
-	}
-	return result, nil
-}
-
-// Run retrieves one Actions run.
-func (s Actions) Run(ctx context.Context, id int64) (Run, error) {
-	var response runResponse
-	// TODO(sdk): ActionsWorkflowRun lacks created_at/updated_at.
-	err := getJSON(ctx, s.Client, fmt.Sprintf("%sruns/%d", s.endpoint(), id), &response)
-	return response.result(), err
-}
-
-// Rerun schedules another attempt, optionally restricted to failed jobs.
-func (s Actions) Rerun(ctx context.Context, id int64, failedOnly bool) error {
-	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
-		if failedOnly {
-			return c.Actions.RerunRepoRunFailedJobs(ctx, owner, repo, id)
-		}
-		_, resp, err := c.Actions.RerunRepoRun(ctx, owner, repo, id)
-		return resp, err
-	})
-}
-
-// DeleteRun removes the selected run.
-func (s Actions) DeleteRun(ctx context.Context, id int64) error {
-	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
-		return c.Actions.DeleteRepoRun(ctx, owner, repo, id)
-	})
-}
-
-func completedActionStatus(status string) bool {
-	switch status {
-	case "completed", "success", "failure", "canceled", "cancelled", "skipped": //nolint:misspell // Gitea API spelling.
-		return true
-	}
-	return false
-}
-
-// SuccessfulRun recognizes a successful terminal run result.
-func SuccessfulRun(run Run) bool {
-	return completedActionStatus(run.Status) && (run.Conclusion == "success" || run.Status == "success")
-}
-
-// Watch polls with cancellation and reports only changed run state.
-func (s Actions) Watch(ctx context.Context, id int64, interval time.Duration, changed func(Run) error) (Run, error) {
-	if interval <= 0 {
-		return Run{}, errors.New("watch interval must be positive")
-	}
-	last := Run{}
-	for {
-		current, err := s.Run(ctx, id)
-		if err != nil {
-			return Run{}, err
-		}
-		if current != last {
-			if changed != nil {
-				if err := changed(current); err != nil {
-					return Run{}, err
-				}
-			}
-			last = current
-		}
-		if completedActionStatus(current.Status) {
-			return current, nil
-		}
-		if err := sleepCtx(ctx, interval); err != nil {
-			return Run{}, err
-		}
-	}
-}
-
-// CancelRun requests cancellation without deleting the run or its history.
-// Force cancellation is an explicit operation for unresponsive runners.
-func (s Actions) CancelRun(ctx context.Context, id int64, force bool) (Run, error) {
-	action := "cancel"
-	if force {
-		action = "force-cancel"
-	}
-	var response runResponse
-	// TODO(sdk): ActionsWorkflowRun lacks created_at/updated_at.
-	err := sendJSON(ctx, s.Client, http.MethodPost, fmt.Sprintf("%sruns/%d/%s", s.endpoint(), id, action), nil, &response)
-	return response.result(), err
 }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 
 	gitea "gitea.dev/sdk"
 )
@@ -30,15 +31,40 @@ func artifactFrom(artifact *gitea.ActionsArtifact) Artifact {
 	}
 }
 
-// Artifacts lists one page of artifacts belonging to a run.
-func (s Actions) Artifacts(ctx context.Context, run int64, limit, page int) ([]Artifact, error) {
+// Artifacts lists one page of artifacts belonging to a run, with their total number.
+func (s Actions) Artifacts(ctx context.Context, run int64, limit, page int) (Page[Artifact], error) {
 	response, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.ActionsArtifactsResponse, *gitea.Response, error) {
 		return c.Actions.ListRepoRunArtifacts(ctx, owner, repo, run, gitea.ListActionsArtifactsOptions{ListOptions: listOptions(limit, page)})
 	})
 	if err != nil {
-		return nil, err
+		return Page[Artifact]{}, Classify(err, "run", strconv.FormatInt(run, 10), s.Repository)
 	}
-	return convertAll(response.Artifacts, artifactFrom), nil
+	total := int(response.TotalCount)
+	return Page[Artifact]{Items: convertAll(response.Artifacts, artifactFrom), More: total > page*limit, Total: total, Counted: true}, nil
+}
+
+// AllArtifacts lists every artifact belonging to a run.
+func (s Actions) AllArtifacts(ctx context.Context, run int64) ([]Artifact, error) {
+	artifacts := []Artifact{}
+	for page := 1; page <= maxListPages; page++ {
+		window, err := s.Artifacts(ctx, run, 100, page)
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, window.Items...)
+		if !window.More || len(window.Items) == 0 {
+			return artifacts, nil
+		}
+	}
+	return nil, fmt.Errorf("listing exceeded %d pages", maxListPages)
+}
+
+// Artifact retrieves one artifact.
+func (s Actions) Artifact(ctx context.Context, id int64) (Artifact, error) {
+	artifact, err := repoConvert(ctx, s.Client, s.Repository, artifactFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.ActionsArtifact, *gitea.Response, error) {
+		return c.Actions.GetRepoArtifact(ctx, owner, repo, id)
+	})
+	return artifact, Classify(err, "artifact", strconv.FormatInt(id, 10), s.Repository)
 }
 
 // DownloadArtifact streams an artifact ZIP, accepting a scoped signed redirect.
@@ -49,7 +75,7 @@ func (s Actions) DownloadArtifact(ctx context.Context, id int64) (io.ReadCloser,
 	}
 	response, err := s.Client.DownloadSigned(ctx, endpoint)
 	if err != nil {
-		return nil, err
+		return nil, Classify(err, "artifact", strconv.FormatInt(id, 10), s.Repository)
 	}
 	return response.Body, nil
 }

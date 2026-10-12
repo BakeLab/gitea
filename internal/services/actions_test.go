@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,22 +76,34 @@ func TestWorkflowsMapDefinitions(t *testing.T) {
 	require.Equal(t, "disabled_manually", item.State)
 }
 
-func TestWatchChangesAndFailureConclusion(t *testing.T) {
-	calls := 0
+func TestWatchReportsEveryPollWithJobsUntilTheRunCompletes(t *testing.T) {
+	polls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if calls <= 2 {
-			_, _ = w.Write([]byte(`{"id":1,"status":"in_progress"}`))
-		} else {
-			_, _ = w.Write([]byte(`{"id":1,"status":"completed","conclusion":"failure"}`))
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/actions/workflows":
+			_, _ = w.Write([]byte(`{"workflows":[{"id":"ci.yml","name":"CI"}]}`))
+		case "/api/v1/repos/owner/repo/actions/runs/1":
+			polls++
+			if polls < 3 {
+				_, _ = w.Write([]byte(`{"id":1,"path":"ci.yml@refs/heads/main","status":"in_progress"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"id":1,"path":"ci.yml@refs/heads/main","status":"completed","conclusion":"failure"}`))
+		case "/api/v1/repos/owner/repo/actions/runs/1/jobs":
+			_, _ = w.Write([]byte(`{"jobs":[{"id":2,"name":"build","status":"in_progress"}]}`))
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
 		}
 	}))
 	defer server.Close()
-	changes := []Run{}
+	var updates []string
 	service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
-	final, err := service.Watch(context.Background(), 1, time.Millisecond, func(run Run) error { changes = append(changes, run); return nil })
+	final, err := service.Watch(context.Background(), 1, time.Millisecond, func(run Run) error {
+		updates = append(updates, run.Workflow+" "+run.Status+" "+run.Jobs[0].Name)
+		return nil
+	})
 	require.NoError(t, err)
-	require.Len(t, changes, 2)
+	require.Equal(t, []string{"CI in_progress build", "CI in_progress build", "CI completed build"}, updates)
 	require.False(t, SuccessfulRun(final))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -137,10 +150,10 @@ func TestActionMutationsUseTheirEndpoints(t *testing.T) {
 			return s.SetWorkflowEnabled(context.Background(), "ci.yml", false)
 		}},
 		{"rerun", "/api/v1/repos/owner/repo/actions/runs/7/rerun", http.MethodPost, func(s Actions) error {
-			return s.Rerun(context.Background(), 7, false)
+			return s.Rerun(context.Background(), 7, 0, false)
 		}},
 		{"rerun-failed", "/api/v1/repos/owner/repo/actions/runs/7/rerun-failed-jobs", http.MethodPost, func(s Actions) error {
-			return s.Rerun(context.Background(), 7, true)
+			return s.Rerun(context.Background(), 7, 0, true)
 		}},
 		{"delete", "/api/v1/repos/owner/repo/actions/runs/7", http.MethodDelete, func(s Actions) error {
 			return s.DeleteRun(context.Background(), 7)
@@ -205,35 +218,138 @@ func TestRunFiltersEncodeServerQueriesAndRejectInvalidStatus(t *testing.T) {
 }
 
 func TestRunTimeFilteringPaginatesMatchingResults(t *testing.T) {
-	since := time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2028, 1, 2, 0, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Query().Get("page") {
 		case "1":
-			_, _ = w.Write([]byte(`{"workflow_runs":[{"id":1,"started_at":"2027-12-31T00:00:00Z"},{"id":2,"started_at":"2028-01-01T00:00:00Z"}]}`))
+			w.Header().Set("Link", `<`+r.URL.Path+`?page=2>; rel="next"`)
+			_, _ = w.Write([]byte(`{"workflow_runs":[{"id":4,"created_at":"2028-01-03T00:00:00Z"},{"id":3,"created_at":"2028-01-01T12:00:00Z"}]}`))
 		case "2":
-			_, _ = w.Write([]byte(`{"workflow_runs":[{"id":3,"started_at":"2028-01-02T00:00:00Z"}]}`))
+			_, _ = w.Write([]byte(`{"workflow_runs":[{"id":2,"created_at":"2028-01-01T00:00:00Z"}]}`))
 		default:
 			_, _ = w.Write([]byte(`{"workflow_runs":[]}`))
 		}
 	}))
 	defer server.Close()
 	service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
-	items, err := service.Runs(context.Background(), RunListOptions{Limit: 1, Page: 2, Since: &since})
+	items, err := service.Runs(context.Background(), RunListOptions{Limit: 1, Page: 2, Until: &until})
 	require.NoError(t, err)
 	require.Len(t, items, 1)
-	require.EqualValues(t, 3, items[0].ID)
+	require.EqualValues(t, 2, items[0].ID)
 }
 
-func TestRunTimeFilteringStopsAtScanCap(t *testing.T) {
+func TestRunTimeFilteringUsesCreationTimeAndStopsAtOlderRuns(t *testing.T) {
 	since := time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC)
 	pages := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pages++
-		_, _ = w.Write([]byte(`{"workflow_runs":[{"id":1,"started_at":"2027-12-31T00:00:00Z"}]}`))
+		_, _ = w.Write([]byte(`{"workflow_runs":[
+			{"id":3,"status":"queued","created_at":"2028-01-02T00:00:00Z","started_at":"1970-01-01T00:00:00Z","completed_at":"1970-01-01T00:00:00Z"},
+			{"id":2,"status":"completed","created_at":"2028-01-01T00:00:00Z","started_at":"2028-01-01T00:00:05Z","completed_at":"2028-01-01T00:01:00Z"},
+			{"id":1,"status":"completed","created_at":"2027-12-31T00:00:00Z","started_at":"2027-12-31T00:00:05Z"}]}`))
 	}))
 	defer server.Close()
 	service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
-	_, err := service.Runs(context.Background(), RunListOptions{Limit: 1, Page: 1, Since: &since})
+	items, err := service.Runs(context.Background(), RunListOptions{Limit: 30, Page: 1, Since: &since})
+	require.NoError(t, err)
+	require.Equal(t, 1, pages)
+	require.Len(t, items, 2)
+	require.EqualValues(t, 3, items[0].ID)
+	require.Nil(t, items[0].StartedAt)
+	require.Nil(t, items[0].CompletedAt)
+	require.Equal(t, "2028-01-01T00:00:05Z", *items[1].StartedAt)
+	data, err := json.Marshal(items[0])
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"started_at":null,"completed_at":null`)
+}
+
+func TestRunTimeFilteringStopsAtScanCap(t *testing.T) {
+	until := time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC)
+	pages := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages++
+		w.Header().Set("Link", `<`+r.URL.Path+`?page=2>; rel="next"`)
+		run := `{"id":1,"created_at":"2028-12-31T00:00:00Z"}`
+		_, _ = w.Write([]byte(`{"workflow_runs":[` + strings.Repeat(run+",", 99) + run + `]}`))
+	}))
+	defer server.Close()
+	service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
+	_, err := service.Runs(context.Background(), RunListOptions{Limit: 1, Page: 1, Until: &until})
 	require.ErrorContains(t, err, "narrow the search")
 	require.Equal(t, maxRunScanPages, pages)
+}
+
+func TestFindWorkflowByFileStemPathOrName(t *testing.T) {
+	workflows := []Workflow{
+		{ID: "ci.yml", Name: "CI", Path: ".gitea/workflows/ci.yml"},
+		{ID: "nightly.yaml", Name: "Nightly build", Path: ".gitea/workflows/nightly.yaml"},
+		{ID: "deploy.yml", Name: "Deploy", Path: ".gitea/workflows/deploy.yml"},
+		{ID: "deploy.yaml", Name: "Deploy staging", Path: ".gitea/workflows/deploy.yaml"},
+	}
+	for raw, want := range map[string]string{
+		"ci.yml": "ci.yml", "ci": "ci.yml", "CI": "ci.yml", ".gitea/workflows/nightly.yaml": "nightly.yaml",
+		"nightly build": "nightly.yaml", "Deploy": "deploy.yml", "deploy.yaml": "deploy.yaml",
+	} {
+		workflow, err := FindWorkflow(workflows, raw, "alice/x")
+		require.NoError(t, err, raw)
+		require.Equal(t, want, workflow.ID, raw)
+	}
+	_, err := FindWorkflow(workflows, "deploy", "alice/x")
+	require.EqualError(t, err, `workflow "deploy" is ambiguous in alice/x (deploy.yml, deploy.yaml); pass the file name`)
+	_, err = FindWorkflow(workflows, "release", "alice/x")
+	require.EqualError(t, err, `workflow "release" not found in alice/x`)
+}
+
+func TestDispatchInputsReadTheWorkflowDispatchTrigger(t *testing.T) {
+	for _, tc := range []struct {
+		name, definition string
+		want             []WorkflowInput
+		err              error
+	}{
+		{"event name", "on: workflow_dispatch\n", []WorkflowInput{}, nil},
+		{"event list", "on: [push, workflow_dispatch]\n", []WorkflowInput{}, nil},
+		{"trigger without inputs", "on:\n  workflow_dispatch:\n", []WorkflowInput{}, nil},
+		{"inputs in order", `on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deploy target
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+      dry_run:
+        type: boolean
+        default: true
+`, []WorkflowInput{
+			{Name: "target", Description: "Deploy target", Type: "choice", Default: "staging", Required: true, Options: []string{"staging", "production"}},
+			{Name: "dry_run", Type: "boolean", Default: "true"},
+		}, nil},
+		{"no trigger", "on:\n  push:\n", nil, ErrNoDispatch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inputs, err := DispatchInputs([]byte(tc.definition))
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.want, inputs)
+		})
+	}
+}
+
+func TestWorkflowFileTellsAMissingRefFromAMissingFile(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/repos/owner/repo/contents/.gitea/workflows/ci.yml", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+		ref := r.URL.Query().Get("ref")
+		if ref == "gone" {
+			_, _ = fmt.Fprintf(w, `{"message":"object does not exist [id: %s, rel_path: ]"}`, ref)
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":"object does not exist [id: 0123abc, rel_path: .gitea/workflows/ci.yml]"}`))
+	}))
+	service := Actions{Client: client, Repository: "owner/repo"}
+	workflow := Workflow{ID: "ci.yml", Path: ".gitea/workflows/ci.yml"}
+	_, err := service.WorkflowFile(context.Background(), workflow, "gone")
+	require.EqualError(t, err, `ref "gone" not found in owner/repo`)
+	_, err = service.WorkflowFile(context.Background(), workflow, "main")
+	require.EqualError(t, err, "workflow file .gitea/workflows/ci.yml not found in owner/repo")
 }

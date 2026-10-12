@@ -161,7 +161,7 @@ func TestSudoSendsHeaderAfterIdentityCheck(t *testing.T) {
 
 func TestJSONFieldErrorsListAvailableFields(t *testing.T) {
 	requireUsageBeforeRequests(t, "unknown JSON field \"titel\"\navailable fields: assignees, author, body", "issue", "list", "--json", "number,titel")
-	requireUsageBeforeRequests(t, "unknown JSON field \"workflow\"\navailable fields: actor, attempt, branch", "run", "list", "--json", "workflow")
+	requireUsageBeforeRequests(t, "unknown JSON field \"workflw\"\navailable fields: actor, attempt, branch", "run", "list", "--json", "workflw")
 	requireUsageBeforeRequests(t, "--json= needs field names; use --json alone for every field", "pr", "list", "--json=")
 	requireUsageBeforeRequests(t, "version prints text; --jq is not supported", "version", "--jq", ".")
 }
@@ -541,42 +541,20 @@ const (
 	repo set-default
 	repo sync
 	repo view
-	run artifact download
-	run artifact list
-	run cancel
-	run delete
-	run jobs
-	run list
-	run logs
-	run rerun
-	run view
-	run watch
 	search issue
 	search pr
 	search repo
-	secret delete
-	secret list
-	secret set
 	status
 	time create
 	time delete
 	time list
 	time reset
-	variable delete
-	variable list
-	variable set
-	variable view
 	wiki create
 	wiki delete
 	wiki edit
 	wiki list
 	wiki revisions
 	wiki view
-	workflow disable
-	workflow enable
-	workflow list
-	workflow run
-	workflow view
 `
 	longsToWrite = `
 	alias
@@ -595,13 +573,8 @@ const (
 	release
 	release asset
 	repo
-	run
-	run artifact
 	search
-	secret
 	time
-	variable
 	wiki
-	workflow
 `
 )

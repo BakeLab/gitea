@@ -198,10 +198,10 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"search", "issue", "--since="}, "invalid --since: use a date"},
 		{[]string{"search", "repo", "query", "--sort", "invalid"}, "--sort must be alpha, created, updated, size, or id"},
 		{[]string{"search", "repo", "query", "--order", "invalid"}, "--order must be asc or desc"},
-		{[]string{"secret", "set", "BUILD_TOKEN", "--value", "text", "--value-file", "-"}, "--value and --value-file are mutually exclusive"},
+		{[]string{"secret", "set", "BUILD_TOKEN", "--value", "text", "--value-file", "-"}, "--body and --body-file are mutually exclusive"},
 		{[]string{"secret", "set", "BUILD_TOKEN", "--value= ", "--json=value"}, "unknown JSON field \"value\""},
-		{[]string{"secret", "set", "BUILD_TOKEN", "--no-input"}, "missing value: supply --value or --value-file"},
-		{[]string{"secret", "set", "CI", "--value", "text"}, "CI and names beginning GITEA_ or GITHUB_ are reserved"},
+		{[]string{"secret", "set", "BUILD_TOKEN", "--no-input"}, "missing value: pass --body, --body-file or standard input"},
+		{[]string{"secret", "set", "CI", "--value", "text"}, "CI and names starting with GITEA_ or GITHUB_ are reserved"},
 		{[]string{"status", "--limit=0"}, `"--limit" flag: must be 1..100`},
 		{[]string{"status", "--json=token"}, "unknown JSON field \"token\""},
 		{[]string{"team", "create", "org", "--name", "Developers", "--permission", "owner"}, "--permission must be read, write, or admin"},
@@ -221,10 +221,10 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"time", "list", "--from", "2026-10-02", "--until", "2026-10-01"}, "--from must not be later than --until"},
 		{[]string{"time", "list", "--from", "1h", "--until", "2h"}, "--from must not be later than --until"},
 		{[]string{"time", "list", "--total", "--json"}, "--total is a human-output summary"},
-		{[]string{"variable", "set", "BUILD_MODE", "--value="}, "variable value cannot be empty"},
-		{[]string{"variable", "set", "GITEA_RESERVED", "--value", "text"}, "CI and names beginning GITEA_ or GITHUB_ are reserved"},
-		{[]string{"variable", "list", "--org", "team", "--account"}, "--org, --account, and --repo select mutually exclusive scopes"},
-		{[]string{"variable", "list", "--org", "team", "--repo", "alice/project"}, "--org, --account, and --repo select mutually exclusive scopes"},
+		{[]string{"variable", "set", "BUILD_MODE", "--value="}, "the value of BUILD_MODE is empty"},
+		{[]string{"variable", "set", "GITEA_RESERVED", "--value", "text"}, "CI and names starting with GITEA_ or GITHUB_ are reserved"},
+		{[]string{"variable", "list", "--org", "team", "--account"}, "--org, --account and --repo select different scopes; pass one"},
+		{[]string{"variable", "list", "--org", "team", "--repo", "alice/project"}, "--org, --account and --repo select different scopes; pass one"},
 		{[]string{"version", "--json"}, "version prints text"},
 		{[]string{"webhook", "edit", "1", "--secret", "private", "--clear-authorization"}, "webhook secret editing is unsupported"},
 		{[]string{"webhook", "create", "ftp://host/path"}, "webhook URL must be an absolute HTTP(S) URL without user information or fragment"},
@@ -245,7 +245,7 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"wiki", "create", "--title", "Home", "--body", "text", "--json=created_at"}, "unknown JSON field \"created_at\""},
 		{[]string{"wiki", "edit", "Home", "--body="}, "wiki content cannot be empty"},
 		{[]string{"wiki", "revisions", "Home", "--page", "0"}, `"--page" flag: must be a positive integer`},
-		{[]string{"workflow", "run", "ci.yml", "-r", "main", "-f", "a=1", "-i", "a=2"}, "duplicate workflow input"},
+		{[]string{"workflow", "run", "ci.yml", "-r", "main", "-f", "a=1", "-i", "a=2"}, "input a is given more than once"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			requireUsageBeforeRequests(t, tc.want, tc.args...)
@@ -289,7 +289,7 @@ func TestPromptedCreateSubmitsWithoutConfirmation(t *testing.T) {
 		secret, write string
 	}{
 		{[]string{"secret", "set", "TOKEN"}, nil, "private", "PUT /api/v1/repos/alice/project/actions/secrets/TOKEN"},
-		{[]string{"variable", "set", "MODE"}, map[string]string{"Variable value": "fast"}, "", "POST /api/v1/repos/alice/project/actions/variables/MODE"},
+		{[]string{"variable", "set", "MODE"}, map[string]string{"Value of MODE:": "fast"}, "", "POST /api/v1/repos/alice/project/actions/variables/MODE"},
 		{[]string{"webhook", "create"}, map[string]string{"Payload URL": "https://hooks.test/path"}, "", "POST /api/v1/repos/alice/project/hooks"},
 		{[]string{"team", "create", "acme"}, map[string]string{"Team name": "Developers"}, "", "POST /api/v1/orgs/acme/teams"},
 	} {

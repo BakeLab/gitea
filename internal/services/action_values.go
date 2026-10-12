@@ -6,9 +6,9 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -20,12 +20,27 @@ type ActionScope struct {
 	Account                  bool
 }
 
-// ActionSecret describes a secret without containing its value.
+// String names the scope for people: "alice/project", "organization acme" or "your account".
+func (s ActionScope) String() string {
+	switch {
+	case s.Account:
+		return "your account"
+	case s.Organization != "":
+		return "organization " + s.Organization
+	}
+	return s.Repository
+}
+
+// ActionSecret describes a secret without containing its value. CreatedAt is empty for a secret
+// that was just set, as Gitea does not return it.
 type ActionSecret struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	CreatedAt   string `json:"created_at"`
+	CreatedAt   string `json:"created_at,omitempty"`
 }
+
+// ActionValueName is the name Gitea stores a secret or variable under: names are upper-cased.
+func ActionValueName(name string) string { return strings.ToUpper(name) }
 
 func secretFrom(secret *gitea.Secret) ActionSecret {
 	return ActionSecret{Name: secret.Name, Description: secret.Description, CreatedAt: timestamp(secret.Created)}
@@ -50,27 +65,34 @@ type ActionSecrets struct {
 
 // List returns secret metadata only.
 func (s ActionSecrets) List(ctx context.Context, limit, page int) ([]ActionSecret, error) {
-	if s.Scope.Account {
-		return nil, &CapabilityError{Feature: "account secret listing", Reason: "Gitea exposes account secret set/delete operations only"}
-	}
-	options := listOptions(limit, page)
-	secrets, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Secret, *gitea.Response, error) {
-		if s.Scope.Organization != "" {
-			return c.Actions.ListOrgSecrets(ctx, s.Scope.Organization, gitea.ListOrgActionsSecretOption{ListOptions: options})
-		}
-		owner, repo, err := splitRepository(s.Scope.Repository)
-		if err != nil {
-			return nil, nil, err
-		}
-		return c.Actions.ListRepoSecrets(ctx, owner, repo, gitea.ListRepoActionsSecretOption{ListOptions: options})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return convertAll(secrets, secretFrom), nil
+	window, err := s.ListPage(ctx, limit, page)
+	return window.Items, err
 }
 
-// Set creates or replaces a secret; the API's PUT operation defines upsert semantics.
+// ListPage is List with what the server reports about the other pages.
+func (s ActionSecrets) ListPage(ctx context.Context, limit, page int) (Page[ActionSecret], error) {
+	if s.Scope.Account {
+		return Page[ActionSecret]{}, &CapabilityError{Feature: "account secret listing", Reason: "Gitea exposes account secret set/delete operations only"}
+	}
+	window, err := listPage(limit, page, func(limit, page int) ([]*gitea.Secret, http.Header, error) {
+		options := listOptions(limit, page)
+		secrets, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Secret, *gitea.Response, error) {
+			if s.Scope.Organization != "" {
+				return c.Actions.ListOrgSecrets(ctx, s.Scope.Organization, gitea.ListOrgActionsSecretOption{ListOptions: options})
+			}
+			owner, repo, err := splitRepository(s.Scope.Repository)
+			if err != nil {
+				return nil, nil, err
+			}
+			return c.Actions.ListRepoSecrets(ctx, owner, repo, gitea.ListRepoActionsSecretOption{ListOptions: options})
+		})
+		return secrets, headerOf(resp), err
+	})
+	return Page[ActionSecret]{Items: convertAll(window.Items, secretFrom), More: window.More, Total: window.Total, Counted: window.Counted}, err
+}
+
+// Set creates or replaces a secret; the API's PUT operation defines upsert semantics. The result
+// names the secret as Gitea stores it.
 func (s ActionSecrets) Set(ctx context.Context, name, value, description string) (ActionSecret, error) {
 	option := gitea.CreateOrUpdateSecretOption{Data: value, Description: description}
 	err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
@@ -86,12 +108,12 @@ func (s ActionSecrets) Set(ctx context.Context, name, value, description string)
 		}
 		return c.Actions.CreateRepoSecret(ctx, owner, repo, name, option)
 	})
-	return ActionSecret{Name: name, Description: description}, err
+	return ActionSecret{Name: ActionValueName(name), Description: description}, err
 }
 
 // Delete removes only the named secret in the selected scope.
 func (s ActionSecrets) Delete(ctx context.Context, name string) error {
-	return do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		switch {
 		case s.Scope.Account:
 			return c.Actions.DeleteUserSecret(ctx, name)
@@ -105,6 +127,7 @@ func (s ActionSecrets) Delete(ctx context.Context, name string) error {
 		// TODO(sdk): DeleteRepoSecret does not escape the secret name.
 		return c.Actions.DeleteRepoSecret(ctx, owner, repo, url.PathEscape(name))
 	})
+	return Classify(err, "secret", ActionValueName(name), s.Scope.String())
 }
 
 // ActionVariables manages scoped non-secret Actions variables.
@@ -126,24 +149,28 @@ func (s ActionVariables) repoVariables(name string) string {
 
 // List returns a non-nil page of variables.
 func (s ActionVariables) List(ctx context.Context, limit, page int) ([]ActionVariable, error) {
-	var variables []*gitea.ActionsVariable
+	window, err := s.ListPage(ctx, limit, page)
+	return window.Items, err
+}
+
+// ListPage is List with what the server reports about the other pages.
+func (s ActionVariables) ListPage(ctx context.Context, limit, page int) (Page[ActionVariable], error) {
+	var window Page[*gitea.ActionsVariable]
 	var err error
-	switch {
-	case s.Scope.Account:
-		variables, _, err = call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.ActionsVariable, *gitea.Response, error) {
-			return c.Actions.ListUserVariables(ctx, listOptions(limit, page))
+	if s.Scope.Account || s.Scope.Organization != "" {
+		window, err = listPage(limit, page, func(limit, page int) ([]*gitea.ActionsVariable, http.Header, error) {
+			variables, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.ActionsVariable, *gitea.Response, error) {
+				if s.Scope.Account {
+					return c.Actions.ListUserVariables(ctx, listOptions(limit, page))
+				}
+				return c.Actions.ListOrgVariables(ctx, s.Scope.Organization, gitea.ListOrgActionsVariableOption{ListOptions: listOptions(limit, page)})
+			})
+			return variables, headerOf(resp), err
 		})
-	case s.Scope.Organization != "":
-		variables, _, err = call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.ActionsVariable, *gitea.Response, error) {
-			return c.Actions.ListOrgVariables(ctx, s.Scope.Organization, gitea.ListOrgActionsVariableOption{ListOptions: listOptions(limit, page)})
-		})
-	default:
-		err = getJSON(ctx, s.Client, fmt.Sprintf("%s?limit=%d&page=%d", s.repoVariables(""), limit, page), &variables)
+	} else {
+		window, err = rawPage[*gitea.ActionsVariable](ctx, s.Client, s.repoVariables(""), nil, limit, page)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return convertAll(variables, variableFrom), nil
+	return Page[ActionVariable]{Items: convertAll(window.Items, variableFrom), More: window.More, Total: window.Total, Counted: window.Counted}, err
 }
 
 // View retrieves one variable.
@@ -163,7 +190,7 @@ func (s ActionVariables) View(ctx context.Context, name string) (ActionVariable,
 		err = getJSON(ctx, s.Client, s.repoVariables(name), variable)
 	}
 	if err != nil {
-		return ActionVariable{}, err
+		return ActionVariable{}, Classify(err, "variable", ActionValueName(name), s.Scope.String())
 	}
 	return variableFrom(variable), nil
 }
@@ -172,7 +199,7 @@ func (s ActionVariables) View(ctx context.Context, name string) (ActionVariable,
 func (s ActionVariables) Set(ctx context.Context, name, value, description string) (ActionVariable, error) {
 	exists := true
 	if _, err := s.View(ctx, name); err != nil {
-		if apiError, ok := errors.AsType[*transport.APIError](err); !ok || apiError.Status != http.StatusNotFound {
+		if !errors.As(err, new(*NotFoundError)) {
 			return ActionVariable{}, err
 		}
 		exists = false
@@ -202,20 +229,23 @@ func (s ActionVariables) Set(ctx context.Context, name, value, description strin
 		}
 		err = sendJSON(ctx, s.Client, method, s.repoVariables(name), update, nil)
 	}
-	return ActionVariable{Name: name, Value: value, Description: description}, err
+	return ActionVariable{Name: ActionValueName(name), Value: value, Description: description}, err
 }
 
 // Delete removes only the named variable in the selected scope.
 func (s ActionVariables) Delete(ctx context.Context, name string) error {
+	var err error
 	switch {
 	case s.Scope.Account:
-		return do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+		err = do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 			return c.Actions.DeleteUserVariable(ctx, name)
 		})
 	case s.Scope.Organization != "":
-		return do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+		err = do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 			return c.Actions.DeleteOrgVariable(ctx, s.Scope.Organization, name)
 		})
+	default:
+		err = sendJSON(ctx, s.Client, http.MethodDelete, s.repoVariables(name), nil, nil)
 	}
-	return sendJSON(ctx, s.Client, http.MethodDelete, s.repoVariables(name), nil, nil)
+	return Classify(err, "variable", ActionValueName(name), s.Scope.String())
 }
