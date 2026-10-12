@@ -10,8 +10,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
-	"strconv"
 
 	"gitea.dev/cli/internal/transport"
 )
@@ -37,20 +35,6 @@ func sendJSON(ctx context.Context, client *transport.Client, method, endpoint st
 	}
 	_, err := rawJSON(ctx, client, method, endpoint, body, out)
 	return err
-}
-
-// rawWindow is listWindow over a raw JSON collection endpoint; it sets limit and page on query.
-func rawWindow[T any](ctx context.Context, client *transport.Client, endpoint string, query url.Values, limit, page int) ([]T, bool, error) {
-	if query == nil {
-		query = url.Values{}
-	}
-	return listWindow(limit, page, func(limit, page int) ([]T, http.Header, error) {
-		query.Set("limit", strconv.Itoa(limit))
-		query.Set("page", strconv.Itoa(page))
-		var response []T
-		headers, err := rawJSON(ctx, client, http.MethodGet, endpoint+"?"+query.Encode(), nil, &response)
-		return response, headers, err
-	})
 }
 
 func rawJSON(ctx context.Context, client *transport.Client, method, endpoint string, body io.Reader, out any) (http.Header, error) {

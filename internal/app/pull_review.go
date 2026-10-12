@@ -19,280 +19,365 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// pullArguments documents the pull request argument of pr commands in their ARGUMENTS section.
+const pullArguments = `A pull request can be supplied as argument in any of the following formats:
+- by number, such as "13" or "#13"
+- by URL, such as "https://gitea.com/OWNER/REPO/pulls/13"
+- by the name of its head branch, such as "feature/login" or "bob:feature/login"
+
+Without an argument, the pull request of the current branch is selected.`
+
+// pullArgumentsAnnotation adds the ARGUMENTS section to a pr command's help.
+func pullArgumentsAnnotation(annotations map[string]string) map[string]string {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations["gt.arguments"] = pullArguments
+	return annotations
+}
+
+// reviewStates maps the review types --event accepts onto the API's review states.
+var reviewStates = map[string]string{
+	"approve": "APPROVED", "approved": "APPROVED",
+	"request-changes": "REQUEST_CHANGES", "request_changes": "REQUEST_CHANGES",
+	"comment": "COMMENT", "pending": "PENDING",
+}
+
+// reviewType holds the flags that choose the type of a review.
+type reviewType struct {
+	approve, requestChanges, comment, pending bool
+	// event is the hidden spelling of the type that gt 0.x and scripts use.
+	event string
+}
+
+// register adds -a, -r, -c, --pending when pending is set, and the hidden --event to cmd.
+func (r *reviewType) register(cmd *cobra.Command, pending bool) {
+	flags := cmd.Flags()
+	flags.BoolVarP(&r.approve, "approve", "a", false, "Approve the pull request")
+	flags.BoolVarP(&r.requestChanges, "request-changes", "r", false, "Request changes (requires a body)")
+	flags.BoolVarP(&r.comment, "comment", "c", false, "Comment without approving (requires a body or inline comments)")
+	values := []string{"approve", "approved", "request-changes", "request_changes", "comment"}
+	if pending {
+		flags.BoolVar(&r.pending, "pending", false, "Save the review as pending, to submit later with gt pr review submit")
+		values = append(values, "pending")
+	}
+	flags.StringVar(&r.event, "event", "", "Review type")
+	enumValues(cmd, "event", values...)
+	_ = flags.MarkHidden("event")
+}
+
+// state returns the API state of the chosen review type, or "" when none was chosen.
+func (r reviewType) state() (string, error) {
+	var states []string
+	for state, chosen := range map[string]bool{"APPROVED": r.approve, "REQUEST_CHANGES": r.requestChanges, "COMMENT": r.comment, "PENDING": r.pending} {
+		if chosen {
+			states = append(states, state)
+		}
+	}
+	if r.event != "" {
+		states = append(states, reviewStates[strings.ToLower(r.event)])
+	}
+	switch len(states) {
+	case 0:
+		return "", nil
+	case 1:
+		return states[0], nil
+	}
+	return "", clierr.Wrap(clierr.Usage, errors.New("choose one review type: --approve, --request-changes or --comment"))
+}
+
+// errReviewType asks for a review type where gt cannot prompt for one.
+func errReviewType(cmd *cobra.Command) error {
+	return clierr.Wrap(clierr.Usage, &argumentError{problem: "choose a review type: --approve, --request-changes, or --comment", cmd: cmd})
+}
+
+// reviewVerbs reports a submitted review by its state: "Approved pull request alice/x#1 (Add one)".
+var reviewVerbs = map[string]string{
+	"APPROVED": "Approved", "REQUEST_CHANGES": "Requested changes on", "COMMENT": "Commented on", "PENDING": "Saved pending review on",
+}
+
+// reviewNouns name a review by its state in prompts: "Submit approval for #1?".
+var reviewNouns = map[string]string{
+	"APPROVED": "approval", "REQUEST_CHANGES": "change request", "COMMENT": "comment", "PENDING": "pending review",
+}
+
+// reviewWords are review types people try as a subcommand, with the flag that chooses them.
+var reviewWords = map[string]string{
+	"approve": "approve", "lgtm": "approve", "comment": "comment", "reject": "request-changes", "request-changes": "request-changes",
+}
+
+// reviewArgs accepts one pull request and points review types given as a subcommand, as in
+// "gt pr review approve 13", at their flags.
+func reviewArgs(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	if flag, ok := reviewWords[strings.ToLower(args[0])]; ok {
+		pull := "<number>"
+		if len(args) > 1 {
+			pull = args[1]
+		}
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("unknown review command %q; to %s run: gt pr review %s --%s (see gt pr review --help)",
+			args[0], strings.ReplaceAll(flag, "-", " "), pull, flag))
+	}
+	if len(args) > 1 {
+		if _, err := parseRef(args[0], pullRef); errors.Is(err, errNotRef) {
+			err := fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+			if suggestions := cmd.SuggestionsFor(args[0]); len(suggestions) > 0 {
+				err = fmt.Errorf("%w; did you mean %s?", err, strings.Join(suggestions, " or "))
+			}
+			return clierr.Wrap(clierr.Usage, err)
+		}
+	}
+	return usageArgs(cobra.MaximumNArgs(1))(cmd, args)
+}
+
+const reviewExamples = `# Approve the pull request of the current branch
+$ gt pr review --approve
+
+# Request changes on #13
+$ gt pr review 13 -r -b "Please hash the password"
+
+# Comment with a body read from a file
+$ gt pr review 13 -c -F notes.md
+
+# Review interactively: pick the type, write the body, optionally annotate the diff
+$ gt pr review 13
+
+# Start a pending review with inline comments, then submit it
+$ gt pr review 13 --pending --comments-file inline.json
+$ gt pr review submit 13 --approve
+
+# See who reviewed, then reply to and resolve an inline comment
+$ gt pr review list 13
+$ gt pr review reply 13 36 -b "Done"
+$ gt pr review resolve 36`
+
 func (a *application) pullReviewCommand() *cobra.Command {
-	var event, body, file, commentsFile, commit string
-	var useEditor bool
-	review := &cobra.Command{Use: "review <number>", Short: "Submit or inspect pull request reviews", Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
-		var draft terminal.Draft
-		defer finishDraft(&draft, &runErr)
-		if err := validateBodySources(cmd); err != nil {
-			return err
-		}
-		n, err := number(args[0])
-		if err != nil {
-			return err
-		}
-		snapshot, err := a.deps.Settings.Load()
-		if err != nil {
-			return err
-		}
-		policy := a.policy(snapshot)
-		if !localFlagsChanged(cmd) && policy.CanPrompt(a.deps.Streams) && a.deps.ReviewForm != nil {
-			return a.createReviewInteractively(cmd, n)
-		}
-		if err := oneOf("event", event, "APPROVED", "REQUEST_CHANGES", "COMMENT", "PENDING"); err != nil {
-			return err
-		}
-		if useEditor {
-			draft, err = a.editDraft(cmd, "")
-			body = draft.Body
-		} else {
-			body, err = a.readBody(cmd, body, file)
-		}
-		if err != nil {
-			return err
-		}
-		opts := services.ReviewOptions{Event: event, Body: body, Commit: commit}
-		if commentsFile != "" {
-			if commentsFile == "-" {
-				return clierr.Wrap(clierr.Usage, errors.New("--comments-file requires a file; use --body-file - for stdin"))
-			}
-			file, err := os.Open(commentsFile)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-			decoder := json.NewDecoder(file)
-			decoder.DisallowUnknownFields()
-			if err := decoder.Decode(&opts.Comments); err != nil {
-				return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid inline comments: %w", err))
-			}
-			if opts.Comments == nil {
-				return clierr.Wrap(clierr.Usage, errors.New("inline comments must be a JSON array"))
-			}
-			if err := decoder.Decode(new(any)); err != io.EOF {
-				return clierr.Wrap(clierr.Usage, errors.New("inline comments file must contain exactly one JSON array"))
-			}
-			for _, comment := range opts.Comments {
-				if err := comment.Validate(); err != nil {
-					return clierr.Wrap(clierr.Usage, err)
-				}
-			}
-		}
-		prompted := false
-		if (event == "COMMENT" || event == "REQUEST_CHANGES" || event == "PENDING") && strings.TrimSpace(body) == "" && len(opts.Comments) == 0 {
-			if useEditor || cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") {
-				return clierr.Wrap(clierr.Usage, errors.New("review body cannot be empty without inline comments"))
-			}
-			prompted, err = a.require(cmd, &body, "body")
-			if err != nil {
-				return err
-			}
-			if strings.TrimSpace(body) == "" {
-				return clierr.Wrap(clierr.Usage, errors.New("review body cannot be empty"))
-			}
-			opts.Body = body
-		}
-		target, err := a.resolve(cmd.Context(), true)
-		if err != nil {
-			return err
-		}
-		if prompted {
-			if err := a.confirm(cmd, fmt.Sprintf("Submit %s review on %s#%d: %s", event, target.Repo, n, body)); err != nil {
-				return err
-			}
-		}
-		item, err := (services.Reviews{Client: target.client, Repository: target.Repo}).Create(cmd.Context(), n, opts)
-		if err != nil {
-			return err
-		}
-		return writeRecord(a, cmd, item, reviewRecord)
-	}}
-	review.Flags().StringVar(&event, "event", "COMMENT", "Review event: APPROVED, REQUEST_CHANGES, COMMENT, PENDING")
-	review.Flags().StringVar(&body, "body", "", "Review body")
-	review.Flags().StringVar(&file, "body-file", "", "Read body from file, or - for stdin")
-	review.Flags().BoolVar(&useEditor, "editor", false, "Compose the review in the configured editor")
-	review.Flags().StringVar(&commentsFile, "comments-file", "", "JSON array of path, body, old_position/new_position inline comments")
-	review.Flags().StringVar(&commit, "commit", "", "Commit to review (default: current PR head)")
-	for _, verb := range []string{"list", "view", "comments"} {
-		var limit, page int
-		var reviewID int64
-		use := verb + " <number>"
-		count := 1
-		if verb == "view" {
-			use += " <review-id>"
-			count = 2
-		}
-		command := &cobra.Command{Use: use, Short: titleCase(verb) + " pull request reviews", Args: argsExact(count), RunE: func(cmd *cobra.Command, args []string) error {
-			n, err := number(args[0])
-			if err != nil {
-				return err
-			}
-			if reviewID < 0 {
-				return clierr.Wrap(clierr.Usage, errors.New("--review must be a positive review ID"))
-			}
-			if verb == "view" {
-				reviewID, err = number(args[1])
-				if err != nil {
-					return err
-				}
-			}
-			target, err := a.resolve(cmd.Context(), true)
-			if err != nil {
-				return err
-			}
-			service := services.Reviews{Client: target.client, Repository: target.Repo}
-			switch verb {
-			case "view":
-				item, err := service.View(cmd.Context(), n, reviewID)
-				if err != nil {
-					return err
-				}
-				return writeRecord(a, cmd, item, reviewRecord)
-			case "list":
-				items, err := service.List(cmd.Context(), n, limit, page)
-				if err != nil {
-					return err
-				}
-				return writeRecords(a, cmd, items, reviewRecord)
-			case "comments":
-				items, err := service.Comments(cmd.Context(), n, reviewID, limit, page)
-				if err != nil {
-					return err
-				}
-				return writeList(a, cmd, items, func(item services.ReviewComment) []terminal.Cell {
-					return terminal.Row(strconv.FormatInt(item.ID, 10), fmt.Sprintf("%s:%d", item.Path, item.Line), item.Author, item.Body)
-				})
-			}
-			return nil
-		}}
-		if verb != "view" {
-			pageFlags(command, &limit, &page)
-		}
-		if verb == "comments" {
-			command.Flags().Int64Var(&reviewID, "review", 0, "Limit comments to one review ID")
-		}
-		review.AddCommand(command)
+	review := a.reviewCreateCommand("review [<number> | <url> | <branch>]", "Review a pull request or manage its reviews")
+	review.Long = `Submit a review on a pull request, or manage existing reviews with the commands below.
+
+Without an argument, the pull request of the current branch is reviewed. Choose the review
+type with --approve, --request-changes or --comment. On a terminal, leaving the type out
+opens an interactive review that also offers to annotate the diff in your editor.`
+	review.Example = reviewExamples
+	review.SuggestionsMinimumDistance = 2
+	create := a.reviewCreateCommand("create [<number> | <url> | <branch>]", `Submit a review (same as "gt pr review")`)
+	create.Example = `$ gt pr review create 13 --approve
+$ gt pr review create --comment -b "Looks good overall"`
+	review.AddCommand(create, a.pullReviewListCommand(), a.pullReviewViewCommand(), a.pullReviewCommentsCommand(), a.pullReviewReplyCommand())
+	for _, resolve := range []bool{true, false} {
+		review.AddCommand(a.pullReviewResolveCommand(resolve))
 	}
-	for _, verb := range []string{"resolve", "unresolve"} {
-		review.AddCommand(&cobra.Command{Use: verb + " <comment-id>", Short: titleCase(verb) + " an inline review conversation", Annotations: textOutput("conversation state changes do not return a resource"), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := number(args[0])
-			if err != nil {
-				return err
-			}
-			target, err := a.resolve(cmd.Context(), true)
-			if err != nil {
-				return err
-			}
-			if err := (services.Reviews{Client: target.client, Repository: target.Repo}).Resolve(cmd.Context(), id, verb == "resolve"); err != nil {
-				return err
-			}
-			_, err = fmt.Fprintf(cmd.ErrOrStderr(), "Comment %d %sd\n", id, verb)
-			return err
-		}})
-	}
-	review.AddCommand(a.pullReviewReplyCommand())
 	review.AddCommand(a.pullReviewRequestCommand(true), a.pullReviewRequestCommand(false))
-	for _, verb := range []string{"submit", "delete", "dismiss", "undismiss"} {
-		review.AddCommand(a.pullReviewLifecycleCommand(verb))
-	}
+	review.AddCommand(a.pullReviewSubmitCommand(), a.pullReviewDeleteCommand(), a.pullReviewDismissCommand(true), a.pullReviewDismissCommand(false))
 	return review
 }
 
-func (a *application) pullReviewReplyCommand() *cobra.Command {
-	var body, file string
+// reviewCreateCommand builds gt pr review and its explicit form gt pr review create.
+func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
+	var kind reviewType
+	var body, file, commentsFile, commit string
 	var useEditor bool
-	cmd := &cobra.Command{Use: "reply <number> <comment-id>", Short: "Reply to an inline review comment", Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+	cmd := &cobra.Command{Use: use, Short: short, Annotations: pullArgumentsAnnotation(nil), Args: reviewArgs, RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var draft terminal.Draft
 		defer finishDraft(&draft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
 			return err
 		}
-		n, err := number(args[0])
+		state, err := kind.state()
 		if err != nil {
 			return err
 		}
-		id, err := number(args[1])
+		comments, err := readInlineComments(commentsFile)
 		if err != nil {
 			return err
 		}
-		if useEditor {
+		if state == "" {
+			if localFlagsChanged(cmd) || !a.canPrompt() || a.deps.ReviewForm == nil {
+				return errReviewType(cmd)
+			}
+			return a.reviewInteractively(cmd, args)
+		}
+		// A comment needs a body or inline comments, and a change request a body.
+		needsBody := state == "REQUEST_CHANGES" || (state != "APPROVED" && len(comments) == 0)
+		missingBody := clierr.Wrap(clierr.Usage, fmt.Errorf("a %s needs a body; pass --body, --body-file or --editor", reviewNouns[state]))
+		explicit := cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file")
+		if body, err = a.readBody(cmd, body, file); err != nil {
+			return err
+		}
+		if needsBody && strings.TrimSpace(body) == "" && (explicit || (!useEditor && !a.canPrompt())) {
+			return missingBody
+		}
+		t, n, err := a.pullSelector(cmd, args)
+		if err != nil {
+			return err
+		}
+		pull, err := (services.Pulls{Client: t.client, Repository: t.Repo}).View(cmd.Context(), n)
+		if err != nil {
+			return err
+		}
+		if err := ownReview(pull, t, state); err != nil {
+			return err
+		}
+		switch {
+		case useEditor:
 			draft, err = a.editDraft(cmd, "")
-			body = draft.Body
-		} else {
-			body, err = a.readBody(cmd, body, file)
+		case needsBody && !explicit:
+			draft, err = a.bodyEditor(cmd)(cmd.Context(), "")
+		default:
+			draft.Body = body
 		}
 		if err != nil {
 			return err
 		}
-		prompted := false
-		if !useEditor && !cmd.Flags().Changed("body") && !cmd.Flags().Changed("body-file") {
-			prompted, err = a.require(cmd, &body, "body")
-			if err != nil {
-				return err
-			}
+		if body = draft.Body; needsBody && strings.TrimSpace(body) == "" {
+			return missingBody
 		}
-		if strings.TrimSpace(body) == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("reply body cannot be empty"))
-		}
-		target, err := a.resolve(cmd.Context(), true)
+		item, err := (services.Reviews{Client: t.client, Repository: t.Repo}).Create(cmd.Context(), n, services.ReviewOptions{Event: state, Body: body, Commit: commit, Comments: comments})
 		if err != nil {
 			return err
 		}
-		if prompted {
-			if err := a.confirm(cmd, fmt.Sprintf("Reply to review comment %d on %s#%d: %s", id, target.Repo, n, body)); err != nil {
-				return err
-			}
-		}
-		item, err := (services.Reviews{Client: target.client, Repository: target.Repo}).Reply(cmd.Context(), n, id, body)
-		if err != nil {
-			return err
-		}
-		return writeRecord(a, cmd, item, func(item services.ReviewComment) terminal.Record {
-			return terminal.Record{Heading: terminal.Row(strconv.FormatInt(item.ID, 10)), Lines: []string{item.Body, item.URL}}
-		})
+		return a.reportReview(cmd, t, pull, item)
 	}}
-	cmd.Flags().BoolVar(&useEditor, "editor", false, "Write the reply in the configured editor")
-	cmd.Flags().StringVar(&body, "body", "", "Reply body")
-	cmd.Flags().StringVar(&file, "body-file", "", "Read body from file, or - for stdin")
+	kind.register(cmd, true)
+	cmd.Flags().StringVarP(&body, "body", "b", "", "Review body")
+	cmd.Flags().StringVarP(&file, "body-file", "F", "", "Read the body from `file`, or - for stdin")
+	cmd.Flags().BoolVarP(&useEditor, "editor", "e", false, "Write the body in your editor")
+	cmd.Flags().StringVar(&commentsFile, "comments-file", "", "Read inline comments from a JSON `file`: an array of path, body, and new_position or old_position")
+	cmd.Flags().StringVar(&commit, "commit", "", "Commit `sha` to review (default: the head of the pull request)")
+	cmd.ValidArgsFunction = a.completePulls("open")
 	return cmd
 }
 
-func reviewRecord(item services.Review) terminal.Record {
-	return terminal.Record{Heading: terminal.Row(strconv.FormatInt(item.ID, 10), item.State, item.Author), Lines: []string{item.Body, item.URL}}
+// canPrompt reports whether gt may ask questions on this terminal.
+func (a *application) canPrompt() bool {
+	s, err := a.deps.Settings.Load()
+	return err == nil && a.policy(s).CanPrompt(a.deps.Streams)
 }
 
-func (a *application) createReviewInteractively(cmd *cobra.Command, n int64) (runErr error) {
-	target, err := a.resolve(cmd.Context(), true)
+// ownReview refuses to approve or request changes on one's own pull request before any body is
+// written, as Gitea would after.
+func ownReview(pull services.Pull, t target, state string) error {
+	if (state == "APPROVED" || state == "REQUEST_CHANGES") && t.login() != "" && strings.EqualFold(pull.Author, t.login()) {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("you can't approve or request changes on your own pull request #%d; use --comment", pull.Number))
+	}
+	return nil
+}
+
+// reportReview reports a submitted review, then prints its URL, or the review as JSON.
+func (a *application) reportReview(cmd *cobra.Command, t target, pull services.Pull, item services.Review) error {
+	a.done(cmd, "%s pull request %s", reviewVerbs[item.State], refLabel(t.Repo, pull.Number, pull.Title))
+	switch {
+	case a.options.json != "":
+		return a.writeJSON(cmd, item)
+	case item.URL != "":
+		return a.printURL(cmd, item.URL)
+	}
+	return nil
+}
+
+// readInlineComments reads the inline comments of --comments-file, a JSON array.
+func readInlineComments(path string) ([]services.InlineComment, error) {
+	if path == "" {
+		return nil, nil
+	}
+	if path == "-" {
+		return nil, clierr.Wrap(clierr.Usage, errors.New("--comments-file requires a file; use --body-file - for stdin"))
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	var comments []services.InlineComment
+	if err := decoder.Decode(&comments); err != nil {
+		return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid inline comments: %w", err))
+	}
+	if comments == nil {
+		return nil, clierr.Wrap(clierr.Usage, errors.New("inline comments must be a JSON array"))
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, clierr.Wrap(clierr.Usage, errors.New("inline comments file must contain exactly one JSON array"))
+	}
+	for _, comment := range comments {
+		if err := comment.Validate(); err != nil {
+			return nil, clierr.Wrap(clierr.Usage, err)
+		}
+	}
+	return comments, nil
+}
+
+// reviewInteractively asks for the review type, body and inline comments, then submits the review.
+func (a *application) reviewInteractively(cmd *cobra.Command, args []string) error {
+	t, n, err := a.pullSelector(cmd, args)
 	if err != nil {
 		return err
 	}
-	values, err := a.deps.ReviewForm.CreateReview(cmd.Context(), terminal.ReviewFormChoices{
-		ReviewDiff: func(context.Context) ([]terminal.ReviewCommentDraft, error) {
-			return a.collectDiffReviewComments(cmd, target, n)
-		},
-		EditBody: a.bodyEditor(cmd),
-	})
-	defer finishDraft(&values.Draft, &runErr)
+	pull, err := (services.Pulls{Client: t.client, Repository: t.Repo}).View(cmd.Context(), n)
 	if err != nil {
 		return err
 	}
-	opts := services.ReviewOptions{Event: values.Event, Body: values.Body}
-	for _, comment := range values.Comments {
-		opts.Comments = append(opts.Comments, services.InlineComment(comment))
-	}
-	description := fmt.Sprintf("Submit %s review on %s#%d", values.Event, target.Repo, n)
-	if values.Body != "" {
-		description += ": " + values.Body
-	}
-	if err := a.confirm(cmd, description); err != nil {
-		return err
-	}
-	item, err := (services.Reviews{Client: target.client, Repository: target.Repo}).Create(cmd.Context(), n, opts)
+	preferences, err := a.preferences()
 	if err != nil {
 		return err
 	}
-	return writeRecord(a, cmd, item, reviewRecord)
+	choices := terminal.ReviewFormChoices{
+		Header: fmt.Sprintf("Reviewing #%d %q (%s → %s) in %s", n, pull.Title, pullHead(pull, t.Repo), pull.Base, t.Repo),
+		Author: t.login() != "" && strings.EqualFold(pull.Author, t.login()),
+		Editor: preferences.Editor,
+	}
+	if preferences.Editor != "" {
+		choices.ReviewDiff = func(context.Context) ([]terminal.ReviewCommentDraft, error) {
+			return a.collectDiffReviewComments(cmd, t, n)
+		}
+	}
+	values, err := a.deps.ReviewForm.CreateReview(cmd.Context(), choices)
+	if err == nil {
+		err = a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Submit %s for #%d?", reviewNouns[values.Event], n), DefaultYes: true})
+	}
+	var item services.Review
+	if err == nil {
+		opts := services.ReviewOptions{Event: values.Event, Body: values.Body}
+		for _, comment := range values.Comments {
+			opts.Comments = append(opts.Comments, services.InlineComment(comment))
+		}
+		item, err = (services.Reviews{Client: t.client, Repository: t.Repo}).Create(cmd.Context(), n, opts)
+	}
+	if err != nil {
+		draft := keepDraft(values.Body)
+		finishDraft(&draft, &err)
+		return err
+	}
+	return a.reportReview(cmd, t, pull, item)
+}
+
+// keepDraft saves typed text that a canceled or failed command did not submit, so that finishDraft
+// reports where it is. Empty text, or text that cannot be saved, has no draft.
+func keepDraft(body string) terminal.Draft {
+	if strings.TrimSpace(body) == "" {
+		return terminal.Draft{}
+	}
+	file, err := os.CreateTemp("", "gt-draft-*.md")
+	if err != nil {
+		return terminal.Draft{}
+	}
+	_, writeErr := file.WriteString(body)
+	if err := errors.Join(writeErr, file.Close()); err != nil {
+		_ = os.Remove(file.Name())
+		return terminal.Draft{}
+	}
+	return terminal.Draft{Path: file.Name(), Body: body}
+}
+
+// pullHead names the head branch of a pull request, as OWNER:BRANCH when it is in a fork of repo.
+func pullHead(item services.Pull, repo string) string {
+	if owner, _, ok := strings.Cut(item.HeadRepo, "/"); ok && !strings.EqualFold(item.HeadRepo, repo) {
+		return owner + ":" + item.Head
+	}
+	return item.Head
 }
 
 func (a *application) collectDiffReviewComments(cmd *cobra.Command, t target, n int64) ([]terminal.ReviewCommentDraft, error) {
@@ -333,4 +418,250 @@ func (a *application) reviewDiffFile(cmd *cobra.Command, path string) ([]termina
 		}
 	}
 	return comments, nil
+}
+
+// reviewStateCell words a review's state for people, colored like gh: Approved, Changes requested,
+// Commented, Pending or Requested, with "(dismissed)" for dismissed reviews.
+func reviewStateCell(item services.Review) terminal.Cell {
+	words := map[string]terminal.Cell{
+		"APPROVED": {Text: "Approved", Color: "green"}, "REQUEST_CHANGES": {Text: "Changes requested", Color: "red"},
+		"COMMENT": {Text: "Commented"}, "PENDING": {Text: "Pending", Color: "yellow"}, "REQUEST_REVIEW": {Text: "Requested", Muted: true},
+	}
+	cell, ok := words[item.State]
+	if !ok {
+		cell = terminal.Cell{Text: item.State}
+	}
+	if item.Dismissed {
+		cell = terminal.Cell{Text: cell.Text + " (dismissed)", Muted: true}
+	}
+	return cell
+}
+
+// reviewPossessive names a review by its author and state in feedback: "bob's approval".
+func reviewPossessive(item services.Review) string {
+	noun := "review"
+	switch item.State {
+	case "APPROVED":
+		noun = "approval"
+	case "REQUEST_CHANGES":
+		noun = "change request"
+	}
+	return item.Author + "'s " + noun
+}
+
+// pullAndID resolves the pull request and the ID that review subcommands take as their two arguments.
+func (a *application) pullAndID(cmd *cobra.Command, args []string) (target, int64, int64, error) {
+	id, err := number(args[1])
+	if err != nil {
+		return target{}, 0, 0, err
+	}
+	t, n, err := a.pullSelector(cmd, args[:1])
+	return t, n, id, err
+}
+
+func (a *application) pullReviewListCommand() *cobra.Command {
+	var limit, page int
+	cmd := &cobra.Command{Use: "list [<number> | <url> | <branch>]", Short: "List reviews on a pull request", Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+		t, n, err := a.pullSelector(cmd, args)
+		if err != nil {
+			return err
+		}
+		items, err := (services.Reviews{Client: t.client, Repository: t.Repo}).List(cmd.Context(), n, limit, page)
+		if err != nil {
+			return err
+		}
+		ref := fmt.Sprintf("%s#%d", t.Repo, n)
+		return writeTable(a, cmd, items, listSpec[services.Review]{
+			Columns: []terminal.Column{{Header: "ID"}, {Header: "Reviewer"}, {Header: "State"}, {Header: "Submitted"}, {Header: "Comments"}, {Header: "Body", Flex: true}},
+			Row: func(item services.Review) []terminal.Cell {
+				return []terminal.Cell{
+					{Text: strconv.FormatInt(item.ID, 10), Link: item.URL},
+					{Text: item.Author},
+					reviewStateCell(item),
+					{Time: terminal.ParseTime(item.SubmittedAt)},
+					{Text: strconv.Itoa(item.CommentsCount)},
+					{Text: item.Body},
+				}
+			},
+			Empty: "no reviews on " + ref, Context: "reviews on " + ref,
+		}, listPage{Number: page, More: len(items) == limit})
+	}}
+	pageFlags(cmd, &limit, &page)
+	cmd.Example = `$ gt pr review list 13
+$ gt pr review list --json id,author,state`
+	cmd.ValidArgsFunction = a.completePulls("all")
+	return cmd
+}
+
+func (a *application) pullReviewViewCommand() *cobra.Command {
+	cmd := &cobra.Command{Use: "view <number> <review-id>", Short: "View a review", Annotations: pullArgumentsAnnotation(nil), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) error {
+		t, n, id, err := a.pullAndID(cmd, args)
+		if err != nil {
+			return err
+		}
+		item, err := (services.Reviews{Client: t.client, Repository: t.Repo}).View(cmd.Context(), n, id)
+		if err != nil {
+			return err
+		}
+		now := a.deps.Now()
+		return writeView(a, cmd, item, func(item services.Review) terminal.View {
+			meta := item.Author
+			if submitted := terminal.ParseTime(item.SubmittedAt); !submitted.IsZero() {
+				meta += " • " + terminal.RelativeTime(now, submitted)
+			}
+			return terminal.View{
+				Title: fmt.Sprintf("Review on %s#%d", t.Repo, n), ID: strconv.FormatInt(item.ID, 10), Badges: []terminal.Cell{reviewStateCell(item)}, Meta: meta,
+				Fields: []terminal.Field{
+					{Label: "Reviewer", Value: item.Author, PipedOnly: true},
+					{Label: "State", Value: item.State, PipedOnly: true},
+					{Label: "Inline comments", Value: strconv.Itoa(item.CommentsCount)},
+					{Label: "Commit", Value: item.Commit},
+				},
+				Body: item.Body, Kind: "review", URL: item.URL,
+			}
+		})
+	}}
+	cmd.Example = "$ gt pr review view 13 6"
+	cmd.ValidArgsFunction = a.completeReviewArgs(false)
+	return cmd
+}
+
+func (a *application) pullReviewCommentsCommand() *cobra.Command {
+	var limit, page int
+	var reviewID int64
+	cmd := &cobra.Command{Use: "comments [<number> | <url> | <branch>]", Short: "List inline review comments", Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+		if reviewID < 0 {
+			return clierr.Wrap(clierr.Usage, errors.New("--review must be a positive review ID"))
+		}
+		t, n, err := a.pullSelector(cmd, args)
+		if err != nil {
+			return err
+		}
+		items, err := (services.Reviews{Client: t.client, Repository: t.Repo}).Comments(cmd.Context(), n, reviewID, limit, page)
+		if err != nil {
+			return err
+		}
+		ref := fmt.Sprintf("%s#%d", t.Repo, n)
+		return writeTable(a, cmd, items, listSpec[services.ReviewComment]{
+			Columns: []terminal.Column{{Header: "ID"}, {Header: "File"}, {Header: "Author"}, {Header: "Resolved"}, {Header: "Body", Flex: true}},
+			Row: func(item services.ReviewComment) []terminal.Cell {
+				location := item.Path
+				if item.Line > 0 {
+					location = fmt.Sprintf("%s:%d", item.Path, item.Line)
+				}
+				return []terminal.Cell{{Text: strconv.FormatInt(item.ID, 10), Link: item.URL}, {Text: location}, {Text: item.Author}, {Text: item.Resolver}, {Text: item.Body}}
+			},
+			Empty: "no inline review comments on " + ref, Context: "inline review comments on " + ref,
+		}, listPage{Number: page, More: len(items) == limit})
+	}}
+	pageFlags(cmd, &limit, &page)
+	cmd.Flags().Int64Var(&reviewID, "review", 0, "Limit comments to one review `ID`")
+	cmd.Example = `$ gt pr review comments 13
+$ gt pr review comments 13 --review 6`
+	cmd.ValidArgsFunction = a.completePulls("all")
+	return cmd
+}
+
+func (a *application) pullReviewResolveCommand(resolve bool) *cobra.Command {
+	verb, short, done := "resolve", "Mark an inline conversation as resolved", "Resolved"
+	if !resolve {
+		verb, short, done = "unresolve", "Reopen a resolved inline conversation", "Reopened"
+	}
+	cmd := &cobra.Command{Use: verb + " <comment-id>", Short: short, Annotations: textOutput("conversation state changes do not return a resource"), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := number(args[0])
+		if err != nil {
+			return err
+		}
+		t, err := a.resolve(cmd.Context(), true)
+		if err != nil {
+			return err
+		}
+		if err := (services.Reviews{Client: t.client, Repository: t.Repo}).Resolve(cmd.Context(), id, resolve); err != nil {
+			return err
+		}
+		a.done(cmd, "%s conversation of review comment %d in %s", done, id, t.Repo)
+		return nil
+	}}
+	cmd.Example = fmt.Sprintf("# Find the comment IDs with: gt pr review comments 13\n$ gt pr review %s 36", verb)
+	return cmd
+}
+
+func (a *application) pullReviewReplyCommand() *cobra.Command {
+	var body, file string
+	var useEditor bool
+	cmd := &cobra.Command{Use: "reply <number> <comment-id>", Short: "Reply to an inline review comment", Annotations: pullArgumentsAnnotation(nil), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+		var draft terminal.Draft
+		defer finishDraft(&draft, &runErr)
+		if err := validateBodySources(cmd); err != nil {
+			return err
+		}
+		t, n, id, err := a.pullAndID(cmd, args)
+		if err != nil {
+			return err
+		}
+		if useEditor {
+			draft, err = a.editDraft(cmd, "")
+			body = draft.Body
+		} else {
+			body, err = a.readBody(cmd, body, file)
+		}
+		if err != nil {
+			return err
+		}
+		if !useEditor && !cmd.Flags().Changed("body") && !cmd.Flags().Changed("body-file") {
+			if !a.canPrompt() {
+				return clierr.Wrap(clierr.Usage, errors.New("a reply needs a body; pass --body, --body-file or --editor"))
+			}
+			if draft, err = a.bodyEditor(cmd)(cmd.Context(), ""); err != nil {
+				return err
+			}
+			body = draft.Body
+		}
+		if strings.TrimSpace(body) == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("reply body cannot be empty"))
+		}
+		item, err := (services.Reviews{Client: t.client, Repository: t.Repo}).Reply(cmd.Context(), n, id, body)
+		if err != nil {
+			return err
+		}
+		a.done(cmd, "Replied to review comment %d on %s#%d", id, t.Repo, n)
+		if a.options.json != "" {
+			return a.writeJSON(cmd, item)
+		}
+		return a.printURL(cmd, item.URL)
+	}}
+	cmd.Flags().StringVarP(&body, "body", "b", "", "Reply body")
+	cmd.Flags().StringVarP(&file, "body-file", "F", "", "Read the body from `file`, or - for stdin")
+	cmd.Flags().BoolVarP(&useEditor, "editor", "e", false, "Write the reply in your editor")
+	cmd.Example = `$ gt pr review reply 13 36 -b "Done, the password is hashed now"`
+	cmd.ValidArgsFunction = a.completeReviewArgs(true)
+	return cmd
+}
+
+// completeReviewArgs completes an open pull request, then the IDs of its reviews, or of its inline
+// review comments when inline is set.
+func (a *application) completeReviewArgs(inline bool) cobra.CompletionFunc {
+	pulls := a.completePulls("open")
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return pulls(cmd, args, toComplete)
+		}
+		n, err := number(args[0])
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+			service := services.Reviews{Client: t.client, Repository: t.Repo}
+			if inline {
+				items, err := service.Comments(ctx, n, 0, completionLimit, 1)
+				return describe(items, func(item services.ReviewComment) (string, string) {
+					return strconv.FormatInt(item.ID, 10), item.Author + " on " + item.Path + ": " + item.Body
+				}), err
+			}
+			items, err := service.List(ctx, n, completionLimit, 1)
+			return describe(items, func(item services.Review) (string, string) {
+				return strconv.FormatInt(item.ID, 10), reviewStateCell(item).Text + " by " + item.Author
+			}), err
+		})(cmd, args, toComplete)
+	}
 }

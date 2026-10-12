@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -26,73 +25,73 @@ func TestDefaultPullTitle(t *testing.T) {
 	}
 }
 
-func TestPullFormMarksRequiredFields(t *testing.T) {
+func TestPullFormAsksTitleBodyThenWhatsNext(t *testing.T) {
+	known := PullFormChoices{Repo: "alice/x", BaseOwner: "alice", Base: "main", HeadOwner: "alice", HeadBranch: "feature", Title: "Seeded", Body: "Seeded body", AllowMaintainerEdits: true}
 	for _, tc := range []struct {
-		name, input   string
-		choices       PullFormChoices
-		want, without []string
+		name, input string
+		choices     PullFormChoices
+		want        PullFormValues
+		err         error
+		rendered    []string
+		hidden      []string
 	}{
 		{
-			"without head", "n\nmain\nalice\nfeature\ny\nTitle\n",
-			PullFormChoices{},
-			[]string{"Target branch (required):", "Source branch (required):", "Title (required):"},
-			nil,
+			name: "submit", input: "Seeded\n\n1\n", choices: known,
+			want:     PullFormValues{IssueFormValues: IssueFormValues{Title: "Seeded", Body: "Seeded body"}, Base: "main", Head: "feature", Topic: "feature", AllowMaintainerEdits: true},
+			rendered: []string{"Creating pull request for feature into main in alice/x", "Title (required):", BodyTitle, "What's next?", "Change branches"},
+			hidden:   []string{"Base branch", "AGit", "Issue", "Add metadata"},
 		},
 		{
-			"with head", "n\n\n\n\n\nTitle\n",
-			PullFormChoices{Base: "main", HeadOwner: "alice", HeadBranch: "feature"},
-			[]string{"Source branch:", "Allow maintainers to push to the source branch:"},
-			[]string{"Source branch (required)"},
+			name: "submit as draft", input: "Add login\n\n2\n", choices: known,
+			want: PullFormValues{IssueFormValues: IssueFormValues{Title: "Add login", Body: "Seeded body"}, Base: "main", Head: "feature", Topic: "feature", AllowMaintainerEdits: true, AsDraft: true},
 		},
-		{"agit", "y\nmain\ntopic\nTitle\n", PullFormChoices{}, []string{"Topic branch (required):"}, nil},
+		{name: "cancel", input: "Seeded\n\n4\n", choices: known, err: ErrCanceled},
+		{
+			name: "unknown head asks the branches first", input: "main\nn\nbob\nfix-typo\n\n\nFix Typo\n\n1\n", choices: PullFormChoices{Repo: "alice/x", BaseOwner: "alice", Base: "main"},
+			want:     PullFormValues{IssueFormValues: IssueFormValues{Title: "Fix Typo"}, Base: "main", Head: "bob:fix-typo"},
+			rendered: []string{"Base branch (required):", "Push through AGit", "Head branch (required):", "Creating pull request for bob:fix-typo into main in alice/x"},
+		},
+		{
+			name: "metadata", input: "Seeded\n\n3\n2\n2026-12-24\n1\n", choices: func() PullFormChoices {
+				c := known
+				c.CanPush, c.Milestones = true, []IssueMilestoneChoice{{Title: "v1.0", ID: 4}}
+				return c
+			}(),
+			want:     PullFormValues{IssueFormValues: IssueFormValues{Title: "Seeded", Body: "Seeded body", Milestone: 4, Deadline: mustDueDate(t, "2026-12-24")}, Base: "main", Head: "feature", Topic: "feature", AllowMaintainerEdits: true},
+			rendered: []string{"Add metadata (assignees, labels, milestone, due date)", "Milestone:", "Due date:"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p, rendered := accessiblePrompter(t, tc.input)
-			tc.choices.EditBody = noEdit
-			_, err := p.CreatePull(context.Background(), tc.choices)
+			p, rendered := linePrompter(t, tc.input)
+			values, err := p.CreatePull(context.Background(), tc.choices)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				return
+			}
 			require.NoError(t, err)
-			for _, want := range tc.want {
+			require.Equal(t, tc.want, values)
+			for _, want := range tc.rendered {
 				require.Contains(t, rendered.String(), want)
 			}
-			for _, unwanted := range tc.without {
+			for _, unwanted := range tc.hidden {
 				require.NotContains(t, rendered.String(), unwanted)
 			}
 		})
 	}
 }
 
-// stagedInput feeds one form's keystrokes per stage. A finished form's canceled read loop can still be inside Read,
-// and bubbletea drops the byte that Read returns. When a stage runs dry, the finished form's loop blocks first and
-// the next form's loop second, so the next stage is handed to that second reader and never to the stale one.
-type stagedInput struct {
-	mu     sync.Mutex
-	cur    string
-	stages []string
-	idle   int
-}
-
-func (s *stagedInput) Read(p []byte) (int, error) {
-	s.mu.Lock()
-	for s.cur == "" {
-		s.idle++
-		if s.idle < 2 || len(s.stages) == 0 {
-			s.mu.Unlock()
-			select {} // no more input for this reader; the loop is abandoned with its form
-		}
-		s.cur, s.stages, s.idle = s.stages[0], s.stages[1:], 0
-	}
-	p[0], s.cur = s.cur[0], s.cur[1:]
-	s.mu.Unlock()
-	return 1, nil
+func mustDueDate(t *testing.T, raw string) *time.Time {
+	t.Helper()
+	due, err := parseDueDate(raw)
+	require.NoError(t, err)
+	return due
 }
 
 func TestCreatePullPreservesDraftOnEditorFailure(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	path := filepath.Join(t.TempDir(), "draft.md")
 	called := false
-	p, _ := testPrompter(&stagedInput{cur: "n\r", stages: []string{"main\ralice\rfeature\ry\r", "Title\r"}})
-	values, err := p.CreatePull(ctx, PullFormChoices{
+	p, _ := linePrompter(t, "Title\n")
+	values, err := p.CreatePull(context.Background(), PullFormChoices{
 		BaseOwner: "alice", Base: "main", HeadOwner: "alice", HeadBranch: "feature",
 		EditBody: func(context.Context, string) (Draft, error) {
 			called = true

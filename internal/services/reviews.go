@@ -4,10 +4,12 @@
 package services
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -103,6 +105,21 @@ func (s Reviews) List(ctx context.Context, n int64, limit, page int) ([]Review, 
 	return convertAll(reviews, reviewFrom), nil
 }
 
+// Pending returns the reviews that login started on pull request n and has not submitted yet.
+func (s Reviews) Pending(ctx context.Context, n int64, login string) ([]Review, error) {
+	reviews, err := s.All(ctx, n)
+	if err != nil {
+		return nil, err
+	}
+	pending := []Review{}
+	for _, review := range reviews {
+		if review.State == string(gitea.ReviewStatePending) && strings.EqualFold(review.Author, login) {
+			pending = append(pending, review)
+		}
+	}
+	return pending, nil
+}
+
 // View retrieves a review belonging to the selected pull request.
 func (s Reviews) View(ctx context.Context, n, id int64) (Review, error) {
 	return repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
@@ -193,14 +210,57 @@ func (s Reviews) Comments(ctx context.Context, n, reviewID int64, limit, page in
 	return pageOf(results, limit, page)
 }
 
-// Thread returns every review and every inline review comment of a pull request.
-func (s Reviews) Thread(ctx context.Context, n int64) ([]Review, []ReviewComment, error) {
-	reviews, err := listAll(func(page int) ([]Review, error) { return s.List(ctx, n, 100, page) })
-	if err != nil {
-		return nil, nil, err
+// All returns every review of a pull request, including requests for a review.
+func (s Reviews) All(ctx context.Context, n int64) ([]Review, error) {
+	return listAll(func(page int) ([]Review, error) { return s.List(ctx, n, 100, page) })
+}
+
+// Inline returns the inline comments of the given reviews of pull request n.
+func (s Reviews) Inline(ctx context.Context, n int64, reviews []Review) ([]ReviewComment, error) {
+	return s.reviewComments(ctx, n, reviews, true)
+}
+
+// LatestReviews returns each reviewer's latest review, in the order of their first review. Pending
+// reviews, which only their author sees, are left out; a later request for a review replaces a review.
+func LatestReviews(reviews []Review) []Review {
+	reviews = slices.Clone(reviews)
+	slices.SortStableFunc(reviews, func(x, y Review) int { return cmp.Compare(x.ID, y.ID) })
+	at := map[string]int{}
+	var latest []Review
+	for _, review := range reviews {
+		if review.Author == "" || review.State == string(gitea.ReviewStatePending) {
+			continue
+		}
+		if i, ok := at[review.Author]; ok {
+			latest[i] = review
+			continue
+		}
+		at[review.Author] = len(latest)
+		latest = append(latest, review)
 	}
-	comments, err := s.reviewComments(ctx, n, reviews, true)
-	return reviews, comments, err
+	return latest
+}
+
+// ReviewDecision summarizes the latest reviews like gh: changes_requested when a reviewer's latest
+// review requests changes, else approved when one approves, else review_required while reviews
+// are requested, else "". Dismissed reviews do not count.
+func ReviewDecision(latest []Review, requested bool) string {
+	decision := ""
+	for _, review := range latest {
+		switch {
+		case review.Dismissed:
+		case review.State == string(gitea.ReviewStateRequestChanges):
+			return "changes_requested"
+		case review.State == string(gitea.ReviewStateApproved):
+			decision = "approved"
+		case review.State == string(gitea.ReviewStateRequestReview):
+			requested = true
+		}
+	}
+	if decision == "" && requested {
+		return "review_required"
+	}
+	return decision
 }
 
 func (s Reviews) reviewComments(ctx context.Context, n int64, reviews []Review, skipEmpty bool) ([]ReviewComment, error) {

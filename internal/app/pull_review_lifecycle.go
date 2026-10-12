@@ -6,6 +6,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -14,131 +15,209 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func (a *application) pullReviewLifecycleCommand(verb string) *cobra.Command {
-	var body, file, event string
+func (a *application) pullReviewSubmitCommand() *cobra.Command {
+	var kind reviewType
+	var body, file string
 	var useEditor bool
-	cmd := &cobra.Command{Use: verb + " <number> <review-id>", Short: titleCase(verb) + " a pull request review", Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+	cmd := &cobra.Command{Use: "submit [<number> | <url> | <branch>] [<review-id>]", Short: "Submit your pending review", Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(2)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var draft terminal.Draft
 		defer finishDraft(&draft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
 			return err
 		}
-		n, err := number(args[0])
+		state, err := kind.state()
 		if err != nil {
 			return err
 		}
-		id, err := number(args[1])
+		if state == "" {
+			return errReviewType(cmd)
+		}
+		missingBody := clierr.Wrap(clierr.Usage, errors.New("a change request needs a body; pass --body, --body-file or --editor"))
+		var supplied *string
+		if cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") {
+			if body, err = a.readBody(cmd, body, file); err != nil {
+				return err
+			}
+			if state == "REQUEST_CHANGES" && strings.TrimSpace(body) == "" {
+				return missingBody
+			}
+			supplied = &body
+		}
+		var id int64
+		if len(args) == 2 {
+			if id, err = number(args[1]); err != nil {
+				return err
+			}
+		}
+		t, n, err := a.pullSelector(cmd, args[:min(len(args), 1)])
 		if err != nil {
 			return err
 		}
-		if verb == "submit" {
-			if err := oneOf("event", event, "APPROVED", "REQUEST_CHANGES", "COMMENT"); err != nil {
-				return err
-			}
-		}
-		var suppliedBody *string
-		if verb == "submit" || verb == "dismiss" {
-			body, err = a.readBody(cmd, body, file)
-			if err != nil {
-				return err
-			}
-			if cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") {
-				suppliedBody = &body
-			}
-			if verb == "dismiss" {
-				if suppliedBody == nil && !useEditor {
-					if _, err := a.require(cmd, &body, "body"); err != nil {
-						return err
-					}
-				}
-				if strings.TrimSpace(body) == "" && !useEditor {
-					return clierr.Wrap(clierr.Usage, errors.New("supply a non-empty dismissal reason with --body or --body-file"))
-				}
-			} else if suppliedBody != nil && strings.TrimSpace(body) == "" && event == "REQUEST_CHANGES" {
-				return clierr.Wrap(clierr.Usage, errors.New("review body cannot be empty for REQUEST_CHANGES"))
-			}
-		}
-		target, err := a.resolve(cmd.Context(), true)
+		pull, err := (services.Pulls{Client: t.client, Repository: t.Repo}).View(cmd.Context(), n)
 		if err != nil {
 			return err
 		}
-		service := services.Reviews{Client: target.client, Repository: target.Repo}
-		if useEditor {
-			initial := ""
-			if verb == "submit" {
-				current, err := service.View(cmd.Context(), n, id)
-				if err != nil {
-					return err
-				}
-				initial = current.Body
-			}
-			draft, err = a.editDraft(cmd, initial)
-			if err != nil {
-				return err
-			}
-			body = draft.Body
-			suppliedBody = &body
-			if strings.TrimSpace(body) == "" && (verb == "dismiss" || event == "REQUEST_CHANGES") {
-				return clierr.Wrap(clierr.Usage, errors.New("supply non-empty review text in the editor"))
-			}
+		if err := ownReview(pull, t, state); err != nil {
+			return err
 		}
-		if verb == "delete" || verb == "dismiss" {
-			message := fmt.Sprintf("%s review %d on %s#%d", verb, id, target.Repo, n)
-			if verb == "dismiss" {
-				message += ": " + body
-			}
-			if err := a.confirm(cmd, message); err != nil {
+		service := services.Reviews{Client: t.client, Repository: t.Repo}
+		if id == 0 {
+			if id, err = a.pendingReview(cmd, service, t, n, state); err != nil {
 				return err
 			}
 		}
-		if verb == "submit" && event == "REQUEST_CHANGES" && suppliedBody == nil {
+		if useEditor || (supplied == nil && state == "REQUEST_CHANGES") {
 			current, err := service.View(cmd.Context(), n, id)
 			if err != nil {
 				return err
 			}
-			body = current.Body
-			if strings.TrimSpace(body) == "" {
-				body = ""
-				if _, err := a.require(cmd, &body, "body"); err != nil {
+			supplied = &current.Body
+			if useEditor {
+				if draft, err = a.editDraft(cmd, current.Body); err != nil {
 					return err
 				}
-				if strings.TrimSpace(body) == "" {
-					return clierr.Wrap(clierr.Usage, errors.New("review body cannot be empty for REQUEST_CHANGES"))
-				}
-				if err := a.confirm(cmd, fmt.Sprintf("Submit REQUEST_CHANGES review on %s#%d: %s", target.Repo, n, body)); err != nil {
-					return err
-				}
+				supplied = &draft.Body
 			}
-			suppliedBody = &body
 		}
-		if verb == "delete" {
-			if err := service.Delete(cmd.Context(), n, id); err != nil {
-				return err
-			}
-			_, err := fmt.Fprintf(cmd.ErrOrStderr(), "Deleted review %d\n", id)
-			return err
+		if state == "REQUEST_CHANGES" && strings.TrimSpace(*supplied) == "" {
+			return missingBody
 		}
-		var item services.Review
-		if verb == "submit" {
-			item, err = service.Submit(cmd.Context(), n, id, services.ReviewSubmitOptions{Event: event, Body: suppliedBody})
-		} else {
-			item, err = service.Dismiss(cmd.Context(), n, id, verb == "dismiss", body)
-		}
+		item, err := service.Submit(cmd.Context(), n, id, services.ReviewSubmitOptions{Event: state, Body: supplied})
 		if err != nil {
 			return err
 		}
-		return writeRecord(a, cmd, item, reviewRecord)
+		return a.reportReview(cmd, t, pull, item)
 	}}
-	if verb == "submit" || verb == "dismiss" {
-		cmd.Flags().BoolVar(&useEditor, "editor", false, "Edit review text in the configured editor")
-		cmd.Flags().StringVar(&body, "body", "", "Review body or dismissal reason (submission preserves draft body when omitted)")
-		cmd.Flags().StringVar(&file, "body-file", "", "Read body from file, or - for stdin")
+	kind.register(cmd, false)
+	cmd.Flags().StringVarP(&body, "body", "b", "", "Review body (default: the body of the pending review)")
+	cmd.Flags().StringVarP(&file, "body-file", "F", "", "Read the body from `file`, or - for stdin")
+	cmd.Flags().BoolVarP(&useEditor, "editor", "e", false, "Edit the body of the pending review in your editor")
+	cmd.Example = `# Start a pending review, then submit it as an approval
+$ gt pr review 13 --pending -b "First pass" --comments-file inline.json
+$ gt pr review submit 13 --approve
+
+# Submit a pending review by its ID
+$ gt pr review submit 13 21 --request-changes -b "See the inline comments"`
+	cmd.ValidArgsFunction = a.completeReviewArgs(false)
+	return cmd
+}
+
+// pendingReview finds the pending review that the account started on pull request n.
+func (a *application) pendingReview(cmd *cobra.Command, service services.Reviews, t target, n int64, state string) (int64, error) {
+	pending, err := service.Pending(cmd.Context(), n, t.login())
+	if err != nil {
+		return 0, err
 	}
-	if verb == "submit" {
-		cmd.Flags().StringVar(&event, "event", "COMMENT", "Review event: APPROVED, REQUEST_CHANGES, COMMENT")
+	switch len(pending) {
+	case 0:
+		flag := map[string]string{"APPROVED": "--approve", "REQUEST_CHANGES": "--request-changes", "COMMENT": "--comment"}[state]
+		return 0, fmt.Errorf("no pending review by %s on %s#%d; to post a new review run: gt pr review %d %s", t.login(), t.Repo, n, n, flag)
+	case 1:
+		return pending[0].ID, nil
 	}
-	if verb == "delete" {
-		cmd.Annotations = textOutput("review deletion does not return a resource")
+	ids := make([]string, len(pending))
+	for i, review := range pending {
+		ids[i] = strconv.FormatInt(review.ID, 10)
 	}
+	return 0, clierr.Wrap(clierr.Usage, fmt.Errorf("%s has several pending reviews on %s#%d (%s); pass a review ID", t.login(), t.Repo, n, strings.Join(ids, ", ")))
+}
+
+func (a *application) pullReviewDeleteCommand() *cobra.Command {
+	cmd := &cobra.Command{Use: "delete <number> <review-id>", Short: "Delete a review", Annotations: pullArgumentsAnnotation(textOutput("review deletion does not return a resource")), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) error {
+		t, n, id, err := a.pullAndID(cmd, args)
+		if err != nil {
+			return err
+		}
+		service := services.Reviews{Client: t.client, Repository: t.Repo}
+		item, err := service.View(cmd.Context(), n, id)
+		if err != nil {
+			return err
+		}
+		subject := fmt.Sprintf("review %d by %s on %s#%d", id, item.Author, t.Repo, n)
+		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + "?", NonTTY: "delete " + subject}); err != nil {
+			return err
+		}
+		if err := service.Delete(cmd.Context(), n, id); err != nil {
+			return err
+		}
+		a.done(cmd, "Deleted %s", subject)
+		return nil
+	}}
+	cmd.Annotations["gt.confirm"] = "true"
+	cmd.Example = "$ gt pr review delete 13 21"
+	cmd.ValidArgsFunction = a.completeReviewArgs(false)
+	return cmd
+}
+
+func (a *application) pullReviewDismissCommand(dismiss bool) *cobra.Command {
+	var body, file string
+	var useEditor bool
+	use, short := "undismiss <number> <review-id>", "Restore a dismissed review"
+	if dismiss {
+		use, short = "dismiss <number> <review-id>", "Dismiss an approval or change request"
+	}
+	cmd := &cobra.Command{Use: use, Short: short, Annotations: pullArgumentsAnnotation(nil), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+		var draft terminal.Draft
+		defer finishDraft(&draft, &runErr)
+		var err error
+		if dismiss {
+			if err := validateBodySources(cmd); err != nil {
+				return err
+			}
+			switch {
+			case useEditor:
+				draft, err = a.editDraft(cmd, "")
+				body = draft.Body
+			case cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file"):
+				body, err = a.readBody(cmd, body, file)
+			default:
+				_, err = a.requireInput(cmd, &body, "body", "Reason for dismissing the review", nil)
+			}
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(body) == "" {
+				return clierr.Wrap(clierr.Usage, errors.New("a dismissal needs a reason; pass --body, --body-file or --editor"))
+			}
+		}
+		t, n, id, err := a.pullAndID(cmd, args)
+		if err != nil {
+			return err
+		}
+		service := services.Reviews{Client: t.client, Repository: t.Repo}
+		current, err := service.View(cmd.Context(), n, id)
+		if err != nil {
+			return err
+		}
+		subject := fmt.Sprintf("%s on %s#%d", reviewPossessive(current), t.Repo, n)
+		if dismiss {
+			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Dismiss " + subject + "?", NonTTY: "dismiss " + subject}); err != nil {
+				return err
+			}
+		}
+		item, err := service.Dismiss(cmd.Context(), n, id, dismiss, body)
+		if err != nil {
+			return err
+		}
+		if dismiss {
+			a.done(cmd, "Dismissed %s", subject)
+		} else {
+			a.done(cmd, "Restored %s", subject)
+		}
+		if a.options.json != "" {
+			return a.writeJSON(cmd, item)
+		}
+		return nil
+	}}
+	if dismiss {
+		cmd.Annotations["gt.confirm"] = "true"
+		cmd.Flags().StringVarP(&body, "body", "b", "", "Reason for dismissing the review (required)")
+		cmd.Flags().StringVarP(&file, "body-file", "F", "", "Read the reason from `file`, or - for stdin")
+		cmd.Flags().BoolVarP(&useEditor, "editor", "e", false, "Write the reason in your editor")
+		cmd.Example = `$ gt pr review dismiss 13 6 -b "Approved an outdated revision"`
+	} else {
+		cmd.Example = "$ gt pr review undismiss 13 6"
+	}
+	cmd.ValidArgsFunction = a.completeReviewArgs(false)
 	return cmd
 }

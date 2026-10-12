@@ -416,7 +416,6 @@ func walkCommands(cmd *cobra.Command, visit func(*cobra.Command)) {
 // have yet to complete; see TestHelpTextsAreComplete.
 const (
 	shortsToFix = `
-	pr review cancel-request
 `
 	examplesToWrite = `
 	issue attachment delete
@@ -457,39 +456,13 @@ const (
 	pr attachment list
 	pr attachment upload
 	pr attachment view
-	pr checkout
-	pr checks
-	pr clean
-	pr close
 	pr comment create
 	pr comment delete
 	pr comment edit
 	pr comment list
 	pr comment view
-	pr create
-	pr diff
-	pr edit
-	pr list
-	pr merge
-	pr reopen
-	pr review
-	pr review cancel-request
-	pr review comments
-	pr review delete
-	pr review dismiss
-	pr review list
-	pr review reply
-	pr review request
-	pr review resolve
-	pr review submit
-	pr review undismiss
-	pr review unresolve
-	pr review view
-	pr status
-	pr view
 	search issue
 	search pr
-	status
 	time create
 	time delete
 	time list
@@ -502,7 +475,6 @@ const (
 	label
 	milestone
 	milestone issue
-	pr
 	pr attachment
 	pr comment
 	time

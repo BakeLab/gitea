@@ -5,6 +5,7 @@ package terminal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -17,19 +18,25 @@ type ReviewCommentDraft struct {
 	OldLine, NewLine int64
 }
 
-// ReviewFormChoices supplies callbacks for interactive pull review.
+// ReviewFormChoices describes the pull request under review and how its review is collected.
 type ReviewFormChoices struct {
-	// ReviewDiff, when non-nil, runs after the user opts into annotating the diff.
+	// Header introduces the form, such as `Reviewing #1 "Add one.txt" (feat/one → main) in alice/x`.
+	Header string
+	// Author leaves out approving and requesting changes, which Gitea refuses on one's own pull request.
+	Author bool
+	// Body seeds the review body.
+	Body string
+	// Editor is the configured editor command that ctrl+e opens on the body; empty disables it.
+	Editor string
+	// ReviewDiff, when non-nil, offers to annotate the diff in the editor after the body.
 	ReviewDiff func(context.Context) ([]ReviewCommentDraft, error)
-	EditBody   BodyEditor
 }
 
-// ReviewFormValues holds interactively collected review fields.
+// ReviewFormValues holds an interactively collected review: its API state, body and inline comments.
 type ReviewFormValues struct {
 	Event    string
 	Body     string
 	Comments []ReviewCommentDraft
-	Draft    Draft
 }
 
 // ReviewForm collects interactive pull review input.
@@ -37,58 +44,65 @@ type ReviewForm interface {
 	CreateReview(context.Context, ReviewFormChoices) (ReviewFormValues, error)
 }
 
-// CreateReview runs the interactive review form on stderr.
+// errEmptyComment rejects a comment review with neither a body nor inline comments.
+var errEmptyComment = errors.New("a comment review needs a body or inline comments")
+
+// CreateReview asks for the review type, then the body, then whether to annotate the diff, on stderr.
 func (p *FormPrompter) CreateReview(ctx context.Context, choices ReviewFormChoices) (ReviewFormValues, error) {
-	var comments []ReviewCommentDraft
-	if choices.ReviewDiff != nil {
-		reviewDiff := true
-		if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(
-			huh.NewConfirm().Title("Review / comment the diff?").Value(&reviewDiff),
-		))); err != nil {
-			return ReviewFormValues{}, err
-		}
-		if reviewDiff {
-			parsed, err := choices.ReviewDiff(ctx)
-			if err != nil {
-				return ReviewFormValues{}, fmt.Errorf("diff review failed: %w", err)
-			}
-			comments = append(comments, parsed...)
-			fmt.Fprintf(p.Streams.ErrOut, "Found %d code comments in your review\n", len(comments))
-		}
+	if choices.Header != "" {
+		fmt.Fprintln(p.Streams.ErrOut, SafeLine(choices.Header))
 	}
-
-	event := "COMMENT"
+	options := []huh.Option[string]{huh.NewOption("Comment", "COMMENT")}
+	if !choices.Author {
+		options = append([]huh.Option[string]{huh.NewOption("Approve", "APPROVED"), huh.NewOption("Request changes", "REQUEST_CHANGES")}, options...)
+	}
+	values := ReviewFormValues{Event: options[0].Value, Body: choices.Body}
 	if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(
-		huh.NewSelect[string]().Title("Your assessment:").Options(
-			huh.NewOption("comment", "COMMENT"),
-			huh.NewOption("request changes", "REQUEST_CHANGES"),
-			huh.NewOption("approve", "APPROVED"),
-		).Value(&event),
+		huh.NewSelect[string]().Title("Review type:").Options(options...).Value(&values.Event),
 	))); err != nil {
-		return ReviewFormValues{}, err
+		return values, err
 	}
 
-	body := ""
-	values := ReviewFormValues{Event: event, Comments: comments}
-	required := (event == "COMMENT" && len(comments) == 0) || event == "REQUEST_CHANGES"
-	if choices.EditBody != nil {
-		var err error
-		if body, values.Draft, err = editBody(ctx, choices.EditBody, ""); err != nil {
+	// A comment can consist of inline comments alone, which are collected after the body.
+	required := values.Event == "REQUEST_CHANGES" || (values.Event == "COMMENT" && choices.ReviewDiff == nil)
+	title := "Body (markdown, optional):"
+	if required {
+		title = "Body (markdown, required):"
+	}
+	args, editor := commandArgs(choices.Editor)
+	if editor {
+		title = strings.TrimSuffix(title, "):") + ", ctrl+e opens your editor):"
+	}
+	body := bodyField(title, &values.Body)
+	if editor {
+		body = body.ExternalEditor(true).Editor(args...).EditorExtension("md")
+	}
+	if required {
+		body = body.Validate(huh.ValidateNotEmpty())
+	}
+	if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(body))); err != nil {
+		return values, err
+	}
+	values.Body = strings.TrimSpace(values.Body)
+
+	if choices.ReviewDiff != nil {
+		annotate := false
+		if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(
+			huh.NewConfirm().Title("Annotate the diff in your editor?").Value(&annotate),
+		))); err != nil {
 			return values, err
 		}
-	} else {
-		field := bodyField("Concluding comment (markdown):", &body)
-		if required {
-			field = field.Title("Concluding comment (markdown, required):").Validate(huh.ValidateNotEmpty())
-		}
-		if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(field))); err != nil {
-			return ReviewFormValues{}, err
+		if annotate {
+			comments, err := choices.ReviewDiff(ctx)
+			if err != nil {
+				return values, fmt.Errorf("diff review failed: %w", err)
+			}
+			values.Comments = comments
+			fmt.Fprintf(p.Streams.ErrOut, "Found %d inline comments in the annotated diff\n", len(comments))
 		}
 	}
-	body = strings.TrimSpace(body)
-	if required && body == "" {
-		return values, fmt.Errorf("concluding comment cannot be empty")
+	if values.Event == "COMMENT" && values.Body == "" && len(values.Comments) == 0 {
+		return values, errEmptyComment
 	}
-	values.Body = body
 	return values, nil
 }

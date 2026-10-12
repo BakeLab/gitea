@@ -75,21 +75,19 @@ var errNoMatchingRemote = errors.New("no Git remote matches the selected reposit
 func (a *application) pullCheckoutCommand() *cobra.Command {
 	var branch string
 	var detached, update bool
-	cmd := &cobra.Command{Use: "checkout <number>", Short: "Check out a pull request in a matching branch or detached HEAD", Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		n, err := number(args[0])
-		if err != nil {
-			return err
-		}
+	cmd := &cobra.Command{Use: "checkout {<number> | <url> | <branch>}", Aliases: []string{"co"}, Short: "Check out a pull request", Long: `Check out the head of a pull request in a local branch.
+
+The branch takes the name of the pull request's head branch when that name is free or
+already points at the head; otherwise it is OWNER/BRANCH for a fork, or pr/NUMBER. gt
+records the pull request in the branch's Git configuration, so that pr commands without an
+argument select it, and the branch tracks the head branch, so that git push updates it.`, Annotations: pullArgumentsAnnotation(nil), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if detached && (cmd.Flags().Changed("branch") || update) {
 			return clierr.Wrap(clierr.Usage, errors.New("--detach and --branch/--update are mutually exclusive"))
 		}
 		if cmd.Flags().Changed("branch") && strings.TrimSpace(branch) == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--branch cannot be empty"))
 		}
-		if branch == "" && !detached {
-			branch = fmt.Sprintf("pr/%d", n)
-		}
-		target, err := a.resolve(cmd.Context(), true)
+		target, n, err := a.pullSelector(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -107,6 +105,9 @@ func (a *application) pullCheckoutCommand() *cobra.Command {
 		}
 		if pull.HeadSHA == "" {
 			return errors.New("Gitea did not return the PR head commit")
+		}
+		if branch == "" && !detached {
+			branch = a.checkoutBranchName(cmd.Context(), target, pull)
 		}
 		rawRemote, err := a.git(cmd.Context(), "remote", "get-url", remote)
 		if err != nil {
@@ -146,20 +147,42 @@ func (a *application) pullCheckoutCommand() *cobra.Command {
 			return a.writeJSON(cmd, result)
 		}
 		if result.Detached {
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Checked out %s in detached HEAD\n", result.Commit)
-			return err
+			a.done(cmd, "Checked out #%d at %s (detached HEAD)", n, shortSHA(result.Commit))
+		} else {
+			a.done(cmd, "Checked out #%d into %s", n, result.Branch)
 		}
-		if result.Tracking != "" {
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Checked out %s (%s) tracking %s\n", result.Branch, result.Commit, result.Tracking)
-			return err
-		}
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Checked out %s (%s)\n", result.Branch, result.Commit)
-		return err
+		return nil
 	}}
 	cmd.Flags().BoolVar(&update, "update", false, "Fast-forward an existing branch to the PR head; reject divergence")
 	cmd.Flags().BoolVar(&detached, "detach", false, "Check out the PR commit without creating or changing a branch")
-	cmd.Flags().StringVarP(&branch, "branch", "b", "", "Local branch name (default: pr/NUMBER; existing branch must match PR head)")
+	cmd.Flags().StringVarP(&branch, "branch", "b", "", "Local branch name (default: the head branch name when free, else OWNER/BRANCH or pr/NUMBER)")
+	cmd.ValidArgsFunction = a.completePulls("open")
+	cmd.Example = `$ gt pr checkout 13
+$ gt pr co feature/login
+$ gt pr checkout 13 --branch review-13
+$ gt pr checkout 13 --update`
 	return cmd
+}
+
+// checkoutBranchName names the local branch for a pull request (D13): its head branch name when
+// that is free or already at the head, else OWNER/BRANCH for a fork, else pr/NUMBER. A branch that
+// an earlier checkout of the same pull request created is reused, so that --update can advance it.
+func (a *application) checkoutBranchName(ctx context.Context, t target, pull services.Pull) string {
+	fallback := fmt.Sprintf("pr/%d", pull.Number)
+	if pull.HeadRemoteDeleted || pull.Head == "" {
+		return fallback
+	}
+	candidates := []string{pull.Head}
+	if owner, _, _ := strings.Cut(pull.HeadRepo, "/"); owner != "" && !strings.EqualFold(pull.HeadRepo, t.Repo) {
+		candidates = append(candidates, owner+"/"+pull.Head)
+	}
+	for _, name := range candidates {
+		tip, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "refs/heads/"+name+"^{commit}")
+		if err != nil || tip == pull.HeadSHA || git.ReadBranchConfig(ctx, a.gitProbe(), a.options.cwd, name).PullNumber == pull.Number {
+			return name
+		}
+	}
+	return fallback
 }
 
 // ensureHeadRemote returns the remote holding the PR head, adding one when none matches.

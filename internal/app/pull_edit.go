@@ -5,6 +5,7 @@ package app
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -14,46 +15,39 @@ import (
 )
 
 func (a *application) pullEditCommand() *cobra.Command {
-	var title, body, file, base string
-	var deadline string
-	var draft, ready, maintainer bool
-	var useEditor bool
-	var milestone int64
-	var milestoneName string
+	var title, body, file, base, deadline, milestone string
+	var draft, ready, maintainer, useEditor, removeMilestone bool
 	var metadata metadataFlags
 	var reviewers services.ReviewRequestChanges
-	cmd := &cobra.Command{Use: "edit <number>", Short: "Edit pull request content, base, and draft state", Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+	cmd := &cobra.Command{Use: "edit [<number> | <url> | <branch>]", Short: "Edit a pull request", Long: `Edit the title, body, base branch, reviewers, labels, assignees, milestone or due date of a
+pull request, or mark it as a draft or ready for review.`, Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var editorDraft terminal.Draft
 		defer finishDraft(&editorDraft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
 			return err
 		}
-		n, err := number(args[0])
-		if err != nil {
-			return err
-		}
 		if draft && ready {
 			return clierr.Wrap(clierr.Usage, errors.New("--draft and --ready are mutually exclusive"))
 		}
-		if err := validateMilestoneFlags(cmd, milestoneName, milestone); err != nil {
-			return err
+		if removeMilestone && cmd.Flags().Changed("milestone") {
+			return clierr.Wrap(clierr.Usage, errors.New("--milestone and --remove-milestone are mutually exclusive"))
+		}
+		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 0 {
+			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID, or 0 for none"))
 		}
 		opts := services.PullEdit{}
+		var err error
 		if cmd.Flags().Changed("deadline") {
-			opts.Deadline, opts.RemoveDeadline, err = parseDeadline(deadline)
-			if err != nil {
+			if opts.Deadline, opts.RemoveDeadline, err = parseDeadline(deadline); err != nil {
 				return err
 			}
 		}
-		if cmd.Flags().Changed("add-reviewers") || cmd.Flags().Changed("remove-reviewers") || cmd.Flags().Changed("add-reviewer-teams") || cmd.Flags().Changed("remove-reviewer-teams") {
+		if cmd.Flags().Changed("add-reviewer") || cmd.Flags().Changed("remove-reviewer") || cmd.Flags().Changed("add-reviewer-team") || cmd.Flags().Changed("remove-reviewer-team") {
 			trimNames(reviewers.Add.Users, reviewers.Remove.Users, reviewers.Add.Teams, reviewers.Remove.Teams)
 			if err := reviewers.Validate(); err != nil {
 				return clierr.Wrap(clierr.Usage, err)
 			}
 			opts.ReviewerChanges = &reviewers
-		}
-		if cmd.Flags().Changed("milestone") {
-			opts.Milestone = &milestone
 		}
 		if err := metadata.validate(cmd); err != nil {
 			return err
@@ -65,8 +59,7 @@ func (a *application) pullEditCommand() *cobra.Command {
 			opts.Title = &title
 		}
 		if cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") {
-			body, err = a.readBody(cmd, body, file)
-			if err != nil {
+			if body, err = a.readBody(cmd, body, file); err != nil {
 				return err
 			}
 			opts.Body = &body
@@ -80,49 +73,49 @@ func (a *application) pullEditCommand() *cobra.Command {
 		if cmd.Flags().Changed("allow-maintainer-edit") {
 			opts.AllowMaintainerEdit = &maintainer
 		}
-		if opts == (services.PullEdit{}) && !useEditor && !draft && !ready && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone-name") {
-			return clierr.Wrap(clierr.Usage, errors.New("supply an edit flag; see gt pr edit --help"))
+		if opts == (services.PullEdit{}) && !useEditor && !draft && !ready && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone") && !removeMilestone {
+			return clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --title (see gt pr edit --help)"))
 		}
-		target, err := a.resolve(cmd.Context(), true)
+		t, n, err := a.pullSelector(cmd, args)
 		if err != nil {
 			return err
 		}
-		if cmd.Flags().Changed("milestone-name") {
-			milestone, err = (services.Milestones{Client: target.client, Repository: target.Repo}).ResolveName(cmd.Context(), milestoneName)
+		switch {
+		case removeMilestone || milestone == "0" || (cmd.Flags().Changed("milestone") && milestone == ""):
+			var none int64
+			opts.Milestone = &none
+		case milestone != "":
+			id, err := milestoneFilter(cmd.Context(), t, milestone)
 			if err != nil {
 				return err
 			}
-			opts.Milestone = &milestone
+			opts.Milestone = &id
 		}
-		if opts.Labels, opts.Assignees, opts.Changes, err = metadata.resolve(cmd, target); err != nil {
+		if opts.ReviewerChanges != nil {
+			t.expandMeAll(reviewers.Add.Users)
+			t.expandMeAll(reviewers.Remove.Users)
+		}
+		if opts.Labels, opts.Assignees, opts.Changes, err = metadata.resolve(cmd, t); err != nil {
 			return err
 		}
-		service := services.Pulls{Client: target.client, Repository: target.Repo}
+		service := services.Pulls{Client: t.client, Repository: t.Repo}
+		var current services.Pull
+		if ((draft || ready) && opts.Title == nil) || useEditor {
+			if current, err = service.View(cmd.Context(), n); err != nil {
+				return err
+			}
+		}
 		if draft || ready {
 			if opts.Title == nil {
-				current, err := service.View(cmd.Context(), n)
-				if err != nil {
-					return err
-				}
 				title = current.Title
 			}
-			if draft {
-				title = services.AddDraftPrefix(title)
-			} else {
-				title = services.StripDraftPrefix(title)
-			}
-			if strings.TrimSpace(title) == "" {
-				return clierr.Wrap(clierr.Usage, errors.New("draft marker removal leaves an empty title; supply --title"))
+			if title = draftTitle(title, draft); strings.TrimSpace(title) == "" {
+				return clierr.Wrap(clierr.Usage, errors.New("removing the draft marker leaves an empty title; pass --title"))
 			}
 			opts.Title = &title
 		}
 		if useEditor {
-			current, err := service.View(cmd.Context(), n)
-			if err != nil {
-				return err
-			}
-			editorDraft, err = a.editDraft(cmd, current.Body)
-			if err != nil {
+			if editorDraft, err = a.editDraft(cmd, current.Body); err != nil {
 				return err
 			}
 			opts.Body = &editorDraft.Body
@@ -131,23 +124,97 @@ func (a *application) pullEditCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return writeRecord(a, cmd, item, pullRecord)
+		a.done(cmd, "Edited pull request %s", refLabel(t.Repo, n, item.Title))
+		if a.options.json != "" {
+			return a.writeJSON(cmd, item)
+		}
+		return nil
 	}}
-	cmd.Flags().StringVar(&title, "title", "", "Pull request title")
+	cmd.Flags().StringVarP(&title, "title", "t", "", "Pull request title")
 	cmd.Flags().StringVar(&deadline, "deadline", "", "Due date: YYYY-MM-DD, RFC3339, or Unix timestamp; empty clears")
-	cmd.Flags().StringVar(&body, "body", "", "Pull request body (empty clears)")
-	cmd.Flags().StringVar(&file, "body-file", "", "Read body from file, or - for stdin")
-	cmd.Flags().BoolVar(&useEditor, "editor", false, "Edit the current pull request body in the configured editor")
-	cmd.Flags().StringVar(&base, "base", "", "Target branch")
-	cmd.Flags().BoolVar(&draft, "draft", false, "Mark the pull request as a draft")
-	cmd.Flags().BoolVar(&ready, "ready", false, "Remove the draft title marker")
-	cmd.Flags().BoolVar(&maintainer, "allow-maintainer-edit", false, "Allow maintainers to modify the head branch")
-	cmd.Flags().StringVar(&milestoneName, "milestone-name", "", "Milestone by exact title; conflicts with --milestone")
-	cmd.Flags().Int64Var(&milestone, "milestone", 0, "Milestone ID; 0 clears")
+	cmd.Flags().StringVarP(&body, "body", "b", "", "Pull request body (empty clears)")
+	cmd.Flags().StringVarP(&file, "body-file", "F", "", "Read the body from `file`, or - for stdin")
+	cmd.Flags().BoolVarP(&useEditor, "editor", "e", false, "Edit the current body in your editor")
+	cmd.Flags().StringVarP(&base, "base", "B", "", "Base branch")
+	cmd.Flags().BoolVar(&draft, "draft", false, "Mark the pull request as a draft (same as gt pr ready --undo)")
+	cmd.Flags().BoolVar(&ready, "ready", false, "Mark the pull request as ready for review (same as gt pr ready)")
+	cmd.Flags().BoolVar(&maintainer, "allow-maintainer-edit", false, "Allow maintainers to push to the head branch")
+	cmd.Flags().StringVarP(&milestone, "milestone", "m", "", "Milestone title or ID; 0 removes it")
+	cmd.Flags().BoolVar(&removeMilestone, "remove-milestone", false, "Remove the milestone")
 	metadata.register(cmd)
-	cmd.Flags().StringSliceVar(&reviewers.Add.Users, "add-reviewers", nil, "Request reviews from users")
-	cmd.Flags().StringSliceVar(&reviewers.Remove.Users, "remove-reviewers", nil, "Remove requests for users")
-	cmd.Flags().StringSliceVar(&reviewers.Add.Teams, "add-reviewer-teams", nil, "Request reviews from organization teams")
-	cmd.Flags().StringSliceVar(&reviewers.Remove.Teams, "remove-reviewer-teams", nil, "Remove requests for organization teams")
+	cmd.Flags().StringSliceVar(&reviewers.Add.Users, "add-reviewer", nil, "Request reviews from users; @me for yourself")
+	cmd.Flags().StringSliceVar(&reviewers.Remove.Users, "remove-reviewer", nil, "Withdraw review requests from users")
+	cmd.Flags().StringSliceVar(&reviewers.Add.Teams, "add-reviewer-team", nil, "Request reviews from teams of the repository's organization")
+	cmd.Flags().StringSliceVar(&reviewers.Remove.Teams, "remove-reviewer-team", nil, "Withdraw review requests from teams")
+	flagAliases(cmd, map[string]string{
+		"milestone-name": "milestone", "add-reviewers": "add-reviewer", "remove-reviewers": "remove-reviewer",
+		"add-reviewer-teams": "add-reviewer-team", "remove-reviewer-teams": "remove-reviewer-team",
+	})
+	for _, name := range []string{"add-reviewer", "remove-reviewer"} {
+		_ = cmd.RegisterFlagCompletionFunc(name, a.completeUsers())
+	}
+	_ = cmd.RegisterFlagCompletionFunc("base", a.completeBranches())
+	_ = cmd.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
+	cmd.ValidArgsFunction = a.completePulls("open")
+	cmd.Example = `$ gt pr edit 13 --title "Add login support" --add-reviewer carol
+$ gt pr edit --base develop
+$ gt pr edit 13 --editor`
+	return cmd
+}
+
+// draftTitle marks a title as a draft, the way Gitea recognizes drafts, or removes the marker.
+func draftTitle(title string, draft bool) string {
+	if draft {
+		return services.AddDraftPrefix(title)
+	}
+	return services.StripDraftPrefix(title)
+}
+
+func (a *application) pullReadyCommand() *cobra.Command {
+	var undo bool
+	cmd := &cobra.Command{Use: "ready [<number> | <url> | <branch>]", Short: "Mark a pull request as ready for review", Long: `Mark a draft pull request as ready for review, or with --undo turn it back into a draft.
+
+Gitea treats a pull request as a draft while its title starts with "WIP:" or "[WIP]"; gt
+removes or adds that marker.`, Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+		t, n, err := a.pullSelector(cmd, args)
+		if err != nil {
+			return err
+		}
+		service := services.Pulls{Client: t.client, Repository: t.Repo}
+		item, err := service.View(cmd.Context(), n)
+		if err != nil {
+			return err
+		}
+		ref := refLabel(t.Repo, n, item.Title)
+		if item.Draft == undo {
+			if undo {
+				a.warn(cmd, "Pull request %s is already a draft", ref)
+			} else {
+				a.warn(cmd, "Pull request %s is already ready for review", ref)
+			}
+		} else {
+			title := draftTitle(item.Title, undo)
+			if strings.TrimSpace(title) == "" {
+				return errors.New("removing the draft marker leaves an empty title; set one with: gt pr edit " + strconv.FormatInt(n, 10) + " --title")
+			}
+			if item, err = service.Edit(cmd.Context(), n, services.PullEdit{Title: &title}); err != nil {
+				return err
+			}
+			if undo {
+				a.done(cmd, "Converted pull request %s to a draft", refLabel(t.Repo, n, item.Title))
+			} else {
+				a.done(cmd, "Marked pull request %s as ready for review", refLabel(t.Repo, n, item.Title))
+			}
+		}
+		if a.options.json != "" {
+			return a.writeJSON(cmd, item)
+		}
+		return nil
+	}}
+	cmd.Flags().BoolVar(&undo, "undo", false, "Turn the pull request back into a draft")
+	cmd.ValidArgsFunction = a.completePulls("open")
+	cmd.Example = `$ gt pr ready
+$ gt pr ready 15
+$ gt pr ready 15 --undo`
 	return cmd
 }

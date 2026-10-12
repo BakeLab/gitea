@@ -64,7 +64,7 @@ func TestPullCleanDeletesLocalAndRemoteBranches(t *testing.T) {
 		"rev-parse --verify refs/heads/pr/7^{commit}":    "abc123",
 		"rev-parse --verify refs/heads/main^{commit}":    "mainsha",
 		"symbolic-ref --short HEAD":                      "pr/7",
-		"switch -- main":                                 "",
+		"switch --quiet -- main":                         "",
 		"branch -D -- pr/7":                              "",
 	}}
 	deps.Git = runner
@@ -92,7 +92,7 @@ func TestPullCleanDeletesLocalAndRemoteBranches(t *testing.T) {
 	runner.calls = nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input", "--json", "--yes"}))
 	require.Contains(t, runner.calls, "branch -D -- pr/7")
-	require.Contains(t, runner.calls, "switch -- main")
+	require.Contains(t, runner.calls, "switch --quiet -- main")
 	require.Contains(t, runner.calls, deleteRemote)
 	require.Contains(t, out.String(), `"local_branch":"pr/7"`)
 	require.Contains(t, out.String(), `"remote_deleted":true`)

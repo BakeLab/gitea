@@ -254,7 +254,6 @@ func writeItem[T any](a *application, cmd *cobra.Command, item T, row func(T) []
 // column, keyed by command path without the root. Their owners replace an entry with a listSpec.
 var legacyColumns = map[string][]terminal.Column{
 	"issue list": numberedColumns,
-	"pr list":    numberedColumns,
 }
 
 // numberedColumns head the rows of issueRow and pullRow.
@@ -347,4 +346,9 @@ func yesNo(value bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// shortSHA abbreviates a commit ID to seven characters, as Gitea and Git show them.
+func shortSHA(sha string) string {
+	return sha[:min(len(sha), 7)]
 }

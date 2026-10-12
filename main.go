@@ -33,7 +33,7 @@ func run(ctx context.Context, deps app.Dependencies, args []string) int {
 	}
 	code := clierr.ExitCode(err)
 	switch {
-	case err == nil, code == clierr.Interrupted:
+	case err == nil, code == clierr.Interrupted, clierr.IsQuiet(err):
 	case code == clierr.Canceled && !errors.Is(err, context.DeadlineExceeded):
 		fmt.Fprintln(deps.Streams.ErrOut, "Canceled.")
 	default:

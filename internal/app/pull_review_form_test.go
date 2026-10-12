@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -25,6 +26,10 @@ func (f reviewFormFunc) CreateReview(ctx context.Context, choices terminal.Revie
 func TestPullReviewImplicitInteractiveForm(t *testing.T) {
 	var createPayload map[string]any
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3" {
+			_, _ = w.Write([]byte(`{"number":3,"title":"Add one","user":{"login":"bob"},"head":{"ref":"feat/one"},"base":{"ref":"main"}}`))
+			return
+		}
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Equal(t, "/api/v1/repos/alice/project/pulls/3/reviews", r.URL.Path)
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&createPayload))
@@ -32,12 +37,15 @@ func TestPullReviewImplicitInteractiveForm(t *testing.T) {
 	}))
 	defer server.Close()
 	calls := 0
-	prompt := &scriptedPrompter{accept: true}
+	prompt := &askingPrompter{scriptedPrompter: scriptedPrompter{accept: true}}
 	deps, out, diagnostics := serverDeps(t, server.URL)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "vi"})
 	deps.ReviewForm = reviewFormFunc(func(_ context.Context, choices terminal.ReviewFormChoices) (terminal.ReviewFormValues, error) {
 		calls++
+		require.Equal(t, `Reviewing #3 "Add one" (feat/one → main) in alice/project`, choices.Header)
+		require.False(t, choices.Author)
+		require.Equal(t, "vi", choices.Editor)
 		require.NotNil(t, choices.ReviewDiff)
-		require.NotNil(t, choices.EditBody)
 		return terminal.ReviewFormValues{
 			Event: "APPROVED", Body: "Looks good",
 			Comments: []terminal.ReviewCommentDraft{{Path: "sample.go", Body: "nice", NewLine: 2}},
@@ -47,7 +55,8 @@ func TestPullReviewImplicitInteractiveForm(t *testing.T) {
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "3", "-R", "alice/project", "--json=id,state", "--interactive"}))
 	require.Equal(t, 1, calls)
-	require.Len(t, prompt.confirmations, 1)
+	require.Equal(t, []string{"Submit approval for #3?"}, prompt.confirmations)
+	require.Equal(t, []bool{true}, prompt.defaults)
 	require.Equal(t, "APPROVED", createPayload["event"])
 	require.Equal(t, "Looks good", createPayload["body"])
 	comments, ok := createPayload["comments"].([]any)
@@ -57,10 +66,36 @@ func TestPullReviewImplicitInteractiveForm(t *testing.T) {
 	require.Empty(t, diagnostics.String())
 }
 
+func TestPullReviewFormKeepsTheBodyWhenSubmissionIsDeclined(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method, "nothing may be submitted")
+		_, _ = w.Write([]byte(`{"number":3,"title":"Add one","user":{"login":"alice"},"head":{"ref":"feat/one"},"base":{"ref":"main"}}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.ReviewForm = reviewFormFunc(func(_ context.Context, choices terminal.ReviewFormChoices) (terminal.ReviewFormValues, error) {
+		require.True(t, choices.Author)
+		require.Nil(t, choices.ReviewDiff, "annotating the diff needs an editor")
+		return terminal.ReviewFormValues{Event: "COMMENT", Body: "Self note"}, nil
+	})
+	deps.Prompter = &askingPrompter{}
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	err := Execute(context.Background(), deps, []string{"pr", "review", "3", "-R", "alice/project"})
+	require.ErrorIs(t, err, terminal.ErrCanceled)
+	path := regexp.MustCompile(`draft saved at (\S+)`).FindStringSubmatch(err.Error())
+	require.Len(t, path, 2, err.Error())
+	data, readErr := os.ReadFile(path[1])
+	require.NoError(t, readErr)
+	require.Equal(t, "Self note", string(data))
+	require.NoError(t, os.Remove(path[1]))
+}
+
 func TestPullReviewInteractiveDiffRoundTrip(t *testing.T) {
 	var createPayload map[string]any
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/4":
+			_, _ = w.Write([]byte(`{"number":4,"title":"Add","user":{"login":"bob"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/4.diff":
 			_, _ = w.Write([]byte(`diff --git a/sample.go b/sample.go
 --- a/sample.go
@@ -100,6 +135,10 @@ func TestPullReviewInteractiveDiffRoundTrip(t *testing.T) {
 
 func TestPullReviewDiffFailureKeepsAnnotatedDiff(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project/pulls/4" {
+			_, _ = w.Write([]byte(`{"number":4,"title":"Add","user":{"login":"bob"}}`))
+			return
+		}
 		require.Equal(t, "/api/v1/repos/alice/project/pulls/4.diff", r.URL.Path, "no review may be submitted")
 		_, _ = w.Write([]byte("diff --git a/sample.go b/sample.go\n"))
 	}))

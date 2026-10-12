@@ -6,13 +6,16 @@ package services
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"gitea.dev/cli/internal/transport"
 )
 
-// PullStatus groups open pull requests by the selected account's participation.
+// PullStatus groups open pull requests by the selected account's participation. CurrentBranch is
+// the pull request of the checked-out branch, which commands fill when they know it.
 type PullStatus struct {
+	CurrentBranch   *Pull        `json:"current_branch"`
 	Authored        []SearchItem `json:"authored"`
 	Assigned        []SearchItem `json:"assigned"`
 	ReviewRequested []SearchItem `json:"review_requested"`
@@ -25,8 +28,10 @@ type AccountStatus struct {
 	Repository     string       `json:"repository"`
 	AssignedIssues []SearchItem `json:"assigned_issues"`
 	PullRequests   PullStatus   `json:"pull_requests"`
-	FailingRuns    []Run        `json:"failing_runs"`
-	RunsIncluded   bool         `json:"runs_included"`
+	// Mentions are the open issues and pull requests that mention the account.
+	Mentions     []SearchItem `json:"mentions"`
+	FailingRuns  []Run        `json:"failing_runs"`
+	RunsIncluded bool         `json:"runs_included"`
 }
 
 // Status reuses search and Actions workflows.
@@ -82,10 +87,10 @@ func (s Status) Pulls(ctx context.Context, limit int) (PullStatus, error) {
 	return result, fmt.Errorf("review requests exceeded %d pages", maxListPages)
 }
 
-// Summary reports open assigned issues and pull requests. Actions results are
-// included only when requested and a repository has been selected.
-func (s Status) Summary(ctx context.Context, limit int, runs bool) (AccountStatus, error) {
-	result := AccountStatus{Host: s.Client.BaseURL, Repository: s.Repository, AssignedIssues: []SearchItem{}, FailingRuns: []Run{}}
+// Summary reports open assigned issues and pull requests and mentions. Failing Actions runs of
+// runsRepository are included when it is set and has Actions enabled.
+func (s Status) Summary(ctx context.Context, limit int, runsRepository string) (AccountStatus, error) {
+	result := AccountStatus{Host: s.Client.BaseURL, Repository: runsRepository, AssignedIssues: []SearchItem{}, Mentions: []SearchItem{}, FailingRuns: []Run{}}
 	if limit < 1 || limit > 100 {
 		return result, fmt.Errorf("status limit must be 1..100")
 	}
@@ -98,19 +103,29 @@ func (s Status) Summary(ctx context.Context, limit int, runs bool) (AccountStatu
 	if err != nil {
 		return result, err
 	}
-	result.AssignedIssues, err = (Issues{Client: s.Client, Repository: s.Repository}).Search(ctx, DiscussionSearchOptions{State: "open", Assigned: true, Limit: limit, Page: 1})
+	scoped := Issues{Client: s.Client, Repository: s.Repository}
+	result.AssignedIssues, err = scoped.Search(ctx, DiscussionSearchOptions{State: "open", Assigned: true, Limit: limit, Page: 1})
 	if err != nil {
 		return result, err
 	}
-	if runs && s.Repository != "" {
-		repository, err := (Repositories{Client: s.Client}).View(ctx, s.Repository)
+	for _, pulls := range []bool{false, true} {
+		mentions, err := scoped.Search(ctx, DiscussionSearchOptions{State: "open", Mentioned: true, Pulls: pulls, Limit: limit, Page: 1})
+		if err != nil {
+			return result, err
+		}
+		result.Mentions = append(result.Mentions, mentions...)
+	}
+	slices.SortStableFunc(result.Mentions, func(x, y SearchItem) int { return strings.Compare(y.UpdatedAt, x.UpdatedAt) })
+	result.Mentions = result.Mentions[:min(len(result.Mentions), limit)]
+	if runsRepository != "" {
+		repository, err := (Repositories{Client: s.Client}).View(ctx, runsRepository)
 		if err != nil {
 			return result, err
 		}
 		if !repository.ActionsEnabled {
 			return result, nil
 		}
-		failing, err := (Actions{Client: s.Client, Repository: s.Repository}).Runs(ctx, RunListOptions{Limit: limit, Page: 1, Statuses: []string{"failure", "timed_out"}})
+		failing, err := (Actions{Client: s.Client, Repository: runsRepository}).Runs(ctx, RunListOptions{Limit: limit, Page: 1, Statuses: []string{"failure", "timed_out"}})
 		if err != nil {
 			return result, err
 		}

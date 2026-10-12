@@ -14,8 +14,24 @@ const (
 	Usage          = 2
 	Canceled       = 3
 	Authentication = 4
-	Interrupted    = 130
+	// Pending reports checks that have not finished, like gh pr checks.
+	Pending     = 8
+	Interrupted = 130
 )
+
+// errReported is the message of Quiet errors.
+var errReported = errors.New("the command reported the outcome")
+
+// Quiet exits with code without an error message, for an outcome the command already reported,
+// such as failing checks.
+func Quiet(code int) error {
+	return &Error{Code: code, Err: errReported}
+}
+
+// IsQuiet reports whether err is a Quiet exit code.
+func IsQuiet(err error) bool {
+	return errors.Is(err, errReported)
+}
 
 // Error associates an operation error with a public CLI exit code.
 type Error struct {

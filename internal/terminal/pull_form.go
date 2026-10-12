@@ -5,6 +5,7 @@ package terminal
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -14,6 +15,8 @@ import (
 
 // PullFormChoices supplies defaults and selectable options for interactive PR create.
 type PullFormChoices struct {
+	// Repo is the base repository, named in the form's header.
+	Repo                                   string
 	BaseOwner, Base, HeadOwner, HeadBranch string
 	// Title and Body seed the form; Title applies only while HeadBranch is kept.
 	Title, Body          string
@@ -21,8 +24,9 @@ type PullFormChoices struct {
 	Assignees            []string
 	Milestones           []IssueMilestoneChoice
 	Labels               []IssueLabelChoice
-	CanPush              bool
-	EditBody             BodyEditor
+	// CanPush offers metadata, which needs push access; without it, changing branches offers AGit.
+	CanPush  bool
+	EditBody BodyEditor
 }
 
 // PullFormValues holds interactively collected pull request create fields.
@@ -31,6 +35,8 @@ type PullFormValues struct {
 	Agit                 bool
 	Base, Head, Topic    string
 	AllowMaintainerEdits bool
+	// AsDraft submits the pull request as a draft.
+	AsDraft bool
 }
 
 // PullForm collects interactive pull create input.
@@ -38,69 +44,130 @@ type PullForm interface {
 	CreatePull(context.Context, PullFormChoices) (PullFormValues, error)
 }
 
-// CreatePull runs the interactive pull create form on stderr.
+// pullNext is what the user does after writing a pull request's title and body.
+type pullNext int
+
+const (
+	pullSubmit pullNext = iota
+	pullSubmitDraft
+	pullMetadata
+	pullBranches
+	pullCancel
+)
+
+// CreatePull runs the interactive pull create form on stderr, like gh pr create: the title and
+// body of a pull request from the current branch, then "What's next?" to submit it, submit it as a
+// draft, add metadata, change the branches or cancel. Branches are asked first when unknown.
 func (p *FormPrompter) CreatePull(ctx context.Context, choices PullFormChoices) (PullFormValues, error) {
-	agit, err := p.Confirm(ctx, "Do you want to create an agit flow pull request?")
-	if err != nil {
-		return PullFormValues{}, err
-	}
-
-	base := choices.Base
-	headOwner := choices.HeadOwner
-	headBranch := choices.HeadBranch
-	topic := headBranch
-	allowMaintainerEdits := choices.AllowMaintainerEdits
-
-	fields := []huh.Field{
-		huh.NewInput().Title("Target branch (required):").Value(&base).Validate(huh.ValidateNotEmpty()),
-	}
-	if agit {
-		fields = append(fields, huh.NewInput().Title("Topic branch (required):").Value(&topic).Validate(huh.ValidateNotEmpty()))
-	} else {
-		headField := huh.NewInput().Title("Source branch:").Value(&headBranch)
-		if strings.TrimSpace(headBranch) == "" {
-			headField = headField.Title("Source branch (required):").Validate(huh.ValidateNotEmpty())
+	branches := pullBranchFields{base: choices.Base, headOwner: choices.HeadOwner, headBranch: choices.HeadBranch, allowEdits: choices.AllowMaintainerEdits}
+	branches.topic = branches.headBranch
+	if strings.TrimSpace(branches.base) == "" || strings.TrimSpace(branches.headBranch) == "" {
+		if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(branches.fields(!choices.CanPush)...))); err != nil {
+			return PullFormValues{}, err
 		}
-		fields = append(fields,
-			huh.NewInput().Title("Source repo owner:").Value(&headOwner),
-			headField,
-			huh.NewConfirm().Title("Allow maintainers to push to the source branch:").Value(&allowMaintainerEdits),
-		)
 	}
-	if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(fields...))); err != nil {
-		return PullFormValues{}, err
-	}
+	fmt.Fprintln(p.Streams.ErrOut, SafeLine(branches.header(choices.Repo, choices.BaseOwner)))
 
-	title := DefaultPullTitle(headBranch)
-	if choices.Title != "" && headBranch == choices.HeadBranch {
+	title := DefaultPullTitle(branches.headBranch)
+	if choices.Title != "" && branches.headBranch == choices.HeadBranch {
 		title = choices.Title
 	}
-	// AGit pushes carry only a title and description.
-	properties, err := p.collectIssueProperties(ctx, title, choices.Body, IssueFormChoices{
-		Assignees: choices.Assignees, Milestones: choices.Milestones, Labels: choices.Labels, CanPush: choices.CanPush && !agit,
-		EditBody: choices.EditBody,
-	})
-	if err != nil {
-		return PullFormValues{IssueFormValues: properties}, err
+	fields := issueFields{title: title, body: choices.Body}
+	content := []huh.Field{titleField(&fields.title)}
+	if choices.EditBody == nil {
+		content = append(content, bodyField(BodyTitle, &fields.body))
 	}
+	if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(content...))); err != nil {
+		return PullFormValues{}, err
+	}
+	values := PullFormValues{}
+	var err error
+	if values.Body, values.Draft, err = editBody(ctx, choices.EditBody, fields.body); err != nil {
+		return values, err
+	}
+	for next := pullMetadata; next == pullMetadata || next == pullBranches; {
+		metadata := choices.CanPush && !branches.agit && (len(choices.Assignees)+len(choices.Milestones)+len(choices.Labels) > 0)
+		options := []huh.Option[pullNext]{huh.NewOption("Submit", pullSubmit)}
+		if !branches.agit {
+			options = append(options, huh.NewOption("Submit as draft", pullSubmitDraft))
+		}
+		if metadata {
+			options = append(options, huh.NewOption("Add metadata (assignees, labels, milestone, due date)", pullMetadata))
+		}
+		options = append(options, huh.NewOption("Change branches", pullBranches), huh.NewOption("Cancel", pullCancel))
+		next = pullSubmit
+		if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(huh.NewSelect[pullNext]().Title("What's next?").Options(options...).Value(&next)))); err != nil {
+			return values, err
+		}
+		switch next {
+		case pullMetadata:
+			groups := fields.groups(noBody, true, choices.Assignees, choices.Milestones, choices.Labels)[1:]
+			if err := p.runForm(ctx, huh.NewForm(groups...)); err != nil {
+				return values, err
+			}
+		case pullBranches:
+			if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(branches.fields(!choices.CanPush)...))); err != nil {
+				return values, err
+			}
+			fmt.Fprintln(p.Streams.ErrOut, SafeLine(branches.header(choices.Repo, choices.BaseOwner)))
+		case pullCancel:
+			return values, ErrCanceled
+		}
+		values.AsDraft = next == pullSubmitDraft
+	}
+	values.Title, values.Assignees, values.Milestone, values.Labels = strings.TrimSpace(fields.title), fields.assignees, fields.milestone, fields.labels
+	if values.Deadline, err = parseDueDate(fields.deadline); err != nil {
+		return values, err
+	}
+	values.Agit, values.Base, values.Topic, values.AllowMaintainerEdits = branches.agit, strings.TrimSpace(branches.base), strings.TrimSpace(branches.topic), branches.allowEdits
+	values.Head = branches.head(choices.BaseOwner)
+	return values, nil
+}
 
-	headBranch = strings.TrimSpace(headBranch)
-	headOwner = strings.TrimSpace(headOwner)
-	head := headBranch
-	switch {
-	case agit && head == "":
-		head = "HEAD"
-	case !agit && headOwner != "" && headOwner != choices.BaseOwner:
-		head = headOwner + ":" + headBranch
+// noBody keeps the body out of issueFields.groups, which the pull request form asks separately.
+func noBody(context.Context, string) (Draft, error) { return Draft{}, nil }
+
+// pullBranchFields are the branches of a new pull request.
+type pullBranchFields struct {
+	base, headOwner, headBranch, topic string
+	allowEdits, agit                   bool
+}
+
+// fields asks for the branches; offerAgit adds the choice of an AGit push for users who cannot
+// push to the base repository.
+func (b *pullBranchFields) fields(offerAgit bool) []huh.Field {
+	fields := []huh.Field{huh.NewInput().Title("Base branch (required):").Value(&b.base).Validate(huh.ValidateNotEmpty())}
+	if offerAgit {
+		fields = append(fields, huh.NewConfirm().Title("Push through AGit (refs/for) instead of a branch of your own?").Value(&b.agit))
 	}
-	return PullFormValues{
-		IssueFormValues:      properties,
-		Agit:                 agit,
-		Base:                 strings.TrimSpace(base),
-		Head:                 head,
-		Topic:                strings.TrimSpace(topic),
-		AllowMaintainerEdits: allowMaintainerEdits,
-	}, nil
+	return append(fields,
+		huh.NewInput().Title("Head repository owner:").Value(&b.headOwner),
+		huh.NewInput().Title("Head branch (required):").Value(&b.headBranch).Validate(huh.ValidateNotEmpty()),
+		huh.NewInput().Title("AGit topic (when pushing through AGit):").Value(&b.topic),
+		huh.NewConfirm().Title("Allow maintainers to push to the head branch?").Value(&b.allowEdits),
+	)
+}
+
+// head is the head of the pull request: BRANCH, OWNER:BRANCH for a head in another repository, or
+// HEAD for an AGit push without a branch.
+func (b *pullBranchFields) head(baseOwner string) string {
+	branch, owner := strings.TrimSpace(b.headBranch), strings.TrimSpace(b.headOwner)
+	switch {
+	case b.agit && branch == "":
+		return "HEAD"
+	case !b.agit && owner != "" && owner != baseOwner:
+		return owner + ":" + branch
+	}
+	return branch
+}
+
+// header introduces the pull request: "Creating pull request for feat/one into main in alice/x".
+func (b *pullBranchFields) header(repo, baseOwner string) string {
+	text := fmt.Sprintf("Creating pull request for %s into %s", b.head(baseOwner), strings.TrimSpace(b.base))
+	if repo != "" {
+		text += " in " + repo
+	}
+	return text
 }
 
 // DefaultPullTitle turns a branch-like head into a readable pull title seed.

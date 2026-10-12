@@ -185,7 +185,7 @@ func CleanPull(ctx context.Context, runner Runner, opts CleanOptions) (CleanResu
 	}
 	current, err := run("symbolic-ref", "--short", "HEAD")
 	if err == nil && current == opts.LocalBranch {
-		if _, err := run("switch", "--", opts.DefaultBranch); err != nil {
+		if _, err := run("switch", "--quiet", "--", opts.DefaultBranch); err != nil {
 			return CleanResult{}, fmt.Errorf("could not switch to %s before deleting %s: %w", opts.DefaultBranch, opts.LocalBranch, err)
 		}
 	}

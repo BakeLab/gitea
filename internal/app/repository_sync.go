@@ -155,8 +155,3 @@ func (a *application) reportSync(cmd *cobra.Command, result git.SyncResult, sour
 		a.done(cmd, "Synced %s from %s (fast-forward %s..%s)", result.Branch, source, shortSHA(result.Previous), shortSHA(result.Commit))
 	}
 }
-
-// shortSHA abbreviates a commit ID to seven characters, as Gitea and Git show them.
-func shortSHA(sha string) string {
-	return sha[:min(len(sha), 7)]
-}

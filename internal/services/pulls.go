@@ -5,12 +5,14 @@ package services
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,33 +23,40 @@ import (
 
 // Pull is the stable command representation of a pull request.
 type Pull struct {
-	Author            string          `json:"author"`
-	CreatedAt         string          `json:"created_at"`
-	UpdatedAt         string          `json:"updated_at"`
-	Assignees         []string        `json:"assignees"`
-	Milestone         *IssueMilestone `json:"milestone"`
-	Labels            []Label         `json:"labels"`
-	Deadline          *string         `json:"due_date"`
-	ID                int64           `json:"id"`
-	Number            int64           `json:"number"`
-	Title             string          `json:"title"`
-	Body              string          `json:"body"`
-	URL               string          `json:"url"`
-	State             string          `json:"state"`
-	Merged            bool            `json:"merged"`
-	Mergeable         bool            `json:"mergeable"`
-	Draft             bool            `json:"-"`
-	Base              string          `json:"base"`
-	Head              string          `json:"head"`
-	HeadSHA           string          `json:"head_sha"`
-	HeadRepo          string          `json:"head_repo,omitempty"`
-	HeadRemoteDeleted bool            `json:"head_remote_deleted"`
-	HeadCanPush       bool            `json:"-"`
-	HeadCloneURL      string          `json:"-"`
-	HeadSSHURL        string          `json:"-"`
-	Reviewers         []string        `json:"reviewers"`
-	ReviewerTeams     []string        `json:"reviewer_teams"`
-	Comments          int64           `json:"comments"`
+	Author    string          `json:"author"`
+	CreatedAt string          `json:"created_at"`
+	UpdatedAt string          `json:"updated_at"`
+	Assignees []string        `json:"assignees"`
+	Milestone *IssueMilestone `json:"milestone"`
+	Labels    []Label         `json:"labels"`
+	Deadline  *string         `json:"due_date"`
+	ID        int64           `json:"id"`
+	Number    int64           `json:"number"`
+	Title     string          `json:"title"`
+	Body      string          `json:"body"`
+	URL       string          `json:"url"`
+	State     string          `json:"state"`
+	Merged    bool            `json:"merged"`
+	MergedAt  *string         `json:"merged_at"`
+	// MergedBy, Reviewers and ReviewerTeams are only in responses for one pull request; lists
+	// leave them out.
+	MergedBy  string `json:"merged_by"`
+	Mergeable bool   `json:"mergeable"`
+	Draft     bool   `json:"draft"`
+	// ReviewDecision summarizes the reviews like gh: approved, changes_requested, review_required
+	// or "". Only commands that read the reviews fill it.
+	ReviewDecision    string   `json:"review_decision"`
+	Base              string   `json:"base"`
+	Head              string   `json:"head"`
+	HeadSHA           string   `json:"head_sha"`
+	HeadRepo          string   `json:"head_repo,omitempty"`
+	HeadRemoteDeleted bool     `json:"head_remote_deleted"`
+	HeadCanPush       bool     `json:"-"`
+	HeadCloneURL      string   `json:"-"`
+	HeadSSHURL        string   `json:"-"`
+	Reviewers         []string `json:"reviewers"`
+	ReviewerTeams     []string `json:"reviewer_teams"`
+	Comments          int64    `json:"comments"`
 }
 
 func pullHeadBranch(number int64, ref, label string) (branch string, deleted bool) {
@@ -74,7 +83,8 @@ func pullFrom(pull *gitea.PullRequest) Pull {
 		Author: login(pull.Poster), CreatedAt: timestamp(deref(pull.Created)), UpdatedAt: timestamp(deref(pull.Updated)),
 		Assignees: convertAll(pull.Assignees, login), Milestone: issueMilestoneFrom(pull.Milestone), Labels: convertAll(pull.Labels, labelFrom),
 		Deadline: optionalTimestamp(pull.Deadline), ID: pull.ID, Number: pull.Index, Title: pull.Title, Body: pull.Body,
-		URL: pull.HTMLURL, State: string(pull.State), Merged: pull.HasMerged, Mergeable: pull.Mergeable, Draft: pull.Draft,
+		URL: pull.HTMLURL, State: string(pull.State), Merged: pull.HasMerged, MergedAt: optionalTimestamp(pull.Merged), MergedBy: login(pull.MergedBy),
+		Mergeable: pull.Mergeable, Draft: pull.Draft,
 		Base: base.Ref, Head: headBranch, HeadSHA: head.Sha, HeadRemoteDeleted: remoteDeleted,
 		Reviewers: convertAll(pull.RequestedReviewers, login), Comments: int64(pull.Comments),
 		ReviewerTeams: convertAll(pull.RequestedReviewersTeams, func(team *gitea.Team) string { return team.Name }),
@@ -127,17 +137,71 @@ type Pulls struct {
 	Repository string
 }
 
-// PullListOptions supplies server-supported pull request filters.
+// PullListOptions filters pull requests. State is open, closed, merged or all.
 type PullListOptions struct {
 	State, Sort, Author, Base string
 	Limit, Page               int
 	Milestone                 int64
 	Labels                    []int64
+	// Draft, Head (BRANCH or OWNER:BRANCH), Assignee, Search (text in the title or body) and the
+	// merged state have no server filter; List applies them to every pull request it reads.
+	Draft                  bool
+	Head, Assignee, Search string
+}
+
+// filtered reports whether a filter needs every pull request read.
+func (o PullListOptions) filtered() bool {
+	return o.State == "merged" || o.Draft || o.Head != "" || o.Assignee != "" || o.Search != ""
+}
+
+// matches applies the filters without a server equivalent to item.
+func (o PullListOptions) matches(item Pull) bool {
+	owner, branch, qualified := strings.Cut(o.Head, ":")
+	if !qualified {
+		owner, branch = "", o.Head
+	}
+	headOwner, _, _ := strings.Cut(item.HeadRepo, "/")
+	search := strings.ToLower(o.Search)
+	return (o.State != "merged" || item.Merged) && (!o.Draft || item.Draft) &&
+		(branch == "" || (item.Head == branch && (owner == "" || strings.EqualFold(owner, headOwner)))) &&
+		(o.Assignee == "" || slices.ContainsFunc(item.Assignees, func(name string) bool { return strings.EqualFold(name, o.Assignee) })) &&
+		(search == "" || strings.Contains(strings.ToLower(item.Title), search) || strings.Contains(strings.ToLower(item.Body), search))
 }
 
 // List returns a page of pull requests, even when the server caps its page size below the
 // limit, and reports whether more pull requests follow.
 func (s Pulls) List(ctx context.Context, options PullListOptions) ([]Pull, bool, error) {
+	page, err := s.ListPage(ctx, options)
+	return page.Items, page.More, err
+}
+
+// ListPage is List that also reports how many pull requests match, when the server counts them
+// or every pull request was read for a filter without a server equivalent.
+func (s Pulls) ListPage(ctx context.Context, options PullListOptions) (Page[Pull], error) {
+	if !options.filtered() {
+		return s.listPage(ctx, options)
+	}
+	query := options
+	if query.State == "merged" {
+		query.State = "closed"
+	}
+	all, err := listAll(func(page int) ([]Pull, error) {
+		query.Limit, query.Page = 50, page
+		window, err := s.listPage(ctx, query)
+		return window.Items, err
+	})
+	if err != nil {
+		return Page[Pull]{}, err
+	}
+	matching := slices.DeleteFunc(all, func(item Pull) bool { return !options.matches(item) })
+	items, err := pageOf(matching, options.Limit, options.Page)
+	if err != nil {
+		return Page[Pull]{}, err
+	}
+	return Page[Pull]{Items: items, More: options.Page*options.Limit < len(matching), Total: len(matching), Counted: true}, nil
+}
+
+func (s Pulls) listPage(ctx context.Context, options PullListOptions) (Page[Pull], error) {
 	query := url.Values{"state": {options.State}}
 	if options.Sort != "" {
 		query.Set("sort", options.Sort)
@@ -156,11 +220,11 @@ func (s Pulls) List(ctx context.Context, options PullListOptions) ([]Pull, bool,
 	}
 
 	// TODO(sdk): ListPullRequestsOptions lacks the poster, base_branch, and labels filters.
-	pulls, more, err := rawWindow[*gitea.PullRequest](ctx, s.Client, "repos/"+s.Repository+"/pulls", query, options.Limit, options.Page)
+	page, err := rawPage[*gitea.PullRequest](ctx, s.Client, "repos/"+s.Repository+"/pulls", query, options.Limit, options.Page)
 	if err != nil {
-		return nil, false, err
+		return Page[Pull]{}, err
 	}
-	return convertAll(pulls, pullFrom), more, nil
+	return Page[Pull]{Items: convertAll(page.Items, pullFrom), More: page.More, Total: page.Total, Counted: page.Counted}, nil
 }
 
 // View retrieves one pull request.
@@ -306,10 +370,79 @@ func (s Pulls) Diff(ctx context.Context, n int64) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(diff)), nil
 }
 
-// MergeOptions supplies merge strategy and optional commit text.
+// DeleteHead deletes the head branch of a pull request in its head repository.
+func (s Pulls) DeleteHead(ctx context.Context, item Pull) error {
+	if item.HeadRemoteDeleted || item.Head == "" {
+		return nil
+	}
+	repo := cmp.Or(item.HeadRepo, s.Repository)
+	_, err := repoCall(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) (bool, *gitea.Response, error) {
+		return c.Repositories.DeleteRepoBranch(ctx, owner, name, item.Head)
+	})
+	return err
+}
+
+// Files lists the paths of the files a pull request changes.
+func (s Pulls) Files(ctx context.Context, n int64) ([]string, error) {
+	files, err := listAll(func(page int) ([]*gitea.ChangedFile, error) {
+		return repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.ChangedFile, *gitea.Response, error) {
+			return c.PullRequests.ListPullRequestFiles(ctx, owner, name, n, gitea.ListPullRequestFilesOptions{ListOptions: listOptions(100, page)})
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		if file != nil {
+			paths = append(paths, file.Filename)
+		}
+	}
+	return paths, nil
+}
+
+// MergeOptions supplies merge strategy and optional commit text. Auto merges once the required
+// checks succeed instead of now.
 type MergeOptions struct {
 	Method, Title, Message string
-	DeleteBranch           bool
+	DeleteBranch, Auto     bool
+}
+
+// MergeSettings are the merge styles a repository allows, in Gitea's order, and its merge defaults.
+type MergeSettings struct {
+	Styles       []string
+	Default      string
+	DeleteBranch bool
+}
+
+// MergeSettings reads the merge styles the repository allows and its default style and branch
+// deletion. A default style that is not allowed falls back to the first allowed one.
+func (s Pulls) MergeSettings(ctx context.Context) (MergeSettings, error) {
+	repo, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Repository, *gitea.Response, error) {
+		return c.Repositories.GetRepo(ctx, owner, name)
+	})
+	if err != nil {
+		return MergeSettings{}, err
+	}
+	settings := MergeSettings{Default: string(repo.DefaultMergeStyle), DeleteBranch: repo.DefaultDeleteBranchAfterMerge}
+	for _, style := range []struct {
+		name    gitea.MergeStyle
+		allowed bool
+	}{
+		{gitea.MergeStyleMerge, repo.AllowMerge},
+		{gitea.MergeStyleRebase, repo.AllowRebase},
+		{gitea.MergeStyleRebaseMerge, repo.AllowRebaseMerge},
+		{gitea.MergeStyleSquash, repo.AllowSquash},
+		{gitea.MergeStyleFastForwardOnly, repo.AllowFastForwardOnlyMerge},
+	} {
+		if style.allowed {
+			settings.Styles = append(settings.Styles, string(style.name))
+		}
+	}
+	if !slices.Contains(settings.Styles, settings.Default) && len(settings.Styles) > 0 {
+		settings.Default = settings.Styles[0]
+	}
+	return settings, nil
 }
 
 // Merge merges the pull request's current head with the selected strategy; Gitea refuses the
@@ -322,6 +455,7 @@ func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 	}
 	option := gitea.MergePullRequestOption{
 		Style: gitea.MergeStyle(opts.Method), Title: opts.Title, Message: opts.Message, DeleteBranchAfterMerge: &opts.DeleteBranch,
+		MergeWhenChecksSucceed: opts.Auto,
 	}
 	if pull.Head != nil {
 		option.HeadCommitId = pull.Head.Sha

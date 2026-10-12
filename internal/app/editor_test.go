@@ -132,12 +132,16 @@ func TestCreationEditorSubmitsTypedBodyAndCleansDraft(t *testing.T) {
 	}{
 		{"issue", "/api/v1/repos/alice/project/issues", "", []string{"issue", "create", "--title", "Issue"}},
 		{"pr", "/api/v1/repos/alice/project/pulls", "", []string{"pr", "create", "--title", "PR", "--head", "feature", "--base", "main"}},
-		{"review", "/api/v1/repos/alice/project/pulls/3/reviews", "COMMENT", []string{"pr", "review", "3"}},
+		{"review", "/api/v1/repos/alice/project/pulls/3/reviews", "COMMENT", []string{"pr", "review", "3", "--comment"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if strings.HasPrefix(r.URL.Path, "/api/v1/repos/alice/project/raw/") {
 					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3" {
+					_, _ = w.Write([]byte(`{"number":3}`))
 					return
 				}
 				require.Equal(t, tc.path, r.URL.Path)
@@ -300,7 +304,7 @@ func TestReviewLifecycleEditorRejectsEmptyRequiredText(t *testing.T) {
 			}
 			err := Execute(context.Background(), deps, args)
 			require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-			require.ErrorContains(t, err, "non-empty review text")
+			require.ErrorContains(t, err, "needs a")
 			require.ErrorContains(t, err, "draft saved at "+path)
 			if verb == "submit" {
 				require.Equal(t, "Saved draft", editor.initial)

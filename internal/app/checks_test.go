@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -38,7 +39,8 @@ func TestChecksUseLatestContextAcrossPagesAndReturnFailureWithCleanJSON(t *testi
 	out.Reset()
 	state = "pending"
 	err := Execute(context.Background(), deps, args)
-	require.ErrorContains(t, err, "not all succeeded")
+	require.Equal(t, clierr.Pending, clierr.ExitCode(err))
+	require.True(t, clierr.IsQuiet(err))
 	require.JSONEq(t, `[{"id":2,"name":"build","state":"pending"}]`, out.String())
 	out.Reset()
 	state = "skipped"
@@ -83,4 +85,70 @@ func TestChecksWatchWaitsForRegistrationAndEmitsOneJSONResult(t *testing.T) {
 	err = Execute(ctx, deps, []string{"pr", "checks", "7", "-R", "owner/repo", "--watch"})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, clierr.Canceled, clierr.ExitCode(err))
+}
+
+func TestChecksSummaryAndExitCodes(t *testing.T) {
+	for _, tc := range []struct {
+		name, statuses, want string
+		code                 int
+	}{
+		{
+			name:     "pending",
+			statuses: `[{"id":1,"context":"ci / test (pull_request)","status":"pending","description":"Waiting to run","target_url":"/alice/x/actions/runs/18/jobs/18"}]`,
+			want: "Some checks are still pending\n0 failing, 0 successful, and 1 pending checks\n\n" +
+				"   NAME                      STATUS   DESCRIPTION     LINK\n" +
+				"*  ci / test (pull_request)  pending  Waiting to run  SERVER/alice/x/actions/runs/18/jobs/18\n",
+			code: clierr.Pending,
+		},
+		{
+			name:     "failing",
+			statuses: `[{"id":1,"context":"lint","status":"failure"},{"id":2,"context":"test","status":"success"}]`,
+			want:     "Some checks were not successful\n1 failing, 1 successful, and 0 pending checks\n\n   NAME  STATUS   DESCRIPTION  LINK\nX  lint  failure\n✓  test  success\n",
+			code:     clierr.Failure,
+		},
+		{name: "none", statuses: `[]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/api/v1/repos/alice/x/pulls/8":
+					_, _ = w.Write([]byte(`{"number":8,"head":{"sha":"abc"}}`))
+				case r.URL.Query().Get("page") == "1":
+					_, _ = w.Write([]byte(tc.statuses))
+				default:
+					_, _ = w.Write([]byte(`[]`))
+				}
+			}))
+			defer server.Close()
+			deps, out, diagnostics := serverDeps(t, server.URL)
+			plainTTY(t, &deps, server.URL)
+			err := Execute(context.Background(), deps, []string{"pr", "checks", "8", "-R", "alice/x"})
+			require.Equal(t, tc.code, clierr.ExitCode(err))
+			if tc.code != 0 {
+				require.True(t, clierr.IsQuiet(err), "the summary already reports the outcome")
+			}
+			require.Equal(t, strings.ReplaceAll(tc.want, "SERVER", server.URL), out.String())
+			if tc.want == "" {
+				require.Equal(t, "no checks reported for pull request alice/x#8\n", diagnostics.String())
+			}
+		})
+	}
+}
+
+func TestChecksWatchTimeoutCountsPendingChecks(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/alice/x/pulls/8":
+			_, _ = w.Write([]byte(`{"number":8,"head":{"sha":"abc"}}`))
+		case r.URL.Query().Get("page") == "1":
+			_, _ = w.Write([]byte(`[{"id":1,"context":"a","status":"pending"},{"id":2,"context":"b","status":"pending"}]`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"pr", "checks", "8", "-R", "alice/x", "--watch", "--interval=1ms", "--timeout=30ms"})
+	require.EqualError(t, err, "timed out after 30ms waiting for 2 pending checks")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 }

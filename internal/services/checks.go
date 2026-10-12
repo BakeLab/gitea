@@ -6,6 +6,7 @@ package services
 import (
 	"context"
 	"errors"
+	"net/url"
 	"slices"
 	"sort"
 	"time"
@@ -51,11 +52,30 @@ func (s Pulls) checkHead(ctx context.Context, n int64) (string, error) {
 	return pull.Head.Sha, nil
 }
 
-func checkFrom(sha string, status *gitea.Status) Check {
+func checkFrom(sha, instance string, status *gitea.Status) Check {
 	return Check{
 		SHA: sha, ID: status.ID, Name: status.Context, State: string(status.State), Description: status.Description,
-		URL: status.TargetURL, CreatedAt: timestamp(status.Created), UpdatedAt: timestamp(status.Updated),
+		URL: absoluteURL(instance, status.TargetURL), CreatedAt: timestamp(status.Created), UpdatedAt: timestamp(status.Updated),
 	}
+}
+
+// absoluteURL resolves a link that Gitea gives relative to its root, such as the job links of
+// Actions statuses, against the instance URL.
+func absoluteURL(instance, link string) string {
+	base, err := url.Parse(instance)
+	if err != nil || link == "" {
+		return link
+	}
+	ref, err := url.Parse(link)
+	if err != nil {
+		return link
+	}
+	return base.ResolveReference(ref).String()
+}
+
+// CommitChecks returns the latest status of each check context of a commit.
+func (s Pulls) CommitChecks(ctx context.Context, sha string) ([]Check, error) {
+	return s.checksForCommit(ctx, sha)
 }
 
 func (s Pulls) checksForCommit(ctx context.Context, sha string) ([]Check, error) {
@@ -71,7 +91,7 @@ func (s Pulls) checksForCommit(ctx context.Context, sha string) ([]Check, error)
 	for _, status := range statuses {
 		current, exists := latest[status.Context]
 		if !exists || status.ID > current.ID {
-			latest[status.Context] = checkFrom(sha, status)
+			latest[status.Context] = checkFrom(sha, s.Client.BaseURL, status)
 		}
 	}
 	result := make([]Check, 0, len(latest))

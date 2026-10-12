@@ -30,7 +30,7 @@ func publishCreateEnv(t *testing.T, creates *int) (Dependencies, *fakeGit, strin
 	}))
 	t.Cleanup(server.Close)
 	deps, _, _ := serverDeps(t, server.URL)
-	pushKey := credentialCall(t, deps, server.URL, "alice", "push", "--", "origin", "refs/heads/feature")
+	pushKey := credentialCall(t, deps, server.URL, "alice", "push", "--set-upstream", "--quiet", "--", "origin", "refs/heads/feature")
 	runner := &fakeGit{results: map[string]string{
 		"rev-parse --is-inside-work-tree":                "true",
 		"rev-parse --verify refs/heads/feature^{commit}": "localsha",

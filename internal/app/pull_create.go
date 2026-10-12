@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -20,10 +21,15 @@ import (
 
 func (a *application) pullCreateCommand() *cobra.Command {
 	var options services.PullOptions
-	var bodyFile, deadline, milestoneName, topic string
+	var bodyFile, deadline, milestone, topic string
 	var labelNames, reviewers, reviewerTeams, attachments []string
-	var useEditor, draft, agit, allowMaintainerEdits bool
-	create := &cobra.Command{Use: "create", Short: "Create a pull request", Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
+	var useEditor, draft, agit, allowMaintainerEdits, fill, web bool
+	create := &cobra.Command{Use: "create", Aliases: []string{"new"}, Short: "Create a pull request", Long: `Create a pull request from the current branch, or from --head.
+
+On a terminal without flags, gt asks for the title and body, then what to do next: submit,
+submit as a draft, add metadata or change the branches. --fill skips the questions and uses
+the commit message of a single-commit branch, or the branch name, as the title. A branch that
+is not on the remote yet is pushed first, with its upstream set.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
 		var editorDraft terminal.Draft
 		defer finishDraft(&editorDraft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
@@ -33,7 +39,7 @@ func (a *application) pullCreateCommand() *cobra.Command {
 			if a.options.json != "" {
 				return clierr.Wrap(clierr.Usage, errors.New("--json/--jq cannot be combined with --agit; AGit creates the pull request through git push"))
 			}
-			for _, name := range []string{"assignee", "label", "milestone", "milestone-name", "deadline", "reviewer", "reviewer-team", "attachment"} {
+			for _, name := range []string{"assignee", "label", "milestone", "deadline", "reviewer", "reviewer-team", "attachment"} {
 				if cmd.Flags().Changed(name) {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --agit; AGit pushes carry only a title and body", name))
 				}
@@ -41,8 +47,8 @@ func (a *application) pullCreateCommand() *cobra.Command {
 		} else if topic != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--topic requires --agit"))
 		}
-		if err := validateMilestoneFlags(cmd, milestoneName, options.Milestone); err != nil {
-			return err
+		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 0 {
+			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
 		}
 		if err := requireNames("label", "", labelNames); err != nil {
 			return err
@@ -83,11 +89,13 @@ func (a *application) pullCreateCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if cmd.Flags().Changed("milestone-name") {
-			if options.Milestone, err = (services.Milestones{Client: t.client, Repository: t.Repo}).ResolveName(cmd.Context(), milestoneName); err != nil {
+		if milestone != "" && milestone != "0" {
+			if options.Milestone, err = milestoneFilter(cmd.Context(), t, milestone); err != nil {
 				return err
 			}
 		}
+		t.expandMeAll(options.Assignees)
+		t.expandMeAll(reviewers)
 		if options.Head == "" {
 			owner, branch := a.defaultPullHead(cmd.Context())
 			if branch == "" {
@@ -106,6 +114,9 @@ func (a *application) pullCreateCommand() *cobra.Command {
 			if options.Base = repo.DefaultBranch; options.Base == "" {
 				return clierr.Wrap(clierr.Usage, errors.New("supply --base; repository has no default branch"))
 			}
+		}
+		if web {
+			return a.openBrowser(cmd, repositoryURL(t)+"/compare/"+options.Base+"..."+options.Head)
 		}
 		var commitBody string
 		if options.Title == "" {
@@ -167,7 +178,7 @@ func (a *application) pullCreateCommand() *cobra.Command {
 				failures = append(failures, fmt.Errorf("upload %s: %w", file.Name(), err))
 			}
 		}
-		if err := writeRecord(a, cmd, item, pullRecord); err != nil {
+		if err := a.reportCreatedPull(cmd, t, item); err != nil {
 			return err
 		}
 		if len(failures) > 0 {
@@ -175,26 +186,42 @@ func (a *application) pullCreateCommand() *cobra.Command {
 		}
 		return nil
 	}}
-	create.Flags().StringSliceVar(&options.Assignees, "assignee", nil, "Assign users by username")
-	create.Flags().StringSliceVar(&labelNames, "label", nil, "Apply labels by exact name; repo:/org: disambiguate")
-	create.Flags().Int64Var(&options.Milestone, "milestone", 0, "Milestone ID")
-	create.Flags().StringVar(&milestoneName, "milestone-name", "", "Milestone by exact title; conflicts with --milestone")
-	create.Flags().StringVar(&options.Title, "title", "", "Pull request title (default: derived from the head branch)")
+	create.Flags().StringSliceVarP(&options.Assignees, "assignee", "a", nil, "Assign users by username; @me for yourself")
+	create.Flags().StringSliceVarP(&labelNames, "label", "l", nil, "Apply labels by name; repo: or org: picks between same-named labels")
+	create.Flags().StringVarP(&milestone, "milestone", "m", "", "Milestone title or ID")
+	flagAliases(create, map[string]string{"milestone-name": "milestone"})
+	create.Flags().StringVarP(&options.Title, "title", "t", "", "Pull request title (default: the commit message of a single-commit branch, or the branch name)")
 	create.Flags().StringVar(&deadline, "deadline", "", "Due date: YYYY-MM-DD, RFC3339, or Unix timestamp")
-	create.Flags().StringVar(&options.Body, "body", "", "Pull request body")
-	create.Flags().StringVar(&bodyFile, "body-file", "", "Read body from a file, or - for stdin")
-	create.Flags().BoolVar(&useEditor, "editor", false, "Compose the pull request body in the configured editor")
-	create.Flags().StringVar(&options.Head, "head", "", "Head branch, optionally user:branch (default: current branch)")
-	create.Flags().StringVar(&options.Base, "base", "", "Base branch (default: repository default branch)")
-	create.Flags().BoolVar(&draft, "draft", false, "Prefix title with WIP for Gitea draft behavior")
+	create.Flags().StringVarP(&options.Body, "body", "b", "", "Pull request body")
+	create.Flags().StringVarP(&bodyFile, "body-file", "F", "", "Read the body from `file`, or - for stdin")
+	create.Flags().BoolVarP(&useEditor, "editor", "e", false, "Write the body in your editor, starting from the repository's template")
+	create.Flags().StringVarP(&options.Head, "head", "H", "", "Head branch, or OWNER:BRANCH for a fork (default: the current branch)")
+	create.Flags().StringVarP(&options.Base, "base", "B", "", "Base branch (default: the repository's default branch)")
+	create.Flags().BoolVarP(&draft, "draft", "d", false, "Create a draft pull request")
+	create.Flags().BoolVarP(&fill, "fill", "f", false, "Skip the questions and take the title and body from the commits")
+	create.Flags().BoolVarP(&web, "web", "w", false, "Open the comparison page in the browser to create the pull request there")
 	create.Flags().BoolVar(&allowMaintainerEdits, "allow-maintainer-edits", true, "Allow maintainers to push to the head branch")
 	create.Flags().BoolVar(&allowMaintainerEdits, "edits", true, "Alias of --allow-maintainer-edits")
 	_ = create.Flags().MarkHidden("edits")
 	create.Flags().BoolVar(&agit, "agit", false, "Create the pull request through AGit push (refs/for)")
-	create.Flags().StringSliceVar(&reviewers, "reviewer", nil, "Request reviews from users by username")
+	create.Flags().StringSliceVarP(&reviewers, "reviewer", "r", nil, "Request reviews from users; @me for yourself")
 	create.Flags().StringSliceVar(&reviewerTeams, "reviewer-team", nil, "Request reviews from teams within the repository's organization")
 	create.Flags().StringArrayVar(&attachments, "attachment", nil, "Attach a file to the pull request (repeatable)")
 	create.Flags().StringVar(&topic, "topic", "", "AGit topic name (default: head branch); requires --agit")
+	_ = create.RegisterFlagCompletionFunc("assignee", a.completeUsers())
+	_ = create.RegisterFlagCompletionFunc("reviewer", a.completeUsers())
+	_ = create.RegisterFlagCompletionFunc("label", a.completeLabels())
+	_ = create.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
+	_ = create.RegisterFlagCompletionFunc("base", a.completeBranches())
+	_ = create.RegisterFlagCompletionFunc("head", a.completeBranches())
+	create.Example = `# Create a pull request for the current branch interactively
+$ gt pr create
+
+# Take the title and body from the commits, without questions
+$ gt pr create --fill
+
+$ gt pr create -t "Add login" -b "Closes #1" -B develop -r carol -l enhancement
+$ gt pr create --draft --fill`
 	return create
 }
 
@@ -304,7 +331,7 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 		body = template
 	}
 	choices := terminal.PullFormChoices{
-		BaseOwner: baseOwner, Base: repo.DefaultBranch, HeadOwner: headOwner, HeadBranch: headBranch, Title: title, Body: body,
+		Repo: target.Repo, BaseOwner: baseOwner, Base: repo.DefaultBranch, HeadOwner: headOwner, HeadBranch: headBranch, Title: title, Body: body,
 		AllowMaintainerEdits: true, CanPush: selectables.CanPush, Assignees: selectables.Assignees,
 		EditBody: a.bodyEditor(cmd),
 	}
@@ -320,8 +347,8 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 	if values.Agit && a.options.json != "" {
 		return clierr.Wrap(clierr.Usage, errors.New("--json/--jq cannot be combined with AGit create; AGit creates the pull request through git push"))
 	}
-	if err := a.confirm(cmd, "Create pull request on "+target.Repo+": "+values.Title); err != nil {
-		return err
+	if values.AsDraft {
+		values.Title = services.AddDraftPrefix(values.Title)
 	}
 	if values.Agit {
 		return a.pushAgit(cmd, target, snapshot, git.AgitOptions{Remote: a.options.remote, Head: values.Head, Base: values.Base, Topic: values.Topic, Title: values.Title, Body: values.Body})
@@ -338,5 +365,14 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 	if err != nil {
 		return err
 	}
-	return writeRecord(a, cmd, item, pullRecord)
+	return a.reportCreatedPull(cmd, target, item)
+}
+
+// reportCreatedPull reports a new pull request and prints its URL, or the pull request as JSON.
+func (a *application) reportCreatedPull(cmd *cobra.Command, t target, item services.Pull) error {
+	a.done(cmd, "Created pull request %s", refLabel(t.Repo, item.Number, item.Title))
+	if a.options.json != "" {
+		return a.writeJSON(cmd, item)
+	}
+	return a.printURL(cmd, item.URL)
 }

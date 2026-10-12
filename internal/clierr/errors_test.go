@@ -27,6 +27,8 @@ func TestExitCodeDistinguishesCancellationAndInterruption(t *testing.T) {
 		{fmt.Errorf("draft preserved: %w", context.DeadlineExceeded), Canceled},
 		{Wrap(Interrupted, context.Canceled), Interrupted},
 		{errors.Join(errors.New("partial failure"), context.Canceled), Canceled},
+		{Quiet(Pending), Pending},
+		{fmt.Errorf("checks: %w", Quiet(Failure)), Failure},
 	} {
 		assert.Equal(t, test.code, ExitCode(test.err), "%v", test.err)
 	}

@@ -47,8 +47,8 @@ func TestExplainNamesResourcesAndTellsWhyRepositoriesFail(t *testing.T) {
 		"POST /api/v1/repos/alice/old/issues":             {"423", `{"message":"repo is archived"}`},
 		"POST /api/v1/repos/alice/project/pulls":          {"409", `{"message":"pull request already exists for these targets [id: 16, issue_id: 3, head_repo_id: 1, base_repo_id: 1, head_branch: feat, base_branch: main]"}`},
 		"GET /api/v1/repos/alice/project/pulls/main/feat": {"200", `{"number":3,"html_url":"https://example.org/alice/project/pulls/3"}`},
-		"GET /api/v1/repos/alice/project/pulls/3":         {"200", `{"number":3,"state":"open","draft":true,"head":{"sha":"abc"}}`},
-		"POST /api/v1/repos/alice/project/pulls/3/merge":  {"405", `{"message":"Work in progress PRs cannot be merged"}`},
+		"GET /api/v1/repos/alice/project/pulls/3":         {"200", `{"number":3,"state":"open","mergeable":false,"head":{"sha":"abc"}}`},
+		"POST /api/v1/repos/alice/project/pulls/3/merge":  {"405", `{"message":"Please try again later"}`},
 	})
 	for _, tc := range []struct {
 		name string
@@ -63,7 +63,7 @@ func TestExplainNamesResourcesAndTellsWhyRepositoriesFail(t *testing.T) {
 		{"empty repository", []string{"pr", "list", "-R", "alice/empty"}, "alice/empty is empty; it has no pull requests"},
 		{"archived repository", []string{"issue", "create", "-R", "alice/old", "--title", "x", "--body", "y"}, "alice/old is archived (read-only); unarchive it with: gt repo unarchive alice/old"},
 		{"existing pull request", []string{"pr", "create", "-R", "alice/project", "--head", "feat", "--base", "main", "--title", "x", "--body", "y"}, "pull request for feat into main already exists in alice/project; see https://example.org/alice/project/pulls/3"},
-		{"context added by the command", []string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, "pull request #3 is a draft; mark it ready for review first: Gitea API returned HTTP 405 for POST /api/v1/repos/alice/project/pulls/3/merge: Work in progress PRs cannot be merged"},
+		{"context added by the command", []string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, "pull request #3 has conflicting files or is otherwise not mergeable: Gitea API returned HTTP 405 for POST /api/v1/repos/alice/project/pulls/3/merge: Please try again later"},
 		{"raw api response", []string{"api", "users/nobody"}, "not found (HTTP 404 GET /api/v1/users/nobody)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -85,7 +85,7 @@ func TestExplainAddsTheNextStepToRefusals(t *testing.T) {
 	}{
 		{"PATCH", "/api/v1/repos/alice/x/pulls/3", "cannot change state of this pull request, it was already merged", 412, "pull request #3 is already merged; its state can no longer change"},
 		{"POST", "/api/v1/repos/alice/x/pulls/3/merge", "The PR is already merged", 405, "pull request #3 is already merged"},
-		{"POST", "/api/v1/repos/alice/x/pulls/5/merge", "Work in progress PRs cannot be merged", 405, "pull request #5 is a draft; mark it ready with: gt pr edit 5 --ready"},
+		{"POST", "/api/v1/repos/alice/x/pulls/5/merge", "Work in progress PRs cannot be merged", 405, "pull request #5 is a draft; mark it ready with: gt pr ready 5"},
 		{"POST", "/api/v1/repos/alice/x/pulls/1/reviews", "approve your own pull is not allowed", 422, "you can't approve or request changes on your own pull request; leave a comment instead"},
 		{"POST", "/api/v1/repos/alice/x/pulls", "Invalid PullRequest: There are no changes between the head and the base", 422, "no commits between the base and head branches; check out your feature branch or pass --head"},
 		{"POST", "/api/v1/repos/alice/x/actions/workflows/nightly.yaml/dispatches", "workflow is disabled", 403, "workflow nightly.yaml is disabled; enable it with: gt workflow enable nightly.yaml"},

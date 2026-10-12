@@ -177,7 +177,7 @@ func conflictHint(ctx context.Context, apiErr *transport.APIError, conflict *ser
 		}
 	case services.ReasonDraft:
 		if number != conflict.Key {
-			return "mark it ready with: gt pr edit " + number + " --ready"
+			return "mark it ready with: gt pr ready " + number
 		}
 	case services.ReasonOwnReview:
 		return "leave a comment instead"

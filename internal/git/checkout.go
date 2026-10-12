@@ -111,7 +111,7 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 		tracking = options.HeadRemote + "/" + options.HeadBranch
 	}
 	fetchArgs := append([]string{}, options.CredentialArgs...)
-	fetchArgs = append(fetchArgs, "fetch", "--no-tags", "--", fetchRemote, fetchRef)
+	fetchArgs = append(fetchArgs, "fetch", "--quiet", "--no-tags", "--", fetchRemote, fetchRef)
 	if _, err := run(fetchArgs...); err != nil {
 		return CheckoutResult{}, err
 	}
@@ -136,11 +136,11 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 			}
 		}
 	}
-	switchArgs := []string{"switch", "--detach", commit}
+	switchArgs := []string{"switch", "--quiet", "--detach", commit}
 	if !options.Detached {
-		switchArgs = []string{"switch", "--create", options.Branch, commit}
+		switchArgs = []string{"switch", "--quiet", "--create", options.Branch, commit}
 		if existing {
-			switchArgs = []string{"switch", options.Branch}
+			switchArgs = []string{"switch", "--quiet", options.Branch}
 		}
 	}
 	if _, err := run(switchArgs...); err != nil {

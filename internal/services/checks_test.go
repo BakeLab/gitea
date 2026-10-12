@@ -90,5 +90,16 @@ func TestCheckFromMapsCommitStatuses(t *testing.T) {
 	require.Equal(t, Check{
 		SHA: "abc", ID: 3, Name: "ci/build", State: "failure", Description: "Broken", URL: "https://ci.test/3",
 		CreatedAt: "2026-10-01T12:00:00Z", UpdatedAt: "2026-10-01T12:05:00Z",
-	}, checkFrom("abc", status))
+	}, checkFrom("abc", "http://instance.test", status))
+}
+
+func TestCheckLinksAreAbsolute(t *testing.T) {
+	for _, tc := range []struct{ instance, link, want string }{
+		{"http://instance.test", "/alice/x/actions/runs/18/jobs/18", "http://instance.test/alice/x/actions/runs/18/jobs/18"},
+		{"https://instance.test/sub", "/sub/alice/x/actions/runs/1", "https://instance.test/sub/alice/x/actions/runs/1"},
+		{"http://instance.test", "https://ci.test/3", "https://ci.test/3"},
+		{"http://instance.test", "", ""},
+	} {
+		require.Equal(t, tc.want, checkFrom("abc", tc.instance, &gitea.Status{TargetURL: tc.link}).URL, tc.link)
+	}
 }

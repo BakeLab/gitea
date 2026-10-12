@@ -122,7 +122,7 @@ func TestCleanPullDeletesLocalAndRemoteBranches(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, CleanResult{LocalBranch: "feature", Remote: "origin", RemoteBranch: "feature", DefaultBranch: "main", RemoteDeleted: true}, result)
-	require.Contains(t, runner.calls, "switch -- main")
+	require.Contains(t, runner.calls, "switch --quiet -- main")
 	require.Contains(t, runner.calls, "branch -D -- feature")
 	require.Contains(t, runner.calls, "-c credential.helper=gt push --delete -- origin feature")
 }

@@ -38,7 +38,7 @@ func TestStatusJSONAndActionsScope(t *testing.T) {
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"status", "-R", "alice/project", "--json=user,pull_requests,runs_included,failing_runs", "--jq", "{user, pull_requests, runs_included, run_ids: [.failing_runs[].id]}"}))
-	require.JSONEq(t, `{"user":"alice","pull_requests":{"authored":[],"assigned":[],"review_requested":[]},"runs_included":true,"run_ids":[7]}`, out.String())
+	require.JSONEq(t, `{"user":"alice","pull_requests":{"current_branch":null,"authored":[],"assigned":[],"review_requested":[]},"runs_included":true,"run_ids":[7]}`, out.String())
 	require.Empty(t, diagnostics.String())
 	require.Equal(t, 1, runs)
 	actionsEnabled = false
@@ -51,7 +51,7 @@ func TestStatusJSONAndActionsScope(t *testing.T) {
 		out.Reset()
 		require.NoError(t, Execute(context.Background(), deps, args))
 		if args[0] == "pr" {
-			require.JSONEq(t, `{"authored":[],"assigned":[],"review_requested":[]}`, out.String())
+			require.JSONEq(t, `{"current_branch":null,"authored":[],"assigned":[],"review_requested":[]}`, out.String())
 		} else {
 			require.JSONEq(t, `{"runs_included":false,"failing_runs":[]}`, out.String())
 		}
@@ -74,4 +74,42 @@ func TestStatusFailureDoesNotPublishPartialJSON(t *testing.T) {
 	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 	require.Empty(t, out.String())
 	require.Empty(t, diagnostics.String())
+}
+
+func TestPullStatusShowsTheCurrentBranch(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/alice/project/pulls/1":
+			_, _ = w.Write([]byte(`{"number":1,"title":"Add one.txt","state":"open","head":{"ref":"feat/one","sha":"abc"},"html_url":"http://gitea/alice/project/pulls/1"}`))
+		case r.URL.Query().Get("page") != "" && r.URL.Query().Get("page") != "1":
+			_, _ = w.Write([]byte(`[]`))
+		case r.URL.Path == "/api/v1/repos/alice/project/pulls/1/reviews":
+			_, _ = w.Write([]byte(`[{"id":5,"state":"APPROVED","user":{"login":"bob"}}]`))
+		case r.URL.Path == "/api/v1/repos/alice/project/statuses/abc":
+			_, _ = w.Write([]byte(`[{"id":1,"context":"ci","status":"pending"},{"id":2,"context":"lint","status":"pending"}]`))
+		case r.URL.Query().Get("created_by") == "alice":
+			_, _ = w.Write([]byte(`[{"id":1,"number":1,"title":"Add one.txt","repository":{"full_name":"alice/project"},"html_url":"http://gitea/alice/project/pulls/1"}]`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	plainTTY(t, &deps, server.URL)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1", "GITEA_CLI_REPO": "alice/project"})
+	deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --short HEAD": "feat/one", "config --get branch.feat/one.gitea-cli-pr": "1"}}
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "status"}))
+	require.Equal(t, `Current branch
+  #1  Add one.txt  [feat/one]
+    - Checks: 2 pending · Review: Approved
+
+Created by you
+  #1  Add one.txt
+
+Assigned to you
+  Nothing here
+
+Requesting a code review from you
+  Nothing here
+`, stripLinks(out.String()))
 }

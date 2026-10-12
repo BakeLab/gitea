@@ -13,17 +13,14 @@ import (
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
 func (a *application) pullCleanCommand() *cobra.Command {
 	var ignoreSHA bool
-	cmd := &cobra.Command{Use: "clean <number>", Short: "Delete local and remote feature branches for a closed pull request", Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		n, err := number(args[0])
-		if err != nil {
-			return err
-		}
-		target, err := a.resolve(cmd.Context(), true)
+	cmd := &cobra.Command{Use: "clean [<number> | <url> | <branch>]", Short: "Delete the branches of a merged or closed pull request", Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+		target, n, err := a.pullSelector(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -87,14 +84,15 @@ func (a *application) pullCleanCommand() *cobra.Command {
 				return err
 			}
 		}
-		description := fmt.Sprintf("Delete local branch %q for pull request %s#%d", localBranch, target.Repo, n)
-		if ignoreSHA {
-			description += " (matched by name; local commits not in the pull request are lost)"
-		}
+		description := fmt.Sprintf("Delete local branch %s of %s", localBranch, refLabel(target.Repo, n, pull.Title))
 		if deleteRemote {
-			description += fmt.Sprintf(" and remote branch %q", remote+"/"+pull.Head)
+			description += fmt.Sprintf(" and remote branch %s/%s", remote, pull.Head)
 		}
-		if err := a.confirm(cmd, description); err != nil {
+		prompt := description + "?"
+		if ignoreSHA {
+			prompt += " Local commits that are not in the pull request are lost."
+		}
+		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: prompt, NonTTY: strings.ToLower(description[:1]) + description[1:]}); err != nil {
 			return err
 		}
 		result, err := git.CleanPull(cmd.Context(), a.deps.Git, git.CleanOptions{
@@ -108,21 +106,21 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		if a.options.json != "" {
 			return a.writeJSON(cmd, result)
 		}
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Deleted local branch %s\n", result.LocalBranch)
-		if err != nil {
-			return err
-		}
-		if result.RemoteDeleted {
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Deleted remote branch %s/%s\n", result.Remote, result.RemoteBranch)
-			return err
-		}
-		if result.RemoteSkipped {
-			_, err = fmt.Fprintf(cmd.ErrOrStderr(), "%s\n", result.RemoteSkipReason)
-			return err
+		a.done(cmd, "Deleted local branch %s", result.LocalBranch)
+		switch {
+		case result.RemoteDeleted:
+			a.done(cmd, "Deleted remote branch %s/%s", result.Remote, result.RemoteBranch)
+		case pull.HeadRemoteDeleted:
+			a.warn(cmd, "Remote branch %s was already deleted", pull.Head)
+		case !pull.HeadCanPush:
+			a.warn(cmd, "Kept remote branch %s: you cannot push to %s", pull.Head, pull.HeadRepo)
 		}
 		return nil
 	}}
 	cmd.Flags().BoolVar(&ignoreSHA, "ignore-sha", false, "Find the local branch by name instead of commit hash")
+	cmd.ValidArgsFunction = a.completePulls("closed")
+	cmd.Example = `# After #13 was merged, delete its branch locally and on Gitea
+$ gt pr clean 13`
 	return cmd
 }
 

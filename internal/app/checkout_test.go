@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"github.com/stretchr/testify/require"
 )
@@ -66,15 +67,14 @@ func TestCheckoutMatchesRemoteThroughEnvironmentSSHHost(t *testing.T) {
 	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_INSTANCE_SSH_HOST": "ssh.example.org"})
 	deps.Git = &fakeGit{results: map[string]string{
 		"remote": "origin", "remote get-url origin": "git@ssh.example.org:alice/project.git",
-		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch pr/7": "",
-		"check-ref-format --branch feature":              "",
+		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch feature": "",
 		"status --porcelain=v1 --untracked-files=normal": "", "for-each-ref --format=%(refname) refs/heads/": "",
-		"fetch --no-tags -- origin refs/heads/feature": "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --create pr/7 abc123": "",
-		"config branch.pr/7.remote origin": "", "config branch.pr/7.merge refs/heads/feature": "",
-		"config branch.pr/7.gitea-cli-pr 7": "", "config branch.pr/7.gitea-cli-base-remote origin": "",
+		"fetch --quiet --no-tags -- origin refs/heads/feature": "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --quiet --create feature abc123": "",
+		"config branch.feature.remote origin": "", "config branch.feature.merge refs/heads/feature": "",
+		"config branch.feature.gitea-cli-pr 7": "", "config branch.feature.gitea-cli-base-remote origin": "",
 	}}
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", "7", "--repo", "alice/project", "--remote", "origin", "--no-input", "--json"}))
-	require.JSONEq(t, `{"branch":"pr/7","commit":"abc123","detached":false,"remote":"origin","tracking":"origin/feature"}`, out.String())
+	require.JSONEq(t, `{"branch":"feature","commit":"abc123","detached":false,"remote":"origin","tracking":"origin/feature"}`, out.String())
 }
 
 func TestSSHCheckoutUsesAccountKeyOnlyForFetch(t *testing.T) {
@@ -90,21 +90,20 @@ func TestSSHCheckoutUsesAccountKeyOnlyForFetch(t *testing.T) {
 	}})
 	sshArgs, err := git.SSHArguments("/keys/alice key", false)
 	require.NoError(t, err)
-	fetch := strings.Join(append(sshArgs, "fetch", "--no-tags", "--", "origin", "refs/heads/feature"), " ")
+	fetch := strings.Join(append(sshArgs, "fetch", "--quiet", "--no-tags", "--", "origin", "refs/heads/feature"), " ")
 	runner := &fakeGit{results: map[string]string{
 		"remote": "origin", "remote get-url origin": "ssh://git@git.example.org:2222/alice/project.git",
-		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch pr/7": "",
-		"check-ref-format --branch feature":              "",
+		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch feature": "",
 		"status --porcelain=v1 --untracked-files=normal": "", "for-each-ref --format=%(refname) refs/heads/": "",
-		fetch: "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --create pr/7 abc123": "",
-		"config branch.pr/7.remote origin": "", "config branch.pr/7.merge refs/heads/feature": "",
-		"config branch.pr/7.gitea-cli-pr 7": "", "config branch.pr/7.gitea-cli-base-remote origin": "",
+		fetch: "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --quiet --create feature abc123": "",
+		"config branch.feature.remote origin": "", "config branch.feature.merge refs/heads/feature": "",
+		"config branch.feature.gitea-cli-pr 7": "", "config branch.feature.gitea-cli-base-remote origin": "",
 	}}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", "7", "--repo", "alice/project", "--remote", "origin", "--no-input", "--json"}))
 	require.Contains(t, runner.calls, fetch)
-	require.Contains(t, runner.calls, "config branch.pr/7.remote origin")
-	require.Contains(t, runner.calls, "config branch.pr/7.merge refs/heads/feature")
+	require.Contains(t, runner.calls, "config branch.feature.remote origin")
+	require.Contains(t, runner.calls, "config branch.feature.merge refs/heads/feature")
 	configured := 0
 	for _, call := range runner.calls {
 		if strings.HasPrefix(call, "-c ") {
@@ -114,5 +113,31 @@ func TestSSHCheckoutUsesAccountKeyOnlyForFetch(t *testing.T) {
 	}
 	require.Equal(t, 1, configured)
 	require.False(t, runner.prompt)
-	require.JSONEq(t, `{"branch":"pr/7","commit":"abc123","detached":false,"remote":"origin","tracking":"origin/feature"}`, out.String())
+	require.JSONEq(t, `{"branch":"feature","commit":"abc123","detached":false,"remote":"origin","tracking":"origin/feature"}`, out.String())
+}
+
+func TestCheckoutNamesTheBranchAfterTheHead(t *testing.T) {
+	same := services.Pull{Number: 7, Head: "feature", HeadSHA: "abc123", HeadRepo: "alice/project"}
+	fork := services.Pull{Number: 7, Head: "feature", HeadSHA: "abc123", HeadRepo: "bob/project"}
+	for _, tc := range []struct {
+		name     string
+		pull     services.Pull
+		branches map[string]string
+		want     string
+	}{
+		{"free head name", same, nil, "feature"},
+		{"head name at the head", same, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "abc123"}, "feature"},
+		{"head name of an earlier checkout", same, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "old", "config --get branch.feature.gitea-cli-pr": "7"}, "feature"},
+		{"head name taken", same, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "other"}, "pr/7"},
+		{"fork head name taken", fork, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "other"}, "bob/feature"},
+		{"fork names taken", fork, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "other", "rev-parse --verify refs/heads/bob/feature^{commit}": "other"}, "pr/7"},
+		{"deleted head", services.Pull{Number: 7, Head: "feature", HeadRemoteDeleted: true}, nil, "pr/7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _, _ := testDeps(t)
+			deps.Git = &fakeGit{results: tc.branches}
+			a := &application{deps: deps}
+			require.Equal(t, tc.want, a.checkoutBranchName(context.Background(), target{Repo: "alice/project"}, tc.pull))
+		})
+	}
 }

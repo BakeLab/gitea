@@ -224,7 +224,7 @@ func TestListsFitTheTerminalAndSplitWhenPiped(t *testing.T) {
 			`{"number":5,"title":"支持中文路径 (support CJK paths)","state":"open","user":{"login":""}}]`))
 	}))
 	defer server.Close()
-	for _, group := range []string{"issue", "pr"} {
+	for _, group := range []string{"issue"} {
 		t.Run(group, func(t *testing.T) {
 			deps, out, _ := serverDeps(t, server.URL)
 			args := []string{group, "list", "-R", "alice/project"}

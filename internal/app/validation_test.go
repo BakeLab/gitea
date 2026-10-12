@@ -106,11 +106,9 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"pr", "attachment", "download", "1", "1", "--json"}, "attachment downloads are binary"},
 		{[]string{"pr", "attachment", "download", "1", "1", "--output-file", "-", "--json=id"}, "attachment downloads are binary"},
 		{[]string{"pr", "checkout", "7", "--detach", "--branch", "name"}, "--detach and --branch/--update are mutually exclusive"},
-		{[]string{"pr", "create", "--milestone=-1"}, "--milestone must be a positive ID, or 0 for none"},
+		{[]string{"pr", "create", "--milestone=-1"}, "--milestone must be a milestone title or a positive ID"},
 		{[]string{"pr", "create", "--assignee", "alice, "}, "assignee names cannot be empty"},
 		{[]string{"pr", "create", "--label", "bug, "}, "label names cannot be empty"},
-		{[]string{"pr", "create", "--milestone-name="}, "--milestone-name cannot be empty"},
-		{[]string{"pr", "create", "--milestone-name=Release", "--milestone=1"}, "--milestone and --milestone-name are mutually exclusive"},
 		{[]string{"pr", "create", "--agit", "--json", "--title", "x", "--no-input"}, "--json/--jq cannot be combined with --agit"},
 		{[]string{"pr", "create", "--topic", "x", "--title", "x", "--no-input"}, "--topic requires --agit"},
 		{[]string{"pr", "create", "--reviewer", "bob, "}, "reviewer names cannot be empty"},
@@ -120,25 +118,27 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"pr", "create", "--agit", "--remote", "origin", "--reviewer-team", "core"}, "--reviewer-team cannot be combined with --agit"},
 		{[]string{"pr", "create", "--agit", "--remote", "origin", "--attachment", "log.txt"}, "--attachment cannot be combined with --agit"},
 		{[]string{"pr", "create", "--attachment", "."}, ". is not a regular file"},
-		{[]string{"pr", "edit", "7"}, "supply an edit flag"},
-		{[]string{"pr", "edit", "7", "--remove-assignees="}, "supply an edit flag"},
+		{[]string{"pr", "edit", "7"}, "nothing to edit; pass a flag such as --title (see gt pr edit --help)"},
+		{[]string{"pr", "edit", "7", "--remove-assignees="}, "nothing to edit"},
+		{[]string{"pr", "edit", "7", "--milestone", "1", "--remove-milestone"}, "--milestone and --remove-milestone are mutually exclusive"},
 		{[]string{"pr", "edit", "7", "--draft", "--ready"}, "--draft and --ready are mutually exclusive"},
 		{[]string{"pr", "edit", "7", "--title="}, "pull request title cannot be empty"},
 		{[]string{"pr", "edit", "7", "--base="}, "--base cannot be empty"},
 		{[]string{"pr", "edit", "7", "--add-reviewers=alice", "--remove-reviewers=Alice"}, "reviewer \"Alice\" is duplicated or present in both add and remove"},
 		{[]string{"pr", "edit", "7", "--add-reviewer-teams="}, "supply at least one reviewer or team"},
 		{[]string{"pr", "list", "--sort", "unknown"}, "--sort must be oldest, recentupdate, recentclose, leastupdate, mostcomment, leastcomment, or priority"},
-		{[]string{"pr", "list", "--milestone", "-1"}, "--milestone must be a nonnegative ID"},
-		{[]string{"pr", "list", "--state", "unknown"}, "--state must be open, closed, or all"},
+		{[]string{"pr", "list", "--milestone", "-1"}, "--milestone must be a milestone title or a positive ID"},
+		{[]string{"pr", "list", "--state", "unknown"}, "--state must be open, closed, merged, or all"},
 		{[]string{"pr", "list", "--limit", "0"}, `"-L, --limit" flag: must be 1..1000`},
-		{[]string{"pr", "review", "1", "--no-input"}, "missing required input: supply --body"},
-		{[]string{"pr", "review", "1", "--body="}, "review body cannot be empty without inline comments"},
-		{[]string{"pr", "review", "1", "--event=unknown"}, "--event must be APPROVED, REQUEST_CHANGES, COMMENT, or PENDING"},
+		{[]string{"pr", "review", "1", "--no-input"}, "choose a review type: --approve, --request-changes, or --comment"},
+		{[]string{"pr", "review", "1", "--comment", "--body="}, "a comment needs a body; pass --body, --body-file or --editor"},
+		{[]string{"pr", "review", "1", "--request-changes", "--no-input"}, "a change request needs a body"},
+		{[]string{"pr", "review", "1", "--event=unknown"}, "--event must be approve, approved, request-changes, request_changes, comment, or pending"},
 		{[]string{"pr", "review", "request", "1", "--team", " "}, "team names cannot be empty"},
 		{[]string{"pr", "review", "1", "--comments-file=-"}, "--comments-file requires a file"},
-		{[]string{"pr", "review", "submit", "1", "2", "--event=PENDING"}, "--event must be APPROVED, REQUEST_CHANGES, or COMMENT"},
-		{[]string{"pr", "review", "submit", "1", "2", "--event=REQUEST_CHANGES", "--body="}, "review body cannot be empty for REQUEST_CHANGES"},
-		{[]string{"pr", "review", "dismiss", "1", "2", "--body="}, "supply a non-empty dismissal reason with --body or --body-file"},
+		{[]string{"pr", "review", "submit", "1", "2", "--event=PENDING"}, "--event must be approve, approved, request-changes, request_changes, or comment"},
+		{[]string{"pr", "review", "submit", "1", "2", "--event=REQUEST_CHANGES", "--body="}, "a change request needs a body"},
+		{[]string{"pr", "review", "dismiss", "1", "2", "--body="}, "a dismissal needs a reason"},
 		{[]string{"pr", "review", "dismiss", "1", "2", "--no-input", "--yes"}, "missing required input: supply --body"},
 		{[]string{"pr", "review", "delete", "1", "2", "--json"}, "review deletion does not return a resource"},
 		{[]string{"pr", "status", "--limit=101"}, `"--limit" flag: must be 1..100`},
@@ -345,13 +345,17 @@ func TestExplicitValuesSkipInteractiveForms(t *testing.T) {
 		{[]string{"issue", "create", "--title", "Explicit"}, http.MethodPost, "/api/v1/repos/alice/project/issues", "number"},
 		{[]string{"issue", "edit", "1", "--title", "Explicit"}, http.MethodPatch, "/api/v1/repos/alice/project/issues/1", "number"},
 		{[]string{"pr", "create", "--title", "Explicit", "--head", "feature", "--base", "main"}, http.MethodPost, "/api/v1/repos/alice/project/pulls", "number"},
-		{[]string{"pr", "review", "1", "--body", "Explicit"}, http.MethodPost, "/api/v1/repos/alice/project/pulls/1/reviews", "id"},
+		{[]string{"pr", "review", "1", "--comment", "--body", "Explicit"}, http.MethodPost, "/api/v1/repos/alice/project/pulls/1/reviews", "id"},
 	} {
 		t.Run(strings.Join(tc.args[:2], " "), func(t *testing.T) {
 			mutations := 0
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project" {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project":
 					_, _ = w.Write([]byte(`{"full_name":"alice/project","default_branch":"main"}`))
+					return
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/1":
+					_, _ = w.Write([]byte(`{"number":1,"user":{"login":"bob"}}`))
 					return
 				}
 				require.Equal(t, tc.method, r.Method)
