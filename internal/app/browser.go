@@ -5,6 +5,7 @@ package app
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"gitea.dev/cli/internal/terminal"
@@ -26,4 +27,18 @@ func (a *application) openBrowser(command *cobra.Command, resource string) error
 // displayURL shows a URL to people without its scheme, like gh.
 func displayURL(url string) string {
 	return terminal.SafeLine(strings.TrimPrefix(strings.TrimPrefix(url, "https://"), "http://"))
+}
+
+// webURL is the page of a path on the target's instance, such as an organization's profile.
+func webURL(t target, path ...string) string {
+	escaped := make([]string, len(path))
+	for i, segment := range path {
+		escaped[i] = url.PathEscape(segment)
+	}
+	return strings.TrimSuffix(t.Host, "/") + "/" + strings.Join(escaped, "/")
+}
+
+// repositoryURL returns the web URL of the target's repository.
+func repositoryURL(t target) string {
+	return strings.TrimSuffix(t.Host, "/") + "/" + t.Repo
 }

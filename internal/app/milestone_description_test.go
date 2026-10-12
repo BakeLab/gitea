@@ -44,7 +44,7 @@ func TestMilestoneEditEditorSeedsDescription(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/milestones":
-			writeMilestones(w, r, `[{"id":4,"title":"Ship","description":"current notes","state":"open"}]`)
+			writeFirstPage(w, r, `[{"id":4,"title":"Ship","description":"current notes","state":"open"}]`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/milestones/4":
 			_, _ = w.Write([]byte(`{"id":4,"title":"Ship","description":"current notes","state":"open"}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/alice/project/milestones/4":

@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
-	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -240,5 +239,3 @@ func TestWorkflowRunFollowStreamsTheLogsOfItsJobs(t *testing.T) {
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.ErrorContains(t, err, "--follow cannot be combined with --json")
 }
-
-var _ terminal.Asker = (*dispatchingPrompter)(nil)

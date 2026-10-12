@@ -200,17 +200,7 @@ func reviewerSummary(item services.Pull, reviews []services.Review) string {
 
 // checkSummary counts checks by outcome: "1 failing, 2 pending, 3 successful", or "" without checks.
 func checkSummary(checks []services.Check) string {
-	var failing, pending, passed int
-	for _, check := range checks {
-		switch {
-		case check.Pending():
-			pending++
-		case check.Passed():
-			passed++
-		default:
-			failing++
-		}
-	}
+	failing, pending, passed := services.Tally(checks)
 	var parts []string
 	for _, count := range []struct {
 		n    int
@@ -315,13 +305,13 @@ func (a *application) writeDiscussion(cmd *cobra.Command, target target, v discu
 		_, err := fmt.Fprint(cmd.OutOrStdout(), b.String())
 		return err
 	}
-	view.Meta = v.summary(now) + " • " + plural(int(v.comments), "comment")
+	view.Meta = v.summary(now) + " • " + terminal.Plural(int(v.comments), "comment")
 	view.URL = ""
 	muted := func(text string) string { return terminal.Colorize("muted", text, d.Color) }
 	var b strings.Builder
 	b.WriteString(view.Render(d))
 	if !withComments && v.comments > 0 {
-		b.WriteString("\n" + muted(plural(int(v.comments), "comment")+" — use --comments to view them") + "\n")
+		b.WriteString("\n" + muted(terminal.Plural(int(v.comments), "comment")+" — use --comments to view them") + "\n")
 	}
 	for _, comment := range comments {
 		heading := []string{terminal.Emphasis(terminal.SafeLine(comment.author), d.Color)}
@@ -345,11 +335,4 @@ func (a *application) writeDiscussion(cmd *cobra.Command, target target, v discu
 	}
 	b.WriteString("\n" + muted("View this "+v.view.Kind+" on Gitea: "+terminal.SafeLine(v.view.URL)) + "\n")
 	return a.writeHuman(cmd, b.String())
-}
-
-func plural(n int, unit string) string {
-	if n == 1 {
-		return "1 " + unit
-	}
-	return fmt.Sprintf("%d %ss", n, unit)
 }

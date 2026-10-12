@@ -72,19 +72,12 @@ var ErrCanceled = clierr.Wrap(clierr.Canceled, errors.New("canceled"))
 
 // Prompter abstracts cancellable input collection and confirmation.
 type Prompter interface {
-	Input(context.Context, string) (string, error)
-	SecretInput(context.Context, string) (string, error)
-	Confirm(context.Context, string) (bool, error)
-}
-
-// Asker is the richer prompt API behind ConfirmAction and RequireInput: inline validation,
-// multi-line text and confirmations with a default answer. FormPrompter implements it; a
-// Prompter without it gets plain Input and Confirm behavior.
-type Asker interface {
-	// Ask collects one line, re-prompting inline until validate accepts it.
+	// Ask collects one line, re-prompting inline until validate, when set, accepts it.
 	Ask(ctx context.Context, title string, validate func(string) error) (string, error)
 	// AskText collects multi-line markdown, starting from initial.
 	AskText(ctx context.Context, title, initial string) (string, error)
+	// SecretInput collects a value without displaying it.
+	SecretInput(ctx context.Context, title string) (string, error)
 	// ConfirmDefault asks a yes/no question that Enter answers with defaultYes.
 	ConfirmDefault(ctx context.Context, title string, defaultYes bool) (bool, error)
 }
@@ -124,11 +117,6 @@ func (p *FormPrompter) runForm(ctx context.Context, form *huh.Form) error {
 	return promptError(ctx, form.WithInput(p.Streams.In).WithOutput(p.Streams.ErrOut).RunWithContext(ctx))
 }
 
-// Input collects one field using the configured terminal streams.
-func (p *FormPrompter) Input(ctx context.Context, title string) (string, error) {
-	return p.Ask(ctx, title, nil)
-}
-
 // Ask collects one line, re-prompting inline until validate accepts the trimmed answer.
 func (p *FormPrompter) Ask(ctx context.Context, title string, validate func(string) error) (string, error) {
 	var value string
@@ -154,11 +142,6 @@ func (p *FormPrompter) SecretInput(ctx context.Context, title string) (string, e
 	return value, err
 }
 
-// Confirm asks a yes/no question that Enter answers with no.
-func (p *FormPrompter) Confirm(ctx context.Context, title string) (bool, error) {
-	return p.ConfirmDefault(ctx, title, false)
-}
-
 // ConfirmDefault asks a yes/no question that Enter answers with defaultYes.
 func (p *FormPrompter) ConfirmDefault(ctx context.Context, title string, defaultYes bool) (bool, error) {
 	accepted := defaultYes
@@ -176,38 +159,20 @@ func RequireInput(ctx context.Context, value *string, flag, label string, valida
 	if !policy.CanPrompt(streams) {
 		return false, clierr.Wrap(clierr.Usage, fmt.Errorf("missing required input: supply --%s", flag))
 	}
-	var entered string
-	var err error
-	if asker, ok := prompt.(Asker); ok {
-		entered, err = asker.Ask(ctx, label, func(s string) error {
-			if s == "" {
-				return errors.New("a value is required")
-			}
-			if validate != nil {
-				return validate(s)
-			}
-			return nil
-		})
-	} else if entered, err = prompt.Input(ctx, label); err == nil {
-		switch {
-		case entered == "":
-			err = clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be empty", flag))
-		case validate != nil:
-			if invalid := validate(entered); invalid != nil {
-				err = clierr.Wrap(clierr.Usage, fmt.Errorf("--%s: %w", flag, invalid))
-			}
+	entered, err := prompt.Ask(ctx, label, func(s string) error {
+		if s == "" {
+			return errors.New("a value is required")
 		}
-	}
+		if validate != nil {
+			return validate(s)
+		}
+		return nil
+	})
 	if err != nil {
 		return false, err
 	}
 	*value = entered
 	return true, nil
-}
-
-// Require is RequireInput titled by the flag name, for callers without a human label.
-func Require(ctx context.Context, value *string, flag string, streams Streams, policy Policy, prompt Prompter) (bool, error) {
-	return RequireInput(ctx, value, flag, flag, nil, streams, policy, prompt)
 }
 
 // Confirmation describes the question asked before an action.
@@ -220,7 +185,8 @@ type Confirmation struct {
 	// Typed, when set, must be typed to confirm, for irreversible actions such as deleting a repository.
 	Typed string
 	// NonTTY names the action in the error returned when no prompt is possible and --yes is
-	// missing: `delete label "bug" from alice/x`.
+	// missing: `delete label "bug" from alice/x`. Without it, a confirmation that defaults to no
+	// names the Prompt up to its question mark.
 	NonTTY string
 }
 
@@ -230,46 +196,27 @@ func ConfirmAction(ctx context.Context, c Confirmation, yes bool, streams Stream
 		return nil
 	}
 	if !policy.CanPrompt(streams) {
-		action := ""
-		if c.NonTTY != "" {
-			action = " to " + c.NonTTY
+		action := c.NonTTY
+		if question, _, ok := strings.Cut(c.Prompt, "?"); action == "" && ok && !c.DefaultYes && question != "" {
+			action = strings.ToLower(question[:1]) + question[1:]
+		}
+		if action != "" {
+			action = " to " + action
 		}
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("confirmation required%s; rerun with --yes", action))
 	}
-	asker, rich := prompt.(Asker)
 	if c.Typed != "" {
-		title := c.Prompt + " Type " + c.Typed + " to confirm:"
-		matches := func(s string) bool { return strings.EqualFold(strings.TrimSpace(s), c.Typed) }
-		if rich {
-			_, err := asker.Ask(ctx, title, func(s string) error {
-				if !matches(s) {
-					return fmt.Errorf("type %s to confirm", c.Typed)
-				}
-				return nil
-			})
-			return err
-		}
-		typed, err := prompt.Input(ctx, title)
-		if err == nil && !matches(typed) {
-			err = ErrCanceled
-		}
+		_, err := prompt.Ask(ctx, c.Prompt+" Type "+c.Typed+" to confirm:", func(s string) error {
+			if !strings.EqualFold(strings.TrimSpace(s), c.Typed) {
+				return fmt.Errorf("type %s to confirm", c.Typed)
+			}
+			return nil
+		})
 		return err
 	}
-	var accepted bool
-	var err error
-	if rich {
-		accepted, err = asker.ConfirmDefault(ctx, c.Prompt, c.DefaultYes)
-	} else {
-		accepted, err = prompt.Confirm(ctx, c.Prompt)
-	}
+	accepted, err := prompt.ConfirmDefault(ctx, c.Prompt, c.DefaultYes)
 	if err == nil && !accepted {
 		err = ErrCanceled
 	}
 	return err
-}
-
-// Confirm requires explicit acceptance unless confirmation was supplied by flag.
-// It is ConfirmAction for callers that predate Confirmation.
-func Confirm(ctx context.Context, description string, yes bool, streams Streams, policy Policy, prompt Prompter) error {
-	return ConfirmAction(ctx, Confirmation{Prompt: description}, yes, streams, policy, prompt)
 }

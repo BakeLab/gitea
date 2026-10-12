@@ -37,7 +37,7 @@ func TestPullReviewImplicitInteractiveForm(t *testing.T) {
 	}))
 	defer server.Close()
 	calls := 0
-	prompt := &askingPrompter{scriptedPrompter: scriptedPrompter{accept: true}}
+	prompt := &scriptedPrompter{accept: true}
 	deps, out, diagnostics := serverDeps(t, server.URL)
 	deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "vi"})
 	deps.ReviewForm = reviewFormFunc(func(_ context.Context, choices terminal.ReviewFormChoices) (terminal.ReviewFormValues, error) {
@@ -78,7 +78,7 @@ func TestPullReviewFormKeepsTheBodyWhenSubmissionIsDeclined(t *testing.T) {
 		require.Nil(t, choices.ReviewDiff, "annotating the diff needs an editor")
 		return terminal.ReviewFormValues{Event: "COMMENT", Body: "Self note"}, nil
 	})
-	deps.Prompter = &askingPrompter{}
+	deps.Prompter = &scriptedPrompter{}
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	err := Execute(context.Background(), deps, []string{"pr", "review", "3", "-R", "alice/project"})
 	require.ErrorIs(t, err, terminal.ErrCanceled)

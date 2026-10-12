@@ -6,6 +6,7 @@ package services
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -45,7 +46,7 @@ func (s SSHKeys) View(ctx context.Context, id int64) (SSHKey, error) {
 		return c.Users.GetPublicKey(ctx, id)
 	})
 	if err != nil {
-		return SSHKey{}, err
+		return SSHKey{}, Classify(err, "SSH key", strconv.FormatInt(id, 10), "")
 	}
 	return sshKeyFrom(key), nil
 }
@@ -56,14 +57,15 @@ func (s SSHKeys) Create(ctx context.Context, title, key string) (SSHKey, error) 
 		return c.Users.CreatePublicKey(ctx, gitea.CreateKeyOption{Title: title, Key: key})
 	})
 	if err != nil {
-		return SSHKey{}, err
+		return SSHKey{}, Classify(err, "SSH key", "", "")
 	}
 	return sshKeyFrom(created), nil
 }
 
 // Delete removes only the selected public key.
 func (s SSHKeys) Delete(ctx context.Context, id int64) error {
-	return do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		return c.Users.DeletePublicKey(ctx, id)
 	})
+	return Classify(err, "SSH key", strconv.FormatInt(id, 10), "")
 }

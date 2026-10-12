@@ -81,7 +81,7 @@ func TestSearchTables(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
-	deps.Now = func() time.Time { return time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC) }
+	deps.Now = func() time.Time { return testNow }
 	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
 	plainOutput(t, deps)
 	deps.Streams.OutTTY = true

@@ -57,7 +57,7 @@ func TestPullMilestoneClearUsesIssueEndpoint(t *testing.T) {
 	}
 }
 
-func TestFindOpenByHeadPagesPastSmallServerLimitsAndMatchesExactly(t *testing.T) {
+func TestListOpenPagesPastSmallServerLimits(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/v1/repos/alice/project/pulls", r.URL.Path)
 		switch r.URL.Query().Get("page") {
@@ -70,11 +70,10 @@ func TestFindOpenByHeadPagesPastSmallServerLimitsAndMatchesExactly(t *testing.T)
 		}
 	}))
 	service := Pulls{Client: client, Repository: "alice/project"}
-	item, err := service.FindOpenByHead(context.Background(), "feature")
+	items, err := service.ListOpen(context.Background())
 	require.NoError(t, err)
-	require.EqualValues(t, 2, item.Number)
-	_, err = service.FindOpenByHead(context.Background(), "FEATURE")
-	require.ErrorContains(t, err, "no open pull request")
+	require.Len(t, items, 2)
+	require.Equal(t, "feature", items[1].Head)
 }
 
 func TestListOpenRejectsEndlessPagination(t *testing.T) {

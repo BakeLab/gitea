@@ -55,7 +55,7 @@ $ gt search repo go --topic --sort updated --order desc`,
 				what += " matching " + opts.Query
 			}
 			spec := listSpec[services.Repository]{Columns: repositoryColumns, Row: repositoryRow, Context: what, Empty: "no " + what}
-			return writeTable(a, cmd, result.Items, spec, listPage{Number: opts.Page, More: result.More, Total: result.Total, Counted: result.Counted})
+			return writeTable(a, cmd, result.Items, spec, servicePage(result, opts.Page))
 		},
 	}
 	flags := command.Flags()

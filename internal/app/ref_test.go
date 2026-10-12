@@ -64,17 +64,13 @@ func refApplication(t *testing.T, gitResults map[string]string) (*application, s
 	t.Helper()
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/repos/alice/project/pulls", r.URL.Path)
-		if r.URL.Query().Get("page") != "1" {
-			_, _ = w.Write([]byte(`[]`))
-			return
-		}
-		_, _ = w.Write([]byte(`[
+		writeFirstPage(w, r, `[
 			{"number":3,"head":{"ref":"feat/one","repo":{"full_name":"alice/project"}}},
 			{"number":4,"head":{"ref":"feat/two","repo":{"full_name":"alice/project"}}},
 			{"number":17,"head":{"ref":"fix","repo":{"full_name":"bob/project"}}},
 			{"number":20,"head":{"ref":"dup","repo":{"full_name":"alice/project"}}},
 			{"number":21,"head":{"ref":"dup","repo":{"full_name":"carol/project"}}}
-		]`))
+		]`)
 	}))
 	t.Cleanup(server.Close)
 	deps, _, _ := testDeps(t)

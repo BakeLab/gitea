@@ -146,12 +146,7 @@ $ gt pr review 13
 
 # Start a pending review with inline comments, then submit it
 $ gt pr review 13 --pending --comments-file inline.json
-$ gt pr review submit 13 --approve
-
-# See who reviewed, then reply to and resolve an inline comment
-$ gt pr review list 13
-$ gt pr review reply 13 36 -b "Done"
-$ gt pr review resolve 36`
+$ gt pr review submit 13 --approve`
 
 func (a *application) pullReviewCommand() *cobra.Command {
 	review := a.reviewCreateCommand("review [<number> | <url> | <branch>]", "Review a pull request or manage its reviews")
@@ -250,12 +245,6 @@ func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
 	return cmd
 }
 
-// canPrompt reports whether gt may ask questions on this terminal.
-func (a *application) canPrompt() bool {
-	s, err := a.deps.Settings.Load()
-	return err == nil && a.policy(s).CanPrompt(a.deps.Streams)
-}
-
 // ownReview refuses to approve or request changes on one's own pull request before any body is
 // written, as Gitea would after.
 func ownReview(pull services.Pull, t target, state string) error {
@@ -268,13 +257,10 @@ func ownReview(pull services.Pull, t target, state string) error {
 // reportReview reports a submitted review, then prints its URL, or the review as JSON.
 func (a *application) reportReview(cmd *cobra.Command, t target, pull services.Pull, item services.Review) error {
 	a.done(cmd, "%s pull request %s", reviewVerbs[item.State], refLabel(t.Repo, pull.Number, pull.Title))
-	switch {
-	case a.options.json != "":
-		return a.writeJSON(cmd, item)
-	case item.URL != "":
-		return a.printURL(cmd, item.URL)
+	if a.options.json == "" && item.URL == "" {
+		return nil
 	}
-	return nil
+	return a.created(cmd, item, item.URL)
 }
 
 // readInlineComments reads the inline comments of --comments-file, a JSON array.
@@ -625,10 +611,7 @@ func (a *application) pullReviewReplyCommand() *cobra.Command {
 			return err
 		}
 		a.done(cmd, "Replied to review comment %d on %s#%d", id, t.Repo, n)
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
-		return a.printURL(cmd, item.URL)
+		return a.created(cmd, item, item.URL)
 	}}
 	cmd.Flags().StringVarP(&body, "body", "b", "", "Reply body")
 	cmd.Flags().StringVarP(&file, "body-file", "F", "", "Read the body from `file`, or - for stdin")

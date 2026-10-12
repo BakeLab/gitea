@@ -61,7 +61,7 @@ func TestReviewPromptAndFlagsReachIdenticalOptions(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
-	prompt := &askingPrompter{}
+	prompt := &scriptedPrompter{}
 	deps.Prompter = prompt
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	args := []string{"pr", "review", "1", "-R", "owner/repo", "--event", "REQUEST_CHANGES"}

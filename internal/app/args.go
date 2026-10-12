@@ -307,9 +307,11 @@ func argumentName(cmd *cobra.Command, argument string) string {
 	return noun + " " + text
 }
 
-// localFlagsChanged reports whether any command-specific flag was supplied.
-func localFlagsChanged(cmd *cobra.Command) bool {
+// localFlagsChanged reports whether a command-specific flag other than those in except was supplied.
+func localFlagsChanged(cmd *cobra.Command, except ...string) bool {
 	changed := false
-	cmd.LocalNonPersistentFlags().VisitAll(func(flag *pflag.Flag) { changed = changed || flag.Changed })
+	cmd.LocalNonPersistentFlags().VisitAll(func(flag *pflag.Flag) {
+		changed = changed || flag.Changed && !slices.Contains(except, flag.Name)
+	})
 	return changed
 }

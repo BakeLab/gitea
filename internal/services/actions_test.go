@@ -275,7 +275,7 @@ func TestRunTimeFilteringStopsAtScanCap(t *testing.T) {
 	defer server.Close()
 	service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
 	_, err := service.Runs(context.Background(), RunListOptions{Limit: 1, Page: 1, Until: &until})
-	require.ErrorContains(t, err, "narrow the search")
+	require.ErrorIs(t, err, ErrRunScanExhausted)
 	require.Equal(t, maxRunScanPages, pages)
 }
 

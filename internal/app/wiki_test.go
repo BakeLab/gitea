@@ -34,11 +34,7 @@ func TestWikiEditRenamesAndKeepsTheContent(t *testing.T) {
 
 func TestWikiListLimitsPagesOnTheClient(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("page") != "1" {
-			_, _ = w.Write([]byte(`[]`))
-			return
-		}
-		_, _ = w.Write([]byte(`[{"title":"Getting Started","last_commit":{"author":{"name":"alice","date":"2026-10-11T18:00:00Z"}}},{"title":"Home"}]`))
+		writeFirstPage(w, r, `[{"title":"Getting Started","last_commit":{"author":{"name":"alice","date":"2026-10-11T18:00:00Z"}}},{"title":"Home"}]`)
 	}))
 	defer server.Close()
 	deps, out, _ := repoTTYDeps(t, server.URL)

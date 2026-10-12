@@ -48,11 +48,7 @@ func TestPullDiffColorsHeadersAndHunks(t *testing.T) {
 func TestPullDiffNameOnly(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/repos/alice/project/pulls/2/files", r.URL.Path)
-		if r.URL.Query().Get("page") != "1" {
-			_, _ = w.Write([]byte(`[]`))
-			return
-		}
-		_, _ = w.Write([]byte(`[{"filename":"one.txt"},{"filename":"docs/two.md"}]`))
+		writeFirstPage(w, r, `[{"filename":"one.txt"},{"filename":"docs/two.md"}]`)
 	}))
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)

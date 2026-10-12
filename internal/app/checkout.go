@@ -91,7 +91,7 @@ argument select it, and the branch tracks the head branch, so that git push upda
 		if err != nil {
 			return err
 		}
-		snapshot, err := a.deps.Settings.Load()
+		snapshot, err := a.settings()
 		if err != nil {
 			return err
 		}
@@ -143,15 +143,12 @@ argument select it, and the branch tracks the head branch, so that git push upda
 			undoRemote()
 			return err
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, result)
-		}
 		if result.Detached {
 			a.done(cmd, "Checked out #%d at %s (detached HEAD)", n, shortSHA(result.Commit))
 		} else {
 			a.done(cmd, "Checked out #%d into %s", n, result.Branch)
 		}
-		return nil
+		return a.jsonResult(cmd, result)
 	}}
 	cmd.Flags().BoolVar(&update, "update", false, "Fast-forward an existing branch to the PR head; reject divergence")
 	cmd.Flags().BoolVar(&detached, "detach", false, "Check out the PR commit without creating or changing a branch")

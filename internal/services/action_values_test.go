@@ -82,9 +82,9 @@ func TestVariableReadsAndDeletesUseTheirScope(t *testing.T) {
 			}))
 			service := ActionVariables{Client: client, Scope: scope.scope}
 			want := ActionVariable{Name: "MODE", Value: "test", Description: "build mode"}
-			items, err := service.List(context.Background(), 20, 2)
+			items, err := service.ListPage(context.Background(), 20, 2)
 			require.NoError(t, err)
-			require.Equal(t, []ActionVariable{want}, items)
+			require.Equal(t, []ActionVariable{want}, items.Items)
 			item, err := service.View(context.Background(), "MODE")
 			require.NoError(t, err)
 			require.Equal(t, want, item)
@@ -128,14 +128,14 @@ func TestSecretListReturnsMetadataOnly(t *testing.T) {
 				assert.Equal(t, "2", r.URL.Query().Get("page"))
 				_, _ = w.Write([]byte(`[{"name":"TOKEN","data":"never-display","description":"deploy","created_at":"2028-01-02T03:04:05Z"},{"name":"OTHER"}]`))
 			}))
-			items, err := (ActionSecrets{Client: client, Scope: scope.scope}).List(context.Background(), 20, 2)
+			items, err := (ActionSecrets{Client: client, Scope: scope.scope}).ListPage(context.Background(), 20, 2)
 			if scope.scope.Account {
 				var unsupported *CapabilityError
 				require.ErrorAs(t, err, &unsupported)
 				return
 			}
 			require.NoError(t, err)
-			require.Equal(t, []ActionSecret{{Name: "TOKEN", Description: "deploy", CreatedAt: "2028-01-02T03:04:05Z"}, {Name: "OTHER"}}, items)
+			require.Equal(t, []ActionSecret{{Name: "TOKEN", Description: "deploy", CreatedAt: "2028-01-02T03:04:05Z"}, {Name: "OTHER"}}, items.Items)
 		})
 	}
 }

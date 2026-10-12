@@ -6,7 +6,6 @@ package app
 import (
 	"context"
 	"net/http"
-	"regexp"
 	"strconv"
 	"testing"
 	"time"
@@ -107,7 +106,7 @@ func TestIssueListTables(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
-	deps.Now = func() time.Time { return time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC) }
+	deps.Now = func() time.Time { return testNow }
 	args := []string{"issue", "list", "-R", "alice/project", "-L", "3"}
 	require.NoError(t, Execute(context.Background(), deps, args))
 	require.Equal(t, "7\tShort\tbug, priority/high\topen\tissue\talice\t2026-10-11T18:00:00Z\n"+
@@ -131,7 +130,7 @@ func TestIssueListTables(t *testing.T) {
 		out.Reset()
 		deps.Streams.OutTTY = true
 		require.NoError(t, Execute(context.Background(), deps, append(append(args, test.args...), "--no-input")))
-		require.Equal(t, test.want, stripLinks(stripColors(out.String())))
+		require.Equal(t, test.want, stripLinks(withoutANSI(out.String())))
 	}
 	require.Contains(t, out.String(), "\x1b]8;;https://example.org/i/7\x1b\\\x1b[32m#7\x1b[0m\x1b]8;;\x1b\\")
 	require.Contains(t, out.String(), "\x1b[35mmerged\x1b[0m")
@@ -156,11 +155,6 @@ func TestIssueListWebOpensTheFilteredPage(t *testing.T) {
 	deps.Browser = browser
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "list", "-R", "alice/project", "-w", "-s", "closed", "-S", "login bug"}))
 	require.Equal(t, server.URL+"/alice/project/issues?q=login+bug&state=closed", browser.resource)
-}
-
-// stripColors removes SGR color sequences from rendered output.
-func stripColors(s string) string {
-	return regexp.MustCompile("\x1b\\[[0-9;]*m").ReplaceAllString(s, "")
 }
 
 func TestIssueListKindFilter(t *testing.T) {

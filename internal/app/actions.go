@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
-	"gitea.dev/cli/internal/transport"
 	"github.com/spf13/cobra"
 )
 
@@ -29,9 +27,7 @@ func (a *application) workflowCommand() *cobra.Command {
 	group := &cobra.Command{
 		Use:   "workflow",
 		Short: "View, run, enable and disable Actions workflows",
-		Long: `View the Actions workflows of a repository, dispatch them, and enable or disable them.
-
-List and inspect the runs of workflows with gt run.`,
+		Long:  "Work with the Actions workflows of a repository. Inspect their runs with gt run.",
 	}
 	group.AddCommand(a.workflowListCommand(), a.workflowViewCommand(), a.workflowRunCommand(), a.workflowStateCommand(true), a.workflowStateCommand(false))
 	return group
@@ -128,7 +124,7 @@ $ gt workflow view ci --web`,
 	cmd.Flags().BoolVar(&showYAML, "yaml", false, "Print the workflow file")
 	cmd.Flags().StringVarP(&ref, "ref", "r", "", "Branch, tag or commit of the workflow file that --yaml prints (default: the default branch)")
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the workflow file in the browser")
-	cmd.ValidArgsFunction = a.completeWorkflowArg()
+	cmd.ValidArgsFunction = firstArg(a.completeWorkflows())
 	_ = cmd.RegisterFlagCompletionFunc("ref", a.completeBranches())
 	return cmd
 }
@@ -144,11 +140,11 @@ func (a *application) renderWorkflow(t target, workflow services.Workflow, runs 
 		fields := []terminal.Field{{Label: "File", Value: workflow.ID}, {Label: "Path", Value: workflow.Path}, {Label: "State", Value: workflow.State}}
 		return terminal.View{Title: workflow.Name, Fields: fields, URL: workflow.URL, Body: terminal.Table(runColumns, rows, d)}.Render(d)
 	}
-	muted := func(text string) string { return paintActionCell(terminal.Cell{Text: text, Muted: true}, d.Color) }
+	muted := func(text string) string { return terminal.Cell{Text: text, Muted: true}.Render(d) }
 	var b strings.Builder
-	b.WriteString(paintActionCell(terminal.Cell{Text: workflow.Name, Bold: true}, d.Color) + " " + muted(workflow.ID) + "\n")
-	b.WriteString(paintActionCell(workflowState(workflow), d.Color) + " • " + muted(workflow.Path) + "\n\n")
-	b.WriteString(paintActionCell(terminal.Cell{Text: "RECENT RUNS", Bold: true}, d.Color) + "\n")
+	b.WriteString(terminal.Cell{Text: workflow.Name, Bold: true}.Render(d) + " " + muted(workflow.ID) + "\n")
+	b.WriteString(workflowState(workflow).Render(d) + " • " + muted(workflow.Path) + "\n\n")
+	b.WriteString(terminal.Cell{Text: "RECENT RUNS", Bold: true}.Render(d) + "\n")
 	if len(runs) == 0 {
 		b.WriteString(muted("No runs yet") + "\n")
 	} else {
@@ -243,7 +239,7 @@ $ gt workflow run nightly --follow`,
 			if !follow {
 				a.nextStep(cmd, "Watch it: gt run watch %d%s", result.ID, a.suggestedRepo(t))
 			}
-			if err := a.printURL(cmd, result.URL); err != nil || !follow {
+			if err := a.created(cmd, result, result.URL); err != nil || !follow {
 				return err
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
@@ -269,7 +265,7 @@ $ gt workflow run nightly --follow`,
 	cmd.Flags().BoolVar(&follow, "follow", false, "Follow the logs of the run's jobs after dispatching it")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "Polling interval with --follow")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to follow")
-	cmd.ValidArgsFunction = a.completeWorkflowArg()
+	cmd.ValidArgsFunction = firstArg(a.completeWorkflows())
 	_ = cmd.RegisterFlagCompletionFunc("ref", a.completeBranches())
 	_ = cmd.RegisterFlagCompletionFunc("field", a.completeWorkflowInputs())
 	_ = cmd.RegisterFlagCompletionFunc("input", a.completeWorkflowInputs())
@@ -315,7 +311,7 @@ func (a *application) dispatchRef(ctx context.Context, t target, ref string) (st
 		return defaultBranch()
 	}
 	_, err = services.Branches{Client: t.client}.View(ctx, t.Repo, branch)
-	if api, ok := errors.AsType[*transport.APIError](err); ok && api.Status == http.StatusNotFound {
+	if services.IsNotFound(err) {
 		fallback, err := defaultBranch()
 		if err != nil {
 			return "", err
@@ -341,11 +337,7 @@ func (a *application) dispatchValues(cmd *cobra.Command, workflow services.Workf
 		}
 		return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("unknown input %q for %s; inputs: %s", key, workflow.Label(), strings.Join(names, ", ")))
 	}
-	s, err := a.deps.Settings.Load()
-	if err != nil {
-		return nil, err
-	}
-	canPrompt := a.policy(s).CanPrompt(a.deps.Streams)
+	canPrompt := a.canPrompt()
 	for _, input := range declared {
 		value, given := values[input.Name]
 		missing := input.Required && input.Default == ""
@@ -357,9 +349,11 @@ func (a *application) dispatchValues(cmd *cobra.Command, workflow services.Workf
 			}
 			values[input.Name] = normalized
 		case canPrompt && (askAll || missing):
-			if values[input.Name], err = a.askInput(cmd, input); err != nil {
+			answer, err := a.askInput(cmd, input)
+			if err != nil {
 				return nil, err
 			}
+			values[input.Name] = answer
 		case missing:
 			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("missing required input %s for %s; pass -f %s=<value>", input.Name, workflow.Label(), input.Name))
 		}
@@ -399,7 +393,6 @@ func (a *application) askInput(cmd *cobra.Command, input services.WorkflowInput)
 	if input.Description != "" {
 		title += " — " + input.Description
 	}
-	asker, rich := a.deps.Prompter.(terminal.Asker)
 	switch chooser, ok := a.deps.Prompter.(terminal.Chooser); {
 	case input.Type == "choice" && ok && len(input.Options) > 0:
 		choices := make([]terminal.Choice, len(input.Options))
@@ -407,8 +400,8 @@ func (a *application) askInput(cmd *cobra.Command, input services.WorkflowInput)
 			choices[i] = terminal.Choice{Label: option, Value: option}
 		}
 		return chooser.Choose(cmd.Context(), title, choices, input.Default)
-	case input.Type == "boolean" && rich:
-		yes, err := asker.ConfirmDefault(cmd.Context(), title, input.Default == "true")
+	case input.Type == "boolean":
+		yes, err := a.deps.Prompter.ConfirmDefault(cmd.Context(), title, input.Default == "true")
 		return strconv.FormatBool(yes), err
 	}
 	if input.Default != "" {
@@ -424,13 +417,7 @@ func (a *application) askInput(cmd *cobra.Command, input services.WorkflowInput)
 		_, err := inputValue(input, answer)
 		return err
 	}
-	var answer string
-	var err error
-	if rich {
-		answer, err = asker.Ask(cmd.Context(), title, validate)
-	} else if answer, err = a.deps.Prompter.Input(cmd.Context(), title); err == nil {
-		err = validate(answer)
-	}
+	answer, err := a.deps.Prompter.Ask(cmd.Context(), title, validate)
 	if err != nil {
 		return "", err
 	}
@@ -452,7 +439,7 @@ func (a *application) workflowStateCommand(enable bool) *cobra.Command {
 $ gt workflow %s Nightly`, verb, verb),
 		Args:              argsExact(1),
 		Annotations:       map[string]string{"gt.arguments": workflowArguments},
-		ValidArgsFunction: a.completeWorkflowArg(),
+		ValidArgsFunction: firstArg(a.completeWorkflows()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			t, err := a.resolve(cmd.Context(), true)
 			if err != nil {
@@ -474,22 +461,8 @@ $ gt workflow %s Nightly`, verb, verb),
 				}
 				a.done(cmd, "%s %s", done, workflow.Label())
 			}
-			if a.options.json != "" {
-				return a.writeJSON(cmd, workflow)
-			}
-			return nil
+			return a.jsonResult(cmd, workflow)
 		},
-	}
-}
-
-// completeWorkflowArg completes the workflow argument with workflow files.
-func (a *application) completeWorkflowArg() cobra.CompletionFunc {
-	workflows := a.completeWorkflows()
-	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
-		if len(args) > 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		return workflows(cmd, args, toComplete)
 	}
 }
 

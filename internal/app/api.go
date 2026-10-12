@@ -256,7 +256,7 @@ func (a *application) apiCommand() *cobra.Command {
 				response.tty = a.deps.Streams.OutTTY
 				response.color = response.tty && a.colorEnabled()
 			}
-			return (services.API{Client: target.client}).Visit(cmd.Context(), services.APIOptions{Endpoint: endpoint, Method: method, Body: body, Headers: headers, Paginate: paginate, MaxPages: maxPages}, func(r *http.Response) error {
+			err = (services.API{Client: target.client}).Visit(cmd.Context(), services.APIOptions{Endpoint: endpoint, Method: method, Body: body, Headers: headers, Paginate: paginate, MaxPages: maxPages}, func(r *http.Response) error {
 				if verbose {
 					if err := writeRequestHead(cmd.ErrOrStderr(), r.Request); err != nil {
 						return err
@@ -273,6 +273,10 @@ func (a *application) apiCommand() *cobra.Command {
 				}
 				return response.write(destination, r)
 			})
+			if errors.Is(err, services.ErrMaxPages) {
+				return errors.New("API pagination exceeded --max-pages")
+			}
+			return err
 		})
 	}}
 	cmd.Flags().StringVarP(&method, "method", "X", "GET", "HTTP `method`")

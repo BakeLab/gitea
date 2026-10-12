@@ -82,7 +82,7 @@ func (s Actions) JobsPage(ctx context.Context, run int64, limit, page int) (Page
 	if err != nil {
 		return Page[Job]{}, err
 	}
-	return Page[Job]{Items: convertAll(window.Items, jobFrom), More: window.More, Total: window.Total, Counted: window.Counted}, nil
+	return convertPage(window, jobFrom), nil
 }
 
 // WaitForFirstJob polls a freshly dispatched run until the server has created its first job.

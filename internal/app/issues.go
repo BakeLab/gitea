@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"path/filepath"
 	"strconv"
@@ -18,7 +17,6 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
-	"gitea.dev/cli/internal/transport"
 	"github.com/spf13/cobra"
 )
 
@@ -111,7 +109,7 @@ func issuesURL(t target, opts services.ListOptions) string {
 	if opts.Search != "" {
 		query.Set("q", opts.Search)
 	}
-	return strings.TrimRight(t.Host, "/") + "/" + t.Repo + "/" + section + "?" + query.Encode()
+	return repositoryURL(t) + "/" + section + "?" + query.Encode()
 }
 
 // issueListSpec describes issue tables of the issues where, such as "in alice/x": STATE shows on a
@@ -187,20 +185,8 @@ $ gt issue view https://gitea.com/OWNER/REPO/issues/12 --web`, Annotations: map[
 	}}
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the issue in the browser")
 	cmd.Flags().BoolVarP(&comments, "comments", "c", false, "View issue comments")
-	cmd.ValidArgsFunction = a.completeIssueArgs("open", false)
+	cmd.ValidArgsFunction = firstArg(a.completeIssues("open"))
 	return cmd
-}
-
-// completeIssueArgs completes issue numbers in state for the first argument, or for every
-// argument when variadic.
-func (a *application) completeIssueArgs(state string, variadic bool) cobra.CompletionFunc {
-	complete := a.completeIssues(state)
-	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
-		if len(args) > 0 && !variadic {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		return complete(cmd, args, toComplete)
-	}
 }
 
 func (a *application) issueCreateCommand() *cobra.Command {
@@ -270,7 +256,7 @@ $ gt issue create --title "Idea" --web`, Args: argsExact(0), RunE: func(cmd *cob
 				return err
 			}
 			query := url.Values{"title": {title}, "body": {cmp.Or(body, templateBody)}}
-			return a.openBrowser(cmd, strings.TrimRight(target.Host, "/")+"/"+target.Repo+"/issues/new?"+query.Encode())
+			return a.openBrowser(cmd, repositoryURL(target)+"/issues/new?"+query.Encode())
 		}
 		if bodyFile == "-" && title == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--body-file - requires --title; stdin cannot also supply a prompt"))
@@ -317,7 +303,7 @@ $ gt issue create --title "Idea" --web`, Args: argsExact(0), RunE: func(cmd *cob
 				failures = append(failures, fmt.Errorf("issue %d created; attachment %s upload failed: %w", item.Number, filepath.Base(file.Name()), err))
 			}
 		}
-		return errors.Join(append(failures, a.created(cmd, target, item))...)
+		return errors.Join(append(failures, a.issueCreated(cmd, target, item))...)
 	}}
 	flags := cmd.Flags()
 	flags.StringVarP(&title, "title", "t", "", "Issue title")
@@ -340,13 +326,10 @@ $ gt issue create --title "Idea" --web`, Args: argsExact(0), RunE: func(cmd *cob
 	return cmd
 }
 
-// created reports a new issue: as JSON, or its URL on stdout after a ✓ line for people.
-func (a *application) created(cmd *cobra.Command, t target, item services.Issue) error {
-	if a.options.json != "" {
-		return a.writeJSON(cmd, item)
-	}
+// issueCreated reports a new issue: as JSON, or its URL on stdout after a ✓ line for people.
+func (a *application) issueCreated(cmd *cobra.Command, t target, item services.Issue) error {
 	a.done(cmd, "Created issue %s", refLabel(t.Repo, item.Number, item.Title))
-	return a.printURL(cmd, item.URL)
+	return a.created(cmd, item, item.URL)
 }
 
 func (a *application) createIssueInteractively(cmd *cobra.Command) (runErr error) {
@@ -379,7 +362,7 @@ func (a *application) createIssueInteractively(cmd *cobra.Command) (runErr error
 	if err != nil {
 		return err
 	}
-	return a.created(cmd, target, item)
+	return a.issueCreated(cmd, target, item)
 }
 
 // issueTemplateBody seeds a body from markdown content, or from the description of form templates.
@@ -445,15 +428,11 @@ $ gt issue %[1]s 12 13 --comment "Done in #14"`, verb), Annotations: map[string]
 			}
 			a.done(cmd, "%s %s %s", past, discussionNoun(item.Kind), refLabel(target.Repo, n, item.Title))
 			return item, nil
-		}, func(services.Issue) {})
-		var err2 error
-		if a.options.json != "" {
-			err2 = writeBatchJSON(a, cmd, len(numbers), results)
-		}
-		return errors.Join(append(failures, err2)...)
+		}, nil)
+		return errors.Join(append(failures, writeBatchJSON(a, cmd, len(numbers), results))...)
 	}}
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "Leave a comment before the issue is "+state)
-	cmd.ValidArgsFunction = a.completeIssueArgs(completeState, true)
+	cmd.ValidArgsFunction = a.completeIssues(completeState)
 	return cmd
 }
 
@@ -509,10 +488,10 @@ func issueLabel(n int64) string { return fmt.Sprintf("issue %d", n) }
 // itemError words the failure of one item of a batch, which the batch prefixes with the item, such
 // as "issue 9: not found in alice/x".
 func itemError(err error, scope string) error {
-	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusNotFound {
+	if services.IsNotFound(err) {
 		return explain(err, "not found in %s", scope)
 	}
-	return services.ClassifyRequest(err)
+	return err
 }
 
 // nameFilter splits a comma-separated filter of kind, trimming entries and rejecting blanks.
@@ -558,7 +537,6 @@ func (f *metadataFlags) register(cmd *cobra.Command) {
 	flags.StringSliceVar(&f.addAssignees, "add-assignee", nil, "Add assignees by `login`; @me for yourself")
 	flags.StringSliceVar(&f.removeAssignees, "remove-assignee", nil, "Remove assignees by `login`; @me for yourself")
 	flags.StringSliceVar(&f.setAssignees, "set-assignees", nil, "Replace all assignees; an empty value clears them")
-	flagAliases(cmd, map[string]string{"add-labels": "add-label", "remove-labels": "remove-label", "add-assignees": "add-assignee", "remove-assignees": "remove-assignee"})
 }
 
 // completeMetadataFlags completes the label and assignee flags of metadataFlags.

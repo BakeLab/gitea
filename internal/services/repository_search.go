@@ -136,5 +136,5 @@ func (s Repositories) Search(ctx context.Context, opts RepositorySearchOptions) 
 	if err != nil {
 		return Page[Repository]{}, err
 	}
-	return Page[Repository]{Items: convertAll(window.Items, repositoryFrom), More: window.More, Total: window.Total, Counted: window.Counted}, nil
+	return convertPage(window, repositoryFrom), nil
 }

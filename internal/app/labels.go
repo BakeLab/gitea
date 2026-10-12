@@ -42,7 +42,7 @@ addressed by name or ID.`}
 	}
 	complete := a.completeScopedLabels(&org)
 	group.AddCommand(a.labelListCommand(scope), a.labelCreateCommand(scope), a.labelEditCommand(scope, complete), a.labelDeleteCommand(scope, complete),
-		a.labelImportCommand(scope), a.labelCloneCommand(scope), a.labelExportCommand(scope))
+		a.labelImportCommand(scope), a.labelExportCommand(scope))
 	return group
 }
 
@@ -182,7 +182,7 @@ $ gt label create bug -c ee0701 --force`, Args: usageArgs(cobra.MaximumNArgs(1))
 		}
 		item, updated, err := s.CreateUnique(cmd.Context(), existing, opts, force)
 		if err != nil {
-			return err
+			return forceHint(err)
 		}
 		return a.reportLabel(cmd, s, item, updated)
 	}}
@@ -196,12 +196,8 @@ $ gt label create bug -c ee0701 --force`, Args: usageArgs(cobra.MaximumNArgs(1))
 
 // askLabelDetails asks for the optional color and description of a label whose name was prompted.
 func (a *application) askLabelDetails(cmd *cobra.Command, opts *services.LabelOptions) error {
-	asker, ok := a.deps.Prompter.(terminal.Asker)
-	if !ok {
-		return nil
-	}
 	if opts.Color == nil {
-		color, err := asker.Ask(cmd.Context(), "Color (hex, e.g. d73a4a; empty = random):", func(s string) error {
+		color, err := a.deps.Prompter.Ask(cmd.Context(), "Color (hex, e.g. d73a4a; empty = random):", func(s string) error {
 			if s != "" && !labelColor.MatchString(strings.TrimPrefix(s, "#")) {
 				return errors.New("use six hexadecimal digits")
 			}
@@ -215,7 +211,7 @@ func (a *application) askLabelDetails(cmd *cobra.Command, opts *services.LabelOp
 		}
 	}
 	if opts.Description == nil {
-		description, err := asker.Ask(cmd.Context(), "Description (optional):", nil)
+		description, err := a.deps.Prompter.Ask(cmd.Context(), "Description (optional):", nil)
 		if err != nil {
 			return err
 		}
@@ -224,32 +220,35 @@ func (a *application) askLabelDetails(cmd *cobra.Command, opts *services.LabelOp
 	return nil
 }
 
+// forceHint points at --force when a label exists already.
+func forceHint(err error) error {
+	if conflict, ok := errors.AsType[*services.ConflictError](err); ok && conflict.Reason == services.ReasonExists {
+		conflict.Hint = "pass --force to update it"
+	}
+	return err
+}
+
 // reportLabel reports a created or updated label as JSON or with a ✓ line.
 func (a *application) reportLabel(cmd *cobra.Command, s services.Labels, item services.Label, updated bool) error {
-	if a.options.json != "" {
-		return a.writeJSON(cmd, item)
-	}
 	verb := "Created"
 	if updated {
 		verb = "Updated"
 	}
 	a.done(cmd, "%s %s", verb, labelName(s, item))
-	return nil
+	return a.jsonResult(cmd, item)
 }
 
 func (a *application) labelEditCommand(scope labelScope, complete cobra.CompletionFunc) *cobra.Command {
 	var fields labelFields
 	var byName bool
-	cmd := &cobra.Command{Use: "edit <label>", Short: "Edit a label", Long: "Edit a label. Without flags on a terminal, a form starts from the current values.", Example: `$ gt label edit bug --name defect --color b60205
+	cmd := &cobra.Command{Use: "edit <label>", Short: "Edit a label", Example: `$ gt label edit bug --name defect --color b60205
 $ gt label edit "kind/question" --description "Further information is requested"
 $ gt label edit old-stuff --archived`, Annotations: map[string]string{"gt.arguments": labelArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		opts, err := fields.options(cmd)
 		if err != nil {
 			return err
 		}
-		prompt := a.canPrompt()
-		form, hasForm := a.deps.Prompter.(terminal.LabelForm)
-		if opts == (services.LabelOptions{}) && (!prompt || !hasForm) {
+		if opts == (services.LabelOptions{}) {
 			return errNothingToEdit
 		}
 		s, err := scope(cmd)
@@ -260,25 +259,12 @@ $ gt label edit old-stuff --archived`, Annotations: map[string]string{"gt.argume
 		if err != nil {
 			return err
 		}
-		if opts == (services.LabelOptions{}) {
-			current := found[0]
-			values, err := form.EditLabel(cmd.Context(), "Editing "+labelName(s, current), terminal.LabelFormValues{
-				Name: current.Name, Color: current.Color, Description: current.Description, Exclusive: current.Exclusive, Archived: current.Archived,
-			})
-			if err != nil {
-				return err
-			}
-			opts = services.LabelOptions{Name: &values.Name, Color: &values.Color, Description: &values.Description, Exclusive: &values.Exclusive, Archived: &values.Archived}
-		}
 		item, err := s.Edit(cmd.Context(), found[0].ID, opts)
 		if err != nil {
 			return err
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
 		a.done(cmd, "Edited %s", labelName(s, item))
-		return nil
+		return a.jsonResult(cmd, item)
 	}}
 	fields.register(cmd, "Rename the label")
 	cmd.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a label name rather than an ID")
@@ -306,7 +292,7 @@ $ gt label delete wontfix duplicate --yes`, Annotations: map[string]string{"gt.t
 		if len(found) > 1 {
 			subject = fmt.Sprintf("%d labels (%s)", len(found), strings.Join(names, ", "))
 		}
-		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + " from " + s.Scope() + "?", NonTTY: "delete " + subject + " from " + s.Scope()}); err != nil {
+		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + " from " + s.Scope() + "?"}); err != nil {
 			return err
 		}
 		return batchDone(a, cmd, found, func(item services.Label) string { return "label " + strconv.Quote(item.Name) }, func(item services.Label) (services.Label, error) {
@@ -324,7 +310,7 @@ func (a *application) labelImportCommand(scope labelScope) *cobra.Command {
 " ;description" and " ;exclusive", " ;archived" or both. gt label export writes this
 format, and Gitea's label templates use it. Existing labels are refused unless --force
 updates them.`, Example: `$ gt label import labels.txt
-$ gt label export --repo alice/old | gt label import - --repo alice/new`, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt label export --repo alice/old | gt label import - --repo alice/new`, Args: argsExact(1), ValidArgsFunction: completeFiles, RunE: func(cmd *cobra.Command, args []string) error {
 		return a.importLabels(cmd, scope, args[0], force)
 	}}
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Update labels that exist already")
@@ -345,12 +331,12 @@ func (a *application) importLabels(cmd *cobra.Command, scope labelScope, file st
 	if err != nil {
 		return err
 	}
-	return a.createLabels(cmd, s, rows, force, false)
+	return a.createLabels(cmd, s, rows, force)
 }
 
 // createLabels creates each label in rows, continuing past failures. A label that exists already
-// is updated with force, skipped with skip, and fails otherwise.
-func (a *application) createLabels(cmd *cobra.Command, s services.Labels, rows []services.LabelOptions, force, skip bool) error {
+// is updated with force and fails otherwise.
+func (a *application) createLabels(cmd *cobra.Command, s services.Labels, rows []services.LabelOptions, force bool) error {
 	existing, err := s.All(cmd.Context())
 	if err != nil {
 		return err
@@ -358,11 +344,8 @@ func (a *application) createLabels(cmd *cobra.Command, s services.Labels, rows [
 	outcome := map[string]string{}
 	results, failures := applyBatch(cmd, rows, func(row services.LabelOptions) string { return "label " + strconv.Quote(*row.Name) }, func(row services.LabelOptions) (services.Label, error) {
 		item, updated, err := s.CreateUnique(cmd.Context(), existing, row, force)
-		var conflict *services.ConflictError
+		err = forceHint(err)
 		switch {
-		case skip && errors.As(err, &conflict) && conflict.Reason == services.ReasonExists:
-			outcome[*row.Name] = "Skipped"
-			return services.Label{Name: *row.Name}, nil
 		case err != nil:
 			return item, err
 		case updated:
@@ -373,40 +356,9 @@ func (a *application) createLabels(cmd *cobra.Command, s services.Labels, rows [
 		}
 		return item, nil
 	}, func(item services.Label) {
-		if outcome[item.Name] == "Skipped" {
-			a.warn(cmd, "Skipped %s: it exists already", labelName(s, item))
-			return
-		}
 		a.done(cmd, "%s %s", outcome[item.Name], labelName(s, item))
 	})
-	if a.options.json != "" {
-		failures = append(failures, writeBatchJSON(a, cmd, len(rows), results))
-	}
-	return errors.Join(failures...)
-}
-
-func (a *application) labelCloneCommand(scope labelScope) *cobra.Command {
-	var force bool
-	cmd := &cobra.Command{Use: "clone <source-repository>", Short: "Copy the labels of another repository", Long: `Create the labels of the source repository in the selected repository or organization.
-Labels that exist already are skipped unless --force updates them.`, Example: `$ gt label clone alice/project
-$ gt label clone alice/project --repo alice/new --force`, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		s, err := scope(cmd)
-		if err != nil {
-			return err
-		}
-		source, err := (services.Labels{Client: s.Client, Repository: args[0]}).All(cmd.Context())
-		if err != nil {
-			return err
-		}
-		rows := make([]services.LabelOptions, len(source))
-		for i, item := range source {
-			rows[i] = services.LabelOptions{Name: &item.Name, Color: &item.Color, Description: &item.Description, Exclusive: &item.Exclusive}
-		}
-		return a.createLabels(cmd, s, rows, force, true)
-	}}
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "Update labels that exist already")
-	cmd.ValidArgsFunction = a.completeRepos()
-	return cmd
+	return errors.Join(append(failures, writeBatchJSON(a, cmd, len(rows), results))...)
 }
 
 // completeScopedLabels completes the label names of the repository or, with --org, of the

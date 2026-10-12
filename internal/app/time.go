@@ -161,7 +161,7 @@ func (a *application) timeCreateCommand() *cobra.Command {
 	return &cobra.Command{Use: "create {<number> | <url>} <duration>", Aliases: []string{"add", "log"}, Short: "Log time spent on an issue", Long: `Log time spent on an issue or pull request. The duration uses h, m and s units, such as
 1h25m or "1h 25m".`, Example: `$ gt time create 12 1h25m
 $ gt time add 12 "1h 30m"
-$ gt time log https://gitea.com/OWNER/REPO/issues/12 45m`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: argsExact(2), ValidArgsFunction: a.completeIssueArgs("open", false), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt time log https://gitea.com/OWNER/REPO/issues/12 45m`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: argsExact(2), ValidArgsFunction: firstArg(a.completeIssues("open")), RunE: func(cmd *cobra.Command, args []string) error {
 		seconds, err := parseSpent(args[1])
 		if err != nil {
 			return err
@@ -174,17 +174,14 @@ $ gt time log https://gitea.com/OWNER/REPO/issues/12 45m`, Annotations: map[stri
 		if err != nil {
 			return err
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
 		a.done(cmd, "Logged %s on %s", spent(item.Seconds), strings.TrimSuffix(refLabel(target.Repo, n, item.IssueTitle), " ()"))
-		return nil
+		return a.jsonResult(cmd, item)
 	}}
 }
 
 func (a *application) timeDeleteCommand() *cobra.Command {
 	return &cobra.Command{Use: "delete {<number> | <url>} <time-id>", Short: "Delete a time record", Example: `# Find the record with gt time list --issue 12
-$ gt time delete 12 8`, Annotations: map[string]string{"gt.text": "time delete does not return a resource", "gt.confirm": "true", "gt.arguments": issueArguments}, Args: argsExact(2), ValidArgsFunction: a.completeIssueArgs("all", false), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt time delete 12 8`, Annotations: map[string]string{"gt.text": "time delete does not return a resource", "gt.confirm": "true", "gt.arguments": issueArguments}, Args: argsExact(2), ValidArgsFunction: firstArg(a.completeIssues("all")), RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := number(args[1])
 		if err != nil {
 			return err
@@ -199,31 +196,19 @@ $ gt time delete 12 8`, Annotations: map[string]string{"gt.text": "time delete d
 			return err
 		}
 		subject := fmt.Sprintf("%s logged by %s on %s#%d", spent(record.Seconds), record.User, target.Repo, n)
-		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + "?", NonTTY: "delete " + subject}); err != nil {
-			return err
-		}
-		if err := service.Delete(cmd.Context(), n, id); err != nil {
-			return err
-		}
-		a.done(cmd, "Deleted %s", subject)
-		return nil
+		return a.deleteConfirmed(cmd, subject, func() error { return service.Delete(cmd.Context(), n, id) })
 	}}
 }
 
 func (a *application) timeResetCommand() *cobra.Command {
-	return &cobra.Command{Use: "reset {<number> | <url>}", Short: "Delete all time logged on an issue", Example: "$ gt time reset 12 --yes", Annotations: map[string]string{"gt.text": "time reset does not return a resource", "gt.confirm": "true", "gt.arguments": issueArguments}, Args: argsExact(1), ValidArgsFunction: a.completeIssueArgs("all", false), RunE: func(cmd *cobra.Command, args []string) error {
+	return &cobra.Command{Use: "reset {<number> | <url>}", Short: "Delete all time logged on an issue", Example: "$ gt time reset 12 --yes", Annotations: map[string]string{"gt.text": "time reset does not return a resource", "gt.confirm": "true", "gt.arguments": issueArguments}, Args: argsExact(1), ValidArgsFunction: firstArg(a.completeIssues("all")), RunE: func(cmd *cobra.Command, args []string) error {
 		target, n, err := a.resolveRef(cmd, args[0], issueRef)
 		if err != nil {
 			return err
 		}
 		subject := fmt.Sprintf("all time logged on %s#%d", target.Repo, n)
-		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + "?", NonTTY: "delete " + subject}); err != nil {
-			return err
-		}
-		if err := (services.Times{Client: target.client, Repository: target.Repo}).Reset(cmd.Context(), n); err != nil {
-			return err
-		}
-		a.done(cmd, "Deleted %s", subject)
-		return nil
+		return a.deleteConfirmed(cmd, subject, func() error {
+			return (services.Times{Client: target.client, Repository: target.Repo}).Reset(cmd.Context(), n)
+		})
 	}}
 }

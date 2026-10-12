@@ -52,7 +52,8 @@ gt exits with 8 while checks are pending and with 1 when a check failed, like gh
 			if err != nil {
 				waiting := "checks to be reported"
 				if len(latest) > 0 {
-					waiting = plural(pendingChecks(latest), "pending check")
+					_, pending, _ := services.Tally(latest)
+					waiting = terminal.Plural(pending, "pending check")
 				}
 				return timeoutError(err, timeout, "waiting for %s", waiting)
 			}
@@ -94,45 +95,18 @@ $ gt pr checks 13 --watch && gt pr merge 13`
 
 // checksOutcome is the exit status of checks: 1 when one failed, 8 while any is pending.
 func checksOutcome(items []services.Check) error {
-	pending := false
-	for _, item := range items {
-		switch {
-		case item.Pending():
-			pending = true
-		case !item.Passed():
-			return clierr.Quiet(clierr.Failure)
-		}
-	}
-	if pending {
+	switch failing, pending, _ := services.Tally(items); {
+	case failing > 0:
+		return clierr.Quiet(clierr.Failure)
+	case pending > 0:
 		return clierr.Quiet(clierr.Pending)
 	}
 	return nil
 }
 
-// pendingChecks counts the checks that have not finished.
-func pendingChecks(items []services.Check) int {
-	pending := 0
-	for _, item := range items {
-		if item.Pending() {
-			pending++
-		}
-	}
-	return pending
-}
-
 // checkCounts words how the checks stand: "0 failing, 1 successful, and 2 pending checks".
 func checkCounts(items []services.Check) string {
-	var failing, passed, pending int
-	for _, item := range items {
-		switch {
-		case item.Pending():
-			pending++
-		case item.Passed():
-			passed++
-		default:
-			failing++
-		}
-	}
+	failing, pending, passed := services.Tally(items)
 	return fmt.Sprintf("%d failing, %d successful, and %d pending checks", failing, passed, pending)
 }
 

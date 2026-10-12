@@ -32,7 +32,7 @@ func RelativeTime(now, t time.Time) string {
 	default:
 		n, unit = d/(365*day), "year"
 	}
-	return prefix + "about " + plural(int(n), unit) + suffix
+	return prefix + "about " + Plural(int(n), unit) + suffix
 }
 
 // Timestamp formats t for scripts: RFC3339 in UTC at second precision.
@@ -49,7 +49,8 @@ func ParseTime(raw string) time.Time {
 	return t
 }
 
-func plural(n int, unit string) string {
+// Plural counts n of a unit, as in "1 fork" or "3 forks".
+func Plural(n int, unit string) string {
 	if n == 1 {
 		return "1 " + unit
 	}

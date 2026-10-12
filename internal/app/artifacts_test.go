@@ -16,13 +16,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestArtifactDownloadsValidateDestinationAndKeepBinaryOutputClean(t *testing.T) {
-	requests := 0
+func TestRunDownloadZipToStdoutKeepsBinaryOutputClean(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
 		switch r.URL.Path {
-		case "/api/v1/repos/owner/repo/actions/artifacts/9":
-			_, _ = w.Write([]byte(`{"id":9,"name":"build"}`))
+		case "/api/v1/repos/owner/repo/actions/runs/29/artifacts":
+			_, _ = w.Write([]byte(`{"total_count":1,"artifacts":[{"id":9,"name":"build"}]}`))
 		case "/api/v1/repos/owner/repo/actions/artifacts/9/zip":
 			require.Equal(t, "token token", r.Header.Get("Authorization"))
 			http.Redirect(w, r, "/signed?signature=private", http.StatusFound)
@@ -36,27 +34,11 @@ func TestArtifactDownloadsValidateDestinationAndKeepBinaryOutputClean(t *testing
 	}))
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"run", "artifact", "download", "9", "-R", "owner/repo", "--output-file", "-"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "download", "29", "-R", "owner/repo", "--zip", "-n", "build", "-O", "-"}))
 	require.Equal(t, []byte{0x50, 0x4b, 0, 0xff}, out.Bytes())
 	require.Empty(t, diagnostics.String())
-
-	dir := t.TempDir()
-	out.Reset()
-	args := []string{"run", "artifact", "download", "#9", "-R", "owner/repo", "--dir", dir}
-	require.NoError(t, Execute(context.Background(), deps, args))
-	data, err := os.ReadFile(filepath.Join(dir, "build.zip"))
-	require.NoError(t, err)
-	require.Equal(t, []byte{0x50, 0x4b, 0, 0xff}, data)
-	require.Empty(t, out.String())
-	before := requests
-	err = Execute(context.Background(), deps, append(args, "--output", filepath.Join(dir, "build.zip")))
-	require.ErrorContains(t, err, "--output and --dir cannot be combined")
-	err = Execute(context.Background(), deps, []string{"run", "artifact", "download", "9", "-R", "owner/repo", "--output", filepath.Join(dir, "build.zip")})
-	require.ErrorContains(t, err, "already exists; pass --clobber")
-	require.Equal(t, before, requests)
-	err = Execute(context.Background(), deps, []string{"run", "artifact", "download", "9", "-R", "owner/repo", "-O", "-", "--json"})
-	require.ErrorContains(t, err, "binary")
-	require.Equal(t, before, requests)
+	err := Execute(context.Background(), deps, []string{"run", "download", "29", "-R", "owner/repo", "--zip", "-n", "build", "-O", "-", "--json"})
+	require.ErrorContains(t, err, "run download writes files")
 }
 
 // zipOf returns a ZIP archive of files, by name.

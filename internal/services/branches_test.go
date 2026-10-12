@@ -36,12 +36,12 @@ func TestBranchListMapsServerFields(t *testing.T) {
 		assert.Equal(t, "3", r.URL.Query().Get("page"))
 		_, _ = w.Write([]byte(`[{"name":"main","commit":{"id":"abc","message":"Fix\n\nbody","timestamp":"2026-10-01T12:00:00Z"},"protected":true,"required_approvals":2,"user_can_push":true,"user_can_merge":true},{"name":"orphan","commit":null}]`))
 	}))
-	items, err := (Branches{Client: client}).List(context.Background(), "owner/repo", 20, 3)
+	items, err := (Branches{Client: client}).ListPage(context.Background(), "owner/repo", 20, 3)
 	require.NoError(t, err)
 	require.Equal(t, []Branch{
 		{Name: "main", SHA: "abc", Message: "Fix\n\nbody", UpdatedAt: "2026-10-01T12:00:00Z", Protected: true, RequiredApprovals: 2, CanPush: true, CanMerge: true},
 		{Name: "orphan"},
-	}, items)
+	}, items.Items)
 }
 
 func TestBranchCreateAndProtectPayloads(t *testing.T) {

@@ -203,7 +203,8 @@ func (s Teams) Sizes(ctx context.Context, teams []Team) ([]TeamSize, error) {
 			_, resp, err := c.Organizations.ListTeamMembers(ctx, id, gitea.ListTeamMembersOptions{ListOptions: first})
 			return resp, err
 		})
-		if err != nil {
+		if err != nil || teams[i].AllRepositories {
+			sizes[i] = TeamSize{Members: members}
 			return err
 		}
 		repositories, err := listTotal(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
@@ -282,17 +283,6 @@ func (s Teams) Members(ctx context.Context, id int64, limit, page int) (Page[Org
 	return convertPage(users, memberFrom), err
 }
 
-// IsMember reports whether username belongs to the team.
-func (s Teams) IsMember(ctx context.Context, id int64, username string) (bool, error) {
-	_, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
-		return c.Organizations.GetTeamMember(ctx, id, username)
-	})
-	if statusNotFound(err) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
 // SetMember adds or removes one team membership.
 func (s Teams) SetMember(ctx context.Context, id int64, username string, add bool) error {
 	err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
@@ -313,17 +303,6 @@ func (s Teams) Repositories(ctx context.Context, id int64, limit, page int) (Pag
 		return repos, headerOf(resp), err
 	})
 	return convertPage(repos, repositoryFrom), err
-}
-
-// HasRepository reports whether the team has access to the owner/name repository.
-func (s Teams) HasRepository(ctx context.Context, id int64, repository string) (bool, error) {
-	_, err := repoCall(ctx, s.Client, repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Repository, *gitea.Response, error) {
-		return c.Organizations.GetTeamRepository(ctx, id, owner, name)
-	})
-	if statusNotFound(err) {
-		return false, nil
-	}
-	return err == nil, err
 }
 
 // SetRepository adds or removes team access to a repository.

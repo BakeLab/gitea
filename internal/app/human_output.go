@@ -15,7 +15,7 @@ import (
 
 // preferences applies environment overrides to the stored preferences, matching config get --show-source.
 func (a *application) preferences() (settings.Preferences, error) {
-	snapshot, err := a.deps.Settings.Load()
+	snapshot, err := a.settings()
 	if err != nil {
 		return settings.Preferences{}, err
 	}
@@ -33,13 +33,12 @@ func (a *application) display() terminal.Display {
 	preferences, _ := a.preferences()
 	streams := a.deps.Streams
 	return terminal.Display{
-		TTY:       streams.OutTTY,
-		Color:     terminal.ColorEnabled(preferences.Color, streams.OutTTY, a.deps.Getenv),
-		TrueColor: terminal.TrueColor(a.deps.Getenv),
-		Links:     terminal.HyperlinksEnabled(preferences.Hyperlinks, streams.OutTTY, a.deps.Getenv),
-		Markdown:  terminal.MarkdownEnabled(preferences.Markdown, streams.OutTTY),
-		Width:     streams.Width,
-		Now:       a.deps.Now(),
+		TTY:      streams.OutTTY,
+		Color:    terminal.ColorEnabled(preferences.Color, streams.OutTTY, a.deps.Getenv),
+		Links:    terminal.HyperlinksEnabled(preferences.Hyperlinks, streams.OutTTY, a.deps.Getenv),
+		Markdown: terminal.MarkdownEnabled(preferences.Markdown, streams.OutTTY),
+		Width:    streams.Width,
+		Now:      a.deps.Now(),
 	}
 }
 
@@ -150,11 +149,19 @@ func (a *application) feedback(cmd *cobra.Command, icon, color, format string, a
 	fmt.Fprintln(cmd.ErrOrStderr(), terminal.Colorize(color, icon, a.colorEnabled())+" "+terminal.SafeLine(fmt.Sprintf(format, args...)))
 }
 
-// printURL writes the URL of a created resource to stdout unless --json is set, so scripts can
-// capture it: url=$(gt issue create …).
-func (a *application) printURL(cmd *cobra.Command, url string) error {
-	if a.options.json != "" {
+// jsonResult writes the result of a mutation when --json asks for it; people get a done line instead.
+func (a *application) jsonResult(cmd *cobra.Command, item any) error {
+	if a.options.json == "" {
 		return nil
+	}
+	return a.writeJSON(cmd, item)
+}
+
+// created writes a created resource as JSON with --json, else its URL to stdout, so scripts can
+// capture it: url=$(gt issue create …).
+func (a *application) created(cmd *cobra.Command, item any, url string) error {
+	if a.options.json != "" {
+		return a.writeJSON(cmd, item)
 	}
 	_, err := fmt.Fprintln(cmd.OutOrStdout(), terminal.SafeLine(url))
 	return err
@@ -171,7 +178,7 @@ type abortBatch struct{ error }
 func (e abortBatch) Unwrap() error { return e.error }
 
 // applyBatch applies run to each selection and continues past individual failures, which it
-// returns prefixed with the selection's label. succeeded sees each result as it arrives.
+// returns prefixed with the selection's label. succeeded, when set, sees each result as it arrives.
 func applyBatch[K, T any](cmd *cobra.Command, keys []K, label func(K) string, run func(K) (T, error), succeeded func(T)) ([]T, []error) {
 	results := []T{}
 	var failures []error
@@ -190,14 +197,18 @@ func applyBatch[K, T any](cmd *cobra.Command, keys []K, label func(K) string, ru
 			continue
 		}
 		results = append(results, item)
-		succeeded(item)
+		if succeeded != nil {
+			succeeded(item)
+		}
 	}
 	return results, failures
 }
 
-// writeBatchJSON writes an object for one selection (none if it failed), otherwise an array.
+// writeBatchJSON writes, with --json, an object for one selection (none if it failed), otherwise an array.
 func writeBatchJSON[T any](a *application, cmd *cobra.Command, selections int, results []T) error {
 	switch {
+	case a.options.json == "":
+		return nil
 	case selections != 1:
 		return a.writeJSON(cmd, results)
 	case len(results) == 1:
@@ -210,11 +221,7 @@ func writeBatchJSON[T any](a *application, cmd *cobra.Command, selections int, r
 // line from report, such as "Closed issue alice/x#5 (Fix login)", and the results as JSON.
 func batchDone[K, T any](a *application, cmd *cobra.Command, keys []K, label func(K) string, run func(K) (T, error), report func(T) string) error {
 	results, failures := applyBatch(cmd, keys, label, run, func(item T) { a.done(cmd, "%s", report(item)) })
-	var err error
-	if a.options.json != "" {
-		err = writeBatchJSON(a, cmd, len(keys), results)
-	}
-	return errors.Join(append(failures, err)...)
+	return errors.Join(append(failures, writeBatchJSON(a, cmd, len(keys), results))...)
 }
 
 // stateColors colors issue, pull request and milestone states with the terminal's own palette.

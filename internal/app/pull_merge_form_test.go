@@ -78,7 +78,7 @@ func TestPullMergeAsksForTheMethodAndBranchDeletion(t *testing.T) {
 	form := &mergeForm{options: func(choices terminal.MergeFormChoices) terminal.MergeFormValues {
 		return terminal.MergeFormValues{Method: "rebase", DeleteBranch: false}
 	}}
-	prompt := &askingPrompter{}
+	prompt := &scriptedPrompter{}
 	deps, _, diagnostics := serverDeps(t, server.URL)
 	deps.MergeForm, deps.Prompter = form, prompt
 	deps.Streams.InTTY, deps.Streams.ErrTTY, deps.Streams.OutTTY = true, true, true
@@ -187,7 +187,7 @@ func TestPullMergePicksAPullRequestForTheBranch(t *testing.T) {
 	}
 	deps, _, _ := serverDeps(t, server.URL)
 	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
-	deps.MergeForm, deps.Prompter = form, &askingPrompter{}
+	deps.MergeForm, deps.Prompter = form, &scriptedPrompter{}
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --short HEAD": "main"}}
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge"}))

@@ -100,6 +100,9 @@ type RunListOptions struct {
 // RunStatuses are the values Gitea accepts as run status filters.
 var RunStatuses = []string{"queued", "in_progress", "waiting", "requested", "pending", "action_required", "completed", "success", "failure", "cancelled", "skipped", "timed_out", "neutral"} //nolint:misspell // Gitea API spelling.
 
+// ErrRunScanExhausted reports time filters that matched too few of the runs a scan may read.
+var ErrRunScanExhausted = fmt.Errorf("time filters scanned %d runs without exhausting the history", maxRunScanPages*100)
+
 // Validate rejects unsupported status filters before performing API requests.
 func (o RunListOptions) Validate() error {
 	if o.Limit < 1 || o.Limit > 1000 || o.Page < 1 || o.Page > int(^uint(0)>>1)/o.Limit {
@@ -107,7 +110,7 @@ func (o RunListOptions) Validate() error {
 	}
 	for _, status := range o.Statuses {
 		if !slices.Contains(RunStatuses, status) {
-			return fmt.Errorf("unsupported run status %q; see gt run list --help", status)
+			return fmt.Errorf("unsupported run status %q", status)
 		}
 	}
 	return nil
@@ -173,7 +176,7 @@ func (s Actions) runs(ctx context.Context, opts RunListOptions) (Page[Run], erro
 			return Page[Run]{Items: result}, nil
 		}
 	}
-	return Page[Run]{}, fmt.Errorf("time filters scanned %d runs without exhausting the history; narrow the search with --branch, --workflow or --status", maxRunScanPages*100)
+	return Page[Run]{}, ErrRunScanExhausted
 }
 
 func (s Actions) runsPage(ctx context.Context, opts RunListOptions) (Page[Run], error) {

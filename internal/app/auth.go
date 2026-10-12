@@ -103,7 +103,8 @@ func (a *application) authCommand() *cobra.Command {
 gt keeps the accounts of each instance in hosts.yml and their tokens in the system
 keyring, or in a private file when you choose so. One account per instance is active;
 --user or GITEA_CLI_USER selects another for a single command. GITEA_TOKEN, together with
-GITEA_INSTANCE_URL or GITEA_CLI_HOST, replaces the stored credentials of its instance.`}
+GITEA_INSTANCE_URL or GITEA_CLI_HOST, replaces the stored credentials of its instance. See
+gt help environment for how commands select the instance.`}
 	group.AddCommand(a.loginCommand(), a.logoutCommand(), a.authStatusCommand(), a.authSwitchCommand(), a.authRefreshCommand(), a.authTokenCommand(), a.setupGitCommand(), a.gitCredentialCommand())
 	return group
 }
@@ -124,17 +125,8 @@ func (a *application) loginCommand() *cobra.Command {
 	login := &cobra.Command{
 		Use: "login", Short: "Log in to a Gitea instance", Args: argsExact(0),
 		Annotations: map[string]string{"gt.text": "login does not return a resource", "gt.confirm": "true"},
-		Long: `Log in to a Gitea instance.
-
-On a terminal without a method flag, gt asks for the instance, how to log in, where to
-keep the token and whether git should use gt for the instance. Otherwise choose one
-method:
-
-  --with-token             read an access token from stdin, or ask for it on a terminal
-  --oauth, --web           authorize gt in a web browser
-  --ssh-key FILE           sign requests with an SSH private key
-  --ssh-agent-key FP       sign requests with the key of fingerprint FP in ssh-agent
-  --ssh-agent-principal P  sign requests with the ssh-agent certificate of principal P
+		Long: `Log in to a Gitea instance. On a terminal without a method flag, gt asks for the instance,
+how to log in, where to keep the token and whether git should use gt for the instance.
 
 Create a token on the instance under Settings > Applications. Logging in to an account
 that gt already has replaces its stored credential after a confirmation (or with --yes).`,
@@ -161,7 +153,7 @@ $ gt auth login --host gitea.com --ssh-key ~/.ssh/id_ed25519`,
 			case selected == 1 && !oauth && cmd.Flags().Changed("scopes"):
 				return clierr.Wrap(clierr.Usage, errors.New("--scopes requires --oauth"))
 			}
-			snapshot, err := a.deps.Settings.Load()
+			snapshot, err := a.settings()
 			if err != nil {
 				return err
 			}
@@ -321,7 +313,7 @@ $ gt auth login --host gitea.com --ssh-key ~/.ssh/id_ed25519`,
 // confirmReplace asks before a login replaces the stored credential of an account that gt already
 // has, and reports whether it does.
 func (a *application) confirmReplace(cmd *cobra.Command, instance, user string) (bool, error) {
-	snapshot, err := a.deps.Settings.Load()
+	snapshot, err := a.settings()
 	if err != nil {
 		return false, err
 	}
@@ -427,17 +419,14 @@ func (a *application) authStatusCommand() *cobra.Command {
 	status := &cobra.Command{
 		Use: "status", Short: "Show the accounts gt can use", Args: argsExact(0),
 		Long: `Show the accounts gt can use on each instance, the active one, and how they
-authenticate. --verify asks each instance whether the credentials still work.
-
-A GITEA_TOKEN in the environment shows under its instance, where it replaces the stored
-accounts. gt auth status fails with exit code 4 when there is no account, or when a
-credential is missing or rejected.`,
+authenticate. Fails with exit code 4 when there is no account, or when a credential is
+missing or rejected.`,
 		Example: `$ gt auth status
 # Check the credentials against their instances
 $ gt auth status --verify
 $ gt auth status --host gitea.com --json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, err := a.deps.Settings.Load()
+			s, err := a.settings()
 			if err != nil {
 				return err
 			}
@@ -463,7 +452,7 @@ $ gt auth status --host gitea.com --json`,
 				rows = append(rows, row)
 			}
 			slices.SortFunc(rows, func(x, y authStatusRow) int {
-				return cmp.Or(strings.Compare(x.Host, y.Host), -compareBool(x.environment(), y.environment()), strings.Compare(x.User, y.User))
+				return cmp.Or(strings.Compare(x.Host, y.Host), cmp.Compare(boolOrder(y.environment()), boolOrder(x.environment())), strings.Compare(x.User, y.User))
 			})
 			if a.options.json != "" {
 				return a.writeJSON(cmd, rows)
@@ -485,16 +474,6 @@ $ gt auth status --host gitea.com --json`,
 	}
 	status.Flags().BoolVar(&verify, "verify", false, "Check each credential against its instance")
 	return status
-}
-
-func compareBool(x, y bool) int {
-	switch {
-	case x == y:
-		return 0
-	case x:
-		return 1
-	}
-	return -1
 }
 
 // accountStatus reports a stored account without revealing its credential.
@@ -647,8 +626,7 @@ func (a *application) authSwitchCommand() *cobra.Command {
 		Annotations: textOutput("switching accounts does not return a resource"), ValidArgsFunction: a.completeAccounts,
 		Long: `Switch the active account of an instance, which commands use unless --user or GITEA_CLI_USER
 selects another. With two accounts, gt auth switch toggles between them; with more, it
-asks which one on a terminal. The instance is the one of the current repository, else
---host, GITEA_CLI_HOST, default_host or the only instance.`,
+asks which one on a terminal.`,
 		Example: "$ gt auth switch\n$ gt auth switch bob\n$ gt auth switch bob --host gitea.com",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			t, err := a.instanceTarget(cmd.Context())
@@ -708,12 +686,8 @@ asks which one on a terminal. The instance is the one of the current repository,
 
 // chooseAccount asks which of the accounts of instance to use, or explains how to name one.
 func (a *application) chooseAccount(cmd *cobra.Command, instance string, names []string, active string) (string, error) {
-	s, err := a.deps.Settings.Load()
-	if err != nil {
-		return "", err
-	}
-	chooser, ok := a.deps.Prompter.(terminal.Chooser)
-	if !ok || !a.policy(s).CanPrompt(a.deps.Streams) {
+	chooser, ok := a.chooser()
+	if !ok {
 		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("name the account: gt auth switch <user> (accounts on %s: %s)", instance, strings.Join(names, ", ")))
 	}
 	choices := make([]terminal.Choice, len(names))
@@ -732,11 +706,7 @@ func (a *application) logoutCommand() *cobra.Command {
 		Annotations: map[string]string{"gt.text": "logout does not return a resource", "gt.confirm": "true"},
 		Long: `Log out of an account: gt forgets the account and deletes its stored credential. Git's
 other credential helpers are asked to forget what they stored for the account on the
-instance, such as a copy of its token that a keychain kept after a push.
-
-Without an account argument or --user, gt logs out of the active account of the
-current repository's instance, else of --host, GITEA_CLI_HOST, default_host or the only
-instance.`,
+instance, such as a copy of its token that a keychain kept after a push.`,
 		Example: "$ gt auth logout\n$ gt auth logout bob --host gitea.com\n# Without confirmation\n$ gt auth logout alice --yes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -758,7 +728,7 @@ instance.`,
 			case !exists:
 				return clierr.Wrap(clierr.Usage, t.accountError(t.User))
 			}
-			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Log out %s from %s?", t.User, t.Host), NonTTY: "log out " + t.User + " from " + t.Host}); err != nil {
+			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Log out %s from %s?", t.User, t.Host)}); err != nil {
 				return err
 			}
 			manager, err := auth.NewManager(a.deps.Settings, a.deps.Credentials)
@@ -774,7 +744,7 @@ instance.`,
 					a.warn(cmd, "Could not ask git's credential helpers to forget %s on %s", t.User, t.Host)
 				}
 			}
-			if s, err := a.deps.Settings.Load(); err == nil {
+			if s, err := a.settings(); err == nil {
 				if active := s.Hosts.Hosts[t.Host].User; active != "" && active != t.host.User {
 					a.done(cmd, "Switched active account for %s to %s", t.Host, active)
 				}
@@ -833,7 +803,7 @@ $ gt auth token --host gitea.com --user alice`,
 			if err != nil {
 				return err
 			}
-			s, err := a.deps.Settings.Load()
+			s, err := a.settings()
 			if err != nil {
 				return err
 			}

@@ -51,10 +51,16 @@ func TestRepositoryForkSendsOrganizationOnlyWhenSelected(t *testing.T) {
 	}
 }
 
-func TestRepositoryAssigneesAndMissingPermissions(t *testing.T) {
+func TestRepositoryAssigneesTagsAndMissingPermissions(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/repos/alice/project/assignees" {
-			_, _ = w.Write([]byte(`[{"login":"alice"},{"login":"bob"}]`))
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/assignees":
+			_, _ = w.Write([]byte(`[{"login":"alice","full_name":"Alice A."},{"login":"bob"}]`))
+			return
+		case "/api/v1/repos/alice/project/tags":
+			assert.Equal(t, "2", r.URL.Query().Get("page"))
+			assert.Equal(t, "5", r.URL.Query().Get("limit"))
+			_, _ = w.Write([]byte(`[{"name":"v1.0"},{"name":"v0.9"}]`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"id":1}`))
@@ -63,6 +69,12 @@ func TestRepositoryAssigneesAndMissingPermissions(t *testing.T) {
 	names, err := service.assignees(context.Background(), "alice/project")
 	require.NoError(t, err)
 	require.Equal(t, []string{"alice", "bob"}, names)
+	users, err := service.Assignees(context.Background(), "alice/project")
+	require.NoError(t, err)
+	require.Equal(t, []Assignee{{Username: "alice", FullName: "Alice A."}, {Username: "bob"}}, users)
+	tags, err := service.Tags(context.Background(), "alice/project", 5, 2)
+	require.NoError(t, err)
+	require.Equal(t, []string{"v1.0", "v0.9"}, tags)
 	permissions, err := service.viewPermissions(context.Background(), "alice/project")
 	require.NoError(t, err)
 	require.Equal(t, RepositoryPermissions{}, permissions)

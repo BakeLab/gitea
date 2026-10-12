@@ -63,13 +63,7 @@ type ActionSecrets struct {
 	Scope  ActionScope
 }
 
-// List returns secret metadata only.
-func (s ActionSecrets) List(ctx context.Context, limit, page int) ([]ActionSecret, error) {
-	window, err := s.ListPage(ctx, limit, page)
-	return window.Items, err
-}
-
-// ListPage is List with what the server reports about the other pages.
+// ListPage lists a page of secrets, with what the server reports about the other pages.
 func (s ActionSecrets) ListPage(ctx context.Context, limit, page int) (Page[ActionSecret], error) {
 	if s.Scope.Account {
 		return Page[ActionSecret]{}, &CapabilityError{Feature: "account secret listing", Reason: "Gitea exposes account secret set/delete operations only"}
@@ -88,7 +82,7 @@ func (s ActionSecrets) ListPage(ctx context.Context, limit, page int) (Page[Acti
 		})
 		return secrets, headerOf(resp), err
 	})
-	return Page[ActionSecret]{Items: convertAll(window.Items, secretFrom), More: window.More, Total: window.Total, Counted: window.Counted}, err
+	return convertPage(window, secretFrom), err
 }
 
 // Set creates or replaces a secret; the API's PUT operation defines upsert semantics. The result
@@ -147,13 +141,7 @@ func (s ActionVariables) repoVariables(name string) string {
 	return endpoint
 }
 
-// List returns a non-nil page of variables.
-func (s ActionVariables) List(ctx context.Context, limit, page int) ([]ActionVariable, error) {
-	window, err := s.ListPage(ctx, limit, page)
-	return window.Items, err
-}
-
-// ListPage is List with what the server reports about the other pages.
+// ListPage lists a page of variables, with what the server reports about the other pages.
 func (s ActionVariables) ListPage(ctx context.Context, limit, page int) (Page[ActionVariable], error) {
 	var window Page[*gitea.ActionsVariable]
 	var err error
@@ -170,7 +158,7 @@ func (s ActionVariables) ListPage(ctx context.Context, limit, page int) (Page[Ac
 	} else {
 		window, err = rawPage[*gitea.ActionsVariable](ctx, s.Client, s.repoVariables(""), nil, limit, page)
 	}
-	return Page[ActionVariable]{Items: convertAll(window.Items, variableFrom), More: window.More, Total: window.Total, Counted: window.Counted}, err
+	return convertPage(window, variableFrom), err
 }
 
 // View retrieves one variable.

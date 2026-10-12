@@ -29,8 +29,8 @@ func (a *application) wikiCommand() *cobra.Command {
 // completeWikiPages completes the titles of the repository's wiki pages.
 func (a *application) completeWikiPages() cobra.CompletionFunc {
 	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
-		pages, err := services.Wiki{Client: t.client, Repository: t.Repo}.List(ctx, completionLimit, 1)
-		return describe(pages, func(page services.WikiPage) (string, string) { return page.Title, "" }), err
+		pages, err := services.Wiki{Client: t.client, Repository: t.Repo}.ListPage(ctx, completionLimit, 1)
+		return describe(pages.Items, func(page services.WikiPage) (string, string) { return page.Title, "" }), err
 	})
 }
 
@@ -57,7 +57,7 @@ func (a *application) wikiListCommand() *cobra.Command {
 				},
 				Context: "wiki pages in " + target.Repo, Empty: "no wiki pages in " + target.Repo,
 			}
-			return writeTable(a, cmd, result.Items, spec, listPage{Number: page, More: result.More, Total: result.Total, Counted: result.Counted})
+			return writeTable(a, cmd, result.Items, spec, servicePage(result, page))
 		},
 	}
 	pageFlags(command, &limit, &page)
@@ -102,7 +102,7 @@ func (a *application) wikiView(item services.WikiPage) terminal.View {
 		meta = append(meta, "updated "+terminal.RelativeTime(a.deps.Now(), updated))
 	}
 	if item.CommitCount > 0 {
-		meta = append(meta, countNoun(int(item.CommitCount), "revision"))
+		meta = append(meta, terminal.Plural(int(item.CommitCount), "revision"))
 	}
 	return terminal.View{
 		Title: item.Title, Meta: strings.Join(meta, " · "), Body: item.Body, Kind: "wiki page", URL: item.URL,
@@ -213,10 +213,7 @@ $ gt wiki create Home --editor`,
 				return err
 			}
 			a.done(cmd, "Created wiki page %q in %s", item.Title, target.Repo)
-			if a.options.json != "" {
-				return a.writeJSON(cmd, item)
-			}
-			return a.printURL(cmd, item.URL)
+			return a.created(cmd, item, item.URL)
 		},
 	}
 	content.register(command)
@@ -229,11 +226,7 @@ func (a *application) wikiBody(cmd *cobra.Command, editor bool, initial string) 
 	if editor {
 		return a.editDraft(cmd, initial)
 	}
-	s, err := a.deps.Settings.Load()
-	if err != nil {
-		return terminal.Draft{}, err
-	}
-	if !a.policy(s).CanPrompt(a.deps.Streams) {
+	if !a.canPrompt() {
 		return terminal.Draft{}, clierr.Wrap(clierr.Usage, errors.New("missing required input: supply --body, --body-file or --editor"))
 	}
 	return a.bodyEditor(cmd)(cmd.Context(), initial)
@@ -298,7 +291,7 @@ $ gt wiki edit Home --editor`,
 			} else {
 				a.done(cmd, "Edited wiki page %q in %s", item.Title, target.Repo)
 			}
-			return a.writeMutationJSON(cmd, item)
+			return a.jsonResult(cmd, item)
 		},
 	}
 	content.register(command)
@@ -319,14 +312,9 @@ func (a *application) wikiDeleteCommand() *cobra.Command {
 				return err
 			}
 			subject := "wiki page " + strconv.Quote(args[0]) + " from " + target.Repo
-			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + "?", NonTTY: "delete " + subject}); err != nil {
-				return err
-			}
-			if err := (services.Wiki{Client: target.client, Repository: target.Repo}).Delete(cmd.Context(), args[0]); err != nil {
-				return err
-			}
-			a.done(cmd, "Deleted %s", subject)
-			return nil
+			return a.deleteConfirmed(cmd, subject, func() error {
+				return (services.Wiki{Client: target.client, Repository: target.Repo}).Delete(cmd.Context(), args[0])
+			})
 		},
 	}
 	command.ValidArgsFunction = a.completeWikiPages()

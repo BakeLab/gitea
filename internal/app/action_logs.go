@@ -107,7 +107,7 @@ $ gt run logs 34 --output logs.zip`,
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Wait for jobs to start and print new lines until they complete")
 	cmd.Flags().DurationVarP(&interval, "interval", "i", 5*time.Second, "Polling interval with --follow")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "Maximum time to follow")
-	cmd.ValidArgsFunction = a.completeRunArg()
+	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	_ = cmd.RegisterFlagCompletionFunc("job", a.completeJobs())
 	return cmd
 }

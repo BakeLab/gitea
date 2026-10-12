@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gitea.dev/cli/internal/filelock"
@@ -102,7 +103,13 @@ type Store struct {
 	Dir        string
 	LegacyPath string
 	mu         sync.Mutex
+	// generation counts the updates made through the store.
+	generation atomic.Uint64
 }
+
+// Generation changes whenever an update through the store ran, so callers can tell when a
+// snapshot they loaded earlier may be stale.
+func (s *Store) Generation() uint64 { return s.generation.Load() }
 
 // New selects an explicit directory or the platform configuration directory.
 func New(dir string) *Store {
@@ -328,6 +335,7 @@ func (s *Store) Update(target Target, update func(*Snapshot) error) error {
 // Transaction runs a compensating action under the lock if publishing the target file fails.
 // It is used to keep credential storage and account metadata consistent.
 func (s *Store) Transaction(target Target, update func(*Snapshot) (func() error, error)) error {
+	defer s.generation.Add(1)
 	return s.Locked(func(snapshot Snapshot) error {
 		unpublished := func() ([]byte, error) {
 			if target == TargetHosts {

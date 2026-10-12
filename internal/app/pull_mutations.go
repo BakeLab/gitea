@@ -109,10 +109,7 @@ func (a *application) pullStateCommand(closing bool) *cobra.Command {
 		if deleteBranch {
 			a.deleteHead(cmd, service, item, false)
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
-		return nil
+		return a.jsonResult(cmd, item)
 	}}
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "Leave a comment before changing the state")
 	cmd.ValidArgsFunction = a.completePulls(map[bool]string{true: "open", false: "closed"}[closing])
@@ -179,11 +176,7 @@ gt pr diff 13 | git apply works.`, Annotations: pullArgumentsAnnotation(textOutp
 		}
 		service := services.Pulls{Client: t.client, Repository: t.Repo}
 		if web {
-			item, err := service.View(cmd.Context(), n)
-			if err != nil {
-				return err
-			}
-			return a.openBrowser(cmd, item.URL+"/files")
+			return a.openBrowser(cmd, fmt.Sprintf("%s/pulls/%d/files", repositoryURL(t), n))
 		}
 		if nameOnly {
 			files, err := service.Files(cmd.Context(), n)
@@ -302,10 +295,7 @@ the base branch.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.co
 		switch {
 		case item.Merged:
 			a.warn(cmd, "Pull request %s is already merged", ref)
-			if a.options.json != "" {
-				return a.writeJSON(cmd, item)
-			}
-			return nil
+			return a.jsonResult(cmd, item)
 		case item.State == "closed":
 			return fmt.Errorf("pull request %s is closed; reopen it with: gt pr reopen %d", ref, n)
 		case item.Draft:
@@ -362,10 +352,7 @@ the base branch.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.co
 				a.deleteHead(cmd, service, merged, true)
 			}
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, merged)
-		}
-		return nil
+		return a.jsonResult(cmd, merged)
 	}}
 	enumFlag(cmd, &method, "method", "s", "", "Merge method (default: the repository's default merge style)", mergeMethods...)
 	cmd.Flags().StringVar(&method, "style", "", "Alias of --method")

@@ -213,31 +213,3 @@ func TestDebugRedactsOnlySensitiveQueryValues(t *testing.T) {
 		require.Equal(t, tc.redacted, sensitiveQuery(tc.path, tc.key), "%s %s", tc.path, tc.key)
 	}
 }
-
-func TestAPIErrorLookupRepeatsReadsWithTheFailedCredential(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "token secret", r.Header.Get("Authorization"))
-		require.Equal(t, "bob", r.Header.Get("Sudo"))
-		if r.URL.Path == "/base/api/v1/repos/a/b" {
-			_, _ = w.Write([]byte(`{"full_name":"a/b","has_issues":false}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"message":"not found"}`))
-	}))
-	defer server.Close()
-	client := New(server.URL+"/base", "secret", false)
-	client.Sudo = "bob"
-	_, err := client.Do(context.Background(), http.MethodGet, "repos/a/b/issues/9", nil, nil)
-	var apiErr *APIError
-	require.ErrorAs(t, err, &apiErr)
-	require.Equal(t, server.URL+"/base", apiErr.Instance)
-	var repo struct {
-		FullName  string `json:"full_name"`
-		HasIssues bool   `json:"has_issues"`
-	}
-	require.Equal(t, http.StatusOK, apiErr.Lookup(context.Background(), "repos/a/b", &repo))
-	require.Equal(t, "a/b", repo.FullName)
-	require.Equal(t, http.StatusNotFound, apiErr.Lookup(context.Background(), "repos/a/missing", nil))
-	require.Zero(t, (&APIError{Status: http.StatusNotFound}).Lookup(context.Background(), "repos/a/b", nil), "errors built without a request cannot look up")
-}

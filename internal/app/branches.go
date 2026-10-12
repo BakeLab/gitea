@@ -104,7 +104,7 @@ $ gt branch list -R alice/project --limit 100 --json name,sha`,
 				},
 				Context: "branches in " + target.Repo, Empty: "no branches in " + target.Repo,
 			}
-			return writeTable(a, cmd, result.Items, spec, listPage{Number: page, More: result.More, Total: result.Total, Counted: result.Counted})
+			return writeTable(a, cmd, result.Items, spec, servicePage(result, page))
 		},
 	}
 	pageFlags(command, &limit, &page)
@@ -145,7 +145,7 @@ func (a *application) branchViewCommand() *cobra.Command {
 				protection := ""
 				if item.Protected {
 					badges = append(badges, terminal.Cell{Text: "protected", Color: "yellow"})
-					protection = countNoun(int(item.RequiredApprovals), "required approval")
+					protection = terminal.Plural(int(item.RequiredApprovals), "required approval")
 				}
 				meta := ""
 				if updated := terminal.ParseTime(item.UpdatedAt); !updated.IsZero() {
@@ -196,7 +196,7 @@ $ gt branch create bisect --source 3f2a9c1`,
 			} else {
 				a.done(cmd, "Created branch %s from %s in %s at %s", item.Name, source, target.Repo, shortSHA(item.SHA))
 			}
-			return a.writeMutationJSON(cmd, item)
+			return a.jsonResult(cmd, item)
 		},
 	}
 	command.Flags().StringVarP(&source, "source", "s", "", "Branch, tag or commit to start from (default: the default branch)")
@@ -250,7 +250,7 @@ $ gt branch delete old-a old-b --yes`,
 				return err
 			}
 			subject := branchSubject(args)
-			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + " from " + target.Repo + "?", NonTTY: "delete " + subject + " from " + target.Repo}); err != nil {
+			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + " from " + target.Repo + "?"}); err != nil {
 				return err
 			}
 			service := services.Branches{Client: target.client}
@@ -358,7 +358,7 @@ $ gt branch protect --pattern 'release/*' --allow-push acme/release`,
 
 // protectionSummary describes a protection rule, as in "1 approval required, no direct pushes".
 func protectionSummary(rule services.Protection) string {
-	parts := []string{countNoun(int(rule.RequiredApprovals), "approval") + " required"}
+	parts := []string{terminal.Plural(int(rule.RequiredApprovals), "approval") + " required"}
 	if pushers := len(rule.PushUsers) + len(rule.PushTeams); pushers > 0 {
 		parts = append(parts, "pushes by "+strings.Join(append(append([]string{}, rule.PushUsers...), rule.PushTeams...), ", "))
 	} else {
@@ -384,7 +384,7 @@ func (a *application) branchUnprotectCommand() *cobra.Command {
 				return err
 			}
 			subject := "the protection of " + strings.Join(args, ", ")
-			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Remove " + subject + " in " + target.Repo + "?", NonTTY: "remove " + subject + " in " + target.Repo}); err != nil {
+			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Remove " + subject + " in " + target.Repo + "?"}); err != nil {
 				return err
 			}
 			service := services.Branches{Client: target.client}

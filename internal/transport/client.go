@@ -35,9 +35,6 @@ type APIError struct {
 	// Instance is the installation URL the failed request was sent to, when it was recorded
 	// from a request.
 	Instance string
-	// apiBase and lookup repeat reads on the failed request's instance with its credential.
-	apiBase string
-	lookup  http.RoundTripper
 }
 
 func (e *APIError) Error() string {
@@ -69,47 +66,16 @@ func (e *APIError) request() string {
 	return strings.TrimSpace(fmt.Sprintf("HTTP %d %s %s", e.Status, e.Method, e.Endpoint))
 }
 
-// bind records the instance of the request to u and the credentialed transport rt, so the
-// failure can later be explained with Lookup.
-func (e *APIError) bind(u *url.URL, rt http.RoundTripper) {
-	prefix, _, ok := strings.Cut(u.Path, "/api/v1/")
-	if !ok {
-		return
+// bind records the instance of the request to u.
+func (e *APIError) bind(u *url.URL) {
+	if prefix, _, ok := strings.Cut(u.Path, "/api/v1/"); ok {
+		e.Instance = (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: prefix}).String()
 	}
-	instance := url.URL{Scheme: u.Scheme, Host: u.Host, Path: prefix}
-	e.Instance = instance.String()
-	instance.Path += "/api/v1/"
-	e.apiBase, e.lookup = instance.String(), rt
-}
-
-// Lookup reads endpoint, a path below the API base such as "repos/alice/project", with the
-// instance and credential of the request that failed, and decodes a successful JSON response
-// into out. It returns the response status, or 0 when the error was not recorded from a
-// request or the lookup itself failed.
-func (e *APIError) Lookup(ctx context.Context, endpoint string, out any) int {
-	if e.lookup == nil {
-		return 0
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.apiBase+strings.TrimLeft(endpoint, "/"), nil)
-	if err != nil {
-		return 0
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := e.lookup.RoundTrip(req)
-	if err != nil {
-		return 0
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 && out != nil && json.NewDecoder(io.LimitReader(resp.Body, maxLookupBody)).Decode(out) != nil {
-		return 0
-	}
-	return resp.StatusCode
 }
 
 const (
 	maxErrorBody    = 4 << 10
 	maxErrorMessage = 300
-	maxLookupBody   = 1 << 20
 )
 
 // newAPIError keeps only a bounded, printable JSON "message" field of a failed response body.

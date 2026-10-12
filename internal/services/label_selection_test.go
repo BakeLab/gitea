@@ -36,7 +36,7 @@ func TestLabelSelectionReadsCappedPagesAndPreservesOrder(t *testing.T) {
 	require.Equal(t, []int64{2, 1}, ids)
 	require.Equal(t, 3, reads)
 	_, err = service.ResolveIssueNames(context.Background(), []string{"missing"})
-	require.ErrorContains(t, err, "does not exist")
+	require.ErrorContains(t, err, "not found")
 	before := reads
 	_, err = service.ResolveIssueNames(context.Background(), []string{" "})
 	require.ErrorContains(t, err, "cannot be empty")
@@ -89,5 +89,5 @@ func TestScopedLabelNamesDoNotCollideWithLiteralPrefixes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2, 3}, ids)
 	_, err = service.ResolveIssueNames(context.Background(), []string{"org:bug"})
-	require.ErrorContains(t, err, "does not exist")
+	require.ErrorContains(t, err, "not found")
 }

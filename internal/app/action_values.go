@@ -283,17 +283,13 @@ func (a *application) actionValue(cmd *cobra.Command, secret bool, name, body, b
 		}
 		return strings.TrimSuffix(strings.TrimSuffix(string(data), "\n"), "\r"), nil
 	}
-	s, err := a.deps.Settings.Load()
-	if err != nil {
-		return "", err
-	}
-	if !a.policy(s).CanPrompt(a.deps.Streams) {
+	if !a.canPrompt() {
 		return "", missing
 	}
 	if secret {
 		return a.deps.Prompter.SecretInput(cmd.Context(), "Paste the value of "+strings.ToUpper(name)+":")
 	}
-	return a.deps.Prompter.Input(cmd.Context(), "Value of "+strings.ToUpper(name)+":")
+	return a.deps.Prompter.Ask(cmd.Context(), "Value of "+strings.ToUpper(name)+":", nil)
 }
 
 // envEntry is one NAME=value line of a dotenv file.
@@ -348,10 +344,7 @@ $ gt %[1]s delete DEPLOY_TOKEN --org acme --yes`, kind),
 			if err != nil {
 				return err
 			}
-			if err := a.confirmAction(cmd, terminal.Confirmation{
-				Prompt: fmt.Sprintf("Delete %s %s from %s?", kind, name, selected),
-				NonTTY: fmt.Sprintf("delete %s %s from %s", kind, name, selected),
-			}); err != nil {
+			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Delete %s %s from %s?", kind, name, selected)}); err != nil {
 				return err
 			}
 			if secret {
@@ -436,10 +429,5 @@ func (a *application) completeActionValues(secret bool, scope *actionScopeFlags)
 	if secret {
 		names = a.completeSecrets(scope.scope)
 	}
-	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
-		if len(args) > 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		return names(cmd, args, toComplete)
-	}
+	return firstArg(names)
 }

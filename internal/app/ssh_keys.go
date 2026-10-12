@@ -135,7 +135,7 @@ func sshKeySource(source string) string {
 func (a *application) sshKeyCreateCommand() *cobra.Command {
 	var title string
 	cmd := &cobra.Command{
-		Use: "create [<file>]", Aliases: []string{"add"}, Short: "Add an SSH public key from a file or stdin", Args: usageArgs(cobra.MaximumNArgs(1)),
+		Use: "create [<file>]", Aliases: []string{"add"}, Short: "Add an SSH public key from a file or stdin", Args: usageArgs(cobra.MaximumNArgs(1)), ValidArgsFunction: completeFiles,
 		Long: `Add an SSH public key to your account. Without a file, or with -, the key is read from stdin.
 
 The title defaults to the key's comment, such as alice@laptop, or else to this computer's name.`,
@@ -174,7 +174,7 @@ $ cat key.pub | gt ssh-key add`,
 			service := services.SSHKeys{Client: target.client}
 			created, err := service.Create(cmd.Context(), title, strings.TrimSpace(string(data)))
 			if err != nil {
-				return a.registeredKey(cmd.Context(), service, key, services.ClassifyRequest(err))
+				return a.registeredKey(cmd.Context(), service, key, err)
 			}
 			a.done(cmd, "Added %s", sshKeyLabel(created))
 			return a.jsonResult(cmd, created)
@@ -223,14 +223,7 @@ $ gt ssh-key delete 2 --yes`,
 			if err != nil {
 				return err
 			}
-			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + sshKeyLabel(key) + "?", NonTTY: "delete " + sshKeyLabel(key)}); err != nil {
-				return err
-			}
-			if err := service.Delete(cmd.Context(), id); err != nil {
-				return err
-			}
-			a.done(cmd, "Deleted %s", sshKeyLabel(key))
-			return nil
+			return a.deleteConfirmed(cmd, sshKeyLabel(key), func() error { return service.Delete(cmd.Context(), id) })
 		},
 	}
 }

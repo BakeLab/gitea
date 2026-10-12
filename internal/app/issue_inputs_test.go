@@ -17,7 +17,7 @@ func TestIssueCreationMetadataAndReferenceClearing(t *testing.T) {
 	calls := 0
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/owner/repo/milestones" {
-			writeMilestones(w, r, `[{"id":4,"title":"Release"}]`)
+			writeFirstPage(w, r, `[{"id":4,"title":"Release"}]`)
 			return
 		}
 		calls++

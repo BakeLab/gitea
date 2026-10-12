@@ -29,6 +29,9 @@ type APIOptions struct {
 	MaxPages int
 }
 
+// ErrMaxPages reports a paginated request that has more pages than APIOptions.MaxPages allows.
+var ErrMaxPages = errors.New("API pagination exceeded the page limit")
+
 func nextPageLinks(headers []string) ([]string, error) {
 	result := []string{}
 	for _, header := range headers {
@@ -141,7 +144,7 @@ func (s API) Visit(ctx context.Context, options APIOptions, visit func(*http.Res
 			return nil
 		}
 		if page+1 >= options.MaxPages {
-			return errors.New("API pagination exceeded --max-pages")
+			return ErrMaxPages
 		}
 		if _, err := s.Client.URL(next); err != nil {
 			return err

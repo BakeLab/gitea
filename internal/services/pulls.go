@@ -224,7 +224,7 @@ func (s Pulls) listPage(ctx context.Context, options PullListOptions) (Page[Pull
 	if err != nil {
 		return Page[Pull]{}, err
 	}
-	return Page[Pull]{Items: convertAll(page.Items, pullFrom), More: page.More, Total: page.Total, Counted: page.Counted}, nil
+	return convertPage(page, pullFrom), nil
 }
 
 // View retrieves one pull request.
@@ -236,10 +236,22 @@ func (s Pulls) View(ctx context.Context, n int64) (Pull, error) {
 	return pullFrom(pull), nil
 }
 
+// ViewAll retrieves each of items again, a few at a time, for the fields only a single pull
+// request carries, such as its reviewers.
+func (s Pulls) ViewAll(ctx context.Context, items []Pull) ([]Pull, error) {
+	viewed := make([]Pull, len(items))
+	err := concurrently(len(items), func(i int) (err error) {
+		viewed[i], err = s.View(ctx, items[i].Number)
+		return err
+	})
+	return viewed, err
+}
+
 func (s Pulls) get(ctx context.Context, n int64) (*gitea.PullRequest, error) {
-	return repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
+	item, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
 		return c.PullRequests.GetPullRequest(ctx, owner, name, n)
 	})
+	return item, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository)
 }
 
 // ListOpen returns every open pull request in the repository.
@@ -250,38 +262,12 @@ func (s Pulls) ListOpen(ctx context.Context) ([]Pull, error) {
 	})
 }
 
-// FindOpenByHead returns the unique open pull whose head branch matches name.
-func (s Pulls) FindOpenByHead(ctx context.Context, head string) (Pull, error) {
-	head = strings.TrimSpace(head)
-	if head == "" {
-		return Pull{}, fmt.Errorf("head branch cannot be empty")
-	}
-	items, err := s.ListOpen(ctx)
-	if err != nil {
-		return Pull{}, err
-	}
-	matches := []Pull{}
-	for _, item := range items {
-		if item.Head == head {
-			matches = append(matches, item)
-		}
-	}
-	switch len(matches) {
-	case 0:
-		return Pull{}, fmt.Errorf("no open pull request uses head branch %q", head)
-	case 1:
-		return matches[0], nil
-	default:
-		return Pull{}, fmt.Errorf("multiple open pull requests use head branch %q; supply an explicit number", head)
-	}
-}
-
 // Create opens a pull request.
 func (s Pulls) Create(ctx context.Context, opts PullOptions) (Pull, error) {
 	// TODO(sdk): CreatePullRequestOption lacks allow_maintainer_edit.
 	var pull gitea.PullRequest
 	if err := sendJSON(ctx, s.Client, http.MethodPost, "repos/"+s.Repository+"/pulls", opts, &pull); err != nil {
-		return Pull{}, err
+		return Pull{}, Classify(err, "pull request", "", s.Repository)
 	}
 	return pullFrom(&pull), nil
 }
@@ -289,15 +275,15 @@ func (s Pulls) Create(ctx context.Context, opts PullOptions) (Pull, error) {
 // Edit updates only explicitly supplied resource fields.
 func (s Pulls) Edit(ctx context.Context, n int64, opts PullEdit) (Pull, error) {
 	if opts.ReviewerChanges != nil {
-		item, err := (Reviews{Client: s.Client, Repository: s.Repository}).ChangeRequests(ctx, n, *opts.ReviewerChanges)
-		if err != nil {
-			return Pull{}, err
-		}
+		reviews, changes := Reviews{Client: s.Client, Repository: s.Repository}, opts.ReviewerChanges
 		opts.ReviewerChanges = nil
 		if opts == (PullEdit{}) {
-			return item, nil
+			return reviews.ChangeRequests(ctx, n, *changes)
 		}
-		item, err = s.Edit(ctx, n, opts)
+		if err := reviews.changeRequests(ctx, n, *changes); err != nil {
+			return Pull{}, err
+		}
+		item, err := s.Edit(ctx, n, opts)
 		if err != nil {
 			return Pull{}, fmt.Errorf("review requests were updated, but editing other pull request fields failed: %w", err)
 		}
@@ -334,9 +320,10 @@ func (s Pulls) Edit(ctx context.Context, n int64, opts PullEdit) (Pull, error) {
 		}
 		return result, nil
 	}
-	return repoConvert(ctx, s.Client, s.Repository, pullFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, pullFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
 		return c.PullRequests.EditPullRequest(ctx, owner, name, n, editPullOption(opts))
 	})
+	return item, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository)
 }
 
 func editPullOption(opts PullEdit) gitea.EditPullRequestOption {
@@ -464,8 +451,9 @@ func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 		_, resp, err := c.PullRequests.MergePullRequest(ctx, owner, name, n, option)
 		return resp, err
 	})
+	key := "#" + strconv.FormatInt(n, 10)
 	if refused, ok := errors.AsType[*transport.APIError](err); !ok || refused.Status != http.StatusMethodNotAllowed {
-		return err
+		return Classify(err, "pull request", key, s.Repository)
 	}
 	var reason string
 	switch {
@@ -478,7 +466,7 @@ func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 	case !pull.Mergeable:
 		reason = "has conflicting files or is otherwise not mergeable"
 	default:
-		return err
+		return Classify(err, "pull request", key, s.Repository)
 	}
 	return fmt.Errorf("pull request #%d %s: %w", n, reason, err)
 }
@@ -499,7 +487,7 @@ func (s Pulls) Template(ctx context.Context, ref string) (string, error) {
 			return c.Repositories.GetFileReader(ctx, owner, name, ref, path)
 		})
 		if err != nil {
-			if apiError, ok := errors.AsType[*transport.APIError](err); ok && apiError.Status == http.StatusNotFound {
+			if IsNotFound(err) {
 				continue
 			}
 			return "", err

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/transport"
@@ -135,9 +136,10 @@ func (s Reviews) Create(ctx context.Context, n int64, opts ReviewOptions) (Revie
 			Path: comment.Path, Body: comment.Body, OldLineNum: comment.OldLine, NewLineNum: comment.NewLine,
 		})
 	}
-	return repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
 		return c.PullRequests.CreatePullReview(ctx, owner, name, n, option)
 	})
+	return item, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository)
 }
 
 // Submit publishes an existing pending review with explicitly collected input.

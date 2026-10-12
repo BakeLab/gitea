@@ -25,7 +25,7 @@ func (a *application) releaseAssetCommand() *cobra.Command {
 	group := &cobra.Command{
 		Use:   "asset",
 		Short: "Manage release assets",
-		Long:  "List, upload, download, rename and delete the files attached to a release. Assets are named by name or ID.",
+		Long:  "List, upload, download, rename and delete the files attached to a release. Assets are addressed by name or ID.",
 	}
 	group.AddCommand(a.assetListCommand(), a.releaseUploadCommand(), a.releaseDownloadCommand(), a.assetEditCommand(), a.assetDeleteCommand())
 	return group
@@ -154,7 +154,7 @@ $ gt release upload v1.0.0 dist/gt-linux --clobber`,
 	}
 	command.Flags().StringVar(&name, "name", "", "Asset name (default: the file's name)")
 	command.Flags().BoolVar(&clobber, "clobber", false, "Replace assets with the same name")
-	command.ValidArgsFunction = a.completeReleases()
+	command.ValidArgsFunction = pathArgs(1, true, completeFiles, a.completeReleases())
 	return command
 }
 
@@ -352,7 +352,7 @@ func (a *application) assetEditCommand() *cobra.Command {
 				return err
 			}
 			a.done(cmd, "Renamed asset %s to %s in release %s", asset.Name, item.Name, release.Tag)
-			return a.writeMutationJSON(cmd, item)
+			return a.jsonResult(cmd, item)
 		},
 	}
 	command.Flags().StringVar(&name, "name", "", "New asset name")

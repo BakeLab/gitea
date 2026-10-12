@@ -93,9 +93,10 @@ func (s Repositories) View(ctx context.Context, repo string) (Repository, error)
 }
 
 func (s Repositories) get(ctx context.Context, repo string) (*gitea.Repository, error) {
-	return repoCall(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Repository, *gitea.Response, error) {
+	item, err := repoCall(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Repository, *gitea.Response, error) {
 		return c.Repositories.GetRepo(ctx, owner, name)
 	})
+	return item, Classify(err, "repository", repo, "")
 }
 
 // readmeNames are the README file names that Gitea shows, in order of preference.
@@ -108,7 +109,7 @@ func (s Repositories) Readme(ctx context.Context, repo, ref string) (name, conte
 		return c.Repositories.ListContents(ctx, owner, name, ref, "")
 	})
 	if err != nil {
-		if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusNotFound {
+		if IsNotFound(err) {
 			return "", "", nil
 		}
 		return "", "", err
@@ -145,15 +146,39 @@ func (s Repositories) viewPermissions(ctx context.Context, repo string) (Reposit
 	return RepositoryPermissions{Admin: item.Permissions.Admin, Push: item.Permissions.Push, Pull: item.Permissions.Pull}, nil
 }
 
-// assignees lists usernames that can be assigned on repository issues.
-func (s Repositories) assignees(ctx context.Context, repo string) ([]string, error) {
+// Assignee is a user that can be assigned on repository issues.
+type Assignee struct {
+	Username string `json:"username"`
+	FullName string `json:"full_name"`
+}
+
+// Assignees lists the users that can be assigned on repository issues.
+func (s Repositories) Assignees(ctx context.Context, repo string) ([]Assignee, error) {
 	users, err := repoCall(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.User, *gitea.Response, error) {
 		return c.Repositories.GetAssignees(ctx, owner, name)
 	})
+	return convertAll(users, func(user *gitea.User) Assignee { return Assignee{Username: user.UserName, FullName: user.FullName} }), err
+}
+
+// assignees lists usernames that can be assigned on repository issues.
+func (s Repositories) assignees(ctx context.Context, repo string) ([]string, error) {
+	users, err := s.Assignees(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
-	return convertAll(users, login), nil
+	names := make([]string, len(users))
+	for i, user := range users {
+		names[i] = user.Username
+	}
+	return names, nil
+}
+
+// Tags lists a page of the repository's tag names.
+func (s Repositories) Tags(ctx context.Context, repo string, limit, page int) ([]string, error) {
+	tags, err := repoCall(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.Tag, *gitea.Response, error) {
+		return c.Repositories.ListRepoTags(ctx, owner, name, gitea.ListRepoTagsOptions{ListOptions: listOptions(limit, page)})
+	})
+	return convertAll(tags, func(tag *gitea.Tag) string { return tag.Name }), err
 }
 
 // Create creates a repository for the account or the named organization.
@@ -171,7 +196,7 @@ func (s Repositories) Create(ctx context.Context, org string, opts RepositoryOpt
 		return c.Repositories.CreateRepo(ctx, options)
 	})
 	if err != nil {
-		return Repository{}, err
+		return Repository{}, Classify(err, "repository", "", "")
 	}
 	return repositoryFrom(item), nil
 }
@@ -183,7 +208,7 @@ func (s Repositories) Edit(ctx context.Context, repo string, opts RepositoryEdit
 		style := gitea.MergeStyle(*opts.MergeStyle)
 		mergeStyle = &style
 	}
-	return repoConvert(ctx, s.Client, repo, repositoryFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Repository, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, repo, repositoryFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Repository, *gitea.Response, error) {
 		return c.Repositories.EditRepo(ctx, owner, name, gitea.EditRepoOption{
 			HasActions: opts.ActionsEnabled, Name: opts.Name, Website: opts.Website, DefaultBranch: opts.DefaultBranch,
 			Description: opts.Description, Private: opts.Private, Archived: opts.Archived, Template: opts.Template,
@@ -192,6 +217,7 @@ func (s Repositories) Edit(ctx context.Context, repo string, opts RepositoryEdit
 			DefaultDeleteBranchAfterMerge: opts.DeleteBranch,
 		})
 	})
+	return item, Classify(err, "repository", repo, "")
 }
 
 // AddTopic adds a topic to the repository.
@@ -210,9 +236,10 @@ func (s Repositories) RemoveTopic(ctx context.Context, repo, topic string) error
 
 // Delete removes the selected repository.
 func (s Repositories) Delete(ctx context.Context, repo string) error {
-	return repoDo(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
+	err := repoDo(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
 		return c.Repositories.DeleteRepo(ctx, owner, name)
 	})
+	return Classify(err, "repository", repo, "")
 }
 
 // ForkOptions places a fork: under Organization instead of the account, and named Name instead

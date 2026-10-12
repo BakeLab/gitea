@@ -5,6 +5,7 @@ package app
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"gitea.dev/cli/internal/auth"
 	"gitea.dev/cli/internal/clierr"
@@ -153,17 +155,34 @@ type scriptedPrompter struct {
 	asked         []string
 	secrets       []string
 	confirmations []string
+	texts         []string
+	defaults      []bool
 }
 
-func (p *scriptedPrompter) Input(_ context.Context, field string) (string, error) {
+func (p *scriptedPrompter) Ask(_ context.Context, field string, validate func(string) error) (string, error) {
 	p.asked = append(p.asked, field)
-	if value, ok := p.inputs[field]; ok {
+	value, ok := p.inputs[field]
+	if !ok {
+		if p.input == "" {
+			return "", errors.New("unexpected input prompt " + field)
+		}
+		value = p.input
+	}
+	// A form re-prompts until the answer is valid; the script has no other answer, so it gives up.
+	if validate != nil && validate(value) != nil {
+		return "", terminal.ErrCanceled
+	}
+	return value, nil
+}
+
+// AskText records the title and initial text, and answers like Ask, else with "typed body".
+func (p *scriptedPrompter) AskText(_ context.Context, title, initial string) (string, error) {
+	p.asked = append(p.asked, title)
+	p.texts = append(p.texts, title+" "+initial)
+	if value, ok := p.inputs[title]; ok {
 		return value, nil
 	}
-	if p.input == "" {
-		return "", errors.New("unexpected input prompt " + field)
-	}
-	return p.input, nil
+	return cmp.Or(p.input, "typed body"), nil
 }
 
 func (p *scriptedPrompter) SecretInput(_ context.Context, title string) (string, error) {
@@ -174,8 +193,9 @@ func (p *scriptedPrompter) SecretInput(_ context.Context, title string) (string,
 	return p.secret, nil
 }
 
-func (p *scriptedPrompter) Confirm(_ context.Context, description string) (bool, error) {
+func (p *scriptedPrompter) ConfirmDefault(_ context.Context, description string, defaultYes bool) (bool, error) {
 	p.confirmations = append(p.confirmations, description)
+	p.defaults = append(p.defaults, defaultYes)
 	return p.accept, nil
 }
 
@@ -317,3 +337,14 @@ func plainOutput(t *testing.T, deps Dependencies) {
 		return nil
 	}))
 }
+
+// writeFirstPage answers the first page of a listing with page and every later page with [].
+func writeFirstPage(w http.ResponseWriter, r *http.Request, page string) {
+	if r.URL.Query().Get("page") != "1" {
+		page = `[]`
+	}
+	_, _ = w.Write([]byte(page))
+}
+
+// testNow is the clock of tests that show relative times.
+var testNow = time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC)

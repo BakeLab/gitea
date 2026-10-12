@@ -356,20 +356,9 @@ func TestVerbAndFlagAliases(t *testing.T) {
 
 // TestHelpTextsAreComplete checks the help texts of every command: a Short line without a final period,
 // a capitalized hyphenated verb ("Mark-read …") or a sibling's wording, an Example on every command and a
-// Long text on every command group. Area streams remove the commands they complete from the allowlists
-// below; S8 deletes the allowlists.
+// Long text on every command group.
 func TestHelpTextsAreComplete(t *testing.T) {
 	deps, _, _ := testDeps(t)
-	pending := func(list string) map[string]bool {
-		set := map[string]bool{}
-		for path := range strings.Lines(list) {
-			if path = strings.TrimSpace(path); path != "" {
-				set[path] = true
-			}
-		}
-		return set
-	}
-	shorts, examples, longs := pending(shortsToFix), pending(examplesToWrite), pending(longsToWrite)
 	walkCommands(NewRoot(deps), func(cmd *cobra.Command) {
 		if !cmd.HasParent() || !cmd.IsAvailableCommand() {
 			return
@@ -377,31 +366,17 @@ func TestHelpTextsAreComplete(t *testing.T) {
 		path := strings.TrimPrefix(cmd.CommandPath(), "gt ")
 		generated := strings.Contains(cmd.Name(), "-") && strings.HasPrefix(cmd.Short, titleCase(cmd.Name())+" ")
 		siblings := slices.ContainsFunc(cmd.Parent().Commands(), func(other *cobra.Command) bool { return other != cmd && other.Short == cmd.Short })
-		badShort := cmd.Short == "" || strings.HasSuffix(cmd.Short, ".") || unicode.IsLower(rune(cmd.Short[0])) || generated || siblings
-		checks := []struct {
-			name    string
-			missing bool
-			pending map[string]bool
-		}{
-			{"a clear Short", badShort, shorts},
-			{"an Example", cmd.Example == "" && cmd.Annotations["gt.group"] == "", examples},
-			{"a Long text", cmd.Long == "" && cmd.Annotations["gt.group"] != "", longs},
+		if cmd.Short == "" || strings.HasSuffix(cmd.Short, ".") || unicode.IsLower(rune(cmd.Short[0])) || generated || siblings {
+			t.Errorf("%s needs a clear Short", path)
 		}
-		for _, check := range checks {
-			switch {
-			case check.missing && !check.pending[path]:
-				t.Errorf("%s needs %s", path, check.name)
-			case !check.missing && check.pending[path]:
-				t.Errorf("%s has %s now; remove it from the allowlist", path, check.name)
-			}
-			delete(check.pending, path)
+		group := cmd.Annotations["gt.group"] != ""
+		if cmd.Example == "" && !group {
+			t.Errorf("%s needs an Example", path)
+		}
+		if cmd.Long == "" && group {
+			t.Errorf("%s needs a Long text", path)
 		}
 	})
-	for _, check := range []map[string]bool{shorts, examples, longs} {
-		for path := range check {
-			t.Errorf("%s is allowlisted but is not a command", path)
-		}
-	}
 }
 
 // walkCommands calls visit for cmd and each of its descendants.
@@ -411,14 +386,3 @@ func walkCommands(cmd *cobra.Command, visit func(*cobra.Command)) {
 		walkCommands(child, visit)
 	}
 }
-
-// shortsToFix, examplesToWrite and longsToWrite list the commands whose help texts area streams
-// have yet to complete; see TestHelpTextsAreComplete.
-const (
-	shortsToFix = `
-`
-	examplesToWrite = `
-`
-	longsToWrite = `
-`
-)

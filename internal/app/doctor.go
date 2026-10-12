@@ -83,7 +83,7 @@ problem comes with the command that fixes it. gt doctor fails when a check fails
 func (a *application) diagnose(ctx context.Context) doctorReport {
 	var report doctorReport
 	add := func(check doctorCheck) { report.Checks = append(report.Checks, check) }
-	snapshot, err := a.deps.Settings.Load()
+	snapshot, err := a.settings()
 	if err != nil {
 		add(doctorCheck{"Config", checkFailed, err.Error(), "repair or move the file; gt config path prints both files"})
 		add(a.gitCheck(ctx, ""))

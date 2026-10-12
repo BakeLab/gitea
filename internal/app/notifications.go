@@ -26,11 +26,8 @@ type notificationScope struct {
 }
 
 func (a *application) notificationCommand() *cobra.Command {
-	group := &cobra.Command{Use: "notification", Short: "Read and triage your notifications", Long: `Read and triage the notifications of your account.
-
-Commands act on your whole inbox. -R OWNER/REPO limits them to one repository, and
---this-repo to the repository of the current directory. The IDs that gt notification
-list shows identify notification threads; they are not issue numbers.`}
+	group := &cobra.Command{Use: "notification", Short: "Read and triage your notifications", Long: `Read and triage the notifications of your account, across your whole inbox unless -R or
+--this-repo selects a repository. IDs identify notification threads, not issue numbers.`}
 	var mine, thisRepo bool
 	group.PersistentFlags().BoolVar(&mine, "mine", false, "Read your whole inbox (the default)")
 	_ = group.PersistentFlags().MarkHidden("mine")
@@ -99,7 +96,7 @@ list shows identify notification threads; they are not issue numbers.`}
 					}, func(item services.Notification) string { return fmt.Sprintf(mark.done, notificationLabel(item)) })
 				}
 				what := notificationsWith(filters) + " " + s.where
-				if settings, err := a.deps.Settings.Load(); err == nil && a.policy(settings).CanPrompt(a.deps.Streams) {
+				if a.canPrompt() {
 					if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf(mark.ask, what), DefaultYes: true}); err != nil {
 						return err
 					}
@@ -115,7 +112,7 @@ list shows identify notification threads; they are not issue numbers.`}
 					a.warn(cmd, "No %s", what)
 					return nil
 				}
-				a.done(cmd, mark.done, plural(len(results), "notification"))
+				a.done(cmd, mark.done, terminal.Plural(len(results), "notification"))
 				return nil
 			},
 		}
@@ -176,7 +173,7 @@ $ gt notification list --type pull --since 24h`,
 			what := notificationsWith(opts.Statuses) + " " + s.where
 			return writeTable(a, cmd, page.Items, listSpec[services.Notification]{
 				Columns: notificationColumns, Row: notificationRow, Empty: "no " + what, Context: what,
-			}, listPage{Number: opts.Page, More: page.More, Total: page.Total, Counted: page.Counted})
+			}, servicePage(page, opts.Page))
 		},
 	}
 	notificationFilters(command, &opts, &updated)

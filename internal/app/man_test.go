@@ -41,7 +41,7 @@ func TestManIncludesFullCommandTree(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	require.NoError(t, Execute(context.Background(), deps, []string{"man"}))
 	manual := out.String()
-	for _, command := range []string{"gt-pr-checkout", "gt-issue-comment-create", "gt-auth-login", "gt-run-artifact-download"} {
+	for _, command := range []string{"gt-pr-checkout", "gt-issue-comment-create", "gt-auth-login", "gt-run-artifact-list"} {
 		require.Contains(t, manual, command)
 	}
 	require.Contains(t, manual, `.TH "GT-PR-CHECKOUT" "1" "Jan 2026"`)

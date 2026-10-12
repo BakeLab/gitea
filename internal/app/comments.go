@@ -21,14 +21,14 @@ const commentTitle = "Comment (markdown):"
 
 // commentNouns are the words for the commands of an issue or pull request comment group.
 type commentNouns struct {
-	group, noun, arguments, example string
+	group, arguments, example string
 }
 
 func commentWords(kind refKind) commentNouns {
 	if kind == pullRef {
-		return commentNouns{group: "pr", noun: "pull request", arguments: pullNumberArguments, example: "13"}
+		return commentNouns{group: "pr", arguments: pullNumberArguments, example: "13"}
 	}
-	return commentNouns{group: "issue", noun: "issue", arguments: issueArguments, example: "12"}
+	return commentNouns{group: "issue", arguments: issueArguments, example: "12"}
 }
 
 // pullNumberArguments is the ARGUMENTS help of pr comment and pr attachment commands, which take pull
@@ -119,11 +119,7 @@ func (a *application) promptComment(cmd *cobra.Command, initial string) (string,
 		draft, err := a.editDraft(cmd, initial)
 		return draft.Body, draft, err
 	}
-	if asker, ok := a.deps.Prompter.(terminal.Asker); ok {
-		body, err := asker.AskText(cmd.Context(), commentTitle, initial)
-		return body, terminal.Draft{}, err
-	}
-	body, err := a.deps.Prompter.Input(cmd.Context(), commentTitle)
+	body, err := a.deps.Prompter.AskText(cmd.Context(), commentTitle, initial)
 	return body, terminal.Draft{}, err
 }
 
@@ -142,11 +138,8 @@ func (a *application) commentOn(cmd *cobra.Command, t target, n int64, kind refK
 	if err != nil {
 		return err
 	}
-	if a.options.json != "" {
-		return a.writeJSON(cmd, comment)
-	}
 	a.done(cmd, "Commented on %s", refLabel(t.Repo, n, item.Title))
-	return a.printURL(cmd, comment.URL)
+	return a.created(cmd, comment, comment.URL)
 }
 
 // lastComment returns the newest comment on n by the account gt acts as.
@@ -185,24 +178,16 @@ func (a *application) editComment(cmd *cobra.Command, t target, comment services
 		return err
 	}
 	edited.IssueNumber = comment.IssueNumber
-	if a.options.json != "" {
-		return a.writeJSON(cmd, edited)
-	}
 	a.done(cmd, "Edited %s", commentName(t, edited))
-	return nil
+	return a.jsonResult(cmd, edited)
 }
 
 // deleteComment deletes comment after a confirmation that defaults to no.
 func (a *application) deleteComment(cmd *cobra.Command, t target, comment services.Comment) error {
 	name := commentName(t, comment)
-	if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + name + "?", NonTTY: "delete " + name}); err != nil {
-		return err
-	}
-	if err := (services.Comments{Client: t.client, Repository: t.Repo}).Delete(cmd.Context(), comment.ID); err != nil {
-		return err
-	}
-	a.done(cmd, "Deleted %s", name)
-	return nil
+	return a.deleteConfirmed(cmd, name, func() error {
+		return (services.Comments{Client: t.client, Repository: t.Repo}).Delete(cmd.Context(), comment.ID)
+	})
 }
 
 // commentView shows one comment; now dates it on a terminal.
@@ -273,10 +258,10 @@ func (a *application) commentCommand(kind refKind) *cobra.Command {
 	words := commentWords(kind)
 	var flags commentFlags
 	var editLast, deleteLast bool
-	group := &cobra.Command{Use: "comment {<number> | <url>}", Short: "Add a comment to " + article(words.noun), Long: fmt.Sprintf(`Add a comment to %[1]s, or edit or delete your last comment on it.
+	group := &cobra.Command{Use: "comment {<number> | <url>}", Short: "Add a comment to " + kind.article(), Long: fmt.Sprintf(`Add a comment to %[1]s, or edit or delete your last comment on it.
 
 Without --body, --body-file or --editor, the configured editor opens, or a multi-line prompt
-asks for the comment. The subcommands list, view, edit and delete comments by their ID.`, article(words.noun)), Example: fmt.Sprintf(`$ gt %[1]s comment %[2]s --body "Fixed in #14"
+asks for the comment. The subcommands list, view, edit and delete comments by their ID.`, kind.article()), Example: fmt.Sprintf(`$ gt %[1]s comment %[2]s --body "Fixed in #14"
 $ gt %[1]s comment %[2]s --body-file notes.md
 # Change or remove your last comment
 $ gt %[1]s comment %[2]s --edit-last --body "Fixed in #15"
@@ -284,7 +269,7 @@ $ gt %[1]s comment %[2]s --delete-last --yes
 $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments, "gt.confirm": "true"}, Args: commentArgs(kind), RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			if localFlagsChanged(cmd) {
-				return clierr.Wrap(clierr.Usage, &argumentError{problem: "missing " + words.noun + " number", cmd: cmd})
+				return clierr.Wrap(clierr.Usage, &argumentError{problem: "missing " + kind.noun() + " number", cmd: cmd})
 			}
 			return cmd.Help()
 		}
@@ -323,7 +308,7 @@ $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[st
 	group.ValidArgsFunction = a.completeDiscussions(kind)
 
 	var limit, page int
-	list := &cobra.Command{Use: "list {<number> | <url>}", Short: "List the comments on " + article(words.noun), Example: fmt.Sprintf(`$ gt %[1]s comment list %[2]s
+	list := &cobra.Command{Use: "list {<number> | <url>}", Short: "List the comments on " + kind.article(), Example: fmt.Sprintf(`$ gt %[1]s comment list %[2]s
 $ gt %[1]s comment list %[2]s --json id,author,body`, words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		t, n, err := a.resolveRef(cmd, args[0], kind)
 		if err != nil {
@@ -360,7 +345,7 @@ $ gt %[1]s comment list %[2]s --json id,author,body`, words.group, words.example
 	}}
 
 	var createFlags commentFlags
-	create := &cobra.Command{Use: "create {<number> | <url>}", Aliases: []string{"add"}, Short: "Add a comment to " + article(words.noun), Example: fmt.Sprintf(`$ gt %[1]s comment create %[2]s --body "Looks good"
+	create := &cobra.Command{Use: "create {<number> | <url>}", Aliases: []string{"add"}, Short: "Add a comment to " + kind.article(), Example: fmt.Sprintf(`$ gt %[1]s comment create %[2]s --body "Looks good"
 $ gt %[1]s comment add %[2]s --editor`, words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if err := createFlags.validate(cmd); err != nil {
 			return err
@@ -430,24 +415,10 @@ func commentArgs(kind refKind) cobra.PositionalArgs {
 	}
 }
 
-// article returns noun with its indefinite article: "an issue", "a pull request".
-func article(noun string) string {
-	if strings.ContainsRune("aeiou", rune(noun[0])) {
-		return "an " + noun
-	}
-	return "a " + noun
-}
-
 // completeDiscussions completes the open issues or pull requests that a command of kind takes.
 func (a *application) completeDiscussions(kind refKind) cobra.CompletionFunc {
 	if kind == pullRef {
-		complete := a.completePulls("open")
-		return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
-			if len(args) > 0 {
-				return nil, cobra.ShellCompDirectiveNoFileComp
-			}
-			return complete(cmd, args, toComplete)
-		}
+		return firstArg(a.completePulls("open"))
 	}
-	return a.completeIssueArgs("open", false)
+	return firstArg(a.completeIssues("open"))
 }

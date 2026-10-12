@@ -104,16 +104,12 @@ func TestPullViewCommentsIncludeReviews(t *testing.T) {
 		case "/api/v1/repos/alice/project/issues/4/comments":
 			_, _ = w.Write([]byte(`[{"body":"Looks close","user":{"login":"carol"},"created_at":"2026-01-02T00:00:00Z"}]`))
 		case "/api/v1/repos/alice/project/pulls/4/reviews":
-			if r.URL.Query().Get("page") != "1" {
-				_, _ = w.Write([]byte(`[]`))
-				return
-			}
-			_, _ = w.Write([]byte(`[
+			writeFirstPage(w, r, `[
 				{"id":1,"body":"Please rename","state":"REQUEST_CHANGES","user":{"login":"alice"},"submitted_at":"2026-01-01T12:00:00Z","comments_count":1},
 				{"id":2,"body":"","state":"APPROVED","user":{"login":"dave"},"submitted_at":"2026-01-03T00:00:00Z"},
 				{"id":3,"body":"Draft","state":"PENDING","user":{"login":"erin"},"submitted_at":"2026-01-03T00:00:00Z"},
 				{"id":4,"body":"Great","state":"APPROVED","user":{"login":"alice"},"submitted_at":"2026-01-03T06:00:00Z"}
-			]`))
+			]`)
 		case "/api/v1/repos/alice/project/pulls/4/reviews/1/comments":
 			_, _ = w.Write([]byte(`[{"id":9,"body":"Typo here","path":"main.go","position":12,"user":{"login":"alice"},"created_at":"2026-01-01T12:00:00Z"}]`))
 		default:

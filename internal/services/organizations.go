@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 
 	"gitea.dev/cli/internal/transport"
@@ -33,7 +34,7 @@ func organization(ctx context.Context, client *transport.Client, owner string) (
 	org, _, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) (*gitea.Organization, *gitea.Response, error) {
 		return c.Organizations.GetOrg(ctx, owner)
 	})
-	if statusNotFound(err) {
+	if IsNotFound(err) {
 		return 0, false, nil
 	}
 	if err != nil {
@@ -43,12 +44,6 @@ func organization(ctx context.Context, client *transport.Client, owner string) (
 		return 0, false, fmt.Errorf("cannot verify the identity of organization %s", owner)
 	}
 	return org.ID, true, nil
-}
-
-// statusNotFound reports whether err is a 404 response.
-func statusNotFound(err error) bool {
-	failure, ok := errors.AsType[*transport.APIError](err)
-	return ok && failure.Status == http.StatusNotFound
 }
 
 // OrganizationOptions permits explicit empty and false preference updates.
@@ -83,18 +78,13 @@ func (s Organizations) List(ctx context.Context, mine bool, username string, lim
 	return convertPage(orgs, organizationFrom), err
 }
 
-// convertPage maps a page of SDK items onto gt results.
-func convertPage[S, T any](page Page[*S], convert func(*S) T) Page[T] {
-	return Page[T]{Items: convertAll(page.Items, convert), More: page.More, Total: page.Total, Counted: page.Counted}
-}
-
 // View retrieves a named organization.
 func (s Organizations) View(ctx context.Context, name string) (Organization, error) {
 	org, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Organization, *gitea.Response, error) {
 		return c.Organizations.GetOrg(ctx, name)
 	})
 	if err != nil {
-		return Organization{}, err
+		return Organization{}, Classify(err, "organization", strconv.Quote(name), "")
 	}
 	return organizationFrom(org), nil
 }
@@ -104,7 +94,8 @@ type OrganizationSize struct {
 	Members, Teams, Repositories *int
 }
 
-// Size counts the members, teams and repositories of an organization.
+// Size counts the members, teams and repositories of an organization; a count the account cannot
+// read is nil.
 func (s Organizations) Size(ctx context.Context, name string) (OrganizationSize, error) {
 	first := listOptions(1, 1)
 	counts := []func(context.Context, *gitea.Client) (*gitea.Response, error){
@@ -116,22 +107,38 @@ func (s Organizations) Size(ctx context.Context, name string) (OrganizationSize,
 			_, resp, err := c.Organizations.ListOrgTeams(ctx, name, gitea.ListTeamsOptions{ListOptions: first})
 			return resp, err
 		},
-		func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
-			_, resp, err := c.Repositories.ListOrgRepos(ctx, name, gitea.ListOrgReposOptions{ListOptions: first})
-			return resp, err
-		},
+		orgRepos(name),
 	}
 	totals := make([]*int, len(counts))
-	for i, count := range counts {
-		total, err := listTotal(ctx, s.Client, count)
-		if ctx.Err() != nil {
-			return OrganizationSize{}, ctx.Err()
-		}
-		if err == nil {
-			totals[i] = total
-		}
+	_ = concurrently(len(counts), func(i int) error {
+		totals[i], _ = listTotal(ctx, s.Client, counts[i])
+		return nil
+	})
+	if ctx.Err() != nil {
+		return OrganizationSize{}, ctx.Err()
 	}
 	return OrganizationSize{Members: totals[0], Teams: totals[1], Repositories: totals[2]}, nil
+}
+
+// RepositoryCount counts the repositories of an organization, or returns nil when the account
+// cannot read the count.
+func (s Organizations) RepositoryCount(ctx context.Context, name string) (*int, error) {
+	total, err := listTotal(ctx, s.Client, orgRepos(name))
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		return nil, nil
+	}
+	return total, nil
+}
+
+// orgRepos requests the first repository of an organization, to count them.
+func orgRepos(name string) func(context.Context, *gitea.Client) (*gitea.Response, error) {
+	return func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+		_, resp, err := c.Repositories.ListOrgRepos(ctx, name, gitea.ListOrgReposOptions{ListOptions: listOptions(1, 1)})
+		return resp, err
+	}
 }
 
 // listTotal returns the collection size a list request reports, or nil when the server does not count it.
@@ -159,7 +166,7 @@ func (s Organizations) Create(ctx context.Context, opts OrganizationOptions) (Or
 		})
 	})
 	if err != nil {
-		return Organization{}, err
+		return Organization{}, Classify(err, "organization", "", "")
 	}
 	return organizationFrom(org), nil
 }
@@ -176,9 +183,10 @@ func (s Organizations) Edit(ctx context.Context, name string, opts OrganizationO
 
 // Delete deletes the named organization.
 func (s Organizations) Delete(ctx context.Context, name string) error {
-	return do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		return c.Organizations.DeleteOrg(ctx, name)
 	})
+	return Classify(err, "organization", strconv.Quote(name), "")
 }
 
 // OrganizationMember identifies a member without exposing private profile fields.
@@ -283,7 +291,7 @@ func (s Organizations) IsPublicMember(ctx context.Context, name, username string
 // check runs a membership check that answers no with a 404.
 func (s Organizations) check(ctx context.Context, op func(context.Context, *gitea.Client) (*gitea.Response, error)) (bool, error) {
 	err := do(ctx, s.Client, op)
-	if statusNotFound(err) {
+	if IsNotFound(err) {
 		return false, nil
 	}
 	return err == nil, err

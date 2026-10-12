@@ -28,11 +28,11 @@ func TestTable(t *testing.T) {
 		want    string
 	}{
 		{"empty", issues, nil, tty, ""},
-		{"aligns legacy rows without header", nil, [][]Cell{Row("7", "Fix login", "open"), Row("12", "Crash", "closed")}, tty, "7   Fix login  open\n12  Crash      closed\n"},
-		{"counts runes, not bytes", nil, [][]Cell{Row("1", "äöü", "x"), Row("2", "abcd", "y")}, tty, "1  äöü   x\n2  abcd  y\n"},
-		{"counts wide runes twice", nil, [][]Cell{Row("1", "修复", "x"), Row("2", "abcd", "y")}, tty, "1  修复  x\n2  abcd  y\n"},
-		{"trims empty trailing cells", nil, [][]Cell{Row("1", "bug", ""), Row("22", "feature", "new work")}, tty, "1   bug\n22  feature  new work\n"},
-		{"pads ragged rows", nil, [][]Cell{Row("1"), Row("2", "two")}, tty, "1\n2  two\n"},
+		{"aligns legacy rows without header", nil, [][]Cell{row("7", "Fix login", "open"), row("12", "Crash", "closed")}, tty, "7   Fix login  open\n12  Crash      closed\n"},
+		{"counts runes, not bytes", nil, [][]Cell{row("1", "äöü", "x"), row("2", "abcd", "y")}, tty, "1  äöü   x\n2  abcd  y\n"},
+		{"counts wide runes twice", nil, [][]Cell{row("1", "修复", "x"), row("2", "abcd", "y")}, tty, "1  修复  x\n2  abcd  y\n"},
+		{"trims empty trailing cells", nil, [][]Cell{row("1", "bug", ""), row("22", "feature", "new work")}, tty, "1   bug\n22  feature  new work\n"},
+		{"pads ragged rows", nil, [][]Cell{row("1"), row("2", "two")}, tty, "1\n2  two\n"},
 		{
 			"heads columns and formats cells for people",
 			issues, issueRows, tty,
@@ -59,7 +59,7 @@ func TestTable(t *testing.T) {
 		{
 			"cuts wide runes by display width",
 			[]Column{{Header: "Title", Flex: true}, {Header: "By"}},
-			[][]Cell{Row("支持中文路径 (support CJK paths)", "alice")},
+			[][]Cell{row("支持中文路径 (support CJK paths)", "alice")},
 			Display{TTY: true, Width: 20},
 			"TITLE          BY\n支持中文路径…  alice\n",
 		},
@@ -73,21 +73,21 @@ func TestTable(t *testing.T) {
 		{
 			"keeps columns to their output",
 			[]Column{{Header: "ID"}, {Header: "State", PipedOnly: true}, {Header: "Link", TTYOnly: true}},
-			[][]Cell{Row("1", "open", "→")},
+			[][]Cell{row("1", "open", "→")},
 			tty,
 			"ID  LINK\n1   →\n",
 		},
 		{
 			"keeps piped-only columns when piped",
 			[]Column{{Header: "ID"}, {Header: "State", PipedOnly: true}, {Header: "Link", TTYOnly: true}},
-			[][]Cell{Row("1", "open", "→")},
+			[][]Cell{row("1", "open", "→")},
 			Display{},
 			"1\topen\n",
 		},
 		{
 			"strips hostile text in both outputs",
 			nil,
-			[][]Cell{Row("1", "a\x1b]52;c;cHduZWQ=\x07b\x1b[2J\u009b31m‮txt.exe\r\ntail\tend", "open")},
+			[][]Cell{row("1", "a\x1b]52;c;cHduZWQ=\x07b\x1b[2J\u009b31m‮txt.exe\r\ntail\tend", "open")},
 			Display{},
 			"1\ta]52;c;cHduZWQ=b[2J31mtxt.exe tail end\topen\n",
 		},
@@ -95,10 +95,10 @@ func TestTable(t *testing.T) {
 		{
 			"styles after alignment and links only the first column",
 			[]Column{{Header: "ID"}, {Header: "Name"}, {Header: "State"}},
-			[][]Cell{{{Text: "7", Link: "https://example.org/7"}, {Text: "bug", Color: "ff0000", Link: "https://example.org/bug"}, {Text: "open", Color: "green", Bold: true}}, Row("12", "feature", "closed")},
+			[][]Cell{{{Text: "7", Link: "https://example.org/7"}, {Text: "bug", Color: "ff0000", Link: "https://example.org/bug"}, {Text: "open", Color: "green", Bold: true}}, row("12", "feature", "closed")},
 			Display{TTY: true, Color: true, Links: true},
 			"\x1b[90mID\x1b[0m  \x1b[90mNAME\x1b[0m     \x1b[90mSTATE\x1b[0m\n" +
-				"\x1b]8;;https://example.org/7\x1b\\7\x1b]8;;\x1b\\   \x1b[38;5;196mbug\x1b[0m      \x1b[1m\x1b[32mopen\x1b[0m\x1b[0m\n" +
+				"\x1b]8;;https://example.org/7\x1b\\7\x1b]8;;\x1b\\   bug      \x1b[1m\x1b[32mopen\x1b[0m\x1b[0m\n" +
 				"12  feature  closed\n",
 		},
 		{
@@ -109,11 +109,11 @@ func TestTable(t *testing.T) {
 			"\x1b]8;;https://example.org/7\x1b\\7\x1b]8;;\x1b\\  bug\n",
 		},
 		{
-			"writes 24-bit color on true-color terminals",
+			"leaves hex colors plain",
 			nil,
 			[][]Cell{{{Text: "bug", Color: "#ff0000"}, {Text: "old", Muted: true}}},
-			Display{TTY: true, Color: true, TrueColor: true},
-			"\x1b[38;2;255;0;0mbug\x1b[0m  \x1b[90mold\x1b[0m\n",
+			Display{TTY: true, Color: true},
+			"bug  \x1b[90mold\x1b[0m\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -126,22 +126,13 @@ func TestTableFitsWidthWithWideRunes(t *testing.T) {
 	titles := []string{"Emoji in title 🚀 works?", "支持中文路径 (support CJK paths)", strings.Repeat("long ", 40)}
 	rows := make([][]Cell, len(titles))
 	for i, title := range titles {
-		rows[i] = Row("#1", title, "alice")
+		rows[i] = row("#1", title, "alice")
 	}
 	for _, width := range []int{30, 50, 80} {
 		for _, line := range strings.Split(strings.TrimSuffix(Table([]Column{{}, {Flex: true}, {}}, rows, Display{TTY: true, Width: width}), "\n"), "\n") {
 			require.LessOrEqual(t, runewidth.StringWidth(line), width, line)
 		}
 	}
-}
-
-func TestRecord(t *testing.T) {
-	record := Record{
-		Heading: []Cell{{Text: "#7", Bold: true}, {Text: "Crash\x1b[2J\nnow"}, {Text: "bob‮"}},
-		Lines:   []string{"Steps:\r\n\x1b]52;c;aGk=\x07run\n", "https://example.org/7"},
-	}
-	require.Equal(t, "#7 Crash[2J now bob\nSteps:\n]52;c;aGk=run\n\nhttps://example.org/7\n", record.Render(false))
-	require.Equal(t, "\x1b[1m#7\x1b[0m Crash[2J now bob\nSteps:\n]52;c;aGk=run\n\nhttps://example.org/7\n", record.Render(true))
 }
 
 func TestSafeText(t *testing.T) {
@@ -161,4 +152,13 @@ func TestSafeText(t *testing.T) {
 			require.Equal(t, tc.line, SafeLine(tc.in))
 		})
 	}
+}
+
+// row returns unstyled cells.
+func row(texts ...string) []Cell {
+	cells := make([]Cell, len(texts))
+	for i, text := range texts {
+		cells[i].Text = text
+	}
+	return cells
 }

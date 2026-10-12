@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"path"
 	"strings"
 	"testing"
 
@@ -86,8 +87,6 @@ func TestTeamRepoAddTakesRepositoriesAsArguments(t *testing.T) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/teams/5":
 			_, _ = w.Write([]byte(`{"id":5,"name":"devs","permission":"none","organization":{"username":"acme"}}`))
-		case "GET /api/v1/teams/5/repos/acme/service", "GET /api/v1/teams/5/repos/acme/website":
-			w.WriteHeader(http.StatusNotFound)
 		case "PUT /api/v1/teams/5/repos/acme/service", "PUT /api/v1/teams/5/repos/acme/website":
 			granted = append(granted, r.URL.Path)
 			w.WriteHeader(http.StatusNoContent)
@@ -182,18 +181,14 @@ func TestTeamPermissionSetsEveryUnit(t *testing.T) {
 	require.Equal(t, map[string]any{"permission": "read", "units_map": wikiWrite}, sent[1])
 }
 
-func TestTeamMemberRemoveNamesMembersAndSkipsOthers(t *testing.T) {
+func TestTeamMemberRemoveConfirmsOnce(t *testing.T) {
 	var removed []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/teams/5":
 			_, _ = w.Write([]byte(`{"id":5,"name":"devs","organization":{"username":"acme"}}`))
-		case "GET /api/v1/teams/5/members/carol":
-			_, _ = w.Write([]byte(`{"login":"carol"}`))
-		case "GET /api/v1/teams/5/members/dave":
-			w.WriteHeader(http.StatusNotFound)
-		case "DELETE /api/v1/teams/5/members/carol":
-			removed = append(removed, "carol")
+		case "DELETE /api/v1/teams/5/members/carol", "DELETE /api/v1/teams/5/members/dave":
+			removed = append(removed, path.Base(r.URL.Path))
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -205,7 +200,7 @@ func TestTeamMemberRemoveNamesMembersAndSkipsOthers(t *testing.T) {
 	prompt := &scriptedPrompter{accept: true}
 	deps.Prompter = prompt
 	require.NoError(t, Execute(context.Background(), deps, []string{"team", "member", "remove", "5", "carol", "dave"}))
-	require.Equal(t, []string{"Remove carol from team acme/devs?"}, prompt.confirmations)
-	require.Equal(t, []string{"carol"}, removed)
-	require.Equal(t, "! dave is not a member of team acme/devs\n✓ Removed carol from team acme/devs\n", withoutANSI(diagnostics.String()))
+	require.Equal(t, []string{"Remove carol and dave from team acme/devs?"}, prompt.confirmations)
+	require.Equal(t, []string{"carol", "dave"}, removed)
+	require.Equal(t, "✓ Removed carol from team acme/devs\n✓ Removed dave from team acme/devs\n", withoutANSI(diagnostics.String()))
 }

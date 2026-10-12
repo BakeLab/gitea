@@ -51,12 +51,24 @@ func (c ReviewRequestChanges) Validate() error {
 
 // ChangeRequests returns the PR after changes and reports partial mutation failures.
 func (s Reviews) ChangeRequests(ctx context.Context, n int64, changes ReviewRequestChanges) (Pull, error) {
-	if err := changes.Validate(); err != nil {
+	if err := s.changeRequests(ctx, n, changes); err != nil {
 		return Pull{}, err
+	}
+	item, err := (Pulls{Client: s.Client, Repository: s.Repository}).View(ctx, n)
+	if err != nil {
+		return Pull{}, fmt.Errorf("review requests were updated, but reading the pull request failed: %w", err)
+	}
+	return item, nil
+}
+
+// changeRequests applies the review request changes to pull request n.
+func (s Reviews) changeRequests(ctx context.Context, n int64, changes ReviewRequestChanges) error {
+	if err := changes.Validate(); err != nil {
+		return err
 	}
 	if len(changes.Add.Teams)+len(changes.Remove.Teams) > 0 {
 		if err := s.CheckRequestTeams(ctx, append(append([]string{}, changes.Add.Teams...), changes.Remove.Teams...)); err != nil {
-			return Pull{}, err
+			return err
 		}
 	}
 	mutated := false
@@ -76,17 +88,13 @@ func (s Reviews) ChangeRequests(ctx context.Context, n int64, changes ReviewRequ
 		})
 		if err != nil {
 			if mutated {
-				return Pull{}, fmt.Errorf("reviewer removals succeeded, but adding reviewers failed: %w", err)
+				return fmt.Errorf("reviewer removals succeeded, but adding reviewers failed: %w", err)
 			}
-			return Pull{}, fmt.Errorf("review request update failed; Gitea may have applied some requests: %w", err)
+			return fmt.Errorf("review request update failed; Gitea may have applied some requests: %w", err)
 		}
 		mutated = true
 	}
-	item, err := (Pulls{Client: s.Client, Repository: s.Repository}).View(ctx, n)
-	if err != nil {
-		return Pull{}, fmt.Errorf("review requests were updated, but reading the pull request failed: %w", err)
-	}
-	return item, nil
+	return nil
 }
 
 // CheckRequestTeams verifies that every named team exists in the repository's organization.

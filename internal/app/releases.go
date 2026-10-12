@@ -82,7 +82,7 @@ $ gt release list -R alice/project --json tag,title,draft`,
 				},
 				Context: "releases in " + target.Repo, Empty: "no releases in " + target.Repo,
 			}
-			return writeTable(a, cmd, result.Items, spec, listPage{Number: page, More: result.More, Total: result.Total, Counted: result.Counted})
+			return writeTable(a, cmd, result.Items, spec, servicePage(result, page))
 		},
 	}
 	pageFlags(command, &limit, &page)
@@ -300,19 +300,14 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 				item.Assets = append(item.Assets, asset)
 				a.done(cmd, "Uploaded %s (%s)", asset.Name, terminal.Bytes(asset.Size))
 			}
-			if a.options.json != "" {
-				failures = append(failures, a.writeJSON(cmd, item))
-			} else {
-				failures = append(failures, a.printURL(cmd, item.URL))
-			}
-			return errors.Join(failures...)
+			return errors.Join(append(failures, a.created(cmd, item, item.URL))...)
 		},
 	}
 	fields.register(a, command)
 	command.Flags().StringVar(&fields.tag, "tag", "", "Release tag")
 	_ = command.Flags().MarkHidden("tag")
 	command.Flags().StringSliceVar(&assets, "asset", nil, "File to upload as an asset (repeatable)")
-	command.ValidArgsFunction = a.completeTags()
+	command.ValidArgsFunction = pathArgs(1, true, completeFiles, a.completeTags())
 	return command
 }
 
@@ -402,11 +397,8 @@ func (a *application) releasePublishCommand() *cobra.Command {
 					a.done(cmd, "Published release %s in %s", item.Tag, target.Repo)
 				}
 				return item, err
-			}, func(services.Release) {})
-			if a.options.json != "" {
-				failures = append(failures, writeBatchJSON(a, cmd, len(args), results))
-			}
-			return errors.Join(failures...)
+			}, nil)
+			return errors.Join(append(failures, writeBatchJSON(a, cmd, len(args), results))...)
 		},
 	}
 	command.ValidArgsFunction = a.completeReleases()
@@ -438,7 +430,7 @@ $ gt release delete v1.0.0-rc1 v1.0.0-rc2 --delete-tag --yes`,
 					subject = "release " + args[0] + " and its tag"
 				}
 			}
-			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + " from " + target.Repo + "?", NonTTY: "delete " + subject + " from " + target.Repo}); err != nil {
+			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + " from " + target.Repo + "?"}); err != nil {
 				return err
 			}
 			service := services.Releases{Client: target.client, Repository: target.Repo}

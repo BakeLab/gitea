@@ -167,7 +167,7 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 				}
 			}
 			if options.Archived != nil && *options.Archived {
-				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Archive " + t.Repo + "? It becomes read-only.", NonTTY: "archive " + t.Repo}); err != nil {
+				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Archive " + t.Repo + "? It becomes read-only."}); err != nil {
 					return err
 				}
 			}
@@ -278,13 +278,13 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 			if _, err := a.cloneRepository(cmd, t, item, opts); err != nil {
 				return err
 			}
-			return a.writeMutationJSON(cmd, item)
+			return a.jsonResult(cmd, item)
 		},
 	}
 	command.Flags().IntVarP(&opts.depth, "depth", "d", 0, "Number of commits to fetch (0: full history)")
 	command.Flags().StringVarP(&opts.upstream, "upstream-remote-name", "u", "upstream", "Remote name for the parent of a fork")
 	command.Flags().BoolVar(&noUpstream, "no-upstream", false, "Do not add a remote for the parent of a fork")
-	command.ValidArgsFunction = a.completeRepos()
+	command.ValidArgsFunction = pathArgs(1, false, completeDirectories, a.completeRepos())
 	return command
 }
 
@@ -352,10 +352,7 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 					return err
 				}
 			}
-			if a.options.json != "" {
-				return a.writeJSON(cmd, fork)
-			}
-			return a.printURL(cmd, fork.URL)
+			return a.created(cmd, fork, fork.URL)
 		},
 	}
 	command.Flags().StringVar(&opts.Organization, "org", "", "Fork into this organization")
@@ -487,13 +484,6 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 		}
 		a.done(cmd, "Added remote %s for %s; gt commands in the clone target it (change with gt repo set-default)", opts.upstream, item.Parent.FullName)
 	}
-	// The remote is named source because repository discovery prefers a remote named upstream.
-	if source := mirrorSourceURL(item); source != "" {
-		if _, err := a.gitIn(cmd.Context(), clone, "remote", "add", "--", "source", source); err != nil {
-			return clone, fmt.Errorf("cloned the mirror, but could not add the source remote: %w", err)
-		}
-		a.done(cmd, "Added remote source for the mirror's source")
-	}
 	return clone, nil
 }
 
@@ -559,7 +549,7 @@ $ gt repo archive alice/old-project --yes`,
 			} else {
 				a.warn(cmd, "%s is not archived", item.FullName)
 			}
-			return a.writeMutationJSON(cmd, item)
+			return a.jsonResult(cmd, item)
 		}
 		if archive {
 			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Archive " + t.Repo + inferred + "? It becomes read-only.", NonTTY: "archive " + t.Repo}); err != nil {
@@ -575,27 +565,17 @@ $ gt repo archive alice/old-project --yes`,
 		} else {
 			a.done(cmd, "Unarchived repository %s", item.FullName)
 		}
-		return a.writeMutationJSON(cmd, item)
+		return a.jsonResult(cmd, item)
 	}
 	command.ValidArgsFunction = a.completeRepos()
 	return command
-}
-
-// writeMutationJSON writes the result of a mutation with --json; people get done lines instead.
-func (a *application) writeMutationJSON(cmd *cobra.Command, item any) error {
-	if a.options.json == "" {
-		return nil
-	}
-	return a.writeJSON(cmd, item)
 }
 
 func (a *application) repoRenameCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "rename <new-name>",
 		Short: "Rename a repository",
-		Long: `Rename a repository; its owner stays the same. Gitea redirects the old name to the new one. When
-the repository was found through a Git remote of the current clone, or through gt repo set-default,
-that remote or setting moves to the new name.`,
+		Long:  "Rename a repository; its owner stays the same. Gitea redirects the old name to the new one.",
 		Example: `# Rename the repository of the current clone
 $ gt repo rename new-name
 
@@ -630,53 +610,13 @@ $ gt repo rename new-name -R alice/old-name`,
 				return err
 			}
 			a.done(cmd, "Renamed repository %s to %s", t.Repo, item.FullName)
-			if err := a.followRename(cmd, t, current, item); err != nil {
-				return err
+			if remote, ok := strings.CutPrefix(t.RepoSource, "remote "); ok {
+				a.warn(cmd, "Git remote %s still points to %s; update it with git remote set-url", remote, t.Repo)
 			}
-			return a.writeMutationJSON(cmd, item)
+			return a.jsonResult(cmd, item)
 		},
 	}
 	return command
-}
-
-// followRename points the Git remote or the saved default repository that selected a renamed
-// repository, previously named old, at its new name.
-func (a *application) followRename(cmd *cobra.Command, t target, old string, item services.Repository) error {
-	if remote, ok := strings.CutPrefix(t.RepoSource, "remote "); ok {
-		raw, err := a.git(cmd.Context(), "remote", "get-url", remote)
-		if err != nil {
-			return fmt.Errorf("renamed %s, but could not read Git remote %s: %w", item.FullName, remote, err)
-		}
-		renamed, ok := renamedURL(raw, old, item.Name)
-		if !ok {
-			a.warn(cmd, "Git remote %s still points to %s; update it with git remote set-url", remote, t.Repo)
-			return nil
-		}
-		if _, err := a.git(cmd.Context(), "remote", "set-url", remote, renamed); err != nil {
-			return fmt.Errorf("renamed %s, but could not update Git remote %s: %w", item.FullName, remote, err)
-		}
-		a.done(cmd, "Updated Git remote %s to %s", remote, item.FullName)
-	}
-	if t.RepoSource == "git config gt.repository" {
-		if _, err := a.git(cmd.Context(), "config", "--local", "gt.repository", t.Host+"/"+item.FullName); err != nil {
-			return fmt.Errorf("renamed %s, but could not update the default repository: %w", item.FullName, err)
-		}
-		a.done(cmd, "Set %s as the default repository for this clone", item.FullName)
-	}
-	return nil
-}
-
-// renamedURL replaces the repository name old at the end of a remote URL with name, keeping the
-// rest of the URL, such as an SSH host alias, and its .git suffix.
-func renamedURL(raw, old, name string) (string, bool) {
-	base, suffix := strings.TrimSuffix(raw, "/"), ""
-	if trimmed, ok := strings.CutSuffix(base, ".git"); ok {
-		base, suffix = trimmed, ".git"
-	}
-	if len(base) <= len(old) || !strings.EqualFold(base[len(base)-len(old):], old) || !strings.ContainsRune("/:", rune(base[len(base)-len(old)-1])) {
-		return "", false
-	}
-	return base[:len(base)-len(old)] + name + suffix, true
 }
 
 func (a *application) repoDeleteCommand() *cobra.Command {

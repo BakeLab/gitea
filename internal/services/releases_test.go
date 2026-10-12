@@ -171,9 +171,9 @@ func TestReleaseListAndViewEscapeTags(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":2,"tag_name":"v1/beta one"}`))
 	}))
 	service := Releases{Client: client, Repository: "alice/project"}
-	items, err := service.List(context.Background(), 10, 2)
+	items, err := service.ListPage(context.Background(), 10, 2)
 	require.NoError(t, err)
-	require.Equal(t, []Release{{ID: 1, Tag: "v1", Assets: []ReleaseAsset{}}}, items)
+	require.Equal(t, []Release{{ID: 1, Tag: "v1", Assets: []ReleaseAsset{}}}, items.Items)
 	item, err := service.View(context.Background(), "v1/beta one")
 	require.NoError(t, err)
 	require.Equal(t, "v1/beta one", item.Tag)

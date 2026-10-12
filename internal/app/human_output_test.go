@@ -62,12 +62,11 @@ func TestLabelListAppliesColorAndPagesWithNoInput(t *testing.T) {
 		_, _ = w.Write([]byte(`[{"id":1,"name":"bug","color":"ff0000","description":"Defect"},{"id":2,"name":"docs","color":"00ff00","description":"Docs"}]`))
 	}))
 	defer server.Close()
-	deps, out, diagnostics, pager := pagedDeps(t, server.URL, map[string]string{"PAGER": "fake-pager", "COLORTERM": "truecolor"}, "color", "always")
+	deps, out, diagnostics, pager := pagedDeps(t, server.URL, map[string]string{"PAGER": "fake-pager"}, "color", "always")
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
 	require.Equal(t, 1, pager.calls)
 	require.Equal(t, "fake-pager", pager.command)
-	require.Contains(t, pager.input, "\x1b[38;2;255;0;0m● ff0000\x1b[0m")
-	require.Contains(t, pager.input, "\x1b[38;2;0;255;0m● 00ff00\x1b[0m")
+	require.Contains(t, pager.input, "\x1b[90mID\x1b[0m")
 	require.Equal(t, "PAGED:"+pager.input, out.String())
 	require.Empty(t, diagnostics.String())
 }
@@ -120,7 +119,7 @@ func TestTeaPagerAndColorEnvironmentOverrides(t *testing.T) {
 	deps, out, _, pager := pagedDeps(t, server.URL, env, "pager", "configured-pager", "color", "never")
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
 	require.Equal(t, "gt-pager", pager.command)
-	require.Contains(t, pager.input, "\x1b[38;5;196m● ff0000\x1b[0m")
+	require.Contains(t, pager.input, "\x1b[90mID\x1b[0m")
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "pager", "--show-source", "--json"}))
 	require.JSONEq(t, `{"pager":{"value":"gt-pager","source":"GITEA_CLI_PAGER"}}`, withoutANSI(out.String()))
@@ -142,7 +141,7 @@ func TestColorAutoUsesStdoutTTY(t *testing.T) {
 	out.Reset()
 	deps.Streams.OutTTY = true
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
-	require.Contains(t, out.String(), "\x1b[38;5;196m● ff0000\x1b[0m")
+	require.Contains(t, out.String(), "\x1b[90mID\x1b[0m")
 }
 
 func TestMultiItemHumanOutputPagesOnce(t *testing.T) {
@@ -152,7 +151,7 @@ func TestMultiItemHumanOutputPagesOnce(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/repos/alice/project/milestones":
-			writeMilestones(w, r, `[{"id":3,"title":"v1"}]`)
+			writeFirstPage(w, r, `[{"id":3,"title":"v1"}]`)
 		case "/api/v1/repos/alice/project/issues":
 			_, _ = w.Write([]byte("[" + issue(1) + "," + issue(2) + "]"))
 		case "/api/v1/repos/alice/project/issues/1", "/api/v1/repos/alice/project/issues/2":
@@ -224,31 +223,22 @@ func TestListsFitTheTerminalAndSplitWhenPiped(t *testing.T) {
 			`{"number":5,"title":"支持中文路径 (support CJK paths)","state":"open","user":{"login":""}}]`))
 	}))
 	defer server.Close()
-	for group, want := range map[string][2]string{
-		"issue": {
-			"6\tA very long issue title that keeps going and going to see how list output handles wrapping\t\topen\tissue\talice\t\n" +
-				"5\t支持中文路径 (support CJK paths)\t\topen\tissue\t\t\n",
-			"Showing 2 of 2 open issues in alice/project\n\n" +
-				"ID  TITLE                  LABELS  AUTHOR  UPDATED\n" +
-				"#6  A very long issue ti…          alice\n" +
-				"#5  支持中文路径 (suppor…\n",
-		},
-	} {
-		t.Run(group, func(t *testing.T) {
-			deps, out, _ := serverDeps(t, server.URL)
-			args := []string{group, "list", "-R", "alice/project"}
-			require.NoError(t, Execute(context.Background(), deps, args))
-			require.Equal(t, want[0], out.String())
+	deps, out, _ := serverDeps(t, server.URL)
+	args := []string{"issue", "list", "-R", "alice/project"}
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.Equal(t, "6\tA very long issue title that keeps going and going to see how list output handles wrapping\t\topen\tissue\talice\t\n"+
+		"5\t支持中文路径 (support CJK paths)\t\topen\tissue\t\t\n", out.String())
 
-			out.Reset()
-			deps.Streams.OutTTY, deps.Streams.Width = true, 50
-			deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
-			require.NoError(t, Execute(context.Background(), deps, args))
-			require.Equal(t, want[1], stripLinks(out.String()))
-			for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
-				require.LessOrEqual(t, runewidth.StringWidth(stripLinks(line)), 50, line)
-			}
-		})
+	out.Reset()
+	deps.Streams.OutTTY, deps.Streams.Width = true, 50
+	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.Equal(t, "Showing 2 of 2 open issues in alice/project\n\n"+
+		"ID  TITLE                  LABELS  AUTHOR  UPDATED\n"+
+		"#6  A very long issue ti…          alice\n"+
+		"#5  支持中文路径 (suppor…\n", stripLinks(out.String()))
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		require.LessOrEqual(t, runewidth.StringWidth(stripLinks(line)), 50, line)
 	}
 }
 
@@ -266,7 +256,7 @@ func stripLinks(s string) string {
 
 // outputApplication returns an application over deps and a command writing to its streams.
 func outputApplication(deps Dependencies, json string) (*application, *cobra.Command) {
-	deps.Now = func() time.Time { return time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC) }
+	deps.Now = func() time.Time { return testNow }
 	a := &application{deps: deps, options: options{json: json}}
 	cmd := &cobra.Command{Use: "list"}
 	cmd.SetOut(deps.Streams.Out)
@@ -336,7 +326,7 @@ func TestWriteView(t *testing.T) {
 	view := func(item listed) terminal.View {
 		return terminal.View{
 			Title: item.Title, ID: fmt.Sprintf("#%d", item.Number), Badges: []terminal.Cell{{Text: "Open", Color: "green"}},
-			Meta: "alice opened " + terminal.RelativeTime(time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC), item.Updated), Body: "Steps", Kind: "issue", URL: "https://example.org/1",
+			Meta: "alice opened " + terminal.RelativeTime(testNow, item.Updated), Body: "Steps", Kind: "issue", URL: "https://example.org/1",
 		}
 	}
 	item := listed{1, "Login fails", time.Date(2026, 10, 11, 18, 0, 0, 0, time.UTC)}
@@ -380,8 +370,12 @@ func TestMutationFeedback(t *testing.T) {
 			ref := refLabel("alice/x", 12, "Fix\x1b[2J login")
 			a.done(cmd, "Created issue %s", ref)
 			a.warn(cmd, "Issue %s is already closed", ref)
-			require.NoError(t, a.printURL(cmd, "https://example.org/12"))
-			require.Equal(t, tc.out, out.String())
+			require.NoError(t, a.created(cmd, map[string]int{"number": 12}, "https://example.org/12"))
+			if tc.json != "" {
+				require.JSONEq(t, `{"number":12}`, out.String())
+			} else {
+				require.Equal(t, tc.out, out.String())
+			}
 			require.Equal(t, tc.stderr, diagnostics.String())
 		})
 	}

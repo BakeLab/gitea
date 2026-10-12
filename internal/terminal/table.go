@@ -16,9 +16,8 @@ import (
 // for scripts, without header, color or links.
 type Display struct {
 	TTY bool
-	// Color enables SGR colors and emphasis on a TTY; TrueColor writes hex colors in 24-bit instead
-	// of the nearest of 256.
-	Color, TrueColor bool
+	// Color enables SGR colors and emphasis on a TTY.
+	Color bool
 	// Links enables OSC 8 links on the first table column on a TTY.
 	Links bool
 	// Markdown renders view bodies on a TTY.
@@ -79,19 +78,13 @@ func (c Cell) style(text string, d Display, link bool) string {
 		if c.Muted {
 			color = "muted"
 		}
-		text = Emphasis(paint(color, text, d.TrueColor), c.Bold)
+		text = Emphasis(Colorize(color, text, true), c.Bold)
 	}
 	return Hyperlink(c.Link, text, link && d.Links)
 }
 
-// Row returns unstyled cells.
-func Row(texts ...string) []Cell {
-	cells := make([]Cell, len(texts))
-	for i, text := range texts {
-		cells[i].Text = text
-	}
-	return cells
-}
+// Render styles the cell's text outside a table: its color, muted or bold, without a link.
+func (c Cell) Render(d Display) string { return c.style(SafeLine(c.Text), d, false) }
 
 // Table renders rows under columns; rows may have more cells than there are columns. On a TTY it
 // prints an uppercase header row when any column has a header, aligns columns two spaces apart,
@@ -207,32 +200,6 @@ func fitWidth(widths []int, limit int, flex func(j int) (bool, int)) {
 		}
 		widths[widest]--
 	}
-}
-
-// Record is one item for human readers: a heading line of cells separated by spaces,
-// followed by text lines such as a body and a URL.
-type Record struct {
-	Heading []Cell
-	Lines   []string
-}
-
-// Render formats the record. Heading cells pass through SafeLine and are styled like
-// Table cells; lines pass through SafeText, so they keep their own line breaks.
-func (r Record) Render(color bool) string {
-	d := Display{TTY: true, Color: color, TrueColor: true, Links: color}
-	var b strings.Builder
-	for i, cell := range r.Heading {
-		if i > 0 {
-			b.WriteByte(' ')
-		}
-		b.WriteString(cell.style(SafeLine(cell.Text), d, true))
-	}
-	b.WriteByte('\n')
-	for _, line := range r.Lines {
-		b.WriteString(SafeText(line))
-		b.WriteByte('\n')
-	}
-	return b.String()
 }
 
 // SafeLine reduces server text to one line: SafeText, with tabs and line breaks as spaces.

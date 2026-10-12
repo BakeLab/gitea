@@ -24,7 +24,7 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		snapshot, err := a.deps.Settings.Load()
+		snapshot, err := a.settings()
 		if err != nil {
 			return err
 		}
@@ -103,9 +103,6 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, result)
-		}
 		a.done(cmd, "Deleted local branch %s", result.LocalBranch)
 		switch {
 		case result.RemoteDeleted:
@@ -115,7 +112,7 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		case !pull.HeadCanPush:
 			a.warn(cmd, "Kept remote branch %s: you cannot push to %s", pull.Head, pull.HeadRepo)
 		}
-		return nil
+		return a.jsonResult(cmd, result)
 	}}
 	cmd.Flags().BoolVar(&ignoreSHA, "ignore-sha", false, "Find the local branch by name instead of commit hash")
 	cmd.ValidArgsFunction = a.completePulls("closed")

@@ -4,9 +4,7 @@
 package app
 
 import (
-	"context"
 	"errors"
-	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,9 +12,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
-	"gitea.dev/cli/internal/transport"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 func (a *application) prCommand() *cobra.Command {
@@ -71,7 +67,7 @@ each pull request, which gt only makes when --json names them.`, Args: argsExact
 			return err
 		}
 		if milestone != "" {
-			if options.Milestone, err = milestoneFilter(cmd.Context(), t, milestone); err != nil {
+			if options.Milestone, err = milestoneID(cmd, t, milestone); err != nil {
 				return err
 			}
 		}
@@ -82,16 +78,14 @@ each pull request, which gt only makes when --json names them.`, Args: argsExact
 		}
 		items := window.Items
 		if a.jsonSelects("reviewers", "reviewer_teams", "merged_by") {
-			for i, item := range items {
-				if items[i], err = service.View(cmd.Context(), item.Number); err != nil {
-					return err
-				}
+			if items, err = service.ViewAll(cmd.Context(), items); err != nil {
+				return err
 			}
 		}
 		noun := map[string]string{"open": "open pull requests", "closed": "closed pull requests", "merged": "merged pull requests", "all": "pull requests"}[state]
 		what := noun + " in " + t.Repo
 		empty := "no " + what
-		if filtered(cmd, "state", "limit", "page", "sort") {
+		if localFlagsChanged(cmd, "state", "limit", "page", "sort") {
 			empty = "no " + noun + " match your filters in " + t.Repo
 		}
 		columns := []terminal.Column{{Header: "ID", Prefix: "#"}, {Header: "Title", Flex: true}, {Header: "Branch", Flex: true, Min: 12}, {Header: "State", PipedOnly: state == "open"}, {Header: "Author"}, {Header: "Created"}}
@@ -109,7 +103,7 @@ each pull request, which gt only makes when --json names them.`, Args: argsExact
 				}
 			},
 			Empty: empty, Context: what,
-		}, listPage{Number: page, More: window.More, Total: window.Total, Counted: window.Counted})
+		}, servicePage(window, page))
 	}}
 	enumFlag(cmd, &state, "state", "s", "open", "Filter by state", "open", "closed", "merged", "all")
 	pageFlags(cmd, &limit, &page)
@@ -137,22 +131,6 @@ $ gt pr list --json number,title,head --jq '.[] | select(.head == "feature/login
 	return cmd
 }
 
-// changedFlags lists the names of the command's own flags that were given.
-func changedFlags(cmd *cobra.Command) []string {
-	var names []string
-	cmd.LocalNonPersistentFlags().VisitAll(func(flag *pflag.Flag) {
-		if flag.Changed {
-			names = append(names, flag.Name)
-		}
-	})
-	return names
-}
-
-// filtered reports whether a flag other than those named, which do not filter, was given.
-func filtered(cmd *cobra.Command, unfiltered ...string) bool {
-	return slices.ContainsFunc(changedFlags(cmd), func(name string) bool { return !slices.Contains(unfiltered, name) })
-}
-
 // jsonSelects reports whether --json names one of fields, rather than selecting every field.
 func (a *application) jsonSelects(fields ...string) bool {
 	for field := range strings.SplitSeq(a.options.json, ",") {
@@ -161,27 +139,6 @@ func (a *application) jsonSelects(fields ...string) bool {
 		}
 	}
 	return false
-}
-
-// repositoryURL returns the web URL of the target's repository.
-func repositoryURL(t target) string {
-	return strings.TrimSuffix(t.Host, "/") + "/" + t.Repo
-}
-
-// milestoneFilter resolves a milestone given as an ID or a title (D10): a number is an ID first,
-// then a title.
-func milestoneFilter(ctx context.Context, t target, raw string) (int64, error) {
-	service := services.Milestones{Client: t.client, Repository: t.Repo}
-	if id, err := strconv.ParseInt(raw, 10, 64); err == nil && id > 0 {
-		_, err := service.View(ctx, id)
-		if err == nil {
-			return id, nil
-		}
-		if apiErr, ok := errors.AsType[*transport.APIError](err); !ok || apiErr.Status != http.StatusNotFound {
-			return 0, err
-		}
-	}
-	return service.ResolveName(ctx, raw)
 }
 
 func (a *application) pullViewCommand() *cobra.Command {

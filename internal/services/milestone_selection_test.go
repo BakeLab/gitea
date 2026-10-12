@@ -32,12 +32,12 @@ func TestMilestoneNamesIncludeClosedAndRejectAmbiguity(t *testing.T) {
 		}
 	}))
 	service := Milestones{Client: client, Repository: "alice/project"}
-	id, err := service.ResolveName(context.Background(), "Release")
+	item, err := service.FindOne(context.Background(), "Release", false)
 	require.NoError(t, err)
-	require.EqualValues(t, 2, id)
-	_, err = service.ResolveName(context.Background(), "missing")
-	require.ErrorContains(t, err, "does not exist")
+	require.EqualValues(t, 2, item.ID)
+	_, err = service.FindOne(context.Background(), "missing", false)
+	require.ErrorContains(t, err, "not found")
 	duplicate = true
-	_, err = service.ResolveName(context.Background(), "Release")
+	_, err = service.FindOne(context.Background(), "Release", false)
 	require.ErrorContains(t, err, "ambiguous")
 }

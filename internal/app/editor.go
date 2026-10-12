@@ -54,9 +54,9 @@ func (a *application) editDraft(cmd *cobra.Command, body string) (terminal.Draft
 // already given is never lost to a missing editor.
 func (a *application) bodyEditor(cmd *cobra.Command) terminal.BodyEditor {
 	preferences, err := a.preferences()
-	if asker, ok := a.deps.Prompter.(terminal.Asker); ok && err == nil && preferences.Editor == "" {
+	if err == nil && preferences.Editor == "" {
 		return func(ctx context.Context, initial string) (terminal.Draft, error) {
-			body, err := asker.AskText(ctx, terminal.BodyTitle, initial)
+			body, err := a.deps.Prompter.AskText(ctx, terminal.BodyTitle, initial)
 			return terminal.Draft{Body: body}, err
 		}
 	}

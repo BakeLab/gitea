@@ -50,7 +50,7 @@ $ gt repo sync bob/project`,
 			if err != nil {
 				return err
 			}
-			snapshot, err := a.deps.Settings.Load()
+			snapshot, err := a.settings()
 			if err != nil {
 				return err
 			}
@@ -91,11 +91,8 @@ $ gt repo sync bob/project`,
 			if err != nil {
 				return err
 			}
-			if a.options.json != "" {
-				return a.writeJSON(cmd, result)
-			}
 			a.reportSync(cmd, result, remote+"/"+result.Branch)
-			return nil
+			return a.jsonResult(cmd, result)
 		},
 	}
 	command.Flags().StringVarP(&branch, "branch", "b", "", "Branch to sync (default: the repository's default branch)")
@@ -118,7 +115,7 @@ func (a *application) syncOnServer(cmd *cobra.Command, t target, branch string) 
 			return err
 		}
 		a.done(cmd, "Started updating the mirror %s from its source", item.FullName)
-		return a.writeMutationJSON(cmd, git.SyncResult{Remote: mirrorSourceURL(item)})
+		return a.jsonResult(cmd, git.SyncResult{Remote: mirrorSourceURL(item)})
 	case !item.Fork || item.Parent == nil:
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is neither a fork nor a mirror, and has no Git remote here; run gt repo sync inside a clone of it", item.FullName))
 	}
@@ -141,7 +138,7 @@ func (a *application) syncOnServer(cmd *cobra.Command, t target, branch string) 
 	} else {
 		a.done(cmd, "Synced %s %s from %s (fast-forward %s..%s)", item.FullName, branch, item.Parent.FullName, shortSHA(result.Previous), shortSHA(result.Commit))
 	}
-	return a.writeMutationJSON(cmd, result)
+	return a.jsonResult(cmd, result)
 }
 
 // reportSync tells how a sync from source, such as origin/main, changed the branch.

@@ -134,14 +134,7 @@ func (a *application) pullReviewDeleteCommand() *cobra.Command {
 			return err
 		}
 		subject := fmt.Sprintf("review %d by %s on %s#%d", id, item.Author, t.Repo, n)
-		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + "?", NonTTY: "delete " + subject}); err != nil {
-			return err
-		}
-		if err := service.Delete(cmd.Context(), n, id); err != nil {
-			return err
-		}
-		a.done(cmd, "Deleted %s", subject)
-		return nil
+		return a.deleteConfirmed(cmd, subject, func() error { return service.Delete(cmd.Context(), n, id) })
 	}}
 	cmd.Annotations["gt.confirm"] = "true"
 	cmd.Example = "$ gt pr review delete 13 21"
@@ -191,7 +184,7 @@ func (a *application) pullReviewDismissCommand(dismiss bool) *cobra.Command {
 		}
 		subject := fmt.Sprintf("%s on %s#%d", reviewPossessive(current), t.Repo, n)
 		if dismiss {
-			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Dismiss " + subject + "?", NonTTY: "dismiss " + subject}); err != nil {
+			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Dismiss " + subject + "?"}); err != nil {
 				return err
 			}
 		}
@@ -204,10 +197,7 @@ func (a *application) pullReviewDismissCommand(dismiss bool) *cobra.Command {
 		} else {
 			a.done(cmd, "Restored %s", subject)
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
-		return nil
+		return a.jsonResult(cmd, item)
 	}}
 	if dismiss {
 		cmd.Annotations["gt.confirm"] = "true"

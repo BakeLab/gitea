@@ -81,11 +81,21 @@ func TestSignalInterruptReturns130(t *testing.T) {
 
 type decliningPrompter struct{}
 
-func (decliningPrompter) Input(context.Context, string) (string, error) { return "", nil }
+func (decliningPrompter) Ask(context.Context, string, func(string) error) (string, error) {
+	return "", nil
+}
+
+func (decliningPrompter) AskText(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
 func (decliningPrompter) SecretInput(context.Context, string) (string, error) {
 	return "", nil
 }
-func (decliningPrompter) Confirm(context.Context, string) (bool, error) { return false, nil }
+
+func (decliningPrompter) ConfirmDefault(context.Context, string, bool) (bool, error) {
+	return false, nil
+}
 
 func TestRunReportsDeclinedConfirmationsAndExplainedFailures(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -91,9 +91,7 @@ func (a *application) completeTeamThen(next func(ctx context.Context, t target, 
 
 func (a *application) teamCommand() *cobra.Command {
 	group := &cobra.Command{Use: "team", Short: "Manage organization teams and access", Long: `Manage the teams of an organization: what they may do in its repositories, who belongs to
-them, and which repositories they can reach.
-
-` + teamArguments}
+them, and which repositories they can reach.`}
 	group.AddCommand(a.teamListCommand(), a.teamViewCommand(), a.teamCreateCommand(), a.teamEditCommand(), a.teamDeleteCommand(), a.teamMemberCommand(), a.teamRepoCommand())
 	return group
 }
@@ -339,12 +337,7 @@ to set single units instead, or to override some of them.`,
 $ gt team create acme/reviewers --unit repo.code=read,repo.pulls=write
 # give the team access to every repository of the organization
 $ gt team create acme ops --permission admin --all-repositories`,
-		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
-			if len(args) > 0 {
-				return nil, cobra.ShellCompDirectiveNoFileComp
-			}
-			return a.completeOrgs()(cmd, args, toComplete)
-		},
+		ValidArgsFunction: firstArg(a.completeOrgs()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			org, name, scoped := strings.Cut(args[0], "/")
 			names := 0
@@ -380,10 +373,7 @@ $ gt team create acme ops --permission admin --all-repositories`,
 				return err
 			}
 			a.done(cmd, "Created team %s (ID %d) with %s access", team.Slug(), team.ID, team.Access())
-			if err := a.printURL(cmd, teamURL(target, team)); err != nil {
-				return err
-			}
-			return a.jsonResult(cmd, team)
+			return a.created(cmd, team, teamURL(target, team))
 		},
 	}
 	flags.register(cmd, true)
@@ -462,12 +452,12 @@ $ gt team delete 7 --yes`,
 			if team.Organization != "" {
 				subject += " from " + team.Organization
 			}
-			confirmation := terminal.Confirmation{Prompt: "Delete " + subject + "?", NonTTY: "delete " + subject}
+			confirmation := terminal.Confirmation{Prompt: "Delete " + subject + "?"}
 			if team.Permission == "owner" {
 				if !force {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is the organization's owner team and its members would lose owner access; pass --force to delete it", subject))
 				}
-				confirmation = terminal.Confirmation{Prompt: "Delete owner " + subject + "? Its members lose owner access.", Typed: team.Slug(), NonTTY: "delete owner " + subject}
+				confirmation = terminal.Confirmation{Prompt: "Delete owner " + subject + "? Its members lose owner access.", Typed: team.Slug()}
 			}
 			if err := a.confirmAction(cmd, confirmation); err != nil {
 				return err
@@ -493,9 +483,7 @@ func joinNames(names []string) string {
 
 func (a *application) teamMemberCommand() *cobra.Command {
 	group := &cobra.Command{Use: "member", Short: "Manage team members", Long: `List, add and remove the members of a team. Adding a user to a team of an organization
-also makes them a member of the organization.
-
-` + teamArguments}
+also makes them a member of the organization.`}
 	var limit, page int
 	list := &cobra.Command{
 		Use: "list <team>", Short: "List team members", Args: argsExact(1), ValidArgsFunction: a.completeTeams(),
@@ -537,14 +525,6 @@ $ gt team member add 2 bob carol`,
 				return err
 			}
 			for _, username := range args[1:] {
-				member, err := service.IsMember(cmd.Context(), team.ID, username)
-				if err != nil {
-					return err
-				}
-				if member {
-					a.warn(cmd, "%s is already a member of team %s", username, team.Slug())
-					continue
-				}
 				if err := service.SetMember(cmd.Context(), team.ID, username, true); err != nil {
 					return err
 				}
@@ -566,25 +546,8 @@ $ gt team member add 2 bob carol`,
 			if err != nil {
 				return err
 			}
-			var members []string
-			for _, username := range args[1:] {
-				member, err := service.IsMember(cmd.Context(), team.ID, username)
-				if err != nil {
-					return err
-				}
-				if !member {
-					a.warn(cmd, "%s is not a member of team %s", username, team.Slug())
-					continue
-				}
-				members = append(members, username)
-			}
-			if len(members) == 0 {
-				return nil
-			}
-			if err := a.confirmAction(cmd, terminal.Confirmation{
-				Prompt: fmt.Sprintf("Remove %s from team %s?", joinNames(members), team.Slug()),
-				NonTTY: fmt.Sprintf("remove %s from team %s", joinNames(members), team.Slug()),
-			}); err != nil {
+			members := args[1:]
+			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Remove %s from team %s?", joinNames(members), team.Slug())}); err != nil {
 				return err
 			}
 			for _, username := range members {
@@ -618,9 +581,7 @@ func teamRepository(team services.Team, raw string) (string, error) {
 
 func (a *application) teamRepoCommand() *cobra.Command {
 	group := &cobra.Command{Use: "repo", Short: "Manage team repository access", Long: `List the repositories a team can reach, and grant or revoke its access to repositories of
-its organization. Repositories are named alone, such as service, or as ORG/NAME.
-
-` + teamArguments}
+its organization. Repositories are named alone, such as service, or as ORG/NAME.`}
 	var limit, page int
 	list := &cobra.Command{
 		Use: "list <team>", Short: "List team repositories", Args: argsExact(1), ValidArgsFunction: a.completeTeams(),
@@ -658,7 +619,7 @@ func (a *application) teamRepoAccessCommand(grant bool) *cobra.Command {
 		delete(annotations, "gt.confirm")
 	}
 	return &cobra.Command{
-		Use: verb + " <team> <repo>...", Short: short, Args: usageArgs(cobra.MinimumNArgs(2)), Example: example, Annotations: annotations,
+		Use: verb + " <team> <repository>...", Short: short, Args: usageArgs(cobra.MinimumNArgs(2)), Example: example, Annotations: annotations,
 		Long: short + ` of its organization. Name the repositories alone, such as service, or as ORG/NAME;
 repositories of other owners cannot be granted to a team.`,
 		ValidArgsFunction: a.completeTeamThen(func(ctx context.Context, t target, team services.Team) ([]cobra.Completion, error) {
@@ -671,7 +632,7 @@ repositories of other owners cannot be granted to a team.`,
 		}),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("repo") {
-				return clierr.Wrap(clierr.Usage, fmt.Errorf("--repo is not used by %s; name the repositories as arguments: %s <team> <repo>", cmd.CommandPath(), cmd.CommandPath()))
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("--repo is not used by %s; name the repositories as arguments: %s <team> <repository>", cmd.CommandPath(), cmd.CommandPath()))
 			}
 			_, service, team, err := a.team(cmd, args[0])
 			if err != nil {
@@ -683,27 +644,10 @@ repositories of other owners cannot be granted to a team.`,
 				if err != nil {
 					return err
 				}
-				has, err := service.HasRepository(cmd.Context(), team.ID, repo)
-				if err != nil {
-					return err
-				}
-				switch {
-				case has && grant:
-					a.warn(cmd, "Team %s already has access to %s", team.Slug(), repo)
-				case !has && !grant:
-					a.warn(cmd, "Team %s has no access to %s", team.Slug(), repo)
-				default:
-					repos = append(repos, repo)
-				}
-			}
-			if len(repos) == 0 {
-				return nil
+				repos = append(repos, repo)
 			}
 			if !grant {
-				if err := a.confirmAction(cmd, terminal.Confirmation{
-					Prompt: fmt.Sprintf("Revoke team %s access to %s?", team.Slug(), joinNames(repos)),
-					NonTTY: fmt.Sprintf("revoke team %s access to %s", team.Slug(), joinNames(repos)),
-				}); err != nil {
+				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Revoke team %s access to %s?", team.Slug(), joinNames(repos))}); err != nil {
 					return err
 				}
 			}

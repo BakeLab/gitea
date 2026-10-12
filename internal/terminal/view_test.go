@@ -52,8 +52,8 @@ func TestViewRender(t *testing.T) {
 		{
 			"styled for color terminals",
 			View{Title: "v1.0", Badges: []Cell{{Text: "Latest", Color: "green"}}, Fields: []Field{{Label: "Labels", Cells: []Cell{{Text: "bug", Color: "ee0701"}}}}, URL: "https://example.org/r"},
-			Display{TTY: true, Color: true, TrueColor: true},
-			"\x1b[1mv1.0\x1b[0m\n\x1b[32mLatest\x1b[0m\n\x1b[1mLabels:\x1b[0m \x1b[38;2;238;7;1mbug\x1b[0m\n\n" +
+			Display{TTY: true, Color: true},
+			"\x1b[1mv1.0\x1b[0m\n\x1b[32mLatest\x1b[0m\n\x1b[1mLabels:\x1b[0m bug\n\n" +
 				"\x1b[90mNo description provided\x1b[0m\n\n\x1b[90mView on Gitea: https://example.org/r\x1b[0m\n",
 		},
 		{

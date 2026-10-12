@@ -122,7 +122,7 @@ func TestCommentGroupCommentsLikeGh(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
-	deps.Now = func() time.Time { return time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC) }
+	deps.Now = func() time.Time { return testNow }
 	run := func(args ...string) error {
 		out.Reset()
 		diagnostics.Reset()

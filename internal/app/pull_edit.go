@@ -85,7 +85,7 @@ pull request, or mark it as a draft or ready for review.`, Annotations: pullArgu
 			var none int64
 			opts.Milestone = &none
 		case milestone != "":
-			id, err := milestoneFilter(cmd.Context(), t, milestone)
+			id, err := milestoneID(cmd, t, milestone)
 			if err != nil {
 				return err
 			}
@@ -125,10 +125,7 @@ pull request, or mark it as a draft or ready for review.`, Annotations: pullArgu
 			return err
 		}
 		a.done(cmd, "Edited pull request %s", refLabel(t.Repo, n, item.Title))
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
-		return nil
+		return a.jsonResult(cmd, item)
 	}}
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Pull request title")
 	cmd.Flags().StringVar(&deadline, "deadline", "", "Due date: YYYY-MM-DD, RFC3339, or Unix timestamp; empty clears")
@@ -146,10 +143,7 @@ pull request, or mark it as a draft or ready for review.`, Annotations: pullArgu
 	cmd.Flags().StringSliceVar(&reviewers.Remove.Users, "remove-reviewer", nil, "Withdraw review requests from users")
 	cmd.Flags().StringSliceVar(&reviewers.Add.Teams, "add-reviewer-team", nil, "Request reviews from teams of the repository's organization")
 	cmd.Flags().StringSliceVar(&reviewers.Remove.Teams, "remove-reviewer-team", nil, "Withdraw review requests from teams")
-	flagAliases(cmd, map[string]string{
-		"milestone-name": "milestone", "add-reviewers": "add-reviewer", "remove-reviewers": "remove-reviewer",
-		"add-reviewer-teams": "add-reviewer-team", "remove-reviewer-teams": "remove-reviewer-team",
-	})
+	flagAliases(cmd, map[string]string{"milestone-name": "milestone"})
 	for _, name := range []string{"add-reviewer", "remove-reviewer"} {
 		_ = cmd.RegisterFlagCompletionFunc(name, a.completeUsers())
 	}
@@ -206,10 +200,7 @@ removes or adds that marker.`, Annotations: pullArgumentsAnnotation(nil), Args: 
 				a.done(cmd, "Marked pull request %s as ready for review", refLabel(t.Repo, n, item.Title))
 			}
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
-		return nil
+		return a.jsonResult(cmd, item)
 	}}
 	cmd.Flags().BoolVar(&undo, "undo", false, "Turn the pull request back into a draft")
 	cmd.ValidArgsFunction = a.completePulls("open")

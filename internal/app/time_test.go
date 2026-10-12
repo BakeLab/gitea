@@ -64,12 +64,8 @@ func TestTimeTablesAndDoneLines(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/repos/alice/project/times", "GET /api/v1/repos/alice/project/issues/1/times":
-			if r.URL.Query().Get("page") != "1" {
-				_, _ = w.Write([]byte(`[]`))
-				return
-			}
-			_, _ = w.Write([]byte(`[{"id":8,"time":5400,"created":"2026-10-11T18:00:00Z","user_name":"alice","issue":{"number":1,"title":"Login fails","repository":{"full_name":"alice/project"}}},` +
-				`{"id":9,"time":900,"created":"2026-10-11T19:00:00Z","user_name":"bob","issue":{"number":2,"title":"Docs"}}]`))
+			writeFirstPage(w, r, `[{"id":8,"time":5400,"created":"2026-10-11T18:00:00Z","user_name":"alice","issue":{"number":1,"title":"Login fails","repository":{"full_name":"alice/project"}}},`+
+				`{"id":9,"time":900,"created":"2026-10-11T19:00:00Z","user_name":"bob","issue":{"number":2,"title":"Docs"}}]`)
 		case "POST /api/v1/repos/alice/project/issues/1/times":
 			changed = append(changed, r.Method+" "+r.URL.Path)
 			_, _ = w.Write([]byte(`{"id":10,"time":5100,"user_name":"alice","issue":{"number":1,"title":"Login fails"}}`))
@@ -80,7 +76,7 @@ func TestTimeTablesAndDoneLines(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
-	deps.Now = func() time.Time { return time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC) }
+	deps.Now = func() time.Time { return testNow }
 	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
 	deps.Streams.OutTTY = true
 	run := func(args ...string) error {

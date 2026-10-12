@@ -68,7 +68,7 @@ func TestNotificationsListTheInboxByDefault(t *testing.T) {
 	}
 	deps, out, _ := serverDeps(t, server.URL)
 	deps.Streams.OutTTY, deps.Streams.Width = true, 100
-	deps.Now = func() time.Time { return time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC) }
+	deps.Now = func() time.Time { return testNow }
 	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "list"}))
 	require.Equal(t, `Showing 2 of 2 unread or pinned notifications in your inbox
 

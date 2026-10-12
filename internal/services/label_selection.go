@@ -55,7 +55,7 @@ func (s Labels) CreateUnique(ctx context.Context, existing []Label, opts LabelOp
 		return Label{}, false, err
 	}
 	if !update {
-		return Label{}, false, &ConflictError{Reason: ReasonExists, Kind: "label", Key: strconv.Quote(current.Name), Scope: s.Scope(), Hint: "pass --force to update it"}
+		return Label{}, false, &ConflictError{Reason: ReasonExists, Kind: "label", Key: strconv.Quote(current.Name), Scope: s.Scope()}
 	}
 	opts.Name = nil
 	label, err := s.Edit(ctx, current.ID, opts)
@@ -68,7 +68,7 @@ func selectLabelNames(scope string, names []string, matches map[string][]int64) 
 	for _, name := range names {
 		candidates := matches[name]
 		if len(candidates) == 0 {
-			return nil, fmt.Errorf("label %q does not exist; use gt label list", name)
+			return nil, NotFound("label", strconv.Quote(name), scope)
 		}
 		if len(candidates) > 1 {
 			return nil, &AmbiguousError{Kind: "label", Key: strconv.Quote(name), Scope: scope, IDs: candidates}
@@ -148,7 +148,7 @@ func (s Labels) RequireFilterNames(ctx context.Context, names []string) error {
 	}
 	for _, name := range names {
 		if !known[name] {
-			return fmt.Errorf("label %q does not exist in %s; issue filters match repository labels only, see gt label list", name, s.Repository)
+			return fmt.Errorf("label %q does not exist in %s; issue filters match repository labels only", name, s.Repository)
 		}
 	}
 	return nil

@@ -107,11 +107,10 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 	return preferences, sources, nil
 }
 
-// configSetting is one effective setting and where its value comes from.
+// configSetting is one effective setting.
 type configSetting struct {
-	Key    string
-	Value  any
-	Source string
+	Key   string
+	Value any
 }
 
 // settingValues returns the effective preferences, the settings of the selected instance when it is
@@ -176,28 +175,12 @@ Preferences live in config.yml and instance settings in hosts.yml, in the config
 directory ($GITEA_CLI_CONFIG_DIR, or gt under the XDG config directory); gt config path prints
 both files. Environment variables that override settings are listed in gt help environment.
 
-Preferences (gt config set <key> <value>):
-  default_host  instance used when no --host, environment variable or repository selects one
-  git_protocol  https or ssh, for clone and checkout remotes
-  editor        command that edits bodies
-  prompt        enabled or disabled
-  pager         command that pages long output
-  browser       command that opens web pages; never disables opening
-  color         auto, always or never
-  hyperlinks    auto, always or never: link the first column of lists to its web page
-  markdown      auto or raw: render markdown bodies on a terminal, or print them as written
-  remote        Git remote that selects the repository
-  aliases       command shortcuts; manage them with gt alias
-
-Instance settings (gt config set --host <url> <key> <value>):
-  user             active account; change it with gt auth switch
-  ssh_host         SSH host[:port] when it differs from the web host
-  insecure         true skips TLS certificate verification
-  git_protocol     https or ssh, overriding the preference for this instance
-  oauth_client_id  OAuth application used by gt auth login --oauth
-
-Account settings (gt config set --host <url> --user <name> <key> <value>):
-  ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint`}
+Preferences: default_host, git_protocol, editor, prompt (enabled or disabled), pager,
+browser (never disables opening), color, hyperlinks and markdown (auto or raw), remote and
+aliases (see gt alias).
+Instance settings (--host <url>): user, ssh_host, insecure, git_protocol, oauth_client_id.
+Account settings (--host <url> --user <name>): ssh_key, ssh_agent,
+ssh_certificate_principal, ssh_key_fingerprint.`}
 	group.AddCommand(&cobra.Command{
 		Use: "path", Short: "Print the paths of the settings files", Args: argsExact(0),
 		Annotations: map[string]string{"gt.text": "config path prints text", "gt.offline": "true"},
@@ -217,7 +200,7 @@ $ gt config get default_host --show-source
 $ gt config get ssh_host --host https://gitea.com
 $ gt config get ssh_key --host https://gitea.com --user alice`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			snapshot, err := a.deps.Settings.Load()
+			snapshot, err := a.settings()
 			if err != nil {
 				return err
 			}
@@ -242,45 +225,35 @@ $ gt config get ssh_key --host https://gitea.com --user alice`,
 	}
 	get.Flags().BoolVar(&getSource, "show-source", false, "Also print where the value comes from")
 	group.AddCommand(get)
-	var listSource bool
 	list := &cobra.Command{
 		Use: "list", Short: "List settings and their values", Args: argsExact(0),
 		Example: `$ gt config list
-# Include the settings of an instance and where each value comes from
-$ gt config list --host https://gitea.com --show-source`,
+# Include the settings of an instance
+$ gt config list --host https://gitea.com`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			snapshot, err := a.deps.Settings.Load()
+			snapshot, err := a.settings()
 			if err != nil {
 				return err
 			}
-			values, sources, err := a.settingValues(snapshot)
+			values, _, err := a.settingValues(snapshot)
 			if err != nil {
 				return err
 			}
 			if a.options.json != "" {
-				return a.writeSettingsJSON(cmd, values, sources, listSource)
+				return a.writeJSON(cmd, values)
 			}
 			items := make([]configSetting, 0, len(values))
 			for _, key := range slices.Sorted(maps.Keys(values)) {
-				items = append(items, configSetting{key, values[key], settingSource(sources, key)})
-			}
-			columns := []terminal.Column{{Header: "Key"}, {Header: "Value", Flex: true}}
-			if listSource {
-				columns = append(columns, terminal.Column{Header: "Source"})
+				items = append(items, configSetting{key, values[key]})
 			}
 			return writeTable(a, cmd, items, listSpec[configSetting]{
-				Columns: columns,
+				Columns: []terminal.Column{{Header: "Key"}, {Header: "Value", Flex: true}},
 				Row: func(item configSetting) []terminal.Cell {
-					row := []terminal.Cell{{Text: item.Key}, {Text: fmt.Sprint(item.Value)}}
-					if listSource {
-						row = append(row, terminal.Cell{Text: item.Source, Muted: true})
-					}
-					return row
+					return []terminal.Cell{{Text: item.Key}, {Text: fmt.Sprint(item.Value)}}
 				},
 			}, listPage{Number: 1})
 		},
 	}
-	list.Flags().BoolVar(&listSource, "show-source", false, "Show where each value comes from")
 	group.AddCommand(list)
 	group.AddCommand(&cobra.Command{
 		Use: "set <key> <value>", Short: "Change a setting", Args: argsExact(2), ValidArgsFunction: a.completeConfig,
@@ -359,7 +332,7 @@ func (a *application) reportSet(cmd *cobra.Command, key, value, scope string) {
 
 // warnWithoutAccount points out a default_host that has no account to act as yet.
 func (a *application) warnWithoutAccount(cmd *cobra.Command) {
-	snapshot, err := a.deps.Settings.Load()
+	snapshot, err := a.settings()
 	if host := snapshot.Preferences.DefaultHost; err == nil && len(snapshot.Hosts.Hosts[host].Users) == 0 {
 		a.warn(cmd, "No account on %s yet; log in with: gt auth login --host %s", host, host)
 	}
@@ -575,7 +548,7 @@ $ gt alias set il "issue list --assignee @me" --clobber`,
 		Use: "list", Short: "List shortcuts", Args: argsExact(0),
 		Example: "$ gt alias list\n# Print the expansion of one alias\n$ gt alias list --jq .il",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, err := a.deps.Settings.Load()
+			s, err := a.settings()
 			if err != nil {
 				return err
 			}

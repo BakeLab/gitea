@@ -32,6 +32,21 @@ func (c Check) Pending() bool { return c.State == "pending" }
 // Passed reports whether the check finished without blocking a merge; Gitea counts skipped as success.
 func (c Check) Passed() bool { return c.State == "success" || c.State == "skipped" }
 
+// Tally counts checks by outcome.
+func Tally(items []Check) (failing, pending, passed int) {
+	for _, item := range items {
+		switch {
+		case item.Pending():
+			pending++
+		case item.Passed():
+			passed++
+		default:
+			failing++
+		}
+	}
+	return failing, pending, passed
+}
+
 // Checks returns latest contexts for the PR head in its base repository, as Gitea does.
 func (s Pulls) Checks(ctx context.Context, n int64) ([]Check, error) {
 	sha, err := s.checkHead(ctx, n)
@@ -126,16 +141,8 @@ func (s Pulls) WatchChecks(ctx context.Context, n int64, interval time.Duration,
 			}
 			previous = items
 		}
-		pending := len(items) == 0
-		failed := false
-		for _, item := range items {
-			if item.Pending() {
-				pending = true
-			} else if !item.Passed() {
-				failed = true
-			}
-		}
-		if failed || !pending {
+		failing, pending, _ := Tally(items)
+		if failing > 0 || (pending == 0 && len(items) > 0) {
 			current, err := s.checkHead(ctx, n)
 			if err != nil {
 				return nil, err

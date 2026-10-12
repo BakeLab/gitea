@@ -105,13 +105,17 @@ Use explicit singular noun/verb commands, such as `gt issue list` and
 missing fields when the shared prompting policy permits it, invoke services, and
 render results through injected streams. Destructive commands require confirmation
 or `--yes`; `--no-input` disables implicit interaction. JSON results go to stdout;
-diagnostics and prompts go to stderr. Lists register `--limit`/`--page` with
-`pageFlags` and print through `writeList`, which renders one `terminal.Table`
-(ID or number first, then title or name, then state) through the pager.
+diagnostics, prompts and the `✓`/`!` mutation messages (`done`/`warn`) go to stderr.
+Lists register `-L/--limit` and `--page` with `pageFlags` and print through
+`writeTable` with a `listSpec`: on a terminal an uppercase header row, a "Showing N of
+M …" line, relative times and links in the first column; piped, tab-separated values
+without header. Single items print through `writeView`. Every command has an
+`Example`, and every command group a `Long` text.
 
 ### Internal Package Structure
 
-- `internal/app`: Cobra commands and application dependency construction.
+- `internal/app`: Cobra commands and application dependency construction. It never
+  calls the API directly: every request goes through `internal/services`.
 - `internal/services`: typed workflows over `gitea.dev/sdk`, independent of CLI flags
   and terminal I/O, including pagination policy. Services map SDK types to gt's
   output types; requests the SDK cannot make yet go through the raw helpers in

@@ -45,8 +45,8 @@ func attachmentView(item services.IssueAttachment) terminal.View {
 
 func (a *application) issueAttachmentCommand(kind refKind) *cobra.Command {
 	words := commentWords(kind)
-	group := &cobra.Command{Use: "attachment", Short: "Manage the attachments of " + words.noun + "s", Long: fmt.Sprintf(`List, view, upload, download, rename and delete the files attached to %s. Attachments
-are addressed by the %s number and the attachment ID that attachment list shows.`, article(words.noun), words.noun)}
+	group := &cobra.Command{Use: "attachment", Short: "Manage the attachments of " + kind.noun() + "s", Long: fmt.Sprintf(`List, view, upload, download, rename and delete the files attached to %s. Attachments
+are addressed by the %s number and the attachment ID that attachment list shows.`, kind.article(), kind.noun())}
 	annotations := map[string]string{"gt.arguments": words.arguments}
 	// discussionTarget resolves the issue or pull request argument of an attachment command.
 	discussionTarget := func(cmd *cobra.Command, raw string) (target, int64, error) {
@@ -90,7 +90,7 @@ are addressed by the %s number and the attachment ID that attachment list shows.
 
 	var uploadName string
 	upload := &cobra.Command{Use: "upload {<number> | <url>} <file>", Short: "Attach a file", Example: fmt.Sprintf(`$ gt %[1]s attachment upload %[2]s crash.log
-$ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.group, words.example), Annotations: annotations, Args: argsExact(2), ValidArgsFunction: completeFirst, RunE: func(cmd *cobra.Command, args []string) error {
+$ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.group, words.example), Annotations: annotations, Args: argsExact(2), ValidArgsFunction: pathArgs(1, false, completeFiles, completeFirst), RunE: func(cmd *cobra.Command, args []string) error {
 		name := uploadName
 		if cmd.Flags().Changed("name") && strings.TrimSpace(name) == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--name cannot be empty"))
@@ -111,11 +111,8 @@ $ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.grou
 		if err != nil {
 			return err
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
 		a.done(cmd, "Uploaded %s (%s) to %s#%d", item.Name, terminal.Bytes(item.Size), t.Repo, n)
-		return a.printURL(cmd, item.URL)
+		return a.created(cmd, item, item.URL)
 	}}
 	upload.Flags().StringVar(&uploadName, "name", "", "File `name` of the attachment (default: the local file name)")
 
@@ -132,11 +129,8 @@ $ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.grou
 		if err != nil {
 			return err
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
 		a.done(cmd, "Renamed %s", attachmentName(t, n, item))
-		return nil
+		return a.jsonResult(cmd, item)
 	}}
 	edit.Flags().StringVar(&newName, "name", "", "New file `name`")
 
@@ -151,14 +145,7 @@ $ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.grou
 			return err
 		}
 		name := attachmentName(t, n, item)
-		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + name + "?", NonTTY: "delete " + name}); err != nil {
-			return err
-		}
-		if err := service.DeleteAttachment(cmd.Context(), n, id); err != nil {
-			return err
-		}
-		a.done(cmd, "Deleted %s", name)
-		return nil
+		return a.deleteConfirmed(cmd, name, func() error { return service.DeleteAttachment(cmd.Context(), n, id) })
 	}}
 
 	var destination downloadFlags

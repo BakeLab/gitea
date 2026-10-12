@@ -6,9 +6,8 @@ package services
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
-	"net/http"
+	"strconv"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -80,17 +79,11 @@ func (s Wiki) page(ctx context.Context, op repoOperation[*gitea.WikiPage]) (Wiki
 	return wikiContentFrom(page)
 }
 
-// List returns a non-nil page of wiki metadata.
-func (s Wiki) List(ctx context.Context, limit, page int) ([]WikiPage, error) {
-	window, err := s.ListPage(ctx, limit, page)
-	return window.Items, err
-}
-
 // wikiPageSize is the page size for reading the whole wiki; Gitea replaces a limit of 1 with its
 // default page size.
 const wikiPageSize = 50
 
-// ListPage is List that also reports whether more pages follow and how many there are. It reads
+// ListPage lists a page of wiki pages, with whether more follow and how many there are. It reads
 // the whole page list and pages it on the client, because the server pages it inconsistently.
 func (s Wiki) ListPage(ctx context.Context, limit, page int) (Page[WikiPage], error) {
 	all, err := listAll(func(page int) ([]*gitea.WikiPageMetaData, error) {
@@ -99,7 +92,7 @@ func (s Wiki) ListPage(ctx context.Context, limit, page int) (Page[WikiPage], er
 		})
 	})
 	if err != nil {
-		if apiError, ok := errors.AsType[*transport.APIError](err); !ok || apiError.Status != http.StatusNotFound {
+		if !IsNotFound(err) {
 			return Page[WikiPage]{}, err
 		}
 		// An uninitialized wiki returns 404. Verify repository visibility and
@@ -121,9 +114,10 @@ func (s Wiki) ListPage(ctx context.Context, limit, page int) (Page[WikiPage], er
 
 // View retrieves and decodes a wiki page.
 func (s Wiki) View(ctx context.Context, name string) (WikiPage, error) {
-	return s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
+	item, err := s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
 		return c.Wiki.GetPage(ctx, owner, repo, name)
 	})
+	return item, Classify(err, "wiki page", strconv.Quote(name), s.Repository)
 }
 
 func wikiOptions(opts WikiOptions) gitea.CreateWikiPageOptions {
@@ -132,9 +126,10 @@ func wikiOptions(opts WikiOptions) gitea.CreateWikiPageOptions {
 
 // Create creates one wiki page, initializing the wiki if necessary.
 func (s Wiki) Create(ctx context.Context, opts WikiOptions) (WikiPage, error) {
-	return s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
+	item, err := s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
 		return c.Wiki.CreatePage(ctx, owner, repo, wikiOptions(opts))
 	})
+	return item, Classify(err, "wiki page", strconv.Quote(opts.Title), s.Repository)
 }
 
 // Edit replaces page content and optionally changes its title.
@@ -146,16 +141,18 @@ func (s Wiki) Edit(ctx context.Context, name string, opts WikiOptions) (WikiPage
 		}
 		opts.Title = current.Title
 	}
-	return s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
+	item, err := s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
 		return c.Wiki.EditPage(ctx, owner, repo, name, wikiOptions(opts))
 	})
+	return item, Classify(err, "wiki page", strconv.Quote(name), s.Repository)
 }
 
 // Delete removes a named wiki page.
 func (s Wiki) Delete(ctx context.Context, name string) error {
-	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
 		return c.Wiki.DeletePage(ctx, owner, repo, name)
 	})
+	return Classify(err, "wiki page", strconv.Quote(name), s.Repository)
 }
 
 // Revisions returns one server-paginated page of wiki commits.

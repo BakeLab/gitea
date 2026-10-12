@@ -6,6 +6,7 @@ package services
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -131,7 +132,7 @@ func (s Issues) ListPage(ctx context.Context, opts ListOptions) (Page[Issue], er
 	if err != nil {
 		return Page[Issue]{}, err
 	}
-	return Page[Issue]{Items: convertAll(issues.Items, discussionFrom), More: issues.More, Total: issues.Total, Counted: issues.Counted}, nil
+	return convertPage(issues, discussionFrom), nil
 }
 
 // filterValues splits a comma-separated filter, which the SDK joins again.
@@ -144,19 +145,21 @@ func filterValues(value string) []string {
 
 // View retrieves one issue.
 func (s Issues) View(ctx context.Context, number int64) (Issue, error) {
-	return repoConvert(ctx, s.Client, s.Repository, discussionFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Issue, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, discussionFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Issue, *gitea.Response, error) {
 		return c.Issues.GetIssue(ctx, owner, repo, number)
 	})
+	return item, Classify(err, "issue", "#"+strconv.FormatInt(number, 10), s.Repository)
 }
 
 // Create opens an issue.
 func (s Issues) Create(ctx context.Context, options IssueOptions) (Issue, error) {
-	return repoConvert(ctx, s.Client, s.Repository, discussionFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Issue, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, discussionFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Issue, *gitea.Response, error) {
 		return c.Issues.CreateIssue(ctx, owner, repo, gitea.CreateIssueOption{
 			Title: options.Title, Body: options.Body, Ref: options.Ref, Assignees: options.Assignees,
 			Deadline: options.Deadline, Milestone: options.Milestone, Labels: options.Labels,
 		})
 	})
+	return item, Classify(err, "issue", "", s.Repository)
 }
 
 // SetState updates only the selected issue state.
@@ -166,7 +169,8 @@ func (s Issues) SetState(ctx context.Context, number int64, state string) (Issue
 }
 
 func (s Issues) edit(ctx context.Context, number int64, opts gitea.EditIssueOption) (Issue, error) {
-	return repoConvert(ctx, s.Client, s.Repository, discussionFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Issue, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, discussionFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Issue, *gitea.Response, error) {
 		return c.Issues.EditIssue(ctx, owner, repo, number, opts)
 	})
+	return item, Classify(err, "issue", "#"+strconv.FormatInt(number, 10), s.Repository)
 }

@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -22,14 +21,6 @@ var visibilities = []string{"public", "limited", "private"}
 
 // visibilityColors color the visibility of organizations and accounts.
 var visibilityColors = map[string]string{"public": "green", "limited": "yellow", "private": "red"}
-
-// jsonResult writes the result of a mutation when --json asks for it; people get a done line instead.
-func (a *application) jsonResult(cmd *cobra.Command, item any) error {
-	if a.options.json == "" {
-		return nil
-	}
-	return a.writeJSON(cmd, item)
-}
 
 // timeField shows an API timestamp relative to now on a TTY, and as RFC3339 for scripts.
 func timeField(label, raw string, d terminal.Display) terminal.Field {
@@ -53,15 +44,6 @@ func countOf(n int, singular, plural string) string {
 		return "1 " + singular
 	}
 	return strconv.Itoa(n) + " " + plural
-}
-
-// webURL is the page of a path on the target's instance, such as an organization's profile.
-func webURL(t target, path ...string) string {
-	escaped := make([]string, len(path))
-	for i, segment := range path {
-		escaped[i] = url.PathEscape(segment)
-	}
-	return strings.TrimSuffix(t.Host, "/") + "/" + strings.Join(escaped, "/")
 }
 
 func (a *application) organizationCommand() *cobra.Command {
@@ -250,10 +232,7 @@ $ gt org create acme-internal --visibility private`,
 			return err
 		}
 		a.done(cmd, "Created organization %s", org.Name)
-		if err := a.printURL(cmd, webURL(target, org.Name)); err != nil {
-			return err
-		}
-		return a.jsonResult(cmd, org)
+		return a.created(cmd, org, webURL(target, org.Name))
 	}
 	return cmd
 }
@@ -313,11 +292,11 @@ $ gt org delete acme-old --yes`,
 			if err != nil {
 				return err
 			}
-			size, err := service.Size(cmd.Context(), org.Name)
+			repos, err := service.RepositoryCount(cmd.Context(), org.Name)
 			if err != nil {
 				return err
 			}
-			if size.Repositories != nil && *size.Repositories > 0 {
+			if repos != nil && *repos > 0 {
 				return &services.ConflictError{Reason: services.ReasonOwnsRepos, Kind: "organization", Key: org.Name, Hint: "transfer or delete them first (see gt repo list " + org.Name + ")"}
 			}
 			if err := a.confirmAction(cmd, terminal.Confirmation{

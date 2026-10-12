@@ -110,7 +110,7 @@ func (a *application) resolveRequest(ctx context.Context, req targetRequest) (ta
 
 // connect selects the instance, account and repository and builds the authenticated client.
 func (a *application) connect(ctx context.Context, req targetRequest) (target, error) {
-	s, err := a.deps.Settings.Load()
+	s, err := a.settings()
 	if err != nil {
 		return target{}, err
 	}
@@ -356,7 +356,7 @@ func (a *application) selectAccount(ctx context.Context, t *target, s settings.S
 	if !authenticate || a.deps.Getenv("GITEA_TOKEN") != "" || !a.policy(s).CanPrompt(a.deps.Streams) || a.deps.Prompter == nil {
 		return nil
 	}
-	selected, err := a.deps.Prompter.Input(ctx, "account ("+accountNames(users)+")")
+	selected, err := a.deps.Prompter.Ask(ctx, "account ("+accountNames(users)+")", nil)
 	if err != nil {
 		return err
 	}

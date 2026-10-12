@@ -82,11 +82,7 @@ func TestIssueEditAddAndRemoveLabels(t *testing.T) {
 		case r.URL.Path == "/api/v1/orgs/alice":
 			w.WriteHeader(http.StatusNotFound)
 		case r.URL.Path == "/api/v1/repos/alice/project/labels":
-			if r.URL.Query().Get("page") != "1" {
-				_, _ = w.Write([]byte(`[]`))
-				return
-			}
-			_, _ = w.Write([]byte(`[{"id":1,"name":"bug"},{"id":2,"name":"docs"},{"id":3,"name":"help"}]`))
+			writeFirstPage(w, r, `[{"id":1,"name":"bug"},{"id":2,"name":"docs"},{"id":3,"name":"help"}]`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/issues/7":
 			_, _ = w.Write([]byte(`{"number":7,"labels":[{"id":1,"name":"bug"},{"id":2,"name":"docs"}]}`))
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/repos/alice/project/issues/7/labels":

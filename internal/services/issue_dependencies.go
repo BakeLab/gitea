@@ -5,10 +5,7 @@ package services
 
 import (
 	"context"
-	"errors"
-	"net/http"
 
-	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
 )
 
@@ -57,7 +54,7 @@ func (s Issues) Dependencies(ctx context.Context, number int64) (IssueDependenci
 			})
 			return convertAll(issues, issueReferenceFrom), err
 		})
-		if api, ok := errors.AsType[*transport.APIError](err); ok && api.Status == http.StatusNotFound {
+		if IsNotFound(err) {
 			return IssueDependencies{}, nil
 		}
 		if err != nil {

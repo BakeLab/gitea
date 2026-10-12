@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"syscall"
 	"time"
@@ -18,9 +17,6 @@ import (
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/transport"
 )
-
-// lookupTimeout bounds the follow-up reads that explain a failed request.
-const lookupTimeout = 5 * time.Second
 
 // explainedError replaces the message of err and keeps err reachable for exit codes.
 type explainedError struct {
@@ -36,16 +32,15 @@ func explain(err error, format string, args ...any) error {
 	return &explainedError{text: fmt.Sprintf(format, args...), err: err}
 }
 
-// Explain words a command failure for people. It names the resource a failed request addressed
-// ("issue #9 not found in alice/x"), tells a missing or inaccessible repository from a disabled
-// feature, adds the next step to refusals Gitea explains, and words rejected credentials,
-// unreachable servers and expired timeouts. Exit codes are unchanged.
+// Explain words a command failure for people. It adds the next step to refusals Gitea explains,
+// and words rejected credentials, unreachable servers and expired timeouts. Exit codes are
+// unchanged.
 func Explain(ctx context.Context, deps Dependencies, err error) error {
 	if err == nil || errors.As(err, new(*explainedError)) {
 		return err
 	}
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok {
-		return explainAPIError(ctx, deps, err, apiErr)
+		return explainAPIError(deps, err, apiErr)
 	}
 	if failure, ok := errors.AsType[*transport.RequestFailure](err); ok {
 		if reason := unreachable(failure.Err); reason != "" && failure.Server != "" {
@@ -58,7 +53,7 @@ func Explain(ctx context.Context, deps Dependencies, err error) error {
 	return err
 }
 
-func explainAPIError(ctx context.Context, deps Dependencies, err error, apiErr *transport.APIError) error {
+func explainAPIError(deps Dependencies, err error, apiErr *transport.APIError) error {
 	if !explainable(err, apiErr) {
 		return err
 	}
@@ -69,26 +64,10 @@ func explainAPIError(ctx context.Context, deps Dependencies, err error, apiErr *
 		}
 		return explain(err, "authentication rejected by %s; run gt auth login", instance)
 	}
-	// Errors a service classified keep its wording; others are classified by their endpoint.
-	classified := err
-	if !errors.As(err, new(*services.NotFoundError)) && !errors.As(err, new(*services.ConflictError)) {
-		classified = services.ClassifyRequest(err)
-	}
-	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
-	defer cancel()
-	resource := services.RequestResource(apiErr.Endpoint)
-	if apiErr.Status == http.StatusNotFound && resource.Repository != "" {
-		if explained := explainRepositoryNotFound(ctx, apiErr, resource); explained != "" {
-			return explain(err, "%s", explained)
-		}
-	}
-	if conflict, ok := errors.AsType[*services.ConflictError](classified); ok && conflict.Hint == "" {
-		if hint := conflictHint(ctx, apiErr, conflict); hint != "" {
+	if conflict, ok := errors.AsType[*services.ConflictError](err); ok && conflict.Hint == "" {
+		if hint := conflictHint(apiErr, conflict); hint != "" {
 			return explain(err, "%s; %s", conflict.Error(), hint)
 		}
-	}
-	if classified != err {
-		return explain(err, "%s", classified.Error())
 	}
 	return err
 }
@@ -111,58 +90,8 @@ func explainable(err error, apiErr *transport.APIError) bool {
 	return apiErr.Error() == text
 }
 
-// explainRepositoryNotFound tells why a request on a repository found nothing: the repository is
-// missing or hidden, the feature is disabled, the repository is empty, or a pull request number
-// names an issue. It returns "" when the resource itself is missing.
-func explainRepositoryNotFound(ctx context.Context, apiErr *transport.APIError, resource services.Resource) string {
-	repo := resource.Repository
-	var state struct {
-		Empty           bool `json:"empty"`
-		HasIssues       bool `json:"has_issues"`
-		HasPullRequests bool `json:"has_pull_requests"`
-		HasWiki         bool `json:"has_wiki"`
-		HasReleases     bool `json:"has_releases"`
-		HasActions      bool `json:"has_actions"`
-		HasProjects     bool `json:"has_projects"`
-	}
-	status := http.StatusNotFound
-	if resource.Kind != "repository" {
-		status = apiErr.Lookup(ctx, "repos/"+repo, &state)
-	}
-	switch status {
-	case http.StatusNotFound:
-		return fmt.Sprintf("repository %s not found on %s (or you don't have access)", repo, cmp.Or(apiErr.Instance, "the instance"))
-	case http.StatusOK:
-	default:
-		return ""
-	}
-	features := map[string]struct {
-		name    string
-		enabled bool
-	}{
-		"issues": {"issues are", state.HasIssues}, "pulls": {"pull requests are", state.HasPullRequests},
-		"wiki": {"the wiki is", state.HasWiki}, "releases": {"releases are", state.HasReleases},
-		"actions": {"Actions are", state.HasActions}, "projects": {"projects are", state.HasProjects},
-	}
-	if feature, ok := features[resource.Section]; ok && !feature.enabled {
-		return feature.name + " disabled for " + repo
-	}
-	if state.Empty && resource.Section == "pulls" {
-		return repo + " is empty; it has no pull requests"
-	}
-	if number, ok := strings.CutPrefix(resource.Key, "#"); ok && resource.Kind == "pull request" {
-		var issue struct {
-			PullRequest any `json:"pull_request"`
-		}
-		if apiErr.Lookup(ctx, "repos/"+repo+"/issues/"+number, &issue) == http.StatusOK && issue.PullRequest == nil {
-			return fmt.Sprintf("#%s in %s is an issue, not a pull request; view it with: gt issue view %s", number, repo, number)
-		}
-	}
-	return ""
-}
-
 // conflictHint returns the next step for a refused request, or "".
-func conflictHint(ctx context.Context, apiErr *transport.APIError, conflict *services.ConflictError) string {
+func conflictHint(apiErr *transport.APIError, conflict *services.ConflictError) string {
 	number := strings.TrimPrefix(conflict.Key, "#")
 	switch conflict.Reason {
 	case services.ReasonArchived:
@@ -170,7 +99,9 @@ func conflictHint(ctx context.Context, apiErr *transport.APIError, conflict *ser
 			return "unarchive it with: gt repo unarchive " + conflict.Scope
 		}
 	case services.ReasonExists:
-		return existsHint(ctx, apiErr, conflict)
+		if conflict.Kind == "wiki page" {
+			return "edit it with: gt wiki edit " + conflict.Key
+		}
 	case services.ReasonMerged:
 		if apiErr.Method == http.MethodPatch {
 			return "its state can no longer change"
@@ -193,25 +124,6 @@ func conflictHint(ctx context.Context, apiErr *transport.APIError, conflict *ser
 		}
 	case services.ReasonOwnsRepos:
 		return "transfer or delete them first"
-	}
-	return ""
-}
-
-func existsHint(ctx context.Context, apiErr *transport.APIError, conflict *services.ConflictError) string {
-	switch conflict.Kind {
-	case "pull request":
-		head, base, ok := strings.Cut(strings.TrimPrefix(conflict.Key, "for "), " into ")
-		if !ok || conflict.Scope == "" {
-			return ""
-		}
-		var pull struct {
-			URL string `json:"html_url"`
-		}
-		if apiErr.Lookup(ctx, "repos/"+conflict.Scope+"/pulls/"+url.PathEscape(base)+"/"+url.PathEscape(head), &pull) == http.StatusOK && pull.URL != "" {
-			return "see " + pull.URL
-		}
-	case "wiki page":
-		return "edit it with: gt wiki edit " + conflict.Key
 	}
 	return ""
 }

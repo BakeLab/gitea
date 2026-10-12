@@ -28,10 +28,7 @@ func (a *application) runCommand() *cobra.Command {
 	group := &cobra.Command{
 		Use:   "run",
 		Short: "View and manage Actions workflow runs",
-		Long: `List, view and watch the runs of a repository's Actions workflows, read their logs, download
-their artifacts, and cancel, rerun or delete them.
-
-Start a run with gt workflow run.`,
+		Long:  "Work with the runs of a repository's Actions workflows. Start a run with gt workflow run.",
 	}
 	group.AddCommand(a.runListCommand(), a.runViewCommand(), a.runWatchCommand(), a.runCancelCommand(), a.runRerunCommand(), a.runDeleteCommand(),
 		a.runJobsCommand(), a.runLogsCommand(), a.runDownloadCommand(), a.artifactCommand())
@@ -78,6 +75,9 @@ $ gt run list --since 24h --json id,status,conclusion,workflow`,
 				opts.Workflow = workflow.ID
 			}
 			page, err := service.RunsPage(cmd.Context(), opts)
+			if errors.Is(err, services.ErrRunScanExhausted) {
+				return fmt.Errorf("%w; narrow the search with --branch, --workflow or --status", err)
+			}
 			if err != nil {
 				return err
 			}
@@ -86,7 +86,7 @@ $ gt run list --since 24h --json id,status,conclusion,workflow`,
 				empty = "no runs match your filters in " + t.Repo
 			}
 			spec := listSpec[services.Run]{Columns: runColumns, Row: runRow(a.deps.Now()), Empty: empty, Context: "runs in " + t.Repo}
-			return writeTable(a, cmd, page.Items, spec, listPage{Number: filters.Page, More: page.More, Total: page.Total, Counted: page.Counted})
+			return writeTable(a, cmd, page.Items, spec, servicePage(page, filters.Page))
 		},
 	}
 	pageFlags(cmd, &filters.Limit, &filters.Page)
@@ -202,7 +202,7 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 				return err
 			}
 			if web {
-				return a.openBrowser(cmd, fmt.Sprintf("%s/%s/actions/runs/%d", strings.TrimSuffix(t.Host, "/"), t.Repo, id))
+				return a.openBrowser(cmd, fmt.Sprintf("%s/actions/runs/%d", repositoryURL(t), id))
 			}
 			service := services.Actions{Client: t.client, Repository: t.Repo}
 			if log {
@@ -228,7 +228,7 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 	cmd.Flags().BoolVar(&noJobs, "no-jobs", false, "Leave out the jobs")
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the run in the browser")
 	cmd.Flags().BoolVar(&log, "log", false, "Print the logs of every job instead, like gt run logs")
-	cmd.ValidArgsFunction = a.completeRunArg()
+	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	return cmd
 }
 
@@ -262,7 +262,7 @@ func renderRun(run services.Run, d terminal.Display, hints []string) string {
 	if !d.TTY {
 		return runRecord(run, d, now)
 	}
-	style := func(cell terminal.Cell) string { return paintActionCell(cell, d.Color) }
+	style := func(cell terminal.Cell) string { return cell.Render(d) }
 	muted := func(text string) string { return style(terminal.Cell{Text: text, Muted: true}) }
 	var b strings.Builder
 	heading := run.Workflow
@@ -319,15 +319,6 @@ func renderRun(run services.Run, d terminal.Display, hints []string) string {
 		b.WriteString(muted("View this run on Gitea: "+terminal.SafeLine(run.URL)) + "\n")
 	}
 	return b.String()
-}
-
-// paintActionCell styles a cell's safe text outside a table: its color, muted or bold.
-func paintActionCell(cell terminal.Cell, color bool) string {
-	name := cell.Color
-	if cell.Muted {
-		name = "muted"
-	}
-	return terminal.Emphasis(terminal.Colorize(name, terminal.SafeLine(cell.Text), color), cell.Bold && color)
 }
 
 // jobLines lists jobs, each followed by its steps, for the run view.
@@ -413,7 +404,7 @@ func (a *application) runArg(cmd *cobra.Command, args []string, active bool) (ta
 		return a.resolveRef(cmd, args[0], runRef)
 	}
 	missing := clierr.Wrap(clierr.Usage, &argumentError{problem: "missing run ID", cmd: cmd})
-	chooser, ok := a.runPicker()
+	chooser, ok := a.chooser()
 	if !ok {
 		return target{}, 0, missing
 	}
@@ -447,27 +438,6 @@ func (a *application) runArg(cmd *cobra.Command, args []string, active bool) (ta
 	}
 	id, err := strconv.ParseInt(chosen, 10, 64)
 	return t, id, err
-}
-
-// runPicker returns the prompter's selection prompt when prompts are allowed.
-func (a *application) runPicker() (terminal.Chooser, bool) {
-	chooser, ok := a.deps.Prompter.(terminal.Chooser)
-	if !ok {
-		return nil, false
-	}
-	s, err := a.deps.Settings.Load()
-	return chooser, err == nil && a.policy(s).CanPrompt(a.deps.Streams)
-}
-
-// completeRunArg completes the run argument of a run command with recent runs.
-func (a *application) completeRunArg() cobra.CompletionFunc {
-	runs := a.completeRuns()
-	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
-		if len(args) > 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		return runs(cmd, args, toComplete)
-	}
 }
 
 // accountNote reminds people who pass the global --user, which selects the account gt acts as,
@@ -507,7 +477,7 @@ $ gt run watch 34 --timeout 10m && echo deployed`,
 	}
 	cmd.Flags().DurationVarP(&interval, "interval", "i", 3*time.Second, "Refresh interval")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "Maximum time to wait")
-	cmd.ValidArgsFunction = a.completeRunArg()
+	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	return cmd
 }
 
@@ -617,15 +587,12 @@ $ gt run cancel 34 --force`,
 			if err != nil {
 				return err
 			}
-			if a.options.json != "" {
-				return a.writeJSON(cmd, run)
-			}
 			a.done(cmd, "Requested cancellation of run %d", id)
-			return nil
+			return a.jsonResult(cmd, run)
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "Cancel without waiting for the runner to acknowledge")
-	cmd.ValidArgsFunction = a.completeRunArg()
+	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	return cmd
 }
 
@@ -678,16 +645,13 @@ $ gt run rerun 34 --job build`,
 			if run, err = service.Run(cmd.Context(), id); err != nil {
 				return err
 			}
-			if a.options.json != "" {
-				return a.writeJSON(cmd, run)
-			}
 			a.done(cmd, "Requested rerun of run %d (attempt %d); watch it with: gt run watch %d%s", id, run.Attempt, id, a.suggestedRepo(t))
-			return nil
+			return a.jsonResult(cmd, run)
 		},
 	}
 	cmd.Flags().BoolVar(&failed, "failed", false, "Rerun only the failed jobs")
 	cmd.Flags().StringVarP(&job, "job", "j", "", "Rerun only this job, by `name or ID`")
-	cmd.ValidArgsFunction = a.completeRunArg()
+	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	_ = cmd.RegisterFlagCompletionFunc("job", a.completeJobs())
 	return cmd
 }
@@ -742,7 +706,7 @@ $ gt run delete 34 --yes`,
 			return nil
 		},
 	}
-	cmd.ValidArgsFunction = a.completeRunArg()
+	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	return cmd
 }
 

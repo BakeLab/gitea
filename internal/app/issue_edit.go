@@ -124,7 +124,7 @@ $ gt issue edit 12 --body-file notes.md`, Annotations: map[string]string{"gt.arg
 	a.completeMetadataFlags(cmd)
 	_ = cmd.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
 	_ = cmd.RegisterFlagCompletionFunc("ref", a.completeBranches())
-	cmd.ValidArgsFunction = a.completeIssueArgs("open", true)
+	cmd.ValidArgsFunction = a.completeIssues("open")
 	return cmd
 }
 

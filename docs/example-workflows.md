@@ -21,7 +21,7 @@ a nonzero exit code.
 For an explicitly authorized merge in CI:
 
 ```sh
-gt pr merge 123 --repo owner/repository --method rebase --no-input
+gt pr merge 123 --repo owner/repository --rebase --yes --no-input
 ```
 
 Keep credentials in the secret environment or credential store. Never write a token

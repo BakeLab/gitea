@@ -280,10 +280,7 @@ $ gt admin user create ci-bot --email ci@example.com --password-file pw.txt --mu
 			return err
 		}
 		a.done(cmd, "Created user %s", user.Username)
-		if err := a.printURL(cmd, user.URL); err != nil {
-			return err
-		}
-		return a.jsonResult(cmd, user)
+		return a.created(cmd, user, user.URL)
 	}
 	return command
 }
@@ -295,11 +292,7 @@ func (a *application) adminUserPassword(cmd *cobra.Command, username, password, 
 		return "", err
 	}
 	if password == "" && !cmd.Flags().Changed("password-file") {
-		snapshot, err := a.deps.Settings.Load()
-		if err != nil {
-			return "", err
-		}
-		if !a.policy(snapshot).CanPrompt(a.deps.Streams) {
+		if !a.canPrompt() {
 			return "", clierr.Wrap(clierr.Usage, errors.New("missing password: supply --password-file or --password"))
 		}
 		if password, err = a.deps.Prompter.SecretInput(cmd.Context(), "Password for "+username); err != nil {
@@ -357,7 +350,7 @@ $ gt admin user delete spammer --purge`,
 			if err != nil {
 				return err
 			}
-			confirmation := terminal.Confirmation{Prompt: fmt.Sprintf("Delete user %s?", user.Username), NonTTY: "delete user " + user.Username}
+			confirmation := terminal.Confirmation{Prompt: "Delete user " + user.Username + "?"}
 			if purge {
 				confirmation = terminal.Confirmation{
 					Prompt: fmt.Sprintf("Delete user %s with their repositories, packages and organization memberships? This cannot be undone.", user.Username),

@@ -16,7 +16,7 @@ func (a *application) git(ctx context.Context, args ...string) (string, error) {
 
 // gitIn runs Git in dir, which is relative to the process's working directory, not to --cwd.
 func (a *application) gitIn(ctx context.Context, dir string, args ...string) (string, error) {
-	snapshot, err := a.deps.Settings.Load()
+	snapshot, err := a.settings()
 	if err != nil {
 		return "", err
 	}

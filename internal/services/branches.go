@@ -39,13 +39,7 @@ func branchFrom(branch *gitea.Branch) Branch {
 // Branches operates on remote branches and protection rules.
 type Branches struct{ Client *transport.Client }
 
-// List returns a page of remote branches.
-func (s Branches) List(ctx context.Context, repo string, limit, page int) ([]Branch, error) {
-	window, err := s.ListPage(ctx, repo, limit, page)
-	return window.Items, err
-}
-
-// ListPage is List that also reports whether more branches follow and how many there are.
+// ListPage lists a page of branches, with whether more follow and how many there are.
 func (s Branches) ListPage(ctx context.Context, repo string, limit, page int) (Page[Branch], error) {
 	window, err := listPage(limit, page, func(limit, page int) ([]*gitea.Branch, http.Header, error) {
 		var headers http.Header
@@ -59,14 +53,15 @@ func (s Branches) ListPage(ctx context.Context, repo string, limit, page int) (P
 	if err != nil {
 		return Page[Branch]{}, err
 	}
-	return Page[Branch]{Items: convertAll(window.Items, branchFrom), More: window.More, Total: window.Total, Counted: window.Counted}, nil
+	return convertPage(window, branchFrom), nil
 }
 
 // View retrieves a remote branch.
 func (s Branches) View(ctx context.Context, repo, branch string) (Branch, error) {
-	return repoConvert(ctx, s.Client, repo, branchFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Branch, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, repo, branchFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Branch, *gitea.Response, error) {
 		return c.Repositories.GetRepoBranch(ctx, owner, name, branch)
 	})
+	return item, Classify(err, "branch", branch, repo)
 }
 
 // Create creates a branch from source, a branch, tag or commit, or from the default branch.
@@ -98,10 +93,11 @@ func (s Branches) Rename(ctx context.Context, repo, oldName, newName string) err
 
 // Delete removes a remote branch.
 func (s Branches) Delete(ctx context.Context, repo, branch string) error {
-	return repoDo(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
+	err := repoDo(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
 		_, resp, err := c.Repositories.DeleteRepoBranch(ctx, owner, name, branch)
 		return resp, err
 	})
+	return Classify(err, "branch", branch, repo)
 }
 
 // Protection is a branch protection rule.
@@ -141,7 +137,7 @@ func (s Branches) Unprotect(ctx context.Context, repo, rule string) (bool, error
 	err := repoDo(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
 		return c.Repositories.DeleteBranchProtection(ctx, owner, name, rule)
 	})
-	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusNotFound {
+	if IsNotFound(err) {
 		if _, err := (Repositories{Client: s.Client}).get(ctx, repo); err != nil {
 			return false, err
 		}

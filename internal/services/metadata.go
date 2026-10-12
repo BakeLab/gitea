@@ -58,7 +58,7 @@ func (s Labels) ListPage(ctx context.Context, limit, page int) (Page[Label], err
 		labels, resp, err := s.list(ctx, limit, page)
 		return labels, headerOf(resp), err
 	})
-	return Page[Label]{Items: convertAll(labels.Items, labelFrom), More: labels.More, Total: labels.Total, Counted: labels.Counted}, err
+	return convertPage(labels, labelFrom), err
 }
 
 func (s Labels) list(ctx context.Context, limit, page int) ([]*gitea.Label, *gitea.Response, error) {
@@ -218,7 +218,7 @@ func (s Milestones) ListPage(ctx context.Context, state string, limit, page int)
 		})
 		return milestones, headerOf(resp), err
 	})
-	return Page[Milestone]{Items: convertAll(milestones.Items, milestoneFrom), More: milestones.More, Total: milestones.Total, Counted: milestones.Counted}, err
+	return convertPage(milestones, milestoneFrom), err
 }
 
 // Create creates one milestone.

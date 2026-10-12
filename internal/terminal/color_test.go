@@ -42,27 +42,14 @@ func TestHyperlinksEnabledIgnoresColorPolicy(t *testing.T) {
 	}
 }
 
-func TestTrueColor(t *testing.T) {
-	require.True(t, TrueColor(env(map[string]string{"COLORTERM": "truecolor"})))
-	require.True(t, TrueColor(env(map[string]string{"COLORTERM": "24bit"})))
-	require.False(t, TrueColor(env(map[string]string{"COLORTERM": "yes"})))
-	require.False(t, TrueColor(nil))
-}
-
 func TestColorizeAndEmphasis(t *testing.T) {
 	require.Equal(t, "bug", Colorize("ff0000", "bug", false))
 	require.Equal(t, "bug", Colorize("bad", "bug", true))
-	require.Equal(t, "\x1b[38;2;255;0;0mbug\x1b[0m", Colorize("#ff0000", "bug", true))
+	require.Equal(t, "bug", Colorize("#ff0000", "bug", true))
 	require.Equal(t, "\x1b[32mopen\x1b[0m", Colorize("green", "open", true))
 	require.Equal(t, "\x1b[90mdraft\x1b[0m", Colorize("muted", "draft", true))
 	require.Equal(t, "open", Emphasis("open", false))
 	require.Equal(t, "\x1b[1mopen\x1b[0m", Emphasis("open", true))
-}
-
-func TestPaintApproximatesHexColorsWithoutTrueColor(t *testing.T) {
-	for hex, index := range map[string]string{"ff0000": "196", "00ff00": "46", "000000": "16", "ffffff": "231", "808080": "244", "d73a4a": "167", "7057ff": "63"} {
-		require.Equal(t, "\x1b[38;5;"+index+"mx\x1b[0m", paint(hex, "x", false), hex)
-	}
 }
 
 func TestHyperlink(t *testing.T) {

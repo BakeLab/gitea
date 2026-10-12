@@ -59,14 +59,14 @@ func TestWikiEmptyListDoesNotHideRepositoryErrors(t *testing.T) {
 				}
 				w.WriteHeader(http.StatusNotFound)
 			}))
-			items, err := (Wiki{Client: client, Repository: "alice/project"}).List(context.Background(), 30, 1)
+			items, err := (Wiki{Client: client, Repository: "alice/project"}).ListPage(context.Background(), 30, 1)
 			if !wikiEnabled {
 				require.Error(t, err)
 				return
 			}
 			require.NoError(t, err)
-			require.NotNil(t, items)
-			require.Empty(t, items)
+			require.NotNil(t, items.Items)
+			require.Empty(t, items.Items)
 		})
 	}
 }
@@ -76,11 +76,7 @@ func TestWikiListAndRevisionsMapCommits(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/repos/alice/project/wiki/pages":
 			assert.Equal(t, "50", r.URL.Query().Get("limit"))
-			if r.URL.Query().Get("page") != "1" {
-				_, _ = w.Write([]byte(`[]`))
-				return
-			}
-			_, _ = w.Write([]byte(`[{"title":"Other"},{"title":"Home","html_url":"https://gitea.test/wiki/Home","last_commit":{"sha":"abc","author":{"name":"Alice","email":"author@example.test","date":"2026-10-04T00:00:00Z"}}},{"title":"Draft"}]`))
+			writeFirstPage(w, r, `[{"title":"Other"},{"title":"Home","html_url":"https://gitea.test/wiki/Home","last_commit":{"sha":"abc","author":{"name":"Alice","email":"author@example.test","date":"2026-10-04T00:00:00Z"}}},{"title":"Draft"}]`)
 		case "/api/v1/repos/alice/project/wiki/revisions/Home":
 			assert.Equal(t, "3", r.URL.Query().Get("page"))
 			_, _ = w.Write([]byte(`{"commits":[{"sha":"abc","message":"Edit","author":{"name":"Alice","email":"author@example.test","date":"2026-10-04T00:00:00Z"}},{"sha":"def","author":null}],"count":2}`))
@@ -95,9 +91,9 @@ func TestWikiListAndRevisionsMapCommits(t *testing.T) {
 		{Title: "Other"},
 		{Title: "Home", URL: "https://gitea.test/wiki/Home", SHA: "abc", Author: "Alice", UpdatedAt: "2026-10-04T00:00:00Z"},
 	}, More: true, Total: 3, Counted: true}, pages)
-	last, err := service.List(context.Background(), 2, 2)
+	last, err := service.ListPage(context.Background(), 2, 2)
 	require.NoError(t, err)
-	require.Equal(t, []WikiPage{{Title: "Draft"}}, last)
+	require.Equal(t, []WikiPage{{Title: "Draft"}}, last.Items)
 	revisions, err := service.Revisions(context.Background(), "Home", 3)
 	require.NoError(t, err)
 	require.Equal(t, []WikiRevision{{SHA: "abc", Message: "Edit", Author: "Alice", CreatedAt: "2026-10-04T00:00:00Z"}, {SHA: "def"}}, revisions)

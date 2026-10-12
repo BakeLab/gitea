@@ -5,7 +5,6 @@ package services
 
 import (
 	"context"
-	"path"
 	"strconv"
 
 	"gitea.dev/cli/internal/transport"
@@ -30,17 +29,8 @@ func commentFrom(comment *gitea.Comment) Comment {
 	return Comment{
 		ID: comment.ID, Body: comment.Body, URL: comment.HTMLURL, Author: login(comment.Poster),
 		CreatedAt: timestamp(comment.Created), UpdatedAt: timestamp(comment.Updated), Pull: comment.PRURL != "",
-		IssueNumber: discussionNumber(comment.IssueURL + comment.PRURL),
+		IssueNumber: lastPathNumber(comment.IssueURL + comment.PRURL),
 	}
-}
-
-// discussionNumber reads the number from the web URL of an issue or pull request, or returns 0.
-func discussionNumber(url string) int64 {
-	n, err := strconv.ParseInt(path.Base(url), 10, 64)
-	if err != nil {
-		return 0
-	}
-	return n
 }
 
 // Comments implements discussion comments under their owning repository resource.
@@ -71,28 +61,32 @@ func (s Comments) Page(ctx context.Context, n int64, limit, page int) ([]Comment
 
 // View retrieves a comment by its repository-scoped ID.
 func (s Comments) View(ctx context.Context, id int64) (Comment, error) {
-	return repoConvert(ctx, s.Client, s.Repository, commentFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Comment, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, commentFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Comment, *gitea.Response, error) {
 		return c.Issues.GetIssueComment(ctx, owner, repo, id)
 	})
+	return item, Classify(err, "comment", strconv.FormatInt(id, 10), s.Repository)
 }
 
 // Create adds a comment to an issue or pull request.
 func (s Comments) Create(ctx context.Context, n int64, body string) (Comment, error) {
-	return repoConvert(ctx, s.Client, s.Repository, commentFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Comment, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, commentFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Comment, *gitea.Response, error) {
 		return c.Issues.CreateIssueComment(ctx, owner, repo, n, gitea.CreateIssueCommentOption{Body: body})
 	})
+	return item, Classify(err, "issue", "#"+strconv.FormatInt(n, 10), s.Repository)
 }
 
 // Edit replaces the body of a repository comment.
 func (s Comments) Edit(ctx context.Context, id int64, body string) (Comment, error) {
-	return repoConvert(ctx, s.Client, s.Repository, commentFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Comment, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, commentFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Comment, *gitea.Response, error) {
 		return c.Issues.EditIssueComment(ctx, owner, repo, id, gitea.EditIssueCommentOption{Body: body})
 	})
+	return item, Classify(err, "comment", strconv.FormatInt(id, 10), s.Repository)
 }
 
 // Delete removes a repository comment.
 func (s Comments) Delete(ctx context.Context, id int64) error {
-	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
 		return c.Issues.DeleteIssueComment(ctx, owner, repo, id)
 	})
+	return Classify(err, "comment", strconv.FormatInt(id, 10), s.Repository)
 }

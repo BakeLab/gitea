@@ -56,8 +56,8 @@ repository with --repo. Words of the query match titles and bodies.`, nouns), Ex
 		if opts.Team != "" && opts.Owner == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--team requires --owner"))
 		}
-		if opts.Team != "" && target.Repo != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--team requires instance-wide search; omit --repo or GITEA_CLI_REPO"))
+		if (opts.Team != "" || opts.ReviewRequested || opts.Reviewed) && target.Repo != "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--team, --review-requested and --reviewed require instance-wide search; omit --repo or GITEA_CLI_REPO"))
 		}
 		opts.Author = target.expandMe(opts.Author)
 		if target.Repo != "" {

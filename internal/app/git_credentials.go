@@ -32,7 +32,7 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 		if args[0] != "get" {
 			return nil
 		}
-		snapshot, err := a.deps.Settings.Load()
+		snapshot, err := a.settings()
 		if err != nil {
 			return err
 		}

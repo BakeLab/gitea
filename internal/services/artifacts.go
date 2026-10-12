@@ -59,14 +59,6 @@ func (s Actions) AllArtifacts(ctx context.Context, run int64) ([]Artifact, error
 	return nil, fmt.Errorf("listing exceeded %d pages", maxListPages)
 }
 
-// Artifact retrieves one artifact.
-func (s Actions) Artifact(ctx context.Context, id int64) (Artifact, error) {
-	artifact, err := repoConvert(ctx, s.Client, s.Repository, artifactFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.ActionsArtifact, *gitea.Response, error) {
-		return c.Actions.GetRepoArtifact(ctx, owner, repo, id)
-	})
-	return artifact, Classify(err, "artifact", strconv.FormatInt(id, 10), s.Repository)
-}
-
 // DownloadArtifact streams an artifact ZIP, accepting a scoped signed redirect.
 func (s Actions) DownloadArtifact(ctx context.Context, id int64) (io.ReadCloser, error) {
 	endpoint, err := s.Client.URL(fmt.Sprintf("%sartifacts/%d/zip", s.endpoint(), id))

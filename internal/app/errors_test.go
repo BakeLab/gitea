@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
@@ -36,19 +37,15 @@ func fakeGitea(t *testing.T, responses map[string][2]string) *httptest.Server {
 	return server
 }
 
-func TestExplainNamesResourcesAndTellsWhyRepositoriesFail(t *testing.T) {
+func TestExplainKeepsClassifiedErrorsAndAddsHints(t *testing.T) {
 	server := fakeGitea(t, map[string][2]string{
-		"GET /api/v1/user":                                {"200", `{"login":"alice"}`},
-		"GET /api/v1/repos/alice/project":                 {"200", `{"full_name":"alice/project","has_issues":true,"has_pull_requests":true}`},
-		"GET /api/v1/repos/alice/project/issues/1":        {"200", `{"number":1,"pull_request":null}`},
-		"GET /api/v1/repos/bob/project":                   {"200", `{"full_name":"bob/project","has_issues":false,"has_pull_requests":true}`},
-		"GET /api/v1/repos/alice/empty":                   {"200", `{"full_name":"alice/empty","empty":true,"has_issues":true,"has_pull_requests":true}`},
-		"GET /api/v1/repos/alice/old":                     {"200", `{"full_name":"alice/old","archived":true,"has_issues":true}`},
-		"POST /api/v1/repos/alice/old/issues":             {"423", `{"message":"repo is archived"}`},
-		"POST /api/v1/repos/alice/project/pulls":          {"409", `{"message":"pull request already exists for these targets [id: 16, issue_id: 3, head_repo_id: 1, base_repo_id: 1, head_branch: feat, base_branch: main]"}`},
-		"GET /api/v1/repos/alice/project/pulls/main/feat": {"200", `{"number":3,"html_url":"https://example.org/alice/project/pulls/3"}`},
-		"GET /api/v1/repos/alice/project/pulls/3":         {"200", `{"number":3,"state":"open","mergeable":false,"head":{"sha":"abc"}}`},
-		"POST /api/v1/repos/alice/project/pulls/3/merge":  {"405", `{"message":"Please try again later"}`},
+		"GET /api/v1/user":                               {"200", `{"login":"alice"}`},
+		"GET /api/v1/repos/alice/project":                {"200", `{"full_name":"alice/project","has_issues":true,"has_pull_requests":true}`},
+		"GET /api/v1/repos/alice/old":                    {"200", `{"full_name":"alice/old","archived":true,"has_issues":true}`},
+		"POST /api/v1/repos/alice/old/issues":            {"423", `{"message":"repo is archived"}`},
+		"POST /api/v1/repos/alice/project/pulls":         {"409", `{"message":"pull request already exists for these targets [id: 16, issue_id: 3, head_repo_id: 1, base_repo_id: 1, head_branch: feat, base_branch: main]"}`},
+		"GET /api/v1/repos/alice/project/pulls/3":        {"200", `{"number":3,"state":"open","mergeable":false,"head":{"sha":"abc"}}`},
+		"POST /api/v1/repos/alice/project/pulls/3/merge": {"405", `{"message":"Please try again later"}`},
 	})
 	for _, tc := range []struct {
 		name string
@@ -56,13 +53,9 @@ func TestExplainNamesResourcesAndTellsWhyRepositoriesFail(t *testing.T) {
 		want string
 	}{
 		{"missing issue", []string{"issue", "view", "999", "-R", "alice/project"}, "issue #999 not found in alice/project"},
-		{"missing repository", []string{"issue", "list", "-R", "alice/nope"}, "repository alice/nope not found on " + server.URL + " (or you don't have access)"},
-		{"disabled issues", []string{"issue", "list", "-R", "bob/project"}, "issues are disabled for bob/project"},
-		{"issue as pull request", []string{"pr", "view", "1", "-R", "alice/project"}, "#1 in alice/project is an issue, not a pull request; view it with: gt issue view 1"},
 		{"missing pull request", []string{"pr", "view", "999", "-R", "alice/project"}, "pull request #999 not found in alice/project"},
-		{"empty repository", []string{"pr", "list", "-R", "alice/empty"}, "alice/empty is empty; it has no pull requests"},
 		{"archived repository", []string{"issue", "create", "-R", "alice/old", "--title", "x", "--body", "y"}, "alice/old is archived (read-only); unarchive it with: gt repo unarchive alice/old"},
-		{"existing pull request", []string{"pr", "create", "-R", "alice/project", "--head", "feat", "--base", "main", "--title", "x", "--body", "y"}, "pull request for feat into main already exists in alice/project; see https://example.org/alice/project/pulls/3"},
+		{"existing pull request", []string{"pr", "create", "-R", "alice/project", "--head", "feat", "--base", "main", "--title", "x", "--body", "y"}, "pull request for feat into main already exists in alice/project"},
 		{"context added by the command", []string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, "pull request #3 has conflicting files or is otherwise not mergeable: Gitea API returned HTTP 405 for POST /api/v1/repos/alice/project/pulls/3/merge: Please try again later"},
 		{"raw api response", []string{"api", "users/nobody"}, "not found (HTTP 404 GET /api/v1/users/nobody)"},
 	} {
@@ -79,23 +72,24 @@ func TestExplainNamesResourcesAndTellsWhyRepositoriesFail(t *testing.T) {
 
 func TestExplainAddsTheNextStepToRefusals(t *testing.T) {
 	for _, tc := range []struct {
-		method, endpoint, message string
-		status                    int
-		want                      string
+		method, kind, key, message string
+		status                     int
+		want                       string
 	}{
-		{"PATCH", "/api/v1/repos/alice/x/pulls/3", "cannot change state of this pull request, it was already merged", 412, "pull request #3 is already merged; its state can no longer change"},
-		{"POST", "/api/v1/repos/alice/x/pulls/3/merge", "The PR is already merged", 405, "pull request #3 is already merged"},
-		{"POST", "/api/v1/repos/alice/x/pulls/5/merge", "Work in progress PRs cannot be merged", 405, "pull request #5 is a draft; mark it ready with: gt pr ready 5"},
-		{"POST", "/api/v1/repos/alice/x/pulls/1/reviews", "approve your own pull is not allowed", 422, "you can't approve or request changes on your own pull request; leave a comment instead"},
-		{"POST", "/api/v1/repos/alice/x/pulls", "Invalid PullRequest: There are no changes between the head and the base", 422, "no commits between the base and head branches; check out your feature branch or pass --head"},
-		{"POST", "/api/v1/repos/alice/x/actions/workflows/nightly.yaml/dispatches", "workflow is disabled", 403, "workflow nightly.yaml is disabled; enable it with: gt workflow enable nightly.yaml"},
-		{"DELETE", "/api/v1/repos/alice/x/actions/runs/37", "this workflow run is not done", 400, "run 37 has not finished; cancel it first: gt run cancel 37"},
-		{"POST", "/api/v1/repos/alice/x/wiki/new", "wiki page already exists [title: Home.md]", 400, `wiki page "Home" already exists in alice/x; edit it with: gt wiki edit "Home"`},
-		{"DELETE", "/api/v1/admin/users/uxadm1", "user still has ownership of repositories [uid: 7]", 422, `user "uxadm1" still owns repositories; transfer or delete them first`},
-		{"POST", "/api/v1/user/keys", "Key content has been used as non-deploy key", 422, "this SSH key is already registered"},
+		{"PATCH", "pull request", "#3", "cannot change state of this pull request, it was already merged", 412, "pull request #3 is already merged; its state can no longer change"},
+		{"POST", "pull request", "#3", "The PR is already merged", 405, "pull request #3 is already merged"},
+		{"POST", "pull request", "#5", "Work in progress PRs cannot be merged", 405, "pull request #5 is a draft; mark it ready with: gt pr ready 5"},
+		{"POST", "pull request", "#1", "approve your own pull is not allowed", 422, "you can't approve or request changes on your own pull request; leave a comment instead"},
+		{"POST", "pull request", "", "Invalid PullRequest: There are no changes between the head and the base", 422, "no commits between the base and head branches; check out your feature branch or pass --head"},
+		{"POST", "workflow", "nightly.yaml", "workflow is disabled", 403, "workflow nightly.yaml is disabled; enable it with: gt workflow enable nightly.yaml"},
+		{"DELETE", "run", "37", "this workflow run is not done", 400, "run 37 has not finished; cancel it first: gt run cancel 37"},
+		{"POST", "wiki page", `"Home"`, "wiki page already exists [title: Home.md]", 400, `wiki page "Home" already exists in alice/x; edit it with: gt wiki edit "Home"`},
+		{"POST", "issue", "", "repo is archived", 423, "alice/x is archived (read-only); unarchive it with: gt repo unarchive alice/x"},
+		{"DELETE", "user", `"uxadm1"`, "user still has ownership of repositories [uid: 7]", 422, `user "uxadm1" still owns repositories; transfer or delete them first`},
+		{"POST", "SSH key", "", "Key content has been used as non-deploy key", 422, "this SSH key is already registered"},
 	} {
-		apiErr := &transport.APIError{Status: tc.status, Method: tc.method, Endpoint: tc.endpoint, Message: tc.message, Instance: "http://localhost:3001"}
-		require.EqualError(t, Explain(context.Background(), Dependencies{}, apiErr), tc.want, tc.endpoint)
+		apiErr := &transport.APIError{Status: tc.status, Method: tc.method, Endpoint: "/api/v1/repos/alice/x/endpoint", Message: tc.message, Instance: "http://localhost:3001"}
+		require.EqualError(t, Explain(context.Background(), Dependencies{}, services.Classify(apiErr, tc.kind, tc.key, "alice/x")), tc.want, tc.message)
 	}
 }
 

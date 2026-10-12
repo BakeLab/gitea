@@ -124,7 +124,7 @@ func TestRepoArchiveAsksWithTheConsequence(t *testing.T) {
 	require.Equal(t, []string{"Archive alice/project (from git remote upstream)? It becomes read-only."}, prompt.confirmations)
 }
 
-func TestRepoRenameFollowsTheRemote(t *testing.T) {
+func TestRepoRenameHintsAtTheRemote(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPatch+" /api/v1/repos/alice/project", r.Method+" "+r.URL.Path)
 		requirePayload(t, `{"name":"renamed"}`, r.Body)
@@ -132,31 +132,14 @@ func TestRepoRenameFollowsTheRemote(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, diagnostics := repoTTYDeps(t, server.URL)
-	runner := &fakeGit{results: map[string]string{
-		"symbolic-ref --short HEAD":                                  "main",
-		"config --get branch.main.remote":                            "origin",
-		"remote get-url origin":                                      server.URL + "/alice/project.git",
-		"remote set-url origin " + server.URL + "/alice/renamed.git": "",
+	deps.Git = &fakeGit{results: map[string]string{
+		"symbolic-ref --short HEAD":       "main",
+		"config --get branch.main.remote": "origin",
+		"remote get-url origin":           server.URL + "/alice/project.git",
 	}}
-	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rename", "renamed", "--yes"}))
-	require.Contains(t, runner.calls, "remote set-url origin "+server.URL+"/alice/renamed.git")
 	require.Empty(t, out.String())
-	require.Equal(t, "✓ Renamed repository alice/project to alice/renamed\n✓ Updated Git remote origin to alice/renamed\n", diagnostics.String())
-}
-
-func TestRenamedURL(t *testing.T) {
-	for _, test := range []struct{ raw, want string }{
-		{"https://gitea.test/alice/project.git", "https://gitea.test/alice/renamed.git"},
-		{"https://gitea.test/alice/project/", "https://gitea.test/alice/renamed"},
-		{"git@gitea-alias:alice/Project.git", "git@gitea-alias:alice/renamed.git"},
-		{"ssh://git@gitea.test:2222/alice/project", "ssh://git@gitea.test:2222/alice/renamed"},
-		{"https://gitea.test/alice/subproject.git", ""},
-	} {
-		renamed, ok := renamedURL(test.raw, "project", "renamed")
-		require.Equal(t, test.want != "", ok, test.raw)
-		require.Equal(t, test.want, renamed, test.raw)
-	}
+	require.Equal(t, "✓ Renamed repository alice/project to alice/renamed\n! Git remote origin still points to alice/project; update it with git remote set-url\n", diagnostics.String())
 }
 
 func TestRepoForkReportsAnExistingFork(t *testing.T) {
@@ -168,11 +151,7 @@ func TestRepoForkReportsAnExistingFork(t *testing.T) {
 			w.WriteHeader(http.StatusConflict)
 			_, _ = w.Write([]byte(`{"message":"repository is already forked by user [uname: alice, repo path: bob/project, fork path: alice/project-fork]"}`))
 		case "GET /api/v1/repos/bob/project/forks":
-			if r.URL.Query().Get("page") != "1" {
-				_, _ = w.Write([]byte(`[]`))
-				return
-			}
-			_, _ = w.Write([]byte(`[{"full_name":"carol/project","owner":{"login":"carol"}},{"full_name":"alice/project-fork","owner":{"login":"alice"}}]`))
+			writeFirstPage(w, r, `[{"full_name":"carol/project","owner":{"login":"carol"}},{"full_name":"alice/project-fork","owner":{"login":"alice"}}]`)
 		case "GET /api/v1/repos/alice/project-fork":
 			_, _ = w.Write([]byte(`{"full_name":"alice/project-fork","fork":true,"html_url":"https://gitea.test/alice/project-fork","parent":{"full_name":"bob/project"}}`))
 		default:

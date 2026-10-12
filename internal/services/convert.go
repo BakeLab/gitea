@@ -66,3 +66,8 @@ func issueFrom(issue *gitea.Issue) Issue {
 		Assignees: convertAll(issue.Assignees, login), Milestone: issueMilestoneFrom(issue.Milestone), Comments: int64(issue.Comments),
 	}
 }
+
+// convertPage maps a page of SDK items onto gt results.
+func convertPage[S, T any](page Page[*S], convert func(*S) T) Page[T] {
+	return Page[T]{Items: convertAll(page.Items, convert), More: page.More, Total: page.Total, Counted: page.Counted}
+}

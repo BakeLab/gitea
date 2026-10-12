@@ -18,7 +18,7 @@ func TestBulkMilestoneStateContinuesAfterFailureAndKeepsJSONClean(t *testing.T) 
 	mutations := []string{}
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/alice/project/milestones" {
-			writeMilestones(w, r, `[{"id":9,"title":"v9"},{"id":10,"title":"v10"},{"id":11,"title":"v11"}]`)
+			writeFirstPage(w, r, `[{"id":9,"title":"v9"},{"id":10,"title":"v10"},{"id":11,"title":"v11"}]`)
 			return
 		}
 		id := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/alice/project/milestones/")

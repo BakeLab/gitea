@@ -173,7 +173,7 @@ $ gt repo list --starred --json full_name,url`,
 			}
 			collection := repositoryCollection(opts)
 			spec := listSpec[services.Repository]{Columns: repositoryColumns, Row: repositoryRow, Context: collection, Empty: "no " + collection}
-			return writeTable(a, cmd, result.Items, spec, listPage{Number: opts.Page, More: result.More, Total: result.Total, Counted: result.Counted})
+			return writeTable(a, cmd, result.Items, spec, servicePage(result, opts.Page))
 		},
 	}
 	pageFlags(list, &opts.Limit, &opts.Page)
@@ -294,8 +294,8 @@ func (a *application) repositoryView(item services.Repository, readme string) te
 		badges = append(badges, badge)
 	}
 	meta := []string{
-		fmt.Sprintf("★ %d", item.Stars), countNoun(item.Forks, "fork"), countNoun(item.OpenIssues, "open issue"),
-		countNoun(item.OpenPulls, "open pull request"),
+		fmt.Sprintf("★ %d", item.Stars), terminal.Plural(item.Forks, "fork"), terminal.Plural(item.OpenIssues, "open issue"),
+		terminal.Plural(item.OpenPulls, "open pull request"),
 	}
 	if updated := terminal.ParseTime(item.UpdatedAt); !updated.IsZero() {
 		meta = append(meta, "updated "+terminal.RelativeTime(a.deps.Now(), updated))
@@ -327,12 +327,4 @@ func parentName(item services.Repository) string {
 		return ""
 	}
 	return item.Parent.FullName
-}
-
-// countNoun counts n of a noun, as in "1 fork" or "3 forks".
-func countNoun(n int, noun string) string {
-	if n == 1 {
-		return "1 " + noun
-	}
-	return fmt.Sprintf("%d %ss", n, noun)
 }

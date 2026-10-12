@@ -40,7 +40,7 @@ $ gt milestone issue list v1.0 --state all --kind issues`, Annotations: map[stri
 	enumFlag(list, &opts.State, "state", "s", "open", "Filter by state", "open", "closed", "all")
 	enumFlag(list, &opts.Kind, "kind", "", "all", "List issues, pull requests or both", "issues", "pulls", "all")
 	list.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
-	list.ValidArgsFunction = a.completeMilestoneArgs(false)
+	list.ValidArgsFunction = firstArg(a.completeMilestones())
 	group.AddCommand(list)
 	for _, verb := range []string{"add", "remove"} {
 		var byName bool
@@ -66,7 +66,7 @@ $ gt milestone issue %[1]s v1.0 12 13 '#14'`, verb), Annotations: map[string]str
 					item, err = service.Edit(cmd.Context(), n, services.IssueEdit{Milestone: &milestone.ID})
 				}
 				return item, itemError(err, target.Repo)
-			}, func(services.Issue) {})
+			}, nil)
 			if len(results) > 0 {
 				changed := make([]string, len(results))
 				for i, item := range results {
@@ -74,10 +74,7 @@ $ gt milestone issue %[1]s v1.0 12 13 '#14'`, verb), Annotations: map[string]str
 				}
 				a.done(cmd, "%s %s %s %s", past, strings.Join(changed, ", "), preposition, milestoneName(target, milestone))
 			}
-			if a.options.json != "" {
-				failures = append(failures, writeBatchJSON(a, cmd, len(numbers), results))
-			}
-			return errors.Join(failures...)
+			return errors.Join(append(failures, writeBatchJSON(a, cmd, len(numbers), results))...)
 		}}
 		command.Flags().BoolVar(&byName, "by-name", false, "Match a numeric milestone argument as a title rather than an ID")
 		milestones, issues := a.completeMilestones(), a.completeIssues("open")

@@ -62,7 +62,7 @@ func TestMilestoneDeleteReturnsJSONSnapshotOnlyAfterSuccess(t *testing.T) {
 		calls = append(calls, r.Method)
 		if r.Method == http.MethodGet {
 			require.Equal(t, "/api/v1/repos/alice/project/milestones", r.URL.Path)
-			writeMilestones(w, r, `[{"id":9,"title":"Release one","state":"open"}]`)
+			writeFirstPage(w, r, `[{"id":9,"title":"Release one","state":"open"}]`)
 			return
 		}
 		require.Equal(t, "/api/v1/repos/alice/project/milestones/9", r.URL.Path)
@@ -118,14 +118,6 @@ func TestMilestoneIssueCommandsSelectByName(t *testing.T) {
 	require.ErrorContains(t, err, "milestone title or ID cannot be empty")
 }
 
-// writeMilestones answers a milestone listing with page, a JSON array, as its first and only page.
-func writeMilestones(w http.ResponseWriter, r *http.Request, page string) {
-	if r.URL.Query().Get("page") != "1" {
-		page = `[]`
-	}
-	_, _ = w.Write([]byte(page))
-}
-
 // payloadField returns the JSON request body's field name as text.
 func payloadField(t *testing.T, r *http.Request, name string) string {
 	t.Helper()
@@ -139,7 +131,7 @@ func TestMilestonesAcceptTitlesOrIDs(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/repos/alice/project/milestones":
-			writeMilestones(w, r, `[{"id":3,"title":"v1.0","state":"open"},{"id":4,"title":"2026","state":"closed"},{"id":5,"title":"v2.0"}]`)
+			writeFirstPage(w, r, `[{"id":3,"title":"v1.0","state":"open"},{"id":4,"title":"2026","state":"closed"},{"id":5,"title":"v2.0"}]`)
 		case "GET /api/v1/repos/alice/project/milestones/3", "GET /api/v1/repos/alice/project/milestones/4":
 			_, _ = w.Write([]byte(`{"id":3,"title":"v1.0","state":"open"}`))
 		case "PATCH /api/v1/repos/alice/project/milestones/3", "PATCH /api/v1/repos/alice/project/milestones/4":

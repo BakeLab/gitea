@@ -143,10 +143,7 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 				detail = " (pull mirror)"
 			}
 			a.done(cmd, "Imported %s into %s%s", opts.CloneURL, item.FullName, detail)
-			if a.options.json != "" {
-				return a.writeJSON(cmd, item)
-			}
-			return a.printURL(cmd, item.URL)
+			return a.created(cmd, item, item.URL)
 		},
 	}
 	flags := command.Flags()

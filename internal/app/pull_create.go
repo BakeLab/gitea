@@ -74,7 +74,7 @@ is not on the remote yet is pushed first, with its upstream set.`, Args: argsExa
 				return err
 			}
 		}
-		s, err := a.deps.Settings.Load()
+		s, err := a.settings()
 		if err != nil {
 			return err
 		}
@@ -90,7 +90,7 @@ is not on the remote yet is pushed first, with its upstream set.`, Args: argsExa
 			return err
 		}
 		if milestone != "" && milestone != "0" {
-			if options.Milestone, err = milestoneFilter(cmd.Context(), t, milestone); err != nil {
+			if options.Milestone, err = milestoneID(cmd, t, milestone); err != nil {
 				return err
 			}
 		}
@@ -260,7 +260,7 @@ func (a *application) defaultPullHead(ctx context.Context) (owner, branch string
 	if err != nil || raw == "" {
 		return "", branch
 	}
-	snapshot, err := a.deps.Settings.Load()
+	snapshot, err := a.settings()
 	if err != nil {
 		return "", branch
 	}
@@ -371,8 +371,5 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 // reportCreatedPull reports a new pull request and prints its URL, or the pull request as JSON.
 func (a *application) reportCreatedPull(cmd *cobra.Command, t target, item services.Pull) error {
 	a.done(cmd, "Created pull request %s", refLabel(t.Repo, item.Number, item.Title))
-	if a.options.json != "" {
-		return a.writeJSON(cmd, item)
-	}
-	return a.printURL(cmd, item.URL)
+	return a.created(cmd, item, item.URL)
 }

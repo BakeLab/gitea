@@ -177,7 +177,7 @@ func (a *application) resolveRefs(cmd *cobra.Command, raws []string, kind refKin
 
 // sameRepository reports whether two repository arguments name the same repository.
 func (a *application) sameRepository(first, second string) bool {
-	s, err := a.deps.Settings.Load()
+	s, err := a.settings()
 	if err != nil {
 		return strings.EqualFold(first, second)
 	}

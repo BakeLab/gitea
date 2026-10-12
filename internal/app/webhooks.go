@@ -260,11 +260,8 @@ $ gt webhook edit 3 --events push,release --authorization-header-file header.txt
 		command.Args = usageArgs(cobra.MaximumNArgs(1))
 		command.Long = `Create a webhook that delivers events to a URL, by default as JSON for push events.
 
-Events: create, delete, fork, push, issues (every issue event), issues_only, issue_assign,
-issue_label, issue_milestone, issue_comment, pull_request (every pull request event),
-pull_request_only, pull_request_assign, pull_request_label, pull_request_milestone,
-pull_request_comment, pull_request_review, pull_request_sync, pull_request_review_request, wiki,
-repository, release, package, status, workflow_run, workflow_job.
+Events: ` + strings.Join(services.WebhookEvents, ", ") + `; issues and pull_request
+include every issue or pull request event.
 
 Types: ` + strings.Join(services.WebhookTypes, ", ") + `. Slack webhooks need
 --config channel=#name; other types take their settings through --config too.`
@@ -365,11 +362,7 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 		}
 		askAuthorization := !create && authSources == 0
 		if askAuthorization {
-			snapshot, err := a.deps.Settings.Load()
-			if err != nil {
-				return err
-			}
-			if !a.policy(snapshot).CanPrompt(a.deps.Streams) {
+			if !a.canPrompt() {
 				return clierr.Wrap(clierr.Usage, errors.New("editing a webhook drops its stored authorization header unless it is sent again, and Gitea never returns it: pass --authorization-header-file or --authorization-header (use --clear-authorization only for a hook without one)"))
 			}
 		}
@@ -431,10 +424,7 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 			return err
 		}
 		a.done(cmd, "Created %s in %s for %s", webhookLabel(hook), webhookScopeName(service.Scope), collapsedEvents(hook.Events))
-		if err := a.printURL(cmd, webhookSettingsURL(target, service.Scope, hook.ID)); err != nil {
-			return err
-		}
-		return a.jsonResult(cmd, hook)
+		return a.created(cmd, hook, webhookSettingsURL(target, service.Scope, hook.ID))
 	}
 	return command
 }
@@ -458,18 +448,7 @@ $ gt webhook delete 4 --org acme --yes`,
 			if err != nil {
 				return err
 			}
-			where := webhookScopeName(service.Scope)
-			if err := a.confirmAction(cmd, terminal.Confirmation{
-				Prompt: fmt.Sprintf("Delete %s from %s?", webhookLabel(hook), where),
-				NonTTY: fmt.Sprintf("delete %s from %s", webhookLabel(hook), where),
-			}); err != nil {
-				return err
-			}
-			if err := service.Delete(cmd.Context(), id); err != nil {
-				return err
-			}
-			a.done(cmd, "Deleted %s from %s", webhookLabel(hook), where)
-			return nil
+			return a.deleteConfirmed(cmd, webhookLabel(hook)+" from "+webhookScopeName(service.Scope), func() error { return service.Delete(cmd.Context(), id) })
 		},
 	}
 }

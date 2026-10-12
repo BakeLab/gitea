@@ -55,13 +55,7 @@ type Releases struct {
 
 func (s Releases) endpoint() string { return "repos/" + s.Repository + "/releases" }
 
-// List returns a non-nil page of releases.
-func (s Releases) List(ctx context.Context, limit, page int) ([]Release, error) {
-	window, err := s.ListPage(ctx, limit, page)
-	return window.Items, err
-}
-
-// ListPage is List that also reports whether more releases follow and how many there are.
+// ListPage lists a page of releases, with whether more follow and how many there are.
 func (s Releases) ListPage(ctx context.Context, limit, page int) (Page[Release], error) {
 	window, err := listPage(limit, page, func(limit, page int) ([]*gitea.Release, http.Header, error) {
 		var headers http.Header
@@ -75,14 +69,15 @@ func (s Releases) ListPage(ctx context.Context, limit, page int) (Page[Release],
 	if err != nil {
 		return Page[Release]{}, err
 	}
-	return Page[Release]{Items: convertAll(window.Items, releaseFrom), More: window.More, Total: window.Total, Counted: window.Counted}, nil
+	return convertPage(window, releaseFrom), nil
 }
 
 // View retrieves a release by its tag, including numeric tags.
 func (s Releases) View(ctx context.Context, tag string) (Release, error) {
-	return repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
 		return c.Releases.GetReleaseByTag(ctx, owner, repo, tag)
 	})
+	return item, Classify(err, "release", tag, s.Repository)
 }
 
 // Latest retrieves the most recent release that is neither a draft nor a prerelease.
@@ -102,12 +97,13 @@ func (s Releases) Archive(ctx context.Context, ref, format string) (io.ReadClose
 
 // Create creates a release and lets Gitea create a missing tag at the supplied target.
 func (s Releases) Create(ctx context.Context, opts ReleaseOptions) (Release, error) {
-	return repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
 		return c.Releases.CreateRelease(ctx, owner, repo, gitea.CreateReleaseOption{
 			TagName: deref(opts.Tag), Target: deref(opts.Target), Title: deref(opts.Title), Note: deref(opts.Body),
 			IsDraft: deref(opts.Draft), IsPrerelease: deref(opts.Prerelease),
 		})
 	})
+	return item, Classify(err, "release", deref(opts.Tag), s.Repository)
 }
 
 // Edit changes only supplied release fields; Gitea ignores empty text fields.

@@ -4,34 +4,12 @@
 package app
 
 import (
-	"context"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
-
-// askingPrompter is scriptedPrompter with the terminal.Asker extension that FormPrompter has.
-type askingPrompter struct {
-	scriptedPrompter
-	texts    []string
-	defaults []bool
-}
-
-func (p *askingPrompter) Ask(ctx context.Context, title string, _ func(string) error) (string, error) {
-	return p.Input(ctx, title)
-}
-
-func (p *askingPrompter) AskText(_ context.Context, title, initial string) (string, error) {
-	p.texts = append(p.texts, title+" "+initial)
-	return "typed body", nil
-}
-
-func (p *askingPrompter) ConfirmDefault(ctx context.Context, title string, defaultYes bool) (bool, error) {
-	p.defaults = append(p.defaults, defaultYes)
-	return p.Confirm(ctx, title)
-}
 
 func TestConfirmActionFollowsThePromptPolicy(t *testing.T) {
 	c := terminal.Confirmation{Prompt: `Delete label "bug" from alice/x?`, NonTTY: `delete label "bug" from alice/x`}
@@ -43,7 +21,7 @@ func TestConfirmActionFollowsThePromptPolicy(t *testing.T) {
 	a.options.yes = true
 	require.NoError(t, a.confirmAction(cmd, c))
 
-	prompt := &askingPrompter{}
+	prompt := &scriptedPrompter{}
 	deps.Prompter = prompt
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	a, cmd = outputApplication(deps, "")

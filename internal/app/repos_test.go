@@ -21,7 +21,7 @@ func repoTTYDeps(t *testing.T, serverURL string) (Dependencies, *bytes.Buffer, *
 	deps, out, diagnostics := serverDeps(t, serverURL)
 	deps.Getenv = serverEnv(serverURL, map[string]string{"TERM": "dumb"})
 	deps.Streams.OutTTY, deps.Streams.Width = true, 100
-	deps.Now = func() time.Time { return time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC) }
+	deps.Now = func() time.Time { return testNow }
 	return deps, out, diagnostics
 }
 

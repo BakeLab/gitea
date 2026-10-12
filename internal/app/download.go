@@ -19,7 +19,6 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 // downloadFlags are the destination flags of a download command.
@@ -93,19 +92,6 @@ func (a *application) download(cmd *cobra.Command, f downloadFlags, path string,
 		_, err := io.Copy(destination, body)
 		return err
 	})
-}
-
-func writeDownload(cmd *cobra.Command, body io.Reader, output string) error {
-	if output == "" || output == "-" {
-		return writeTerminalSafe(cmd.OutOrStdout(), isTerminal(cmd.OutOrStdout()), body)
-	}
-	return publish(cmd, output, false, false, func(destination io.Writer) error { _, err := io.Copy(destination, body); return err })
-}
-
-// isTerminal reports whether w is a terminal, for writers without injected stream capabilities.
-func isTerminal(w io.Writer) bool {
-	file, ok := w.(*os.File)
-	return ok && term.IsTerminal(int(file.Fd()))
 }
 
 // binarySniffLength is how much of a download decides whether it is text.

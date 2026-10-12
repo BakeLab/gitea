@@ -323,7 +323,7 @@ func TestReviewLifecycleEditorRejectsEmptyRequiredText(t *testing.T) {
 
 func TestBodyEditorTypesInlineWithoutAnEditor(t *testing.T) {
 	deps, _, _ := testDeps(t)
-	prompt := &askingPrompter{}
+	prompt := &scriptedPrompter{}
 	deps.Prompter = prompt
 	a, cmd := outputApplication(deps, "")
 	draft, err := a.bodyEditor(cmd)(context.Background(), "## Steps")
@@ -340,10 +340,4 @@ func TestBodyEditorTypesInlineWithoutAnEditor(t *testing.T) {
 	require.Equal(t, terminal.Draft{Path: path, Body: "edited body"}, draft)
 	require.Equal(t, "## Steps", editor.initial)
 	require.Len(t, prompt.texts, 1)
-
-	deps.Prompter = &scriptedPrompter{}
-	deps.Getenv = envFunc(nil)
-	a, cmd = outputApplication(deps, "")
-	_, err = a.bodyEditor(cmd)(context.Background(), "")
-	require.ErrorContains(t, err, "configure an editor")
 }

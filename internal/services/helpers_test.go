@@ -75,3 +75,11 @@ func TestNameOrIDPrefersIDsThenExactThenFoldedNames(t *testing.T) {
 		require.Equal(t, tc.want, got.id, tc.raw)
 	}
 }
+
+// writeFirstPage answers the first page of a listing with page and every later page with [].
+func writeFirstPage(w http.ResponseWriter, r *http.Request, page string) {
+	if r.URL.Query().Get("page") != "1" {
+		page = `[]`
+	}
+	_, _ = w.Write([]byte(page))
+}

@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -71,6 +72,27 @@ type options struct {
 type application struct {
 	deps    Dependencies
 	options options
+
+	// snapshot caches the settings for one run; generation is the store's generation it was loaded at.
+	mu         sync.Mutex
+	snapshot   *settings.Snapshot
+	generation uint64
+}
+
+// settings returns the settings, loaded once per run and again after gt changed them.
+func (a *application) settings() (settings.Snapshot, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	generation := a.deps.Settings.Generation()
+	if a.snapshot != nil && a.generation == generation {
+		return *a.snapshot, nil
+	}
+	snapshot, err := a.deps.Settings.Load()
+	if err != nil {
+		return snapshot, err
+	}
+	a.snapshot, a.generation = &snapshot, generation
+	return snapshot, nil
 }
 
 // NewRoot builds fresh commands. Construction performs no disk, network, or Git IO.
@@ -144,7 +166,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 		if offline(cmd) {
 			return nil
 		}
-		snapshot, err := a.deps.Settings.Load()
+		snapshot, err := a.settings()
 		if err != nil {
 			return err
 		}
@@ -192,19 +214,34 @@ var rootGroups = map[string]string{
 // Commands add other gh verbs, such as new, co, add and get, to their own Aliases.
 var verbAliases = map[string]string{"list": "ls", "delete": "rm"}
 
-// addVerbAliases gives every list and delete command its short name.
+// addVerbAliases gives every list and delete command its short name, and lets its flags be named
+// in the plural.
 func addVerbAliases(cmd *cobra.Command) {
 	if alias, ok := verbAliases[cmd.Name()]; ok && cmd.HasParent() && !slices.Contains(cmd.Aliases, alias) {
 		cmd.Aliases = append(cmd.Aliases, alias)
 	}
+	acceptPlurals(cmd)
 	for _, child := range cmd.Commands() {
 		addVerbAliases(child)
 	}
 }
 
+// acceptPlurals lets the flags of cmd be named in the plural, such as --add-labels for the gh name
+// --add-label (D8), without showing the plural in help.
+func acceptPlurals(cmd *cobra.Command) {
+	names := map[string]bool{}
+	cmd.Flags().VisitAll(func(flag *pflag.Flag) { names[flag.Name] = true })
+	normalize := cmd.Flags().GetNormalizeFunc()
+	cmd.Flags().SetNormalizeFunc(func(flags *pflag.FlagSet, name string) pflag.NormalizedName {
+		if singular, ok := strings.CutSuffix(name, "s"); ok && !names[name] && names[singular] {
+			name = singular
+		}
+		return normalize(flags, name)
+	})
+}
+
 // flagAliases makes the flags of cmd accept each key of aliases as another name of the flag it maps
-// to, without showing it in help. Renamed flags keep their old names working this way, such as the
-// plural --add-labels after the singular gh name --add-label became primary (D8).
+// to, without showing it in help. Renamed flags keep their old names working this way.
 func flagAliases(cmd *cobra.Command, aliases map[string]string) {
 	normalize := cmd.Flags().GetNormalizeFunc()
 	cmd.Flags().SetNormalizeFunc(func(flags *pflag.FlagSet, name string) pflag.NormalizedName {

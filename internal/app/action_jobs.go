@@ -34,11 +34,11 @@ $ gt run jobs 34 --json id,conclusion --jq '.[] | select(.conclusion == "failure
 				return err
 			}
 			spec := listSpec[services.Job]{Columns: jobColumns, Row: jobRow(a.deps.Now()), Empty: fmt.Sprintf("no jobs in run %d", run), Context: fmt.Sprintf("jobs in run %d", run)}
-			return writeTable(a, cmd, jobs.Items, spec, listPage{Number: page, More: jobs.More, Total: jobs.Total, Counted: jobs.Counted})
+			return writeTable(a, cmd, jobs.Items, spec, servicePage(jobs, page))
 		},
 	}
 	pageFlags(cmd, &limit, &page)
-	cmd.ValidArgsFunction = a.completeRunArg()
+	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	return cmd
 }
 

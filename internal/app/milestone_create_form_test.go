@@ -74,7 +74,7 @@ func TestMilestoneTablesViewsAndDoneLines(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/repos/alice/project/milestones":
-			writeMilestones(w, r, `[{"id":5,"title":"later","state":"open"},{"id":4,"title":"v0.9","state":"closed","closed_issues":3},`+
+			writeFirstPage(w, r, `[{"id":5,"title":"later","state":"open"},{"id":4,"title":"v0.9","state":"closed","closed_issues":3},`+
 				`{"id":3,"title":"v1.0","state":"open","description":"First release","due_on":"2026-12-31T00:00:00Z","open_issues":3,"closed_issues":1}]`)
 		case "GET /api/v1/repos/alice/project/issues/1", "GET /api/v1/repos/alice/project/issues/2":
 			_, _ = w.Write([]byte(`{"number":1,"milestone":{"id":4,"title":"v0.9"}}`))
@@ -88,7 +88,7 @@ func TestMilestoneTablesViewsAndDoneLines(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
-	deps.Now = func() time.Time { return time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC) }
+	deps.Now = func() time.Time { return testNow }
 	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
 	plainOutput(t, deps)
 	run := func(tty bool, args ...string) {
@@ -132,7 +132,7 @@ func TestMilestoneEditFormStartsFromTheMilestone(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/repos/alice/project/milestones":
-			writeMilestones(w, r, `[{"id":3,"title":"v1.0","description":"First","due_on":"2026-12-31T00:00:00Z"}]`)
+			writeFirstPage(w, r, `[{"id":3,"title":"v1.0","description":"First","due_on":"2026-12-31T00:00:00Z"}]`)
 		case "PATCH /api/v1/repos/alice/project/milestones/3":
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&edited))
 			_, _ = w.Write([]byte(`{"id":3,"title":"v1.0.0"}`))

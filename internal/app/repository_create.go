@@ -90,7 +90,7 @@ $ gt repo create project --source . --push`,
 			if err := validateRepositoryName(opts.Name); err != nil {
 				return err
 			}
-			selected := *a
+			selected := &application{deps: a.deps, options: a.options}
 			selected.options.repo = template
 			target, err := selected.resolve(cmd.Context(), false)
 			if err != nil {
@@ -159,10 +159,7 @@ $ gt repo create project --source . --push`,
 			if err != nil {
 				return err
 			}
-			if a.options.json != "" {
-				return a.writeJSON(cmd, item)
-			}
-			return a.printURL(cmd, item.URL)
+			return a.created(cmd, item, item.URL)
 		},
 	}
 	flags := command.Flags()

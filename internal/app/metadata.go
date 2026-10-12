@@ -113,7 +113,7 @@ func milestoneName(t target, item services.Milestone) string {
 
 // milestoneURL is the web page of a milestone, which the API does not return.
 func milestoneURL(t target, item services.Milestone) string {
-	return strings.TrimRight(t.Host, "/") + "/" + t.Repo + "/milestone/" + strconv.FormatInt(item.ID, 10)
+	return repositoryURL(t) + "/milestone/" + strconv.FormatInt(item.ID, 10)
 }
 
 func milestoneView(t target, now time.Time) func(services.Milestone) terminal.View {
@@ -125,13 +125,12 @@ func milestoneView(t target, now time.Time) func(services.Milestone) terminal.Vi
 		}
 		due := ""
 		if item.Deadline != nil {
-			deadline := terminal.ParseTime(*item.Deadline)
-			due = terminal.Timestamp(deadline)
-			meta = append([]string{"due " + deadline.Format("Jan 2, 2006") + " (" + terminal.RelativeTime(now, deadline) + ")"}, meta...)
+			due = terminal.Timestamp(terminal.ParseTime(*item.Deadline))
+			meta = append([]string{"due " + dueText(now, *item.Deadline)}, meta...)
 		}
 		return terminal.View{
 			Title: item.Title, ID: "#" + strconv.FormatInt(item.ID, 10),
-			Badges: []terminal.Cell{{Text: titleCase(item.State), Color: stateColors[item.State]}}, Meta: strings.Join(meta, " • "),
+			Badges: []terminal.Cell{stateBadge(item.State)}, Meta: strings.Join(meta, " • "),
 			Fields: []terminal.Field{
 				{Label: "State", Value: item.State, PipedOnly: true},
 				{Label: "Due", Value: due, PipedOnly: true},
@@ -161,7 +160,7 @@ $ gt milestone view 3 --web`, Annotations: map[string]string{"gt.arguments": mil
 	}}
 	cmd.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the milestone in the browser")
-	cmd.ValidArgsFunction = a.completeMilestoneArgs(false)
+	cmd.ValidArgsFunction = firstArg(a.completeMilestones())
 	return cmd
 }
 
@@ -274,11 +273,8 @@ $ gt milestone create --title v2.0 --editor`, Args: usageArgs(cobra.MaximumNArgs
 		if err != nil {
 			return err
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
 		a.done(cmd, "Created %s", milestoneName(t, item))
-		return a.printURL(cmd, milestoneURL(t, item))
+		return a.created(cmd, item, milestoneURL(t, item))
 	}}
 	fields.register(cmd)
 	enumFlag(cmd, &state, "state", "", "open", "State of the new milestone", "open", "closed")
@@ -338,15 +334,12 @@ $ gt milestone edit 3 --editor`, Annotations: map[string]string{"gt.arguments": 
 		if err != nil {
 			return err
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
 		a.done(cmd, "Edited %s", milestoneName(t, item))
-		return nil
+		return a.jsonResult(cmd, item)
 	}}
 	fields.register(cmd)
 	cmd.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
-	cmd.ValidArgsFunction = a.completeMilestoneArgs(false)
+	cmd.ValidArgsFunction = firstArg(a.completeMilestones())
 	return cmd
 }
 
@@ -363,20 +356,17 @@ $ gt milestone delete 7 --yes`, Annotations: map[string]string{"gt.confirm": "tr
 			return err
 		}
 		name := fmt.Sprintf("milestone %q (ID %d) from %s", item.Title, item.ID, t.Repo)
-		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + name + "?", NonTTY: "delete " + name}); err != nil {
+		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + name + "?"}); err != nil {
 			return err
 		}
 		if err := s.Delete(cmd.Context(), item.ID); err != nil {
 			return err
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
-		}
 		a.done(cmd, "Deleted milestone %q from %s", item.Title, t.Repo)
-		return nil
+		return a.jsonResult(cmd, item)
 	}}
 	cmd.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
-	cmd.ValidArgsFunction = a.completeMilestoneArgs(false)
+	cmd.ValidArgsFunction = firstArg(a.completeMilestones())
 	return cmd
 }
 
@@ -386,16 +376,4 @@ func findMilestone(cmd *cobra.Command, s services.Milestones, raw string, byName
 		return services.Milestone{}, clierr.Wrap(clierr.Usage, errors.New("milestone title or ID cannot be empty"))
 	}
 	return s.FindOne(cmd.Context(), raw, byName)
-}
-
-// completeMilestoneArgs completes milestone titles for the first argument, or for every argument
-// when variadic.
-func (a *application) completeMilestoneArgs(variadic bool) cobra.CompletionFunc {
-	complete := a.completeMilestones()
-	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
-		if len(args) > 0 && !variadic {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		return complete(cmd, args, toComplete)
-	}
 }

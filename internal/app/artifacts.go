@@ -25,10 +25,8 @@ import (
 func (a *application) artifactCommand() *cobra.Command {
 	group := &cobra.Command{
 		Use:   "artifact",
-		Short: "List and download the artifacts of runs",
-		Long: `List the artifacts that a run uploaded and download one as a ZIP archive.
-
-To download and extract the artifacts of a run by name, use gt run download.`,
+		Short: "List the artifacts of runs",
+		Long:  "List the artifacts that a run uploaded. To download them, use gt run download.",
 	}
 	var limit, page int
 	list := &cobra.Command{
@@ -48,62 +46,13 @@ $ gt run artifact list 34`,
 				return err
 			}
 			spec := listSpec[services.Artifact]{Columns: artifactColumns, Row: artifactRow, Empty: fmt.Sprintf("no artifacts in run %d", run), Context: fmt.Sprintf("artifacts of run %d", run)}
-			return writeTable(a, cmd, items.Items, spec, listPage{Number: page, More: items.More, Total: items.Total, Counted: items.Counted})
+			return writeTable(a, cmd, items.Items, spec, servicePage(items, page))
 		},
 	}
 	pageFlags(list, &limit, &page)
-	list.ValidArgsFunction = a.completeRunArg()
+	list.ValidArgsFunction = firstArg(a.completeRuns())
 	group.AddCommand(list)
 
-	var destination downloadFlags
-	download := &cobra.Command{
-		Use:   "download <artifact-id>",
-		Short: "Download an artifact as a ZIP archive",
-		Long:  "Download an artifact as a ZIP archive without extracting it, named after the artifact by default.",
-		Example: `# download artifact 7 to <name>.zip
-$ gt run artifact download 7
-# write it to standard output
-$ gt run artifact download 7 --output - > build.zip`,
-		Annotations: textOutput("artifact downloads are binary"),
-		Args:        argsExact(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := number(args[0])
-			if err != nil {
-				return err
-			}
-			t, err := a.resolve(cmd.Context(), true)
-			if err != nil {
-				return err
-			}
-			service := services.Actions{Client: t.client, Repository: t.Repo}
-			name := ""
-			if destination.output == "" || isDirectory(destination.output) {
-				artifact, err := service.Artifact(cmd.Context(), id)
-				if err != nil {
-					return err
-				}
-				name = artifact.Name + ".zip"
-			}
-			path, skip, err := destination.destination(name)
-			if err != nil || skip {
-				return err
-			}
-			body, err := service.DownloadArtifact(cmd.Context(), id)
-			if err != nil {
-				return err
-			}
-			defer body.Close()
-			if err := a.download(cmd, destination, path, body); err != nil {
-				return err
-			}
-			if path != "-" {
-				a.done(cmd, "Downloaded artifact %d to %s", id, path)
-			}
-			return nil
-		},
-	}
-	destination.register(download)
-	group.AddCommand(download)
 	return group
 }
 
@@ -199,7 +148,7 @@ $ gt run download 34 --zip`,
 	destination.register(cmd)
 	cmd.Flags().StringSliceVarP(&names, "name", "n", nil, "Only download the artifacts with these names")
 	cmd.Flags().BoolVar(&asZip, "zip", false, "Save each artifact as a ZIP archive instead of extracting it")
-	cmd.ValidArgsFunction = a.completeRunArg()
+	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	_ = cmd.RegisterFlagCompletionFunc("name", commaSeparated(a.completeArtifactNames()))
 	return cmd
 }

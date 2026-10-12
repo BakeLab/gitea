@@ -40,21 +40,24 @@ func TestDownloadsPublishOnlyCompleteFiles(t *testing.T) {
 	cmd.SetContext(context.Background())
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
-	require.NoError(t, writeDownload(cmd, bytes.NewBufferString("archive"), "-"))
+	copyBody := func(body io.Reader) func(io.Writer) error {
+		return func(destination io.Writer) error { _, err := io.Copy(destination, body); return err }
+	}
+	require.NoError(t, writeTerminalSafe(cmd.OutOrStdout(), false, bytes.NewBufferString("archive")))
 	require.Equal(t, "archive", stdout.String())
 	directory := t.TempDir()
 	output := filepath.Join(directory, "logs.zip")
-	require.ErrorIs(t, writeDownload(cmd, failingDownload{}, output), io.ErrUnexpectedEOF)
+	require.ErrorIs(t, publish(cmd, output, false, false, copyBody(failingDownload{})), io.ErrUnexpectedEOF)
 	_, err := os.Stat(output)
 	require.True(t, errors.Is(err, os.ErrNotExist))
 	entries, err := os.ReadDir(directory)
 	require.NoError(t, err)
 	require.Empty(t, entries)
-	require.NoError(t, writeDownload(cmd, bytes.NewBufferString("archive"), output))
+	require.NoError(t, publish(cmd, output, false, false, copyBody(bytes.NewBufferString("archive"))))
 	info, err := os.Stat(output)
 	require.NoError(t, err)
 	require.Equal(t, umaskMode(t), info.Mode().Perm(), "downloads are not private files")
-	require.ErrorContains(t, writeDownload(cmd, bytes.NewBufferString("replacement"), output), "already exists")
+	require.ErrorContains(t, publish(cmd, output, false, false, copyBody(bytes.NewBufferString("replacement"))), "already exists")
 	data, err := os.ReadFile(output)
 	require.NoError(t, err)
 	require.Equal(t, "archive", string(data))
