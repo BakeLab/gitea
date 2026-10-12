@@ -38,6 +38,7 @@ func TestOAuthLoginPKCEAndState(t *testing.T) {
 		}
 		require.Equal(t, "configured-client", u.Query().Get("client_id"))
 		require.Equal(t, "S256", u.Query().Get("code_challenge_method"))
+		require.Equal(t, "write:issue write:misc write:notification write:organization write:package write:repository write:user", u.Query().Get("scope"))
 		redirect = u.Query().Get("redirect_uri")
 		callback, err := url.Parse(redirect)
 		require.NoError(t, err)
@@ -111,11 +112,12 @@ func TestOAuthWithoutHTTPClientUsesDefaultClient(t *testing.T) {
 		_, _ = fmt.Fprintln(w, `{"access_token":"access","refresh_token":"refresh","expires_in":3600,"token_type":"Bearer"}`)
 	}))
 	defer server.Close()
-	credential, err := OAuthLogin(context.Background(), OAuthOptions{Instance: server.URL, Timeout: time.Second, Authorize: func(_ context.Context, raw string) error {
+	credential, err := OAuthLogin(context.Background(), OAuthOptions{Instance: server.URL, Timeout: time.Second, Scopes: []string{"read:repository", "read:user"}, Authorize: func(_ context.Context, raw string) error {
 		u, err := url.Parse(raw)
 		if err != nil {
 			return err
 		}
+		require.Equal(t, "read:repository read:user", u.Query().Get("scope"))
 		response, err := http.Get(u.Query().Get("redirect_uri") + "?code=code&state=" + url.QueryEscape(u.Query().Get("state")))
 		if err != nil {
 			return err

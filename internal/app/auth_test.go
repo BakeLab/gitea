@@ -4,6 +4,8 @@
 package app
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -24,6 +26,7 @@ import (
 	"gitea.dev/cli/internal/auth"
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
 	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
@@ -161,7 +164,7 @@ func TestLogoutRejectsUnknownAccountBeforeConfirmation(t *testing.T) {
 	configureHost(t, deps, "https://example.org", settings.Host{User: "alice", Users: tokenAccounts(settings.StoreKeyring, "alice")})
 	err := Execute(context.Background(), deps, []string{"auth", "logout", "--host", "https://example.org", "--user", "bob", "--no-input"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-	require.ErrorContains(t, err, "account is not configured")
+	require.EqualError(t, err, `account "bob" is not logged in on https://example.org (accounts: alice)`)
 	require.Empty(t, out.String())
 	require.Empty(t, diagnostics.String())
 	require.Empty(t, keyring.reads)
@@ -179,14 +182,17 @@ func TestAuthStatusFiltersBeforeReadingCredentials(t *testing.T) {
 	}
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--host", "https://EXAMPLE.org/base/", "--user", "BOB", "--json"}))
 	require.Equal(t, []string{auth.Identity("https://example.org/base", "bob")}, keyring.reads)
-	require.JSONEq(t, `[{"host":"https://example.org/base","user":"bob","active":false,"credential_store":"keyring","credential_available":true,"expires_at":null,"verified":null,"error":""}]`, out.String())
+	require.JSONEq(t, `[{"host":"https://example.org/base","user":"bob","active":false,"method":"token","credential_store":"keyring","credential_available":true,"expires_at":null,"verified":null,"error":""}]`, out.String())
 	out.Reset()
 	keyring.reads = nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--host", "https://unconfigured.example.org", "--json"}))
 	require.JSONEq(t, `[]`, out.String())
 	require.Empty(t, keyring.reads)
 	out.Reset()
-	require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, []string{"auth", "status", "--host", "invalid-host"})))
+	require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, []string{"auth", "status", "--host", "ftp://invalid-host"})))
+	err := Execute(context.Background(), deps, []string{"auth", "status", "--host", "unconfigured.example.org"})
+	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
+	require.EqualError(t, err, "not logged in to https://unconfigured.example.org; run gt auth login --host https://unconfigured.example.org")
 	require.Empty(t, out.String())
 	require.Empty(t, keyring.reads)
 }
@@ -352,7 +358,11 @@ func TestAuthLoginMethodFlagsAreMutuallyExclusive(t *testing.T) {
 		t.Run(strings.Join(args[3:], " "), func(t *testing.T) {
 			err := Execute(context.Background(), deps, args)
 			require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-			require.ErrorContains(t, err, "select exactly one")
+			if strings.Count(strings.Join(args, " "), "--") > 2 {
+				require.ErrorContains(t, err, "select one of --with-token, --oauth, --ssh-key")
+			} else {
+				require.ErrorContains(t, err, "select how to log in: --with-token, --oauth or --ssh-key")
+			}
 			require.Empty(t, out.String())
 		})
 	}
@@ -360,8 +370,10 @@ func TestAuthLoginMethodFlagsAreMutuallyExclusive(t *testing.T) {
 
 func TestAuthLoginValidatesMethodBeforePromptingForHost(t *testing.T) {
 	for args, want := range map[string]string{
-		"auth login":                            "select exactly one",
+		"auth login --with-token --oauth":       "select one of",
 		"auth login --with-token --client-id x": "--client-id requires --oauth",
+		"auth login --with-token --scopes all":  "--scopes requires --oauth",
+		"auth login --oauth --scopes nope":      "--scopes must be all, read:activitypub",
 	} {
 		t.Run(args, func(t *testing.T) {
 			deps, out, _ := testDeps(t)
@@ -433,13 +445,18 @@ func TestAuthRefreshRejectsTokenAccounts(t *testing.T) {
 func TestAuthStatusVerifyChecksStoredCredentials(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		require.Equal(t, "/api/v1/user", r.URL.Path)
-		if r.Header.Get("Authorization") != "token valid-status-token" {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
+		if r.URL.Path == "/api/v1/user" {
+			requests++
 		}
-		_, _ = w.Write([]byte(`{"login":"alice"}`))
+		switch {
+		case r.Header.Get("Authorization") != "token valid-status-token":
+			w.WriteHeader(http.StatusUnauthorized)
+		case r.URL.Path == "/api/v1/token":
+			_, _ = w.Write([]byte(`{"scopes":["write:repository","read:user"]}`))
+		default:
+			require.Equal(t, "/api/v1/user", r.URL.Path)
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		}
 	}))
 	defer server.Close()
 	deps, out, _ := testDeps(t)
@@ -451,7 +468,7 @@ func TestAuthStatusVerifyChecksStoredCredentials(t *testing.T) {
 	configureHost(t, deps, server.URL, settings.Host{User: "alice", Users: accounts})
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--json=user,verified,error"}))
 	require.Zero(t, requests)
-	require.JSONEq(t, `[{"user":"alice","verified":null,"error":""},{"user":"bob","verified":null,"error":""},{"user":"carol","verified":null,"error":""}]`, out.String())
+	require.JSONEq(t, `[{"user":"alice","verified":null,"error":""},{"user":"bob","verified":null,"error":""},{"user":"carol","verified":null,"error":"credential unavailable; run gt auth login for this instance and account"}]`, out.String())
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--verify", "--json"}))
 	require.Equal(t, 2, requests)
@@ -476,7 +493,7 @@ func TestAuthStatusVerifyChecksStoredCredentials(t *testing.T) {
 	require.NotContains(t, out.String(), "status-token")
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--verify", "--user", "alice"}))
-	require.Equal(t, server.URL+"\talice\tactive=true\tcredentials=true\texpires=2030-01-02T03:04:05Z\tverified=true\n", out.String())
+	require.Equal(t, server.URL+"\talice\ttrue\toauth\tfile\ttrue\ttrue\t2030-01-02T03:04:05Z\t\n", out.String())
 }
 
 func TestOAuthLoginOpensAuthorizationURLInBrowser(t *testing.T) {
@@ -539,4 +556,229 @@ func TestOAuthLoginOpensAuthorizationURLInBrowser(t *testing.T) {
 	normalized, err := settings.NormalizeHost(server.URL)
 	require.NoError(t, err)
 	require.Contains(t, snapshot.Hosts.Hosts[normalized].Users, "alice")
+}
+
+// loginPrompter answers the interactive login and account choices, recording what it was asked.
+type loginPrompter struct {
+	scriptedPrompter
+	answers   terminal.LoginAnswers
+	questions terminal.LoginQuestions
+	prefilled terminal.LoginAnswers
+	choice    int
+	options   []string
+}
+
+func (p *loginPrompter) Login(_ context.Context, questions terminal.LoginQuestions, answers *terminal.LoginAnswers) error {
+	p.questions, p.prefilled = questions, *answers
+	host := answers.Host
+	*answers = p.answers
+	answers.Host = cmp.Or(answers.Host, host)
+	return nil
+}
+
+func (p *loginPrompter) Choose(_ context.Context, _ string, choices []terminal.Choice, _ string) (string, error) {
+	p.options = make([]string, len(choices))
+	for i, choice := range choices {
+		p.options[i] = choice.Label
+	}
+	return choices[p.choice].Value, nil
+}
+
+// terminalDeps returns testDeps on a terminal, where gt prompts and reports mutations.
+func terminalDeps(t *testing.T) (Dependencies, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	deps, out, diagnostics := testDeps(t)
+	deps.Streams.InTTY, deps.Streams.OutTTY, deps.Streams.ErrTTY = true, true, true
+	return deps, out, diagnostics
+}
+
+func TestAuthLoginAsksHowToLogIn(t *testing.T) {
+	server := newAuthenticatedServer(http.NotFoundHandler())
+	defer server.Close()
+	deps, _, diagnostics := terminalDeps(t)
+	prompt := &loginPrompter{answers: terminal.LoginAnswers{Method: terminal.LoginToken, Token: "pasted-token", Store: settings.StoreFile}}
+	deps.Prompter = prompt
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "login", "--host", server.URL}))
+	require.Equal(t, terminal.LoginAnswers{Host: server.URL, Method: terminal.LoginToken, Store: settings.StoreKeyring, SSHKey: prompt.prefilled.SSHKey, SetupGit: true}, prompt.prefilled)
+	require.False(t, prompt.questions.Host)
+	require.True(t, prompt.questions.Method && prompt.questions.Store && prompt.questions.SetupGit)
+	require.Equal(t, "Create one at https://gitea.com/user/settings/applications", prompt.questions.TokenHint("https://gitea.com"))
+	credential, err := deps.Credentials.Load(server.URL, "alice", settings.StoreFile)
+	require.NoError(t, err)
+	require.Equal(t, "pasted-token", credential.AccessToken)
+	require.Equal(t, "✓ Logged in to "+server.URL+" as alice (token, file store)\n", withoutANSI(diagnostics.String()))
+	// Without --host, the sole instance is the suggestion; logging in again replaces the token.
+	diagnostics.Reset()
+	prompt.answers.Token, prompt.accept = "rotated-token", true
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "login"}))
+	require.True(t, prompt.questions.Host)
+	require.Equal(t, server.URL, prompt.prefilled.Host)
+	require.Equal(t, []string{"alice is already logged in to " + server.URL + ". Replace the stored credential?"}, prompt.confirmations)
+	credential, err = deps.Credentials.Load(server.URL, "alice", settings.StoreFile)
+	require.NoError(t, err)
+	require.Equal(t, "rotated-token", credential.AccessToken)
+}
+
+func TestAuthLoginReplacesACredentialOnlyWhenConfirmed(t *testing.T) {
+	server := newAuthenticatedServer(http.NotFoundHandler())
+	defer server.Close()
+	deps, _, _ := testDeps(t)
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	login := func(extra ...string) error {
+		deps.Streams.In = strings.NewReader("new-token\n")
+		return Execute(context.Background(), deps, append([]string{"auth", "login", "--host", server.URL, "--with-token", "--credential-store", "file", "--no-input"}, extra...))
+	}
+	err := login()
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, "confirmation required to replace the stored credential of alice on "+server.URL+"; rerun with --yes")
+	credential, err := deps.Credentials.Load(server.URL, "alice", settings.StoreFile)
+	require.NoError(t, err)
+	require.Equal(t, "alice-token", credential.AccessToken)
+	require.NoError(t, login("--yes"))
+	credential, err = deps.Credentials.Load(server.URL, "alice", settings.StoreFile)
+	require.NoError(t, err)
+	require.Equal(t, "new-token", credential.AccessToken)
+	// A named account is confirmed before gt asks for its token.
+	deps, _, _ = terminalDeps(t)
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	prompt := &scriptedPrompter{secret: "unused"}
+	deps.Prompter = prompt
+	err = Execute(context.Background(), deps, []string{"auth", "login", "--host", server.URL, "--with-token", "--user", "alice"})
+	require.Equal(t, clierr.Canceled, clierr.ExitCode(err))
+	require.Len(t, prompt.confirmations, 1)
+	require.Empty(t, prompt.secrets)
+}
+
+func TestAuthStatusShowsAccountsByInstance(t *testing.T) {
+	const instance = "https://example.org"
+	helper := "config --global --get-all credential." + instance + ".helper"
+	for _, tc := range []struct {
+		name     string
+		users    []string
+		env      map[string]string
+		helper   bool
+		want     string
+		failure  string
+		exitCode int
+	}{
+		{
+			name: "accounts", users: []string{"alice", "bob"}, helper: true,
+			want: instance + "\n  ✓ Logged in as alice (token, file store) · active\n  ✓ Logged in as bob (token, file store)\n  - Git credential helper: configured (global)\n",
+		},
+		{
+			name: "environment token", users: []string{"alice"}, env: map[string]string{"GITEA_TOKEN": "env", "GITEA_CLI_HOST": "example.org"},
+			want: instance + "\n  ✓ Using GITEA_TOKEN from the environment\n  ✓ Logged in as alice (token, file store) · active\n  - Git credential helper: not configured; run gt auth setup-git\n",
+		},
+		{
+			name: "environment token only", env: map[string]string{"GITEA_TOKEN": "env", "GITEA_INSTANCE_URL": instance},
+			want: instance + "\n  ✓ Using GITEA_TOKEN from the environment\n",
+		},
+		{name: "logged out", failure: "not logged in to any Gitea instance; run gt auth login", exitCode: clierr.Authentication},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, out, _ := terminalDeps(t)
+			deps.Getenv = envFunc(tc.env)
+			if tc.helper {
+				deps.Git = &fakeGit{results: map[string]string{helper: "!'/usr/bin/gt' auth git-credential --host " + instance}}
+			}
+			if len(tc.users) > 0 {
+				configureAccounts(t, deps, instance, tc.users[0], tc.users...)
+			}
+			err := Execute(context.Background(), deps, []string{"auth", "status"})
+			if tc.failure != "" {
+				require.Equal(t, tc.exitCode, clierr.ExitCode(err))
+				require.EqualError(t, err, tc.failure)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tc.want, withoutANSI(out.String()))
+		})
+	}
+	deps, out, _ := testDeps(t)
+	configureHost(t, deps, instance, settings.Host{User: "alice", Users: tokenAccounts(settings.StoreFile, "alice")})
+	err := Execute(context.Background(), deps, []string{"auth", "status"})
+	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
+	require.EqualError(t, err, "1 of 1 credentials cannot authenticate; log in again with gt auth login")
+	require.Equal(t, instance+"\talice\ttrue\ttoken\tfile\tfalse\t\t\tcredential unavailable; run gt auth login for this instance and account\n", out.String())
+}
+
+func TestAuthSwitchSelectsInstanceAndAccount(t *testing.T) {
+	const instance = "https://example.org"
+	deps, _, diagnostics := terminalDeps(t)
+	configureAccounts(t, deps, instance, "alice", "alice")
+	err := Execute(context.Background(), deps, []string{"auth", "switch"})
+	require.EqualError(t, err, "alice is the only account on "+instance+"; log in to another with gt auth login --host "+instance)
+	configureAccounts(t, deps, instance, "alice", "alice", "bob")
+	active := func() string {
+		s, err := deps.Settings.Load()
+		require.NoError(t, err)
+		return s.Hosts.Hosts[instance].User
+	}
+	for _, tc := range []struct {
+		args       []string
+		want, diag string
+	}{
+		{nil, "bob", "✓ Switched active account for " + instance + " to bob\n"},
+		{nil, "alice", "✓ Switched active account for " + instance + " to alice\n"},
+		{[]string{"ALICE"}, "alice", "! alice is already the active account on " + instance + "\n"},
+		{[]string{"--user", "bob"}, "bob", "✓ Switched active account for " + instance + " to bob\n"},
+	} {
+		diagnostics.Reset()
+		require.NoError(t, Execute(context.Background(), deps, append([]string{"auth", "switch"}, tc.args...)))
+		require.Equal(t, tc.want, active())
+		require.Equal(t, tc.diag, withoutANSI(diagnostics.String()))
+	}
+	configureAccounts(t, deps, instance, "bob", "alice", "bob", "carol")
+	prompt := &loginPrompter{choice: 2}
+	deps.Prompter = prompt
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "switch"}))
+	require.Equal(t, []string{"alice", "bob (active)", "carol"}, prompt.options)
+	require.Equal(t, "carol", active())
+	err = Execute(context.Background(), deps, []string{"auth", "switch", "--no-input"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, "name the account: gt auth switch <user> (accounts on "+instance+": alice, bob, carol)")
+	err = Execute(context.Background(), deps, []string{"auth", "switch", "dave"})
+	require.EqualError(t, err, `account "dave" is not logged in on `+instance+" (accounts: alice, bob, carol)")
+}
+
+func TestAuthTokenPrintsTheCredential(t *testing.T) {
+	const instance = "https://example.org"
+	deps, out, _ := testDeps(t)
+	configureAccounts(t, deps, instance, "alice", "alice")
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "token"}))
+	require.Equal(t, "alice-token\n", out.String())
+	err := Execute(context.Background(), deps, []string{"auth", "token", "--user", "bob"})
+	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
+	out.Reset()
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "env-token", "GITEA_CLI_HOST": instance})
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "token"}))
+	require.Equal(t, "env-token\n", out.String())
+	deps.Getenv = envFunc(nil)
+	configureHost(t, deps, instance, settings.Host{User: "alice", Users: map[string]settings.Account{"alice": {AuthMethod: settings.AuthHTTPSign, SSHKey: "/keys/id"}}})
+	require.EqualError(t, Execute(context.Background(), deps, []string{"auth", "token"}), "alice on "+instance+" signs requests with an SSH key and has no token")
+	require.EqualError(t, Execute(context.Background(), deps, []string{"auth", "token", "--json"}), "auth token prints the token; --json is not supported")
+}
+
+// rejectingGit records the input of Git commands that read standard input.
+type rejectingGit struct {
+	fakeGit
+	inputs []string
+}
+
+func (g *rejectingGit) Input(_ context.Context, _, input string, args ...string) (string, error) {
+	g.inputs = append(g.inputs, strings.Join(args, " ")+"\n"+input)
+	return "", nil
+}
+
+func TestLogoutAsksGitToForgetTheAccount(t *testing.T) {
+	const instance = "https://example.org:3000"
+	deps, _, diagnostics := terminalDeps(t)
+	runner := &rejectingGit{}
+	deps.Git = runner
+	configureAccounts(t, deps, instance, "alice", "alice", "bob")
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "logout", "--yes"}))
+	require.Equal(t, []string{"credential reject\nprotocol=https\nhost=example.org:3000\nusername=alice\n\n"}, runner.inputs)
+	require.Equal(t, "✓ Logged out of "+instance+" (alice)\n✓ Switched active account for "+instance+" to bob\n", withoutANSI(diagnostics.String()))
+	err := Execute(context.Background(), deps, []string{"auth", "logout", "carol", "--yes"})
+	require.EqualError(t, err, `account "carol" is not logged in on `+instance+" (accounts: bob)")
 }

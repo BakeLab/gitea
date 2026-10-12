@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
@@ -51,6 +52,7 @@ func pagedDeps(t *testing.T, serverURL string, env map[string]string, config ...
 	for i := 0; i < len(config); i += 2 {
 		require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", config[i], config[i+1]}))
 	}
+	diagnostics.Reset()
 	return deps, out, diagnostics, pager
 }
 
@@ -174,7 +176,7 @@ func TestMultiItemHumanOutputPagesOnce(t *testing.T) {
 		{[]string{"issue", "comment", "list", "5"}, "1 alice\none\n\n2 bob\ntwo\n\n"},
 	} {
 		t.Run(tc.args[0]+" "+tc.args[1], func(t *testing.T) {
-			deps, out, _, pager := pagedDeps(t, server.URL, map[string]string{"GITEA_CLI_HYPERLINKS": "never"}, "pager", "fake-pager", "color", "never")
+			deps, out, _, pager := pagedDeps(t, server.URL, nil, "pager", "fake-pager", "color", "never", "hyperlinks", "never")
 			require.NoError(t, Execute(context.Background(), deps, append(tc.args, "-R", "alice/project", "--yes")))
 			require.Equal(t, 1, pager.calls)
 			require.Equal(t, tc.want, pager.input)
@@ -341,7 +343,11 @@ func TestWriteView(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, out, _ := testDeps(t)
 			deps.Streams.OutTTY = tc.tty
-			deps.Getenv = envFunc(map[string]string{"NO_COLOR": "1", "GITEA_CLI_MARKDOWN": "raw", "GITEA_CLI_HYPERLINKS": "never"})
+			deps.Getenv = envFunc(map[string]string{"NO_COLOR": "1"})
+			require.NoError(t, deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
+				s.Preferences.Markdown, s.Preferences.Hyperlinks = "raw", "never"
+				return nil
+			}))
 			a, cmd := outputApplication(deps, tc.json)
 			require.NoError(t, writeView(a, cmd, item, view))
 			require.Equal(t, tc.want, out.String())

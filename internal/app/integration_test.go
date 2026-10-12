@@ -293,8 +293,9 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	require.False(t, notification.Pinned)
 	require.NoError(t, json.Unmarshal(scoped("notification", "mark-unread", notificationID), &notification))
 	require.True(t, notification.Unread)
-	require.NoError(t, json.Unmarshal(scoped("notification", "watch", "--timeout", "500ms", "--interval", "100ms"), &notifications))
-	require.NotEmpty(t, notifications)
+	watched := json.NewDecoder(bytes.NewReader(scoped("notification", "watch", "--timeout", "500ms", "--interval", "100ms")))
+	require.NoError(t, watched.Decode(&notification), "watch prints one object per line")
+	require.Equal(t, repo.FullName, notification.Repository)
 	scoped("notification", "mark-read", "--all")
 	require.Equal(t, "[]\n", string(scoped("notification", "list")))
 	var release services.Release

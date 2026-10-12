@@ -5,12 +5,16 @@ package app
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -94,11 +98,200 @@ func TestConfigHelpDocumentsSettingsAndEnvironment(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "--help"}))
 	for _, name := range []string{
-		"default_host", "git_protocol", "editor", "prompt", "pager", "browser", "color", "remote", "aliases",
+		"default_host", "git_protocol", "editor", "prompt", "pager", "browser", "color", "hyperlinks", "markdown", "remote", "aliases",
 		"user", "ssh_host", "insecure", "oauth_client_id", "ssh_key", "ssh_agent", "ssh_certificate_principal", "ssh_key_fingerprint",
-		"GITEA_CLI_CONFIG_DIR", "GITEA_CLI_HOST", "GITEA_INSTANCE_URL", "GITEA_TOKEN", "GITEA_CLI_USER", "GITEA_CLI_REPO", "GITEA_CLI_EDITOR", "VISUAL", "EDITOR",
-		"GITEA_CLI_PAGER", "PAGER", "GITEA_CLI_COLOR", "NO_COLOR", "BROWSER",
+		"gt help environment",
 	} {
 		require.Contains(t, out.String(), name)
+	}
+	require.NotContains(t, out.String(), "GITEA_TOKEN", "the environment table lives in gt help environment")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"help", "environment"}))
+	for _, name := range []string{"GITEA_CLI_CONFIG_DIR", "GITEA_CLI_HOST", "GITEA_INSTANCE_URL", "GITEA_TOKEN", "GITEA_CLI_USER", "GITEA_CLI_REPO", "GITEA_CLI_EDITOR", "VISUAL", "EDITOR", "GITEA_CLI_PAGER", "PAGER", "GITEA_CLI_COLOR", "NO_COLOR", "BROWSER"} {
+		require.Contains(t, out.String(), name)
+	}
+}
+
+func TestConfigGetPrintsOnlyTheValue(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	configureHost(t, deps, "http://localhost:3001", settings.Host{User: "alice", Users: tokenAccounts(settings.StoreFile, "alice", "bob")})
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "editor", "code --wait"}))
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"config", "get", "editor"}, "code --wait\n"},
+		{[]string{"config", "get", "editor", "--show-source"}, "code --wait\tconfig.yml\n"},
+		{[]string{"config", "get", "pager"}, "\n"},
+		{[]string{"config", "get", "hyperlinks", "--show-source"}, "auto\tdefault\n"},
+		{[]string{"config", "get", "user", "--host", "http://localhost:3001"}, "alice\n"},
+		{[]string{"config", "get", "user", "--host", "localhost:3001", "--show-source"}, "alice\thosts.yml http://localhost:3001\n"},
+		{[]string{"config", "get", "user"}, "alice\n"},
+		{[]string{"config", "get", "insecure"}, "false\n"},
+	} {
+		t.Run(strings.Join(tc.args[2:], " "), func(t *testing.T) {
+			out.Reset()
+			require.NoError(t, Execute(context.Background(), deps, tc.args))
+			require.Equal(t, tc.want, out.String())
+		})
+	}
+}
+
+func TestConfigNamesValidSettings(t *testing.T) {
+	deps, _, _ := testDeps(t)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"config", "get", "nope"}, `unknown setting "nope"; settings: browser, color, default_host, editor, git_protocol, hyperlinks, insecure, markdown,`},
+		{[]string{"config", "get", "user"}, "user is an instance setting; select a configured instance with --host URL"},
+		{[]string{"config", "get", "ssh_key"}, "ssh_key is an account setting; select the account with --host URL --user NAME"},
+		{[]string{"config", "set", "nope", "1"}, `unknown setting "nope"; preferences: browser, color, default_host,`},
+		{[]string{"config", "set", "user", "bob"}, "the active account changes with gt auth switch"},
+		{[]string{"config", "set", "hyperlinks", "off"}, "hyperlinks must be auto, always, or never"},
+		{[]string{"config", "set", "markdown", "never"}, "markdown must be auto or raw"},
+	} {
+		t.Run(strings.Join(tc.args[1:], " "), func(t *testing.T) {
+			err := Execute(context.Background(), deps, tc.args)
+			require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestConfigPathWorksWithBrokenSettings(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	require.NoError(t, os.WriteFile(filepath.Join(deps.Settings.Dir, "hosts.yml"), []byte("version: '1'\nhosts: [\n"), 0o600))
+	require.Error(t, Execute(context.Background(), deps, []string{"config", "list"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "path"}))
+	require.Equal(t, "config\t"+filepath.Join(deps.Settings.Dir, "config.yml")+"\nhosts\t"+filepath.Join(deps.Settings.Dir, "hosts.yml")+"\n", out.String())
+}
+
+func TestConfigSetReportsChangesOnATerminal(t *testing.T) {
+	deps, out, diagnostics := testDeps(t)
+	deps.Streams.OutTTY = true
+	configureHost(t, deps, "https://example.org", settings.Host{User: "alice", Users: tokenAccounts(settings.StoreFile, "alice")})
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"config", "set", "markdown", "raw"}, "✓ Set markdown to raw\n"},
+		{[]string{"config", "set", "editor", ""}, "✓ Cleared editor\n"},
+		{[]string{"config", "set", "ssh_host", "git.example.org:2222", "--host", "example.org"}, "✓ Set ssh_host for https://example.org to git.example.org:2222\n"},
+		{[]string{"config", "set", "default_host", "https://example.org"}, "✓ Set default_host to https://example.org\n"},
+		{[]string{"config", "set", "default_host", "localhost:3002"}, "✓ Set default_host to https://localhost:3002\n! No account on https://localhost:3002 yet; log in with: gt auth login --host https://localhost:3002\n"},
+	} {
+		t.Run(strings.Join(tc.args[2:], " "), func(t *testing.T) {
+			diagnostics.Reset()
+			require.NoError(t, Execute(context.Background(), deps, tc.args))
+			require.Equal(t, tc.want, withoutANSI(diagnostics.String()))
+			require.Empty(t, out.String())
+		})
+	}
+	snapshot, err := deps.Settings.Load()
+	require.NoError(t, err)
+	require.Equal(t, "raw", snapshot.Preferences.Markdown)
+	require.Equal(t, "git.example.org:2222", snapshot.Hosts.Hosts["https://example.org"].SSHHost)
+}
+
+func TestDisplayFollowsHyperlinkAndMarkdownPreferences(t *testing.T) {
+	for _, tc := range []struct {
+		config      []string
+		links, rich bool
+	}{
+		{nil, true, true},
+		{[]string{"hyperlinks", "never"}, false, true},
+		{[]string{"markdown", "raw"}, true, false},
+	} {
+		deps, _, _ := testDeps(t)
+		deps.Streams.OutTTY, deps.Now = true, time.Now
+		for i := 0; i < len(tc.config); i += 2 {
+			require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", tc.config[i], tc.config[i+1]}))
+		}
+		d := (&application{deps: deps}).display()
+		require.Equal(t, tc.links, d.Links, tc.config)
+		require.Equal(t, tc.rich, d.Markdown, tc.config)
+	}
+}
+
+func TestAliasSetGuardsExistingAliasesAndQuoting(t *testing.T) {
+	deps, _, diagnostics := testDeps(t)
+	deps.Streams.OutTTY = true
+	run := func(args ...string) error {
+		return Execute(context.Background(), deps, append([]string{"alias", "set"}, args...))
+	}
+	require.NoError(t, run("il", "gt issue list --label bug"))
+	require.Equal(t, "✓ Added alias il for \"issue list --label bug\"\n", withoutANSI(diagnostics.String()))
+	err := run("il", "issue list")
+	require.ErrorContains(t, err, `alias il already expands to "issue list --label bug"; replace it with --clobber`)
+	diagnostics.Reset()
+	require.NoError(t, run("il", "issue list --state all", "--clobber"))
+	require.Equal(t, "✓ Changed alias il from \"issue list --label bug\" to \"issue list --state all\"\n", withoutANSI(diagnostics.String()))
+	err = run("ls", "issue", "list")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, `the expansion must be one argument; quote it: gt alias set ls "issue list"`)
+	err = run("il", "issue", "list", "--state", "all")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.ErrorContains(t, err, `unknown flag: --state; quote an expansion with flags: gt alias set il "issue list --state all"`)
+	snapshot, err := deps.Settings.Load()
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"il": "issue list --state all"}, snapshot.Preferences.Aliases)
+}
+
+func TestAliasDeleteAndList(t *testing.T) {
+	deps, out, diagnostics := testDeps(t)
+	deps.Streams.OutTTY = true
+	run := func(args ...string) error {
+		return Execute(context.Background(), deps, append([]string{"alias"}, args...))
+	}
+	require.NoError(t, run("list"))
+	require.Empty(t, out.String())
+	require.Equal(t, "no aliases configured; create one with: gt alias set <name> <expansion>\n", diagnostics.String())
+	for _, name := range []string{"a", "b", "c"} {
+		require.NoError(t, run("set", name, "issue list"))
+	}
+	diagnostics.Reset()
+	require.NoError(t, run("list"))
+	require.Equal(t, "NAME  EXPANSION\na     issue list\nb     issue list\nc     issue list\n", withoutANSI(out.String()))
+	err := run("delete", "a", "nope", "zz")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, `no alias named "nope", "zz"; gt alias list shows them`)
+	require.NoError(t, run("delete", "a", "b"))
+	require.Equal(t, "✓ Deleted alias a (issue list)\n✓ Deleted alias b (issue list)\n", withoutANSI(diagnostics.String()))
+	require.Equal(t, clierr.Usage, clierr.ExitCode(run("delete")))
+	require.Equal(t, clierr.Usage, clierr.ExitCode(run("delete", "c", "--all")))
+	require.NoError(t, run("delete", "--all"))
+	snapshot, err := deps.Settings.Load()
+	require.NoError(t, err)
+	require.Empty(t, snapshot.Preferences.Aliases)
+}
+
+func TestPlatformCommandsComplete(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/notifications", r.URL.Path)
+		_, _ = w.Write([]byte(notificationThreads))
+	}))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	configureAccounts(t, deps, server.URL, "alice", "alice", "bob")
+	require.NoError(t, Execute(context.Background(), deps, []string{"alias", "set", "il", "issue list"}))
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"alias", "delete", ""}, []string{"il\tissue list"}},
+		{[]string{"config", "get", "hyp"}, []string{"hyperlinks"}},
+		{[]string{"config", "set", "hyperlinks", ""}, []string{"auto", "always", "never"}},
+		{[]string{"config", "set", "markdown", ""}, []string{"auto", "raw"}},
+		{[]string{"auth", "switch", ""}, []string{"alice\t" + server.URL + " (active)", "bob\t" + server.URL}},
+		{[]string{"auth", "logout", "b"}, []string{"bob\t" + server.URL}},
+		{[]string{"auth", "login", "--credential-store", ""}, []string{"keyring", "file"}},
+		{[]string{"auth", "login", "--scopes", "read:repository,write:re"}, []string{"read:repository,write:repository"}},
+		{[]string{"notification", "list", "--type", ""}, []string{"issue", "pull", "commit", "repository"}},
+		{[]string{"notification", "view", ""}, []string{"12\talice/project#17 Improve greeting", "3\talice/project#8 Improve error messages"}},
+	} {
+		candidates, directive := complete(t, deps, out, tc.args...)
+		require.Equal(t, tc.want, candidates, tc.args)
+		require.NotZero(t, directive&cobra.ShellCompDirectiveNoFileComp, tc.args)
 	}
 }

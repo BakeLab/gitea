@@ -30,8 +30,7 @@ func (a *application) colorEnabled() bool {
 	return terminal.ColorEnabled(preferences.Color, a.deps.Streams.OutTTY, a.deps.Getenv)
 }
 
-// display describes stdout for tables and views. The hyperlinks (auto, always, never) and markdown
-// (auto, raw) preferences are read from GITEA_CLI_HYPERLINKS and GITEA_CLI_MARKDOWN until config.yml stores them.
+// display describes stdout for tables and views under the color, hyperlinks and markdown preferences.
 func (a *application) display() terminal.Display {
 	preferences, _ := a.preferences()
 	streams := a.deps.Streams
@@ -39,8 +38,8 @@ func (a *application) display() terminal.Display {
 		TTY:       streams.OutTTY,
 		Color:     terminal.ColorEnabled(preferences.Color, streams.OutTTY, a.deps.Getenv),
 		TrueColor: terminal.TrueColor(a.deps.Getenv),
-		Links:     terminal.HyperlinksEnabled(a.deps.Getenv("GITEA_CLI_HYPERLINKS"), streams.OutTTY, a.deps.Getenv),
-		Markdown:  terminal.MarkdownEnabled(a.deps.Getenv("GITEA_CLI_MARKDOWN"), streams.OutTTY),
+		Links:     terminal.HyperlinksEnabled(preferences.Hyperlinks, streams.OutTTY, a.deps.Getenv),
+		Markdown:  terminal.MarkdownEnabled(preferences.Markdown, streams.OutTTY),
 		Width:     streams.Width,
 		Now:       a.deps.Now(),
 	}

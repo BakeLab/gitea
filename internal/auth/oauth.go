@@ -20,6 +20,10 @@ import (
 // DefaultClientID identifies the public gt OAuth application.
 const DefaultClientID = "d57cb8c4-630c-4168-8324-ec79935e18d4"
 
+// DefaultScopes are the token scopes gt requests through OAuth: read and write access to everything
+// but instance administration.
+var DefaultScopes = []string{"write:issue", "write:misc", "write:notification", "write:organization", "write:package", "write:repository", "write:user"}
+
 // refreshTimeout bounds a token refresh, which holds the settings lock, below settings.LockTimeout.
 const refreshTimeout = 20 * time.Second
 
@@ -31,6 +35,8 @@ type OAuthOptions struct {
 	HTTP      *http.Client
 	Authorize func(context.Context, string) error
 	Timeout   time.Duration
+	// Scopes are the token scopes to request; none requests DefaultScopes.
+	Scopes []string
 }
 
 // OAuthLogin exchanges a PKCE authorization code through a loopback callback.
@@ -57,6 +63,10 @@ func OAuthLogin(ctx context.Context, opts OAuthOptions) (Credential, error) {
 	// Gitea ignores the port of a loopback redirect but compares its path; the built-in gt application registers none.
 	redirect := "http://" + listener.Addr().String()
 	config := oauthConfig(opts.Instance, opts.ClientID)
+	config.Scopes = opts.Scopes
+	if len(config.Scopes) == 0 {
+		config.Scopes = DefaultScopes
+	}
 	config.RedirectURL = redirect
 	codes := make(chan string, 1)
 	failures := make(chan error, 1)
@@ -130,7 +140,7 @@ func withHTTPClient(ctx context.Context, client *http.Client) context.Context {
 }
 
 func oauthConfig(instance, clientID string) *oauth2.Config {
-	return &oauth2.Config{ClientID: clientID, Endpoint: oauth2.Endpoint{AuthURL: instance + "/login/oauth/authorize", TokenURL: instance + "/login/oauth/access_token", AuthStyle: oauth2.AuthStyleInParams}, Scopes: []string{"admin", "user", "issue", "misc", "notification", "organization", "package", "repository"}}
+	return &oauth2.Config{ClientID: clientID, Endpoint: oauth2.Endpoint{AuthURL: instance + "/login/oauth/authorize", TokenURL: instance + "/login/oauth/access_token", AuthStyle: oauth2.AuthStyleInParams}}
 }
 
 // Refresh locks by instance and account, then reads again before rotating secrets.

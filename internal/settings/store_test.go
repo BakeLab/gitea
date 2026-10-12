@@ -120,7 +120,7 @@ func TestUpdatePersistsOnlyExplicitPreferences(t *testing.T) {
 	snapshot, err := s.Load()
 	require.NoError(t, err)
 	require.True(t, snapshot.Configured["editor"])
-	for _, key := range []string{"git_protocol", "prompt", "color", "aliases"} {
+	for _, key := range []string{"git_protocol", "prompt", "color", "hyperlinks", "markdown", "aliases"} {
 		require.False(t, snapshot.Configured[key], key)
 	}
 	require.Equal(t, Defaults().GitProtocol, snapshot.Preferences.GitProtocol)
@@ -128,6 +128,25 @@ func TestUpdatePersistsOnlyExplicitPreferences(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(s.Dir, "config.yml"))
 	require.NoError(t, err)
 	require.Equal(t, "version: \"1\"\neditor: vi\ncolor: never\n", string(data))
+}
+
+func TestDisplayPreferencesAcceptOnlyTheirValues(t *testing.T) {
+	for _, tc := range []struct {
+		config string
+		valid  bool
+	}{
+		{"hyperlinks: never\n", true},
+		{"hyperlinks: always\nmarkdown: raw\n", true},
+		{"hyperlinks: off\n", false},
+		{"markdown: never\n", false},
+	} {
+		t.Run(tc.config, func(t *testing.T) {
+			s := New(t.TempDir())
+			require.NoError(t, os.WriteFile(filepath.Join(s.Dir, "config.yml"), []byte("version: '1'\n"+tc.config), 0o600))
+			_, err := s.Load()
+			require.Equal(t, tc.valid, err == nil, "%v", err)
+		})
+	}
 }
 
 func TestTokenlessAccounts(t *testing.T) {

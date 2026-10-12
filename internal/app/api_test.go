@@ -209,3 +209,82 @@ func TestAPIFieldFilesPreserveTextAndValidateStdinConsumers(t *testing.T) {
 		require.Error(t, Execute(context.Background(), deps, args))
 	}
 }
+
+func TestAPIFiltersAndFormatsJSONResponses(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json;charset=utf-8")
+		switch r.URL.Path {
+		case "/api/v1/version":
+			_, _ = w.Write([]byte(`{"version":"28.1.0","b":1}`))
+		case "/api/v1/repos/alice/nope":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		case "/api/v1/repos":
+			if r.URL.Query().Get("page") != "2" {
+				w.Header().Set("Link", `<?page=2>; rel="next"`)
+				_, _ = w.Write([]byte(`[{"name":"one"}]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"name":"two"}]`))
+		default:
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("plain"))
+		}
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name string
+		tty  bool
+		args []string
+		want string
+		err  string
+	}{
+		{name: "jq without --json", args: []string{"version", "--jq", ".version"}, want: "28.1.0\n"},
+		{name: "jq shorthand on a terminal", tty: true, args: []string{"version", "-q", "."}, want: "{\n  \"b\": 1,\n  \"version\": \"28.1.0\"\n}\n"},
+		{name: "jq on every page", args: []string{"repos", "--paginate", "--jq", ".[].name"}, want: "one\ntwo\n"},
+		{name: "terminal keeps key order", tty: true, args: []string{"version"}, want: "{\n  \"version\": \"28.1.0\",\n  \"b\": 1\n}\n"},
+		{name: "piped JSON ends with a newline", args: []string{"version"}, want: "{\"version\":\"28.1.0\",\"b\":1}\n"},
+		{name: "error body ends with a newline", args: []string{"repos/alice/nope"}, want: "{\"message\":\"not found\"}\n", err: "HTTP 404"},
+		{name: "error body is not filtered", args: []string{"repos/alice/nope", "--jq", ".message"}, want: "{\"message\":\"not found\"}\n", err: "HTTP 404"},
+		{name: "jq needs JSON", args: []string{"text", "--jq", "."}, err: "--jq needs a JSON response, but the response is text/plain"},
+		{name: "silent", args: []string{"version", "--silent"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, out, _ := serverDeps(t, server.URL)
+			deps.Streams.OutTTY = tc.tty
+			err := Execute(context.Background(), deps, append([]string{"api"}, tc.args...))
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tc.want, withoutANSI(out.String()))
+		})
+	}
+	requireUsageBeforeRequests(t, "--silent and --jq are mutually exclusive", "api", "version", "--silent", "--jq", ".")
+	requireUsageBeforeRequests(t, "api returns raw responses; --json is not supported", "api", "version", "--json")
+}
+
+func TestAPIVerboseShowsRequestAndResponseWithoutCredentials(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Gt-Test", "response")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "version?access_token=secret", "--verbose", "-H", "X-Request: one"}))
+	require.Equal(t, "{}", out.String())
+	head := diagnostics.String()
+	for _, want := range []string{"> GET " + server.URL + "/api/v1/version\n", "> Authorization: (hidden)\n", "> X-Request: one\n", "< HTTP/1.1 200 OK\n", "< X-Gt-Test: response\n"} {
+		require.Contains(t, head, want)
+	}
+	require.NotContains(t, head, "secret")
+	require.NotContains(t, head, "token token")
+}
+
+func TestAPIHelpShowsJQ(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "--help"}))
+	require.Contains(t, out.String(), "\n  -q, --jq expression ")
+	require.NotContains(t, out.String(), "--json fields")
+}

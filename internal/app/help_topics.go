@@ -154,8 +154,8 @@ func availableCommands(cmd *cobra.Command) []commandList {
 }
 
 // helpFlags renders the flags of cmd and the global flags that apply to it: --repo, --remote and --cwd
-// unless it never selects a repository, --json and --jq when it outputs JSON, and --yes when it asks
-// for confirmation. Persistent flags of parent commands, such as --org, count as its own.
+// unless it never selects a repository, --json and --jq when it outputs JSON (--jq alone when it
+// filters raw JSON), and --yes when it asks for confirmation. Persistent flags of parent commands, such as --org, count as its own.
 func helpFlags(cmd *cobra.Command) (local, inherited string) {
 	globals := cmd.Root().PersistentFlags()
 	var own []*pflag.Flag
@@ -169,7 +169,7 @@ func helpFlags(cmd *cobra.Command) (local, inherited string) {
 	slices.SortFunc(own, func(x, y *pflag.Flag) int { return strings.Compare(x.Name, y.Name) })
 	path := cmd.CommandPath()
 	repo := !slices.ContainsFunc(noRepoCommands, func(prefix string) bool { return path == prefix || strings.HasPrefix(path, prefix+" ") })
-	shown := map[string]bool{"repo": repo, "remote": repo, "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd), "yes": cmd.Annotations["gt.confirm"] != ""}
+	shown := map[string]bool{"repo": repo, "remote": repo, "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd) || cmd.Annotations["gt.rawjson"] != "", "yes": cmd.Annotations["gt.confirm"] != ""}
 	var shared []*pflag.Flag
 	for _, name := range []string{"repo", "remote", "cwd", "json", "jq", "yes"} {
 		if shown[name] {

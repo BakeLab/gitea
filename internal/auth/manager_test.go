@@ -177,3 +177,57 @@ func TestRegisterHTTPSignRejectsTokenAccounts(t *testing.T) {
 	require.Equal(t, settings.Account{AuthMethod: settings.AuthSSH, SSHKey: "/keys/id"}, s.Hosts.Hosts["https://example.org"].Users["alice"])
 	require.NoError(t, manager.Logout("https://example.org", "alice"))
 }
+
+func TestRegisterReplacesAnAccountOnlyWhenAsked(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		previous settings.Account
+		next     string
+	}{
+		{"same store", settings.Account{AuthMethod: settings.AuthToken, CredentialStore: settings.StoreFile}, settings.StoreFile},
+		{"other store", settings.Account{AuthMethod: settings.AuthOAuth, CredentialStore: settings.StoreKeyring}, settings.StoreFile},
+		{"SSH key account", settings.Account{AuthMethod: settings.AuthHTTPSign, SSHKey: "/keys/id"}, settings.StoreKeyring},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := settings.New(t.TempDir())
+			keyring := &memoryKeyring{values: map[string]string{}}
+			credentials := &Store{Dir: config.Dir, Keyring: keyring}
+			manager := newTestManager(t, config, credentials)
+			if tc.previous.Tokenless() {
+				require.NoError(t, manager.RegisterHTTPSign("https://example.org", "alice", tc.previous, HostOptions{}))
+			} else {
+				require.NoError(t, manager.Register("https://example.org", "alice", tc.previous.CredentialStore, tc.previous.AuthMethod, HostOptions{}, Credential{AccessToken: "old"}))
+			}
+			require.NoError(t, manager.Register("https://example.org", "bob", settings.StoreFile, settings.AuthToken, HostOptions{}, Credential{AccessToken: "bob"}))
+			err := manager.Register("https://example.org", "alice", tc.next, settings.AuthToken, HostOptions{}, Credential{AccessToken: "new"})
+			require.ErrorIs(t, err, ErrAccountExists)
+			require.NoError(t, manager.Register("https://example.org", "alice", tc.next, settings.AuthToken, HostOptions{Replace: true}, Credential{AccessToken: "new"}))
+			s, err := config.Load()
+			require.NoError(t, err)
+			host := s.Hosts.Hosts["https://example.org"]
+			require.Equal(t, "alice", host.User)
+			require.Equal(t, settings.Account{AuthMethod: settings.AuthToken, CredentialStore: tc.next}, host.Users["alice"])
+			credential, err := credentials.Load("https://example.org", "alice", tc.next)
+			require.NoError(t, err)
+			require.Equal(t, "new", credential.AccessToken)
+			if !tc.previous.Tokenless() && tc.previous.CredentialStore != tc.next {
+				_, err := credentials.Load("https://example.org", "alice", tc.previous.CredentialStore)
+				require.Error(t, err, "the replaced credential leaves its old store")
+			}
+		})
+	}
+}
+
+func TestFailedReplacementRestoresTheCredential(t *testing.T) {
+	config := settings.New(t.TempDir())
+	keyring := &memoryKeyring{values: map[string]string{}}
+	credentials := &Store{Dir: config.Dir, Keyring: keyring}
+	manager := newTestManager(t, config, credentials)
+	require.NoError(t, manager.Register("https://example.org", "alice", settings.StoreKeyring, settings.AuthToken, HostOptions{}, Credential{AccessToken: "old"}))
+	require.Error(t, manager.Register("https://example.org", "alice", settings.StoreFile, "invalid", HostOptions{Replace: true}, Credential{AccessToken: "new"}))
+	credential, err := credentials.Load("https://example.org", "alice", settings.StoreKeyring)
+	require.NoError(t, err)
+	require.Equal(t, "old", credential.AccessToken)
+	_, err = credentials.Load("https://example.org", "alice", settings.StoreFile)
+	require.Error(t, err)
+}

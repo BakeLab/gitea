@@ -279,7 +279,7 @@ func (a *application) checkOutputFlags(cmd *cobra.Command) error {
 
 // offline reports commands that must work without valid settings.
 func offline(cmd *cobra.Command) bool {
-	if cmd.Annotations["gt.group"] == "true" {
+	if cmd.Annotations["gt.group"] == "true" || cmd.Annotations["gt.offline"] == "true" {
 		return true
 	}
 	switch cmd.Name() {
@@ -492,12 +492,6 @@ func commandIndex(root *cobra.Command, args []string) int {
 	return len(args)
 }
 
-// configKeys are the preferences, instance settings and account settings that config get reads.
-var configKeys = []string{
-	"browser", "color", "default_host", "editor", "git_protocol", "insecure", "oauth_client_id", "pager", "prompt",
-	"remote", "ssh_agent", "ssh_certificate_principal", "ssh_host", "ssh_key", "ssh_key_fingerprint", "version",
-}
-
 func commandOutputFields(cmd *cobra.Command) []string {
 	if cmd.Name() == "status" && cmd.Parent() != nil {
 		if cmd.Parent().Name() == "pr" {
@@ -527,7 +521,7 @@ func commandOutputFields(cmd *cobra.Command) []string {
 		}
 	case "gt":
 		if cmd.Name() == "doctor" {
-			return jsonFields[target]()
+			return jsonFields[doctorReport]()
 		}
 	case "attachment":
 		return jsonFields[services.IssueAttachment]()

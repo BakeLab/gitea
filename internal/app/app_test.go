@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/version"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -68,7 +69,7 @@ func TestCommandLineEdgeCases(t *testing.T) {
 	err = Execute(context.Background(), deps, []string{"config", "list", "--jq", ".[", "--remote", "-h"})
 	require.ErrorContains(t, err, "invalid --jq expression")
 	require.NoError(t, Execute(context.Background(), deps, []string{"--version"}))
-	require.NotContains(t, out.String(), "gt version")
+	require.Equal(t, version.Format()+"\n", out.String())
 }
 
 func TestAliasesAfterGlobalFlagsAndNestedHelp(t *testing.T) {
@@ -415,23 +416,9 @@ func walkCommands(cmd *cobra.Command, visit func(*cobra.Command)) {
 // have yet to complete; see TestHelpTextsAreComplete.
 const (
 	shortsToFix = `
-	config get
-	config list
-	notification mark-read
-	notification mark-unread
 	pr review cancel-request
 `
 	examplesToWrite = `
-	alias delete
-	alias list
-	alias set
-	api
-	auth login
-	auth logout
-	auth refresh
-	auth setup-git
-	auth status
-	auth switch
 	branch create
 	branch delete
 	branch list
@@ -439,11 +426,6 @@ const (
 	branch rename
 	branch unprotect
 	branch view
-	config get
-	config list
-	config path
-	config set
-	doctor
 	issue attachment delete
 	issue attachment download
 	issue attachment edit
@@ -476,13 +458,6 @@ const (
 	milestone list
 	milestone reopen
 	milestone view
-	notification list
-	notification mark-read
-	notification mark-unread
-	notification pin
-	notification unpin
-	notification view
-	notification watch
 	pr attachment delete
 	pr attachment download
 	pr attachment edit
@@ -557,8 +532,6 @@ const (
 	wiki view
 `
 	longsToWrite = `
-	alias
-	auth
 	branch
 	issue
 	issue attachment
@@ -566,7 +539,6 @@ const (
 	label
 	milestone
 	milestone issue
-	notification
 	pr
 	pr attachment
 	pr comment

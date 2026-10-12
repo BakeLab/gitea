@@ -79,3 +79,25 @@ func TestMatchAccount(t *testing.T) {
 	require.True(t, MatchAccount("alice", "Alice"))
 	require.False(t, MatchAccount("bob", "Alice"))
 }
+
+func TestTokenScopesAndServerVersion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/token":
+			require.Equal(t, "token secret", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"id":1,"name":"gt","scopes":["write:repository","read:user"]}`))
+		case "/api/v1/version":
+			_, _ = w.Write([]byte(`{"version":"28.1.0"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client := transport.New(server.URL, "secret", false)
+	scopes, err := TokenScopes(context.Background(), client)
+	require.NoError(t, err)
+	require.Equal(t, []string{"write:repository", "read:user"}, scopes)
+	version, err := ServerVersion(context.Background(), client)
+	require.NoError(t, err)
+	require.Equal(t, "28.1.0", version)
+}

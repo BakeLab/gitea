@@ -125,6 +125,20 @@ func (o JSONOutput) encode(w io.Writer, value any) error {
 	return err
 }
 
+// IndentJSON formats JSON text for a terminal like Write with Pretty, but keeps the key order of the
+// text: indented, sanitized, ending with a newline and, with color, highlighted.
+func IndentJSON(data []byte, color bool) (string, error) {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, bytes.TrimSpace(data), "", "  "); err != nil {
+		return "", err
+	}
+	text := SafeText(buf.String()) + "\n"
+	if color {
+		text = colorJSON(text)
+	}
+	return text, nil
+}
+
 // JSON colors, following gh: bold blue keys, green strings, yellow booleans, cyan null.
 const (
 	jsonKeyColor    = "\x1b[1;34m"

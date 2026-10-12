@@ -255,15 +255,6 @@ func (a *application) completeAliases(_ *cobra.Command, _ []string, toComplete s
 	return matching(describe(slices.Sorted(maps.Keys(aliases)), func(name string) (string, string) { return name, aliases[name] }), toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
-// configValues lists the values of the settings that accept a fixed set.
-var configValues = map[string][]string{
-	"git_protocol": {"https", "ssh"},
-	"prompt":       {"enabled", "disabled"},
-	"color":        {"auto", "always", "never"},
-	"insecure":     {"true", "false"},
-	"ssh_agent":    {"true", "false"},
-}
-
 // completeConfig completes a setting name, then its value: the fixed values, the configured instances
 // for default_host, or the Git remotes for remote.
 func (a *application) completeConfig(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {

@@ -6,8 +6,10 @@ package app
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/aliases"
@@ -16,6 +18,26 @@ import (
 	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
+
+// Settings that gt config reads and writes, by where they are stored.
+var (
+	preferenceKeys = []string{"browser", "color", "default_host", "editor", "git_protocol", "hyperlinks", "markdown", "pager", "prompt", "remote"}
+	instanceKeys   = []string{"git_protocol", "insecure", "oauth_client_id", "ssh_host", "user"}
+	accountKeys    = []string{"ssh_agent", "ssh_certificate_principal", "ssh_key", "ssh_key_fingerprint"}
+	// configKeys are every setting that config get reads, in alphabetical order.
+	configKeys = slices.Compact(slices.Sorted(slices.Values(slices.Concat(preferenceKeys, instanceKeys, accountKeys, []string{"version"}))))
+)
+
+// configValues lists the values of the settings that accept a fixed set.
+var configValues = map[string][]string{
+	"git_protocol": {"https", "ssh"},
+	"prompt":       {"enabled", "disabled"},
+	"color":        {"auto", "always", "never"},
+	"hyperlinks":   {"auto", "always", "never"},
+	"markdown":     {"auto", "raw"},
+	"insecure":     {"true", "false"},
+	"ssh_agent":    {"true", "false"},
+}
 
 func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings.Preferences, map[string]string, error) {
 	preferences := snapshot.Preferences
@@ -42,7 +64,7 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 		}
 	}
 	if host != "" {
-		normalized, err := settings.NormalizeHost(host)
+		normalized, err := settings.ResolveHost(host, snapshot.Hosts.Hosts)
 		if err != nil {
 			return preferences, nil, clierr.Wrap(clierr.Usage, err)
 		}
@@ -85,269 +107,489 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 	return preferences, sources, nil
 }
 
+// configSetting is one effective setting and where its value comes from.
+type configSetting struct {
+	Key    string
+	Value  any
+	Source string
+}
+
+// settingValues returns the effective preferences, the settings of the selected instance when it is
+// configured, and with --user the settings of that account, each with its source.
+func (a *application) settingValues(snapshot settings.Snapshot) (map[string]any, map[string]string, error) {
+	if a.options.user != "" && a.options.host == "" {
+		return nil, nil, clierr.Wrap(clierr.Usage, errors.New("account settings require both --host and --user"))
+	}
+	preferences, sources, err := a.effectivePreferences(snapshot)
+	if err != nil {
+		return nil, nil, err
+	}
+	values := map[string]any{
+		"version": preferences.Version, "default_host": preferences.DefaultHost,
+		"git_protocol": preferences.GitProtocol, "editor": preferences.Editor,
+		"prompt": preferences.Prompt, "pager": preferences.Pager,
+		"browser": preferences.Browser, "color": preferences.Color,
+		"hyperlinks": preferences.Hyperlinks, "markdown": preferences.Markdown,
+		"remote": preferences.Remote,
+	}
+	host, configured := snapshot.Hosts.Hosts[preferences.DefaultHost]
+	if !configured {
+		if a.options.user != "" {
+			return nil, nil, clierr.Wrap(clierr.Usage, fmt.Errorf("instance %s is not configured; run gt auth login --host %s", preferences.DefaultHost, preferences.DefaultHost))
+		}
+		return values, sources, nil
+	}
+	for key, value := range map[string]any{"user": host.User, "ssh_host": host.SSHHost, "insecure": host.Insecure, "oauth_client_id": host.OAuthClientID} {
+		values[key] = value
+		sources[key] = "hosts.yml " + preferences.DefaultHost
+	}
+	if a.options.user != "" {
+		user, exists := matchAccount(host.Users, a.options.user)
+		if !exists {
+			return nil, nil, clierr.Wrap(clierr.Usage, fmt.Errorf("account %q is not logged in on %s (accounts: %s)", a.options.user, preferences.DefaultHost, accountNames(host.Users)))
+		}
+		account := host.Users[user]
+		for key, value := range map[string]any{"ssh_key": account.SSHKey, "ssh_agent": account.SSHAgent, "ssh_certificate_principal": account.SSHCertPrincipal, "ssh_key_fingerprint": account.SSHKeyFingerprint} {
+			values[key] = value
+			sources[key] = "hosts.yml " + preferences.DefaultHost + " user " + user
+		}
+	}
+	return values, sources, nil
+}
+
+// unknownSetting explains why key has no value: it names an account or instance setting that needs
+// --host or --user, or no setting at all.
+func unknownSetting(key string) error {
+	switch {
+	case slices.Contains(accountKeys, key):
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is an account setting; select the account with --host URL --user NAME", key))
+	case slices.Contains(instanceKeys, key):
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is an instance setting; select a configured instance with --host URL", key))
+	}
+	return clierr.Wrap(clierr.Usage, fmt.Errorf("unknown setting %q; settings: %s", key, strings.Join(configKeys, ", ")))
+}
+
 func (a *application) configCommand() *cobra.Command {
-	group := &cobra.Command{Use: "config", Short: "Manage preferences", Long: `Manage preferences.
+	group := &cobra.Command{Use: "config", Short: "Manage settings", Long: `Manage gt's settings.
 
-Settings live in config.yml and hosts.yml in the configuration directory
-($GITEA_CLI_CONFIG_DIR, or gt under the XDG config directory); gt config path prints both.
+Preferences live in config.yml and instance settings in hosts.yml, in the configuration
+directory ($GITEA_CLI_CONFIG_DIR, or gt under the XDG config directory); gt config path prints
+both files. Environment variables that override settings are listed in gt help environment.
 
-config.yml preferences (gt config set <key> <value>):
-  default_host  instance URL used when no --host, environment or repository selects one
-  git_protocol  https or ssh for clone and checkout remotes
-  editor        command used to edit bodies
+Preferences (gt config set <key> <value>):
+  default_host  instance used when no --host, environment variable or repository selects one
+  git_protocol  https or ssh, for clone and checkout remotes
+  editor        command that edits bodies
   prompt        enabled or disabled
-  pager         command used to page human output
-  browser       command used to open web pages; never disables opening
+  pager         command that pages long output
+  browser       command that opens web pages; never disables opening
   color         auto, always or never
-  remote        Git remote used for repository discovery
-  aliases       command aliases; manage them with gt alias
+  hyperlinks    auto, always or never: link the first column of lists to its web page
+  markdown      auto or raw: render markdown bodies on a terminal, or print them as written
+  remote        Git remote that selects the repository
+  aliases       command shortcuts; manage them with gt alias
 
-hosts.yml per-instance settings (gt config set --host <url> <key> <value>):
-  user             active account, changed only by gt auth switch
+Instance settings (gt config set --host <url> <key> <value>):
+  user             active account; change it with gt auth switch
   ssh_host         SSH host[:port] when it differs from the web host
   insecure         true skips TLS certificate verification
-  git_protocol     https or ssh, overriding config.yml for this instance
-  oauth_client_id  OAuth application used by gt auth login
+  git_protocol     https or ssh, overriding the preference for this instance
+  oauth_client_id  OAuth application used by gt auth login --oauth
 
-Per-account SSH settings (gt config set --host <url> --user <name> <key> <value>):
-  ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint
-
-Environment overrides:
-  GITEA_CLI_CONFIG_DIR                 configuration directory
-  GITEA_CLI_HOST, GITEA_INSTANCE_URL   instance, overriding default_host
-  GITEA_TOKEN                    access token for that instance instead of stored credentials
-  GITEA_INSTANCE_INSECURE        with GITEA_TOKEN, skip TLS verification when true
-  GITEA_INSTANCE_SSH_HOST        with GITEA_TOKEN, SSH host that identifies the instance's remotes
-  GITEA_CLI_USER                       account on the selected instance
-  GITEA_CLI_REPO                       repository as owner/name or URL
-  GITEA_CLI_EDITOR                     editor, overriding config.yml
-  GITEA_CLI_PAGER                      pager, overriding config.yml
-  GITEA_CLI_COLOR                      color preference; NO_COLOR disables automatic color
-  VISUAL, EDITOR, PAGER, BROWSER editor (VISUAL first), pager and browser when config.yml sets none`}
-	group.AddCommand(&cobra.Command{Use: "path", Short: "Show configuration file paths", Annotations: textOutput("config path prints text"), Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "config\t%s\nhosts\t%s\n", filepath.Join(a.deps.Settings.Dir, "config.yml"), filepath.Join(a.deps.Settings.Dir, "hosts.yml"))
-		return err
-	}})
-	for _, name := range []string{"get", "list"} {
-		var source bool
-		command := &cobra.Command{Use: name, Short: "Show effective preferences"}
-		command.Flags().BoolVar(&source, "show-source", false, "Show the source of each effective value")
-		if name == "get" {
-			command.Use = "get <key>"
-			command.Args = argsExact(1)
-		} else {
-			command.Args = argsExact(0)
-		}
-		command.RunE = func(cmd *cobra.Command, args []string) error {
-			if a.options.user != "" && a.options.host == "" {
-				return clierr.Wrap(clierr.Usage, errors.New("account settings require both --host and --user"))
-			}
+Account settings (gt config set --host <url> --user <name> <key> <value>):
+  ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint`}
+	group.AddCommand(&cobra.Command{
+		Use: "path", Short: "Print the paths of the settings files", Args: argsExact(0),
+		Annotations: map[string]string{"gt.text": "config path prints text", "gt.offline": "true"},
+		Example:     "$ gt config path\n# Settings of another configuration directory\n$ GITEA_CLI_CONFIG_DIR=~/work/gt gt config path",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "config\t%s\nhosts\t%s\n", filepath.Join(a.deps.Settings.Dir, "config.yml"), filepath.Join(a.deps.Settings.Dir, "hosts.yml"))
+			return err
+		},
+	})
+	var getSource bool
+	get := &cobra.Command{
+		Use: "get <key>", Short: "Print the value of a setting", Args: argsExact(1), ValidArgsFunction: a.completeConfig,
+		Example: `$ gt config get editor
+# Show where the value comes from
+$ gt config get default_host --show-source
+# Read an instance or account setting
+$ gt config get ssh_host --host https://gitea.com
+$ gt config get ssh_key --host https://gitea.com --user alice`,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			snapshot, err := a.deps.Settings.Load()
 			if err != nil {
 				return err
 			}
-			preferences, sources, err := a.effectivePreferences(snapshot)
+			values, sources, err := a.settingValues(snapshot)
 			if err != nil {
 				return err
 			}
-			if _, exists := snapshot.Hosts.Hosts[preferences.DefaultHost]; a.options.user != "" && !exists {
-				return clierr.Wrap(clierr.Usage, errors.New("instance is not configured; run gt auth login first"))
-			}
-			values := map[string]any{
-				"version": preferences.Version, "default_host": preferences.DefaultHost,
-				"git_protocol": preferences.GitProtocol, "editor": preferences.Editor,
-				"prompt": preferences.Prompt, "pager": preferences.Pager,
-				"browser": preferences.Browser, "color": preferences.Color,
-				"remote": preferences.Remote,
-			}
-			if host, exists := snapshot.Hosts.Hosts[preferences.DefaultHost]; a.options.host != "" && exists {
-				for key, value := range map[string]any{"ssh_host": host.SSHHost, "insecure": host.Insecure, "oauth_client_id": host.OAuthClientID} {
-					values[key] = value
-					sources[key] = "hosts.yml " + preferences.DefaultHost
-				}
-				if a.options.user != "" {
-					user, exists := matchAccount(host.Users, a.options.user)
-					if !exists {
-						return clierr.Wrap(clierr.Usage, errors.New("account is not configured on the selected instance"))
-					}
-					account := host.Users[user]
-					for key, value := range map[string]any{"ssh_key": account.SSHKey, "ssh_agent": account.SSHAgent, "ssh_certificate_principal": account.SSHCertPrincipal, "ssh_key_fingerprint": account.SSHKeyFingerprint} {
-						values[key] = value
-						sources[key] = "hosts.yml " + preferences.DefaultHost + " user " + user
-					}
-				}
-			}
-			if len(args) > 0 {
-				value, ok := values[args[0]]
-				if !ok {
-					return clierr.Wrap(clierr.Usage, fmt.Errorf("unknown preference %q", args[0]))
-				}
-				values = map[string]any{args[0]: value}
+			value, ok := values[args[0]]
+			if !ok {
+				return unknownSetting(args[0])
 			}
 			if a.options.json != "" {
-				if source {
-					results := map[string]any{}
-					for key, value := range values {
-						origin := sources[key]
-						if origin == "" {
-							origin = "default"
-						}
-						results[key] = struct {
-							Value  any    `json:"value"`
-							Source string `json:"source"`
-						}{value, origin}
-					}
-					return a.writeJSON(cmd, results)
-				}
-				return a.writeJSON(cmd, values)
+				return a.writeSettingsJSON(cmd, map[string]any{args[0]: value}, sources, getSource)
 			}
-			keys := make([]string, 0, len(values))
-			for key := range values {
-				keys = append(keys, key)
+			line := fmt.Sprint(value)
+			if getSource {
+				line += "\t" + settingSource(sources, args[0])
 			}
-			sort.Strings(keys)
-			for _, key := range keys {
-				suffix := ""
-				if source {
-					origin := "default"
-					if sources[key] != "" {
-						origin = sources[key]
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), line)
+			return err
+		},
+	}
+	get.Flags().BoolVar(&getSource, "show-source", false, "Also print where the value comes from")
+	group.AddCommand(get)
+	var listSource bool
+	list := &cobra.Command{
+		Use: "list", Short: "List settings and their values", Args: argsExact(0),
+		Example: `$ gt config list
+# Include the settings of an instance and where each value comes from
+$ gt config list --host https://gitea.com --show-source`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			snapshot, err := a.deps.Settings.Load()
+			if err != nil {
+				return err
+			}
+			values, sources, err := a.settingValues(snapshot)
+			if err != nil {
+				return err
+			}
+			if a.options.json != "" {
+				return a.writeSettingsJSON(cmd, values, sources, listSource)
+			}
+			items := make([]configSetting, 0, len(values))
+			for _, key := range slices.Sorted(maps.Keys(values)) {
+				items = append(items, configSetting{key, values[key], settingSource(sources, key)})
+			}
+			columns := []terminal.Column{{Header: "Key"}, {Header: "Value", Flex: true}}
+			if listSource {
+				columns = append(columns, terminal.Column{Header: "Source"})
+			}
+			return writeTable(a, cmd, items, listSpec[configSetting]{
+				Columns: columns,
+				Row: func(item configSetting) []terminal.Cell {
+					row := []terminal.Cell{{Text: item.Key}, {Text: fmt.Sprint(item.Value)}}
+					if listSource {
+						row = append(row, terminal.Cell{Text: item.Source, Muted: true})
 					}
-					suffix = "\t" + origin
-				}
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%v%s\n", key, values[key], suffix); err != nil {
+					return row
+				},
+			}, listPage{Number: 1})
+		},
+	}
+	list.Flags().BoolVar(&listSource, "show-source", false, "Show where each value comes from")
+	group.AddCommand(list)
+	group.AddCommand(&cobra.Command{
+		Use: "set <key> <value>", Short: "Change a setting", Args: argsExact(2), ValidArgsFunction: a.completeConfig,
+		Annotations: textOutput("config set does not return a resource"),
+		Example: `$ gt config set editor "code --wait"
+$ gt config set git_protocol ssh
+# Keep raw markdown and plain IDs on a terminal
+$ gt config set markdown raw
+$ gt config set hyperlinks never
+# Change an instance or account setting
+$ gt config set ssh_host git.example.com:2222 --host https://example.com
+$ gt config set ssh_key ~/.ssh/id_ed25519 --host https://example.com --user alice`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			key, value := args[0], args[1]
+			if a.options.user != "" && a.options.host == "" {
+				return clierr.Wrap(clierr.Usage, errors.New("account settings require both --host and --user"))
+			}
+			if a.options.host == "" {
+				value, err := a.setPreference(key, value)
+				if err != nil {
 					return err
 				}
+				a.reportSet(cmd, key, value, "")
+				if key == "default_host" && value != "" {
+					a.warnWithoutAccount(cmd)
+				}
+				return nil
 			}
-			return nil
-		}
-		group.AddCommand(command)
-	}
-	group.AddCommand(&cobra.Command{Use: "set <key> <value>", Short: "Set a preference, or an instance setting with --host", Annotations: textOutput("config set does not return a resource"), Args: argsExact(2), RunE: func(_ *cobra.Command, args []string) error {
-		if a.options.user != "" && a.options.host == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("account settings require both --host and --user"))
-		}
-		if a.options.host != "" {
-			instance, err := settings.NormalizeHost(a.options.host)
+			instance, err := a.setInstanceSetting(key, value)
 			if err != nil {
-				return clierr.Wrap(clierr.Usage, err)
+				return err
 			}
-			return a.deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
-				host, exists := s.Hosts.Hosts[instance]
-				if !exists {
-					return clierr.Wrap(clierr.Usage, errors.New("instance is not configured; run gt auth login first"))
-				}
-				if a.options.user != "" {
-					user, exists := matchAccount(host.Users, a.options.user)
-					if !exists {
-						return clierr.Wrap(clierr.Usage, errors.New("account is not configured on the selected instance"))
-					}
-					account := host.Users[user]
-					switch args[0] {
-					case "ssh_key":
-						account.SSHKey = args[1]
-					case "ssh_agent":
-						if args[1] != "true" && args[1] != "false" {
-							return clierr.Wrap(clierr.Usage, errors.New("ssh_agent must be true or false"))
-						}
-						account.SSHAgent = args[1] == "true"
-					case "ssh_certificate_principal":
-						account.SSHCertPrincipal = args[1]
-					case "ssh_key_fingerprint":
-						account.SSHKeyFingerprint = args[1]
-					default:
-						return clierr.Wrap(clierr.Usage, errors.New("supported account settings: ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint"))
-					}
-					host.Users[user] = account
-					s.Hosts.Hosts[instance] = host
-					return clierr.Wrap(clierr.Usage, s.Validate())
-				}
-				switch args[0] {
-				case "git_protocol":
-					host.GitProtocol = args[1]
-				case "ssh_host":
-					host.SSHHost = args[1]
-				case "insecure":
-					if args[1] != "true" && args[1] != "false" {
-						return clierr.Wrap(clierr.Usage, errors.New("insecure must be true or false"))
-					}
-					host.Insecure = args[1] == "true"
-				case "oauth_client_id":
-					host.OAuthClientID = args[1]
-				default:
-					return clierr.Wrap(clierr.Usage, fmt.Errorf("preference %q cannot be set per instance; supported keys: git_protocol, ssh_host, insecure, oauth_client_id", args[0]))
-				}
-				s.Hosts.Hosts[instance] = host
-				return clierr.Wrap(clierr.Usage, s.Validate())
-			})
-		}
-		return a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
-			p := &s.Preferences
-			switch args[0] {
-			case "default_host":
-				if args[1] == "" {
-					p.DefaultHost = ""
-					break
-				}
-				normalized, err := settings.NormalizeHost(args[1])
-				if err != nil {
-					return clierr.Wrap(clierr.Usage, err)
-				}
-				p.DefaultHost = normalized
-			case "git_protocol":
-				p.GitProtocol = args[1]
-			case "editor":
-				p.Editor = args[1]
-			case "prompt":
-				p.Prompt = args[1]
-			case "pager":
-				p.Pager = args[1]
-			case "browser":
-				p.Browser = args[1]
-			case "color":
-				p.Color = args[1]
-			case "remote":
-				p.Remote = args[1]
-			default:
-				return clierr.Wrap(clierr.Usage, fmt.Errorf("unknown or immutable preference %q", args[0]))
+			scope := " for " + instance
+			if a.options.user != "" {
+				scope = " for " + a.options.user + " on " + instance
 			}
-			return clierr.Wrap(clierr.Usage, s.Validate())
-		})
-	}})
+			a.reportSet(cmd, key, value, scope)
+			return nil
+		},
+	})
 	return group
 }
 
-func (a *application) aliasCommand() *cobra.Command {
-	group := &cobra.Command{Use: "alias", Short: "Manage shortcuts to built-in commands"}
-	group.AddCommand(&cobra.Command{Use: "set <name> <expansion>", Short: "Define a command alias", Annotations: textOutput("alias set does not return a resource"), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) error {
-		return a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
-			s.Preferences.Aliases[args[0]] = args[1]
-			return clierr.Wrap(clierr.Usage, aliases.Check(args[0], s.Preferences.Aliases, builtins(cmd.Root())))
-		})
-	}})
-	group.AddCommand(&cobra.Command{Use: "delete <name>", Short: "Remove a command alias", Annotations: textOutput("alias deletion does not return a resource"), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		return a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
-			if _, ok := s.Preferences.Aliases[args[0]]; !ok {
-				return clierr.Wrap(clierr.Usage, errors.New("alias does not exist"))
+// settingSource names where the value of key comes from.
+func settingSource(sources map[string]string, key string) string {
+	if source := sources[key]; source != "" {
+		return source
+	}
+	return "default"
+}
+
+// writeSettingsJSON writes settings as a key-value object, or with source as objects of value and source.
+func (a *application) writeSettingsJSON(cmd *cobra.Command, values map[string]any, sources map[string]string, source bool) error {
+	if !source {
+		return a.writeJSON(cmd, values)
+	}
+	type sourced struct {
+		Value  any    `json:"value"`
+		Source string `json:"source"`
+	}
+	results := map[string]sourced{}
+	for key, value := range values {
+		results[key] = sourced{value, settingSource(sources, key)}
+	}
+	return a.writeJSON(cmd, results)
+}
+
+// reportSet confirms a changed setting; scope names the instance or account it belongs to.
+func (a *application) reportSet(cmd *cobra.Command, key, value, scope string) {
+	if value == "" {
+		a.done(cmd, "Cleared %s%s", key, scope)
+		return
+	}
+	a.done(cmd, "Set %s%s to %s", key, scope, value)
+}
+
+// warnWithoutAccount points out a default_host that has no account to act as yet.
+func (a *application) warnWithoutAccount(cmd *cobra.Command) {
+	snapshot, err := a.deps.Settings.Load()
+	if host := snapshot.Preferences.DefaultHost; err == nil && len(snapshot.Hosts.Hosts[host].Users) == 0 {
+		a.warn(cmd, "No account on %s yet; log in with: gt auth login --host %s", host, host)
+	}
+}
+
+// setPreference changes a preference in config.yml and returns the stored value, such as a
+// normalized default_host.
+func (a *application) setPreference(key, value string) (string, error) {
+	return value, a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
+		p := &s.Preferences
+		switch key {
+		case "default_host":
+			if value != "" {
+				normalized, err := settings.ResolveHost(value, s.Hosts.Hosts)
+				if err != nil {
+					return clierr.Wrap(clierr.Usage, err)
+				}
+				value = normalized
 			}
-			delete(s.Preferences.Aliases, args[0])
+			p.DefaultHost = value
+		case "git_protocol":
+			p.GitProtocol = value
+		case "editor":
+			p.Editor = value
+		case "prompt":
+			p.Prompt = value
+		case "pager":
+			p.Pager = value
+		case "browser":
+			p.Browser = value
+		case "color":
+			p.Color = value
+		case "hyperlinks":
+			p.Hyperlinks = value
+		case "markdown":
+			p.Markdown = value
+		case "remote":
+			p.Remote = value
+		case "user":
+			return clierr.Wrap(clierr.Usage, errors.New("the active account changes with gt auth switch"))
+		default:
+			if slices.Contains(instanceKeys, key) || slices.Contains(accountKeys, key) {
+				return unknownSetting(key)
+			}
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("unknown setting %q; preferences: %s", key, strings.Join(preferenceKeys, ", ")))
+		}
+		return clierr.Wrap(clierr.Usage, s.Validate())
+	})
+}
+
+// setInstanceSetting changes a setting of the --host instance in hosts.yml, or with --user one of its
+// account's settings, and returns the instance.
+func (a *application) setInstanceSetting(key, value string) (string, error) {
+	var instance string
+	return instance, a.deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
+		var err error
+		if instance, err = settings.ResolveHost(a.options.host, s.Hosts.Hosts); err != nil {
+			return clierr.Wrap(clierr.Usage, err)
+		}
+		host, exists := s.Hosts.Hosts[instance]
+		if !exists {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("instance %s is not configured; run gt auth login --host %s", instance, instance))
+		}
+		if a.options.user != "" {
+			user, exists := matchAccount(host.Users, a.options.user)
+			if !exists {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("account %q is not logged in on %s (accounts: %s)", a.options.user, instance, accountNames(host.Users)))
+			}
+			account := host.Users[user]
+			switch key {
+			case "ssh_key":
+				account.SSHKey = value
+			case "ssh_agent":
+				if value != "true" && value != "false" {
+					return clierr.Wrap(clierr.Usage, errors.New("ssh_agent must be true or false"))
+				}
+				account.SSHAgent = value == "true"
+			case "ssh_certificate_principal":
+				account.SSHCertPrincipal = value
+			case "ssh_key_fingerprint":
+				account.SSHKeyFingerprint = value
+			default:
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("%q is not an account setting; account settings: %s", key, strings.Join(accountKeys, ", ")))
+			}
+			host.Users[user] = account
+			s.Hosts.Hosts[instance] = host
+			return clierr.Wrap(clierr.Usage, s.Validate())
+		}
+		switch key {
+		case "git_protocol":
+			host.GitProtocol = value
+		case "ssh_host":
+			host.SSHHost = value
+		case "insecure":
+			if value != "true" && value != "false" {
+				return clierr.Wrap(clierr.Usage, errors.New("insecure must be true or false"))
+			}
+			host.Insecure = value == "true"
+		case "oauth_client_id":
+			host.OAuthClientID = value
+		case "user":
+			return clierr.Wrap(clierr.Usage, errors.New("the active account changes with gt auth switch"))
+		default:
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("%q is not an instance setting; instance settings: git_protocol, insecure, oauth_client_id, ssh_host", key))
+		}
+		s.Hosts.Hosts[instance] = host
+		return clierr.Wrap(clierr.Usage, s.Validate())
+	})
+}
+
+func (a *application) aliasCommand() *cobra.Command {
+	group := &cobra.Command{Use: "alias", Short: "Create shortcuts for gt commands", Long: `Create shortcuts for gt commands.
+
+An alias expands to a gt command with its arguments before gt runs it: after
+gt alias set il "issue list --label bug", gt il --state all runs
+gt issue list --label bug --state all. $1, $2 and so on in the expansion take the
+arguments in that position; other arguments follow the expansion. Aliases never run a
+shell, and built-in commands always win over an alias of the same name.`}
+	var clobber bool
+	set := &cobra.Command{
+		Use: "set <name> <expansion>", Short: "Create a shortcut for a gt command",
+		Annotations: textOutput("alias set does not return a resource"),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 2 {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("the expansion must be one argument; quote it: gt alias set %s %q", args[0], strings.Join(args[1:], " ")))
+			}
+			return argsExact(2)(cmd, args)
+		},
+		Example: `# gt il runs gt issue list --label bug
+$ gt alias set il "issue list --label bug"
+# $1 takes the first argument: gt review 13 runs gt pr review 13 --approve
+$ gt alias set review 'pr review $1 --approve'
+# Replace an existing alias
+$ gt alias set il "issue list --assignee @me" --clobber`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, expansion := args[0], strings.TrimPrefix(strings.TrimSpace(args[1]), "gt ")
+			var previous string
+			err := a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
+				previous = s.Preferences.Aliases[name]
+				if previous != "" && !clobber {
+					return fmt.Errorf("alias %s already expands to %q; replace it with --clobber", name, previous)
+				}
+				s.Preferences.Aliases[name] = expansion
+				return clierr.Wrap(clierr.Usage, aliases.Check(name, s.Preferences.Aliases, builtins(cmd.Root())))
+			})
+			if err != nil {
+				return err
+			}
+			if previous != "" {
+				a.done(cmd, "Changed alias %s from %q to %q", name, previous, expansion)
+			} else {
+				a.done(cmd, "Added alias %s for %q", name, expansion)
+			}
 			return nil
-		})
-	}})
-	group.AddCommand(&cobra.Command{Use: "list", Short: "List command aliases", Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		s, err := a.deps.Settings.Load()
-		if err != nil {
-			return err
-		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, s.Preferences.Aliases)
-		}
-		names := make([]string, 0, len(s.Preferences.Aliases))
-		for name := range s.Preferences.Aliases {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		return a.writeHuman(cmd, table(names, func(name string) []terminal.Cell { return terminal.Row(name, s.Preferences.Aliases[name]) }, a.colorEnabled()))
-	}})
+		},
+	}
+	set.Flags().BoolVar(&clobber, "clobber", false, "Replace an existing alias of the same name")
+	set.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("%w; quote an expansion with flags: gt alias set il \"issue list --state all\"", err))
+	})
+	group.AddCommand(set)
+	var all bool
+	remove := &cobra.Command{
+		Use: "delete [<name>...]", Short: "Delete shortcuts", ValidArgsFunction: a.completeAliases,
+		Annotations: textOutput("alias deletion does not return a resource"),
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) == 0 && !all {
+				return clierr.Wrap(clierr.Usage, errors.New("name the aliases to delete, or pass --all"))
+			}
+			if len(args) > 0 && all {
+				return clierr.Wrap(clierr.Usage, errors.New("alias names and --all are mutually exclusive"))
+			}
+			return nil
+		},
+		Example: "$ gt alias delete il\n$ gt alias delete il review\n$ gt alias delete --all",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			deleted := map[string]string{}
+			err := a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
+				names := args
+				if all {
+					names = slices.Collect(maps.Keys(s.Preferences.Aliases))
+				}
+				var missing []string
+				for _, name := range names {
+					expansion, ok := s.Preferences.Aliases[name]
+					if !ok {
+						missing = append(missing, strconv.Quote(name))
+						continue
+					}
+					deleted[name] = expansion
+					delete(s.Preferences.Aliases, name)
+				}
+				if len(missing) > 0 {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("no alias named %s; gt alias list shows them", strings.Join(missing, ", ")))
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			if len(deleted) == 0 {
+				a.warn(cmd, "No aliases to delete")
+			}
+			for _, name := range slices.Sorted(maps.Keys(deleted)) {
+				a.done(cmd, "Deleted alias %s (%s)", name, deleted[name])
+			}
+			return nil
+		},
+	}
+	remove.Flags().BoolVar(&all, "all", false, "Delete every alias")
+	group.AddCommand(remove)
+	group.AddCommand(&cobra.Command{
+		Use: "list", Short: "List shortcuts", Args: argsExact(0),
+		Example: "$ gt alias list\n# Print the expansion of one alias\n$ gt alias list --jq .il",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := a.deps.Settings.Load()
+			if err != nil {
+				return err
+			}
+			if a.options.json != "" {
+				return a.writeJSON(cmd, s.Preferences.Aliases)
+			}
+			return writeTable(a, cmd, slices.Sorted(maps.Keys(s.Preferences.Aliases)), listSpec[string]{
+				Columns: []terminal.Column{{Header: "Name"}, {Header: "Expansion", Flex: true}},
+				Row: func(name string) []terminal.Cell {
+					return []terminal.Cell{{Text: name, Bold: true}, {Text: s.Preferences.Aliases[name]}}
+				},
+				Empty: "no aliases configured; create one with: gt alias set <name> <expansion>",
+			}, listPage{Number: 1})
+		},
+	})
 	return group
 }

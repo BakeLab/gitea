@@ -107,21 +107,48 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 
 func (a *application) setupGitCommand() *cobra.Command {
 	var local, keepHelpers bool
-	command := &cobra.Command{Use: "setup-git", Short: "Explicitly register gt as a scoped Git credential helper", Annotations: textOutput("setup-git configures Git"), Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		target, err := a.resolveTarget(cmd.Context(), false, false)
-		if err != nil {
-			return err
-		}
-		executable, configDir, err := a.credentialHelper()
-		if err != nil {
-			return err
-		}
-		pinned, _ := a.selectedUser()
-		return git.SetupCredentials(cmd.Context(), a.deps.Git, git.CredentialSetup{Directory: a.options.cwd, Local: local, KeepHelpers: keepHelpers, Instance: target.Host, Executable: executable, User: pinned, ConfigDirectory: configDir})
-	}}
+	command := &cobra.Command{
+		Use: "setup-git", Short: "Configure git to use gt for credentials", Args: argsExact(0),
+		Annotations: textOutput("setup-git configures Git"),
+		Long: `Configure git to ask gt for the credentials of an instance, so that git push and fetch
+over HTTPS use the active account, or the account of --user. gt's own clone and checkout
+commands do not need this.
+
+Other credential helpers, such as a system keychain, are turned off for the instance:
+otherwise they answer first and keep a copy of gt's token. --keep-helpers keeps them.`,
+		Example: `$ gt auth setup-git
+$ gt auth setup-git --host gitea.com
+# Only for the current repository, always as alice
+$ gt auth setup-git --local --user alice`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			t, err := a.instanceTarget(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return a.setupGit(cmd, t.Host, local, keepHelpers)
+		},
+	}
 	command.Flags().BoolVar(&local, "local", false, "Configure only the current Git repository instead of global Git configuration")
 	command.Flags().BoolVar(&keepHelpers, "keep-helpers", false, "Keep other credential helpers for the instance; they are asked first and store gt's token")
 	return command
+}
+
+// setupGit configures Git to ask gt for the credentials of instance, globally or in the repository.
+func (a *application) setupGit(cmd *cobra.Command, instance string, local, keepHelpers bool) error {
+	executable, configDir, err := a.credentialHelper()
+	if err != nil {
+		return err
+	}
+	pinned, _ := a.selectedUser()
+	if err := git.SetupCredentials(cmd.Context(), a.deps.Git, git.CredentialSetup{Directory: a.options.cwd, Local: local, KeepHelpers: keepHelpers, Instance: instance, Executable: executable, User: pinned, ConfigDirectory: configDir}); err != nil {
+		return err
+	}
+	scope := "global git configuration"
+	if local {
+		scope = "this repository"
+	}
+	a.done(cmd, "Configured git to use gt for %s (%s)", instance, scope)
+	return nil
 }
 
 // credentialHelper locates gt's executable and absolute configuration directory for Git's credential helper.

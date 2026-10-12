@@ -30,7 +30,13 @@ func NewManager(settingsStore *settings.Store, credentials *Store) (Manager, err
 type HostOptions struct {
 	OAuthClientID string
 	Insecure      bool
+	// Replace lets a registration replace the metadata and stored credential of an account that is
+	// already configured, as when logging in again with a new token.
+	Replace bool
 }
+
+// ErrAccountExists rejects a registration of a configured account without HostOptions.Replace.
+var ErrAccountExists = errors.New("account already configured")
 
 // Register publishes account metadata and compensates credential writes on failure.
 func (m Manager) Register(instance, user, backend, method string, options HostOptions, credential Credential) error {
@@ -52,15 +58,34 @@ func (m Manager) register(instance, user string, account settings.Account, optio
 		if host.Users == nil {
 			host.Users = map[string]settings.Account{}
 		}
-		if _, exists := host.Users[user]; exists {
-			return nil, errors.New("account already configured; logout before authenticating again")
+		previous, exists := host.Users[user]
+		if exists && !options.Replace {
+			return nil, ErrAccountExists
 		}
-		var rollback func() error
+		var undo []func() error
+		rollback := func() error {
+			var err error
+			for i := len(undo) - 1; i >= 0; i-- {
+				err = errors.Join(err, undo[i]())
+			}
+			return err
+		}
+		// A replaced token is restored if publishing fails, and removed from a store the account leaves.
+		if exists && !previous.Tokenless() {
+			if old, err := m.credentials.Load(instance, user, previous.CredentialStore); err == nil {
+				undo = append(undo, func() error { return m.credentials.Save(instance, user, previous.CredentialStore, old) })
+			}
+			if credential == nil || previous.CredentialStore != account.CredentialStore {
+				if err := m.credentials.Delete(instance, user, previous.CredentialStore); err != nil {
+					return nil, err
+				}
+			}
+		}
 		if credential != nil {
 			if err := m.credentials.Save(instance, user, account.CredentialStore, *credential); err != nil {
-				return nil, err
+				return nil, errors.Join(err, rollback())
 			}
-			rollback = func() error { return m.credentials.Delete(instance, user, account.CredentialStore) }
+			undo = append(undo, func() error { return m.credentials.Delete(instance, user, account.CredentialStore) })
 		}
 		host.Users[user] = account
 		host.User = user

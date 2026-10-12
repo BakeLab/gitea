@@ -52,6 +52,8 @@ type Preferences struct {
 	Pager       string            `yaml:"pager,omitempty" json:"pager"`
 	Browser     string            `yaml:"browser,omitempty" json:"browser"`
 	Color       string            `yaml:"color,omitempty" json:"color"`
+	Hyperlinks  string            `yaml:"hyperlinks,omitempty" json:"hyperlinks"`
+	Markdown    string            `yaml:"markdown,omitempty" json:"markdown"`
 	Remote      string            `yaml:"remote,omitempty" json:"remote"`
 	Aliases     map[string]string `yaml:"aliases,omitempty" json:"aliases"`
 }
@@ -114,7 +116,7 @@ func New(dir string) *Store {
 
 // Defaults returns a fresh preferences value with built-in settings.
 func Defaults() Preferences {
-	return Preferences{Version: Version, GitProtocol: "https", Prompt: "enabled", Color: "auto", Aliases: map[string]string{}}
+	return Preferences{Version: Version, GitProtocol: "https", Prompt: "enabled", Color: "auto", Hyperlinks: "auto", Markdown: "auto", Aliases: map[string]string{}}
 }
 
 // stored omits built-in defaults so that only explicit settings are persisted.
@@ -128,6 +130,12 @@ func (p Preferences) stored() Preferences {
 	}
 	if p.Color == defaults.Color {
 		p.Color = ""
+	}
+	if p.Hyperlinks == defaults.Hyperlinks {
+		p.Hyperlinks = ""
+	}
+	if p.Markdown == defaults.Markdown {
+		p.Markdown = ""
 	}
 	return p
 }
@@ -246,6 +254,12 @@ func (s Snapshot) Validate() error {
 	}
 	if p.Color != "auto" && p.Color != "always" && p.Color != "never" {
 		return errors.New("color must be auto, always, or never")
+	}
+	if p.Hyperlinks != "auto" && p.Hyperlinks != "always" && p.Hyperlinks != "never" {
+		return errors.New("hyperlinks must be auto, always, or never")
+	}
+	if p.Markdown != "auto" && p.Markdown != "raw" {
+		return errors.New("markdown must be auto or raw")
 	}
 	if p.DefaultHost != "" {
 		normalized, err := NormalizeHost(p.DefaultHost)

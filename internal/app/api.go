@@ -5,14 +5,17 @@ package app
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -108,13 +111,51 @@ func apiHeaders(values []string) (http.Header, error) {
 	return headers, nil
 }
 
+// apiLong documents gt api like gh api: endpoints, placeholders, fields, pagination and output.
+const apiLong = `Make an authenticated request to the Gitea API of the selected instance and print
+the response.
+
+The endpoint is a path under /api/v1, such as repos/{owner}/{repo}/issues, or a URL of
+the instance's API. The placeholders {owner} and {repo} take the repository of the
+current directory or --repo, and {branch} the checked-out Git branch.
+
+The method is GET, or POST when fields or --input supply a request body; -X selects
+another. Fields become query parameters of GET and HEAD requests and a JSON body
+otherwise:
+
+  -f, --raw-field name=value   a string value
+  -F, --field name=value       a typed value: true, false, null, numbers, arrays and
+                               objects are JSON, @FILE reads a file and @- stdin
+
+--paginate follows the next-page links of a GET request and prints every page on its
+own line. --jq filters each JSON response with a jq expression and prints strings
+without quotes; jq does not need to be installed.
+
+On a terminal, JSON responses are indented and colored. A response outside 2xx prints
+its body, then fails with the HTTP status.`
+
+// apiExamples are the examples of gt api.
+const apiExamples = `# The login of the authenticated account
+$ gt api user --jq .login
+# Open issues of the current repository, as number and title
+$ gt api 'repos/{owner}/{repo}/issues?state=open' --jq '.[] | "\(.number) \(.title)"'
+# Create an issue: -f sends strings, -F typed values
+$ gt api repos/{owner}/{repo}/issues -f title="Crash on start" -F labels='[3]'
+# Every page of the account's repositories
+$ gt api user/repos --paginate --jq '.[].full_name'
+# Send a JSON body from a file
+$ gt api -X PATCH repos/alice/project --input settings.json`
+
 func (a *application) apiCommand() *cobra.Command {
 	var method, input, output string
 	var raw, typed, headerValues []string
-	var include, paginate bool
+	var include, verbose, paginate, silent bool
 	var maxPages int
-	cmd := &cobra.Command{Use: "api <endpoint>", Short: "Make an authenticated Gitea API request", Annotations: textOutput("api returns raw responses"), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "api <endpoint>", Short: "Make an authenticated Gitea API request", Long: apiLong, Example: apiExamples, Annotations: map[string]string{"gt.text": "api returns raw responses", "gt.rawjson": "true"}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		usage := func(err error) error { return clierr.Wrap(clierr.Usage, err) }
+		if silent && a.options.jq != "" {
+			return usage(errors.New("--silent and --jq are mutually exclusive"))
+		}
 		headers, err := apiHeaders(headerValues)
 		if err != nil {
 			return usage(err)
@@ -210,49 +251,129 @@ func (a *application) apiCommand() *cobra.Command {
 			}
 		}
 		return writeOutput(cmd, output, func(destination io.Writer) error {
+			response := apiResponse{paginate: paginate, query: a.options.jq}
 			if output == "" || output == "-" {
-				destination = terminal.SafeWriter(destination, a.deps.Streams.OutTTY, false)
+				response.tty = a.deps.Streams.OutTTY
+				response.color = response.tty && a.colorEnabled()
 			}
-			return (services.API{Client: target.client}).Visit(cmd.Context(), services.APIOptions{Endpoint: endpoint, Method: method, Body: body, Headers: headers, Paginate: paginate, MaxPages: maxPages}, func(response *http.Response) error {
-				if include {
-					if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "%s %s\n", response.Proto, response.Status); err != nil {
-						return err
-					}
-					keys := make([]string, 0, len(response.Header))
-					for key := range response.Header {
-						keys = append(keys, key)
-					}
-					sort.Strings(keys)
-					for _, key := range keys {
-						for _, value := range response.Header.Values(key) {
-							if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "%s: %s\n", key, value); err != nil {
-								return err
-							}
-						}
-					}
-					if _, err := fmt.Fprintln(cmd.ErrOrStderr()); err != nil {
+			return (services.API{Client: target.client}).Visit(cmd.Context(), services.APIOptions{Endpoint: endpoint, Method: method, Body: body, Headers: headers, Paginate: paginate, MaxPages: maxPages}, func(r *http.Response) error {
+				if verbose {
+					if err := writeRequestHead(cmd.ErrOrStderr(), r.Request); err != nil {
 						return err
 					}
 				}
-				if _, err := io.Copy(destination, response.Body); err != nil {
+				if include || verbose {
+					if err := writeResponseHead(cmd.ErrOrStderr(), r, verbose); err != nil {
+						return err
+					}
+				}
+				if silent {
+					_, err := io.Copy(io.Discard, r.Body)
 					return err
 				}
-				if paginate {
-					_, err := fmt.Fprintln(destination)
-					return err
-				}
-				return nil
+				return response.write(destination, r)
 			})
 		})
 	}}
-	cmd.Flags().StringVarP(&method, "method", "X", "GET", "HTTP method")
-	cmd.Flags().StringVar(&input, "input", "", "Read request body from a file or stdin (-)")
-	cmd.Flags().StringArrayVarP(&headerValues, "header", "H", nil, "Request header: Name: value")
-	cmd.Flags().StringArrayVarP(&raw, "raw-field", "f", nil, "String request field: name=value")
-	cmd.Flags().StringArrayVarP(&typed, "field", "F", nil, "JSON request field: name=value; @PATH or @- reads file text")
-	cmd.Flags().StringVar(&output, "output-file", "", "Write the complete response to a new file")
-	cmd.Flags().BoolVar(&include, "include", false, "Print response status and headers to stderr")
-	cmd.Flags().BoolVar(&paginate, "paginate", false, "Follow scoped next-page links; separate raw pages with newlines")
-	cmd.Flags().IntVar(&maxPages, "max-pages", 1000, "Maximum pages with --paginate")
+	cmd.Flags().StringVarP(&method, "method", "X", "GET", "HTTP `method`")
+	cmd.Flags().StringVar(&input, "input", "", "Read the request body from a `file`, or stdin with -")
+	cmd.Flags().StringArrayVarP(&headerValues, "header", "H", nil, "Add an HTTP request header in `name:value` format")
+	cmd.Flags().StringArrayVarP(&raw, "raw-field", "f", nil, "Add a string parameter in `key=value` format")
+	cmd.Flags().StringArrayVarP(&typed, "field", "F", nil, "Add a typed parameter in `key=value` format; @FILE or @- reads a file or stdin")
+	cmd.Flags().StringVar(&output, "output-file", "", "Write the complete response to a new `file`")
+	cmd.Flags().BoolVarP(&include, "include", "i", false, "Print the response status and headers to stderr")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print the request and the response status and headers to stderr")
+	cmd.Flags().BoolVar(&silent, "silent", false, "Do not print the response body")
+	cmd.Flags().BoolVar(&paginate, "paginate", false, "Follow next-page links and print every page")
+	cmd.Flags().IntVar(&maxPages, "max-pages", 1000, "Stop --paginate after this many pages")
 	return cmd
+}
+
+// apiResponse writes response bodies for gt api: filtered by the jq query, as indented and colored
+// JSON on a terminal, otherwise as received, without terminal controls on a terminal. Output to a
+// terminal, JSON and pages end with a newline.
+type apiResponse struct {
+	tty, color, paginate bool
+	query                string
+}
+
+func (o apiResponse) write(w io.Writer, r *http.Response) error {
+	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	isJSON := mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
+	succeeded := r.StatusCode >= 200 && r.StatusCode < 300
+	if (o.query != "" && succeeded) || (o.tty && isJSON) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			return err
+		}
+		if o.query != "" && succeeded {
+			if !json.Valid(data) {
+				return fmt.Errorf("--jq needs a JSON response, but the response is %s", cmp.Or(mediaType, "not JSON"))
+			}
+			return terminal.JSONOutput{Query: o.query, Pretty: o.tty, Color: o.color}.Write(w, json.RawMessage(data))
+		}
+		if pretty, err := terminal.IndentJSON(data, o.color); err == nil {
+			_, err = io.WriteString(w, pretty)
+			return err
+		}
+		r.Body = io.NopCloser(bytes.NewReader(data))
+	}
+	last := &lastByte{w: terminal.SafeWriter(w, o.tty, false)}
+	if _, err := io.Copy(last, r.Body); err != nil {
+		return err
+	}
+	if last.written && last.b != '\n' && (o.tty || isJSON || o.paginate) {
+		_, err := io.WriteString(w, "\n")
+		return err
+	}
+	return nil
+}
+
+// lastByte remembers the last byte written through it.
+type lastByte struct {
+	w       io.Writer
+	b       byte
+	written bool
+}
+
+func (l *lastByte) Write(p []byte) (int, error) {
+	if len(p) > 0 {
+		l.b, l.written = p[len(p)-1], true
+	}
+	return l.w.Write(p)
+}
+
+// writeResponseHead prints the status line and the sorted headers of r, then a blank line; verbose
+// marks each line with "< " like curl.
+func writeResponseHead(w io.Writer, r *http.Response, verbose bool) error {
+	prefix := ""
+	if verbose {
+		prefix = "< "
+	}
+	return writeHead(w, prefix, r.Proto+" "+r.Status, r.Header)
+}
+
+// writeRequestHead prints the method, URL without query and headers of r marked with "> ", hiding
+// credentials.
+func writeRequestHead(w io.Writer, r *http.Request) error {
+	headers := r.Header.Clone()
+	for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie"} {
+		if headers.Get(name) != "" {
+			headers.Set(name, "(hidden)")
+		}
+	}
+	return writeHead(w, "> ", r.Method+" "+r.URL.Scheme+"://"+r.URL.Host+r.URL.EscapedPath(), headers)
+}
+
+func writeHead(w io.Writer, prefix, first string, headers http.Header) error {
+	var b strings.Builder
+	b.WriteString(prefix + first + "\n")
+	for _, key := range slices.Sorted(maps.Keys(headers)) {
+		for _, value := range headers.Values(key) {
+			b.WriteString(prefix + terminal.SafeLine(key+": "+value) + "\n")
+		}
+	}
+	b.WriteString("\n")
+	_, err := io.WriteString(w, b.String())
+	return err
 }

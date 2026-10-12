@@ -90,6 +90,30 @@ func TestSetupGitCredentialsWorksWithoutAnExistingGlobalFile(t *testing.T) {
 	require.Contains(t, string(data), "auth git-credential")
 }
 
+func TestRejectCredentialsAsksHelpersToEraseTheAccount(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("Git is not installed")
+	}
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	home := t.TempDir()
+	log := filepath.Join(home, "helper.log")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, "gitconfig"))
+	ctx := context.Background()
+	runner := System{}
+	_, err := runner.Output(ctx, home, false, "config", "--global", "credential.helper", "!f() { echo \"op=$1\" >> '"+log+"'; cat >> '"+log+"'; }; f")
+	require.NoError(t, err)
+	require.Empty(t, HelperScope(ctx, runner, home, "http://localhost:3001"))
+	require.NoError(t, RejectCredentials(ctx, runner, home, "http://localhost:3001/gitea", "alice"))
+	data, err := os.ReadFile(log)
+	require.NoError(t, err)
+	require.Equal(t, "op=erase\nprotocol=http\nhost=localhost:3001\nusername=alice\n", string(data))
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	require.NoError(t, SetupCredentials(ctx, runner, CredentialSetup{Directory: home, Instance: "http://localhost:3001", Executable: executable}))
+	require.Equal(t, "global", HelperScope(ctx, runner, home, "http://localhost:3001"))
+	require.Empty(t, HelperScope(ctx, runner, home, "http://localhost:3002"))
+}
+
 func TestGitMissingConfigValueCarriesExitCode(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("Git is not installed")

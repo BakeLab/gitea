@@ -7,6 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,13 +22,17 @@ import (
 type Notification struct {
 	ID         int64  `json:"id"`
 	Repository string `json:"repository"`
-	Title      string `json:"title"`
-	URL        string `json:"url"`
-	Type       string `json:"type"`
-	State      string `json:"state"`
-	Unread     bool   `json:"unread"`
-	Pinned     bool   `json:"pinned"`
-	UpdatedAt  string `json:"updated_at"`
+	// Number is the issue or pull request number of the subject, when it is one.
+	Number    int64  `json:"number,omitempty"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	Type      string `json:"type"`
+	State     string `json:"state"`
+	Unread    bool   `json:"unread"`
+	Pinned    bool   `json:"pinned"`
+	UpdatedAt string `json:"updated_at"`
+	// latestComment is the API URL of the latest comment on the subject.
+	latestComment string
 }
 
 func notificationFrom(thread *gitea.NotificationThread) Notification {
@@ -32,13 +40,30 @@ func notificationFrom(thread *gitea.NotificationThread) Notification {
 	if thread.Repository != nil {
 		result.Repository = thread.Repository.FullName
 	}
-	if thread.Subject != nil {
-		result.Title = thread.Subject.Title
-		result.URL = thread.Subject.HTMLURL
-		result.Type = string(thread.Subject.Type)
-		result.State = string(thread.Subject.State)
+	if subject := thread.Subject; subject != nil {
+		result.Title = subject.Title
+		result.URL = subject.HTMLURL
+		result.Type = string(subject.Type)
+		result.State = string(subject.State)
+		result.latestComment = subject.LatestCommentURL
+		if subject.Type == gitea.NotificationSubjectIssue || subject.Type == gitea.NotificationSubjectPull {
+			result.Number = lastPathNumber(subject.URL)
+		}
 	}
 	return result
+}
+
+// lastPathNumber returns the number that ends the path of a URL, such as 17 of …/issues/17, or 0.
+func lastPathNumber(raw string) int64 {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return 0
+	}
+	number, err := strconv.ParseInt(path.Base(u.Path), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return number
 }
 
 func notificationStatuses(statuses []string) []gitea.NotificationStatus {
@@ -76,22 +101,26 @@ type Notifications struct {
 	Repository string
 }
 
-// List returns a non-nil page of notifications.
-func (s Notifications) List(ctx context.Context, opts NotificationOptions) ([]Notification, error) {
-	threads, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.NotificationThread, *gitea.Response, error) {
-		if s.Repository == "" {
-			return c.Notifications.List(ctx, opts.sdk())
-		}
-		owner, name, err := splitRepository(s.Repository)
+// List returns a non-nil page of notifications and what the server reported about the rest.
+func (s Notifications) List(ctx context.Context, opts NotificationOptions) (Page[Notification], error) {
+	return listPage(opts.Limit, opts.Page, func(limit, page int) ([]Notification, http.Header, error) {
+		window := opts
+		window.Limit, window.Page = limit, page
+		threads, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.NotificationThread, *gitea.Response, error) {
+			if s.Repository == "" {
+				return c.Notifications.List(ctx, window.sdk())
+			}
+			owner, name, err := splitRepository(s.Repository)
+			if err != nil {
+				return nil, nil, err
+			}
+			return c.Notifications.ListByRepo(ctx, owner, name, window.sdk())
+		})
 		if err != nil {
 			return nil, nil, err
 		}
-		return c.Notifications.ListByRepo(ctx, owner, name, opts.sdk())
+		return convertAll(threads, notificationFrom), headerOf(resp), nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return convertAll(threads, notificationFrom), nil
 }
 
 // View retrieves an account-owned notification thread.
@@ -100,13 +129,26 @@ func (s Notifications) View(ctx context.Context, id int64) (Notification, error)
 		return c.Notifications.GetByID(ctx, id)
 	})
 	if err != nil {
-		return Notification{}, err
+		return Notification{}, Classify(err, "notification", strconv.FormatInt(id, 10), "")
 	}
 	item := notificationFrom(thread)
 	if s.Repository != "" && !strings.EqualFold(item.Repository, s.Repository) {
 		return Notification{}, fmt.Errorf("notification %d belongs to %s, not selected repository %s", id, item.Repository, s.Repository)
 	}
 	return item, nil
+}
+
+// LatestComment returns the latest comment on the subject of a notification, or nil without one.
+func (s Notifications) LatestComment(ctx context.Context, item Notification) (*Comment, error) {
+	id := lastPathNumber(item.latestComment)
+	if id == 0 || item.Repository == "" {
+		return nil, nil
+	}
+	comment, err := (Comments{Client: s.Client, Repository: item.Repository}).View(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &comment, nil
 }
 
 // Mark changes the selected notification status.
@@ -151,13 +193,13 @@ func (s Notifications) Watch(ctx context.Context, opts NotificationOptions, inte
 	}
 	seen := map[int64]Notification{}
 	for {
-		items, err := s.List(ctx, opts)
+		listed, err := s.List(ctx, opts)
 		if err != nil {
 			return err
 		}
 		changes := []Notification{}
 		next := map[int64]Notification{}
-		for _, item := range items {
+		for _, item := range listed.Items {
 			next[item.ID] = item
 			if previous, exists := seen[item.ID]; !exists || previous != item {
 				changes = append(changes, item)

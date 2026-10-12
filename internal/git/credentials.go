@@ -6,6 +6,9 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -116,5 +119,59 @@ func SetupCredentials(ctx context.Context, runner Runner, options CredentialSetu
 		}
 	}
 	_, err = runner.Output(ctx, cwd, false, "config", scope, "--add", prefix+"helper", helper)
+	return err
+}
+
+// HelperScope returns where Git is configured to ask gt for credentials of instance: "local" for
+// the repository in dir, "global", or "" when it is not.
+func HelperScope(ctx context.Context, runner Runner, dir, instance string) string {
+	normalized, err := settings.NormalizeHost(instance)
+	if err != nil {
+		return ""
+	}
+	for _, scope := range []string{"local", "global"} {
+		helpers, err := runner.Output(ctx, dir, false, "config", "--"+scope, "--get-all", "credential."+normalized+".helper")
+		if err == nil && strings.Contains(helpers, " auth git-credential ") {
+			return scope
+		}
+	}
+	return ""
+}
+
+// InputRunner runs Git with text on its standard input.
+type InputRunner interface {
+	Input(ctx context.Context, dir, input string, args ...string) (string, error)
+}
+
+// Input runs Git like Output with input on its standard input, without terminal prompts.
+func (s System) Input(ctx context.Context, dir, input string, args ...string) (string, error) {
+	env := s.Env
+	if env == nil {
+		env = os.Environ()
+	}
+	s.Env, s.In = setEnv(env, "GIT_TERMINAL_PROMPT", "0"), strings.NewReader(input)
+	return s.Output(ctx, dir, true, args...)
+}
+
+// RejectCredentials asks Git's credential helpers to erase the credentials they stored for user on
+// instance, such as a copy of gt's token that another helper kept after a push. Runners that cannot
+// send input reject nothing.
+func RejectCredentials(ctx context.Context, runner Runner, dir, instance, user string) error {
+	input, ok := runner.(InputRunner)
+	if !ok {
+		return nil
+	}
+	u, err := url.Parse(instance)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid instance URL %q", instance)
+	}
+	if strings.ContainsAny(user, "\x00\r\n") {
+		return errors.New("invalid account name")
+	}
+	request := "protocol=" + u.Scheme + "\nhost=" + u.Host + "\n"
+	if user != "" {
+		request += "username=" + user + "\n"
+	}
+	_, err = input.Input(ctx, dir, request+"\n", "credential", "reject")
 	return err
 }

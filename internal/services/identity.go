@@ -42,6 +42,30 @@ func CurrentAccount(ctx context.Context, client *transport.Client) (string, erro
 	return account, nil
 }
 
+// TokenScopes returns the scopes of the access token that client authenticates with, such as
+// "all" or "write:repository". Gitea answers only for access tokens.
+func TokenScopes(ctx context.Context, client *transport.Client) ([]string, error) {
+	token, _, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) (*gitea.CurrentAccessToken, *gitea.Response, error) {
+		return c.Users.GetCurrentAccessToken(ctx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	scopes := make([]string, len(token.Scopes))
+	for i, scope := range token.Scopes {
+		scopes[i] = string(scope)
+	}
+	return scopes, nil
+}
+
+// ServerVersion returns the Gitea version of the instance.
+func ServerVersion(ctx context.Context, client *transport.Client) (string, error) {
+	version, _, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) (string, *gitea.Response, error) {
+		return c.Meta.ServerVersion(ctx)
+	})
+	return version, err
+}
+
 // MatchAccount reports whether selected matches the authenticated login.
 // An empty selection accepts any account.
 func MatchAccount(selected, authenticated string) bool {

@@ -105,17 +105,20 @@ func TestNotificationListSendsFilters(t *testing.T) {
 		require.Empty(t, query.Get("before"))
 		_, _ = w.Write([]byte(`[]`))
 	}))
-	items, err := (Notifications{Client: client}).List(context.Background(), NotificationOptions{Limit: 20, Page: 2, Types: []string{"Issue", "Pull"}, Since: &since})
+	page, err := (Notifications{Client: client}).List(context.Background(), NotificationOptions{Limit: 20, Page: 2, Types: []string{"Issue", "Pull"}, Since: &since})
 	require.NoError(t, err)
-	require.Equal(t, []Notification{}, items)
+	require.Equal(t, []Notification{}, page.Items)
 }
 
 func TestNotificationFromMapsServerFields(t *testing.T) {
 	thread := decode[gitea.NotificationThread](t, `{"id":5,"repository":{"full_name":"alice/project"},"unread":true,"pinned":true,
-		"updated_at":"2026-10-02T12:00:00+02:00","subject":{"title":"Fix","html_url":"https://gitea.test/alice/project/pulls/1","type":"Pull","state":"merged"}}`)
+		"updated_at":"2026-10-02T12:00:00+02:00","subject":{"title":"Fix","html_url":"https://gitea.test/alice/project/pulls/1","type":"Pull","state":"merged",
+		"url":"https://gitea.test/api/v1/repos/alice/project/issues/1","latest_comment_url":"https://gitea.test/api/v1/repos/alice/project/issues/comments/9"}}`)
 	require.Equal(t, Notification{
-		ID: 5, Repository: "alice/project", Title: "Fix", URL: "https://gitea.test/alice/project/pulls/1", Type: "Pull", State: "merged",
-		Unread: true, Pinned: true, UpdatedAt: "2026-10-02T12:00:00+02:00",
+		ID: 5, Repository: "alice/project", Number: 1, Title: "Fix", URL: "https://gitea.test/alice/project/pulls/1", Type: "Pull", State: "merged",
+		Unread: true, Pinned: true, UpdatedAt: "2026-10-02T12:00:00+02:00", latestComment: "https://gitea.test/api/v1/repos/alice/project/issues/comments/9",
 	}, notificationFrom(thread))
+	commit := decode[gitea.NotificationThread](t, `{"id":7,"subject":{"type":"Commit","url":"https://gitea.test/api/v1/repos/alice/project/commits/123"}}`)
+	require.Zero(t, notificationFrom(commit).Number)
 	require.Equal(t, Notification{ID: 6}, notificationFrom(decode[gitea.NotificationThread](t, `{"id":6,"repository":null,"subject":null}`)))
 }
