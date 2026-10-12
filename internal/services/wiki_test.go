@@ -75,9 +75,12 @@ func TestWikiListAndRevisionsMapCommits(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/repos/alice/project/wiki/pages":
-			assert.Equal(t, "5", r.URL.Query().Get("limit"))
-			assert.Equal(t, "2", r.URL.Query().Get("page"))
-			_, _ = w.Write([]byte(`[{"title":"Home","html_url":"https://gitea.test/wiki/Home","last_commit":{"sha":"abc","author":{"name":"Alice","email":"author@example.test","date":"2026-10-04T00:00:00Z"}}},{"title":"Draft"}]`))
+			assert.Equal(t, "50", r.URL.Query().Get("limit"))
+			if r.URL.Query().Get("page") != "1" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"title":"Other"},{"title":"Home","html_url":"https://gitea.test/wiki/Home","last_commit":{"sha":"abc","author":{"name":"Alice","email":"author@example.test","date":"2026-10-04T00:00:00Z"}}},{"title":"Draft"}]`))
 		case "/api/v1/repos/alice/project/wiki/revisions/Home":
 			assert.Equal(t, "3", r.URL.Query().Get("page"))
 			_, _ = w.Write([]byte(`{"commits":[{"sha":"abc","message":"Edit","author":{"name":"Alice","email":"author@example.test","date":"2026-10-04T00:00:00Z"}},{"sha":"def","author":null}],"count":2}`))
@@ -86,12 +89,15 @@ func TestWikiListAndRevisionsMapCommits(t *testing.T) {
 		}
 	}))
 	service := Wiki{Client: client, Repository: "alice/project"}
-	pages, err := service.List(context.Background(), 5, 2)
+	pages, err := service.ListPage(context.Background(), 2, 1)
 	require.NoError(t, err)
-	require.Equal(t, []WikiPage{
+	require.Equal(t, Page[WikiPage]{Items: []WikiPage{
+		{Title: "Other"},
 		{Title: "Home", URL: "https://gitea.test/wiki/Home", SHA: "abc", Author: "Alice", UpdatedAt: "2026-10-04T00:00:00Z"},
-		{Title: "Draft"},
-	}, pages)
+	}, More: true, Total: 3, Counted: true}, pages)
+	last, err := service.List(context.Background(), 2, 2)
+	require.NoError(t, err)
+	require.Equal(t, []WikiPage{{Title: "Draft"}}, last)
 	revisions, err := service.Revisions(context.Background(), "Home", 3)
 	require.NoError(t, err)
 	require.Equal(t, []WikiRevision{{SHA: "abc", Message: "Edit", Author: "Alice", CreatedAt: "2026-10-04T00:00:00Z"}, {SHA: "def"}}, revisions)

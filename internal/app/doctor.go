@@ -148,7 +148,7 @@ func (a *application) instanceCheck(ctx context.Context, t target) doctorCheck {
 	if err != nil {
 		return doctorCheck{"Instance", checkFailed, where + ": " + Explain(ctx, a.deps, err).Error(), "check --host, the instance URL and your network"}
 	}
-	return doctorCheck{"Instance", checkPassed, fmt.Sprintf("%s · Gitea %s · %s", where, version, time.Since(start).Round(time.Millisecond)), ""}
+	return doctorCheck{"Instance", checkPassed, fmt.Sprintf("%s · Gitea %s · %dms", where, version, max(time.Since(start).Milliseconds(), 1)), ""}
 }
 
 // accountCheck reports whether the account authenticates, and the scopes of its token.

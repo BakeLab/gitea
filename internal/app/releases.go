@@ -4,6 +4,7 @@
 package app
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -15,209 +16,447 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func releaseRecord(item services.Release) terminal.Record {
-	return terminal.Record{Heading: terminal.Row(item.Tag, item.Title), Lines: []string{item.URL}}
+func (a *application) releaseCommand() *cobra.Command {
+	group := &cobra.Command{
+		Use:   "release",
+		Short: "Manage releases",
+		Long: `Work with the releases of a repository: list and view them with their notes and assets, create,
+edit, publish and delete them, and upload or download their assets.`,
+	}
+	group.AddCommand(a.releaseListCommand(), a.releaseViewCommand(), a.releaseCreateCommand(), a.releaseEditCommand(),
+		a.releasePublishCommand(), a.releaseDeleteCommand(), a.releaseAssetCommand(), a.releaseUploadCommand(), a.releaseDownloadCommand())
+	return group
 }
 
-func releaseRow(item services.Release) []terminal.Cell {
-	status := "released"
+// releaseKind is the type of a release for people: Draft, Pre-release, or Latest when it is the
+// repository's latest release.
+func releaseKind(item services.Release, latest int64) terminal.Cell {
 	switch {
 	case item.Draft:
-		status = "draft"
+		return terminal.Cell{Text: "Draft", Muted: true}
 	case item.Prerelease:
-		status = "prerelease"
+		return terminal.Cell{Text: "Pre-release", Color: "yellow"}
+	case item.ID == latest:
+		return terminal.Cell{Text: "Latest", Color: "green"}
 	}
-	return []terminal.Cell{{Text: item.Tag, Link: item.URL}, {Text: item.Title}, {Text: status}}
+	return terminal.Cell{}
 }
 
-func (a *application) releaseCommand() *cobra.Command {
-	group := &cobra.Command{Use: "release", Short: "Manage repository releases"}
+// releaseTime is when a release was published, or created for a draft.
+func releaseTime(item services.Release) string {
+	if item.PublishedAt != nil && !item.Draft {
+		return *item.PublishedAt
+	}
+	return item.CreatedAt
+}
+
+func (a *application) releaseListCommand() *cobra.Command {
 	var limit, page int
-	list := &cobra.Command{Use: "list", Short: "List releases", Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		target, err := a.resolve(cmd.Context(), true)
-		if err != nil {
-			return err
-		}
-		items, err := (services.Releases{Client: target.client, Repository: target.Repo}).List(cmd.Context(), limit, page)
-		if err != nil {
-			return err
-		}
-		return writeList(a, cmd, items, releaseRow)
-	}}
-	pageFlags(list, &limit, &page)
-	group.AddCommand(list)
-	for _, verb := range []string{"view", "create", "edit", "publish", "delete"} {
-		var tag, title, body, file, targetName string
-		var draft, prerelease, deleteTag, useEditor bool
-		var assetPaths []string
-		command := &cobra.Command{Use: verb + " <tag>", Short: titleCase(verb) + " repository releases", Args: argsExact(1)}
-		if verb == "edit" || verb == "delete" || verb == "publish" {
-			command.Use = verb + " <tag>..."
-			command.Args = usageArgs(cobra.MinimumNArgs(1))
-		}
-		if verb == "create" {
-			command.Use = "create [tag]"
-			command.Args = usageArgs(cobra.MaximumNArgs(1))
-			command.Flags().StringVar(&tag, "tag", "", "Release tag")
-			command.Flags().StringSliceVar(&assetPaths, "asset", nil, "Asset file to upload after creation (repeatable)")
-		}
-		if verb == "create" || verb == "edit" {
-			if verb == "edit" {
-				command.Flags().StringVar(&tag, "tag", "", "Change the release tag (one release only)")
-			}
-			command.Flags().StringVar(&title, "title", "", "Release title (creation defaults to tag)")
-			command.Flags().BoolVar(&useEditor, "editor", false, "Edit release notes in an editor")
-			command.Flags().StringVar(&body, "body", "", "Release notes")
-			command.Flags().StringVar(&file, "body-file", "", "Read notes from file, or - for stdin")
-			command.Flags().StringVar(&targetName, "target", "", "Target branch or commit for the tag")
-			command.Flags().BoolVar(&draft, "draft", false, "Draft release")
-			command.Flags().BoolVar(&prerelease, "prerelease", false, "Prerelease")
-		}
-		if verb == "delete" {
-			command.Flags().BoolVar(&deleteTag, "delete-tag", false, "Delete the associated Git tag too")
-		}
-		command.RunE = func(cmd *cobra.Command, args []string) (runErr error) {
-			var editorDraft terminal.Draft
-			defer finishDraft(&editorDraft, &runErr)
-			if err := validateBodySources(cmd); err != nil {
+	command := &cobra.Command{
+		Use:   "list",
+		Short: "List releases",
+		Example: `$ gt release list
+$ gt release list -R alice/project --json tag,title,draft`,
+		Args: argsExact(0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			target, err := a.resolve(cmd.Context(), true)
+			if err != nil {
 				return err
 			}
-			if useEditor && verb == "edit" && len(args) != 1 {
-				return clierr.Wrap(clierr.Usage, errors.New("--editor requires one release"))
+			result, err := (services.Releases{Client: target.client, Repository: target.Repo}).ListPage(cmd.Context(), limit, page)
+			if err != nil {
+				return err
 			}
-			opts := services.ReleaseOptions{}
-			files, err := openRegularFiles(assetPaths)
+			// Releases come newest first, so the first published one of the first page is the latest.
+			var latest int64
+			for _, item := range result.Items {
+				if page == 1 && !item.Draft && !item.Prerelease {
+					latest = item.ID
+					break
+				}
+			}
+			spec := listSpec[services.Release]{
+				Columns: []terminal.Column{{Header: "Title", Flex: true}, {Header: "Type"}, {Header: "Tag"}, {Header: "Published"}, {Header: "URL", PipedOnly: true}},
+				Row: func(item services.Release) []terminal.Cell {
+					return []terminal.Cell{{Text: cmp.Or(item.Title, item.Tag), Link: item.URL}, releaseKind(item, latest), {Text: item.Tag}, {Time: terminal.ParseTime(releaseTime(item))}, {Text: item.URL}}
+				},
+				Context: "releases in " + target.Repo, Empty: "no releases in " + target.Repo,
+			}
+			return writeTable(a, cmd, result.Items, spec, listPage{Number: page, More: result.More, Total: result.Total, Counted: result.Counted})
+		},
+	}
+	pageFlags(command, &limit, &page)
+	return command
+}
+
+// viewRelease returns the release tagged tag, or the latest release without a tag.
+func viewRelease(cmd *cobra.Command, service services.Releases, tag string) (services.Release, error) {
+	if tag == "" {
+		return service.Latest(cmd.Context())
+	}
+	return service.View(cmd.Context(), tag)
+}
+
+func (a *application) releaseViewCommand() *cobra.Command {
+	var web bool
+	command := &cobra.Command{
+		Use:   "view [<tag>]",
+		Short: "View a release",
+		Long:  "View a release with its notes, rendered on a terminal, and its assets. Without a tag, view the latest release.",
+		Example: `# View the latest release
+$ gt release view
+
+# View a release in the browser
+$ gt release view v1.0.0 --web`,
+		Args: usageArgs(cobra.MaximumNArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := a.resolve(cmd.Context(), true)
+			if err != nil {
+				return err
+			}
+			service := services.Releases{Client: target.client, Repository: target.Repo}
+			tag := ""
+			if len(args) > 0 {
+				tag = args[0]
+			}
+			item, err := viewRelease(cmd, service, tag)
+			if err != nil {
+				return err
+			}
+			if web {
+				return a.openBrowser(cmd, item.URL)
+			}
+			latest := item.ID
+			if tag != "" && a.options.json == "" && !item.Draft && !item.Prerelease {
+				newest, _ := service.Latest(cmd.Context())
+				latest = newest.ID
+			}
+			return writeView(a, cmd, item, func(item services.Release) terminal.View { return a.releaseView(item, latest) })
+		},
+	}
+	command.Flags().BoolVarP(&web, "web", "w", false, "Open the release in the browser")
+	command.ValidArgsFunction = a.completeReleases()
+	return command
+}
+
+// releaseView shows a release with its notes as the body.
+func (a *application) releaseView(item services.Release, latest int64) terminal.View {
+	view := terminal.View{Title: cmp.Or(item.Title, item.Tag), Body: item.Body, Kind: "release", URL: item.URL}
+	if item.Title != "" && item.Title != item.Tag {
+		view.ID = item.Tag
+	}
+	if kind := releaseKind(item, latest); kind.Text != "" {
+		view.Badges = []terminal.Cell{kind}
+	}
+	verb := "released"
+	if item.Draft {
+		verb = "drafted"
+	}
+	var meta []string
+	if when := terminal.ParseTime(releaseTime(item)); !when.IsZero() {
+		meta = append(meta, strings.TrimSpace(item.Author+" "+verb+" this "+terminal.RelativeTime(a.deps.Now(), when)))
+	}
+	if item.Target != "" {
+		meta = append(meta, "target "+item.Target)
+	}
+	view.Meta = strings.Join(meta, " · ")
+	assets := make([]string, len(item.Assets))
+	for i, asset := range item.Assets {
+		assets[i] = fmt.Sprintf("%s (%s)", asset.Name, terminal.Bytes(asset.Size))
+	}
+	view.Fields = []terminal.Field{{Label: "Tag", Value: item.Tag, PipedOnly: true}, {Label: "Assets", Value: strings.Join(assets, ", ")}}
+	return view
+}
+
+// releaseFields are the flags of release create and release edit.
+type releaseFields struct {
+	tag, title, notes, notesFile, target string
+	draft, prerelease, editor            bool
+}
+
+func (f *releaseFields) register(a *application, cmd *cobra.Command) {
+	flags := cmd.Flags()
+	flags.StringVarP(&f.title, "title", "t", "", "Release title")
+	flags.StringVarP(&f.notes, "notes", "n", "", "Release notes")
+	flags.StringVarP(&f.notesFile, "notes-file", "F", "", "Read release notes from a file, or - for standard input")
+	flags.BoolVarP(&f.editor, "editor", "e", false, "Write release notes in an editor")
+	flags.StringVar(&f.target, "target", "", "Branch or commit the tag points to, when it is new")
+	flags.BoolVarP(&f.draft, "draft", "d", false, "Save the release as a draft")
+	flags.BoolVarP(&f.prerelease, "prerelease", "p", false, "Mark the release as a prerelease")
+	flagAliases(cmd, map[string]string{"body": "notes", "body-file": "notes-file"})
+	_ = cmd.RegisterFlagCompletionFunc("target", a.completeBranches())
+}
+
+// options returns the release fields whose flags were passed.
+func (f *releaseFields) options(a *application, cmd *cobra.Command) (services.ReleaseOptions, error) {
+	opts := services.ReleaseOptions{}
+	changed := cmd.Flags().Changed
+	if changed("title") {
+		if strings.TrimSpace(f.title) == "" {
+			return opts, clierr.Wrap(clierr.Usage, errors.New("release title cannot be empty"))
+		}
+		opts.Title = &f.title
+	}
+	if changed("notes") || changed("notes-file") {
+		notes, err := a.readTextSource(cmd, f.notes, f.notesFile, "notes", "notes-file")
+		if err != nil {
+			return opts, err
+		}
+		opts.Body = &notes
+	}
+	for _, field := range []struct {
+		flag  string
+		value *bool
+		into  **bool
+	}{{"draft", &f.draft, &opts.Draft}, {"prerelease", &f.prerelease, &opts.Prerelease}} {
+		if changed(field.flag) {
+			*field.into = field.value
+		}
+	}
+	if changed("target") {
+		opts.Target = &f.target
+	}
+	return opts, nil
+}
+
+func (a *application) releaseCreateCommand() *cobra.Command {
+	var fields releaseFields
+	var assets []string
+	command := &cobra.Command{
+		Use:     "create [<tag>] [<file>...]",
+		Aliases: []string{"new"},
+		Short:   "Create a release",
+		Long: `Create a release for a tag, and upload the files that follow the tag as its assets. Gitea creates
+the tag at --target (the default branch) when it does not exist yet. The title defaults to the tag.`,
+		Example: `# Create a release with notes from a file and two assets
+$ gt release create v1.0.0 dist/gt-linux dist/gt-darwin --notes-file CHANGELOG.md
+
+# Create a draft prerelease of a new tag on a branch
+$ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title "1.1 RC 1"`,
+		Args: usageArgs(cobra.ArbitraryArgs),
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+			var editorDraft terminal.Draft
+			defer finishDraft(&editorDraft, &runErr)
+			if len(args) > 0 {
+				if cmd.Flags().Changed("tag") {
+					return clierr.Wrap(clierr.Usage, errors.New("supply a tag argument or --tag, not both"))
+				}
+				fields.tag, assets = args[0], append(args[1:], assets...)
+			}
+			if err := validateTextSources(cmd, "notes", "notes-file"); err != nil {
+				return err
+			}
+			if fields.tag == "" && fields.notesFile == "-" {
+				return clierr.Wrap(clierr.Usage, errors.New("--notes-file - requires a tag; stdin cannot also supply a prompt"))
+			}
+			files, err := openRegularFiles(assets)
 			defer closeFiles(files)
 			if err != nil {
 				return err
 			}
-			prompted := false
-			if verb == "create" {
-				if len(args) > 0 {
-					if cmd.Flags().Changed("tag") {
-						return clierr.Wrap(clierr.Usage, errors.New("supply a tag argument or --tag, not both"))
-					}
-					tag = args[0]
-				}
-				if tag == "" && file == "-" {
-					return clierr.Wrap(clierr.Usage, errors.New("--body-file - requires a tag; stdin cannot also supply a prompt"))
-				}
-				prompted, err = a.require(cmd, &tag, "tag")
-				if err != nil {
+			opts, err := fields.options(a, cmd)
+			if err != nil {
+				return err
+			}
+			prompted, err := a.requireInput(cmd, &fields.tag, "tag", "Tag", nil)
+			if err != nil {
+				return err
+			}
+			title := cmp.Or(fields.title, fields.tag)
+			opts.Tag, opts.Title, opts.Draft, opts.Prerelease = &fields.tag, &title, &fields.draft, &fields.prerelease
+			target, err := a.resolve(cmd.Context(), true)
+			if err != nil {
+				return err
+			}
+			service := services.Releases{Client: target.client, Repository: target.Repo}
+			if fields.editor {
+				if editorDraft, err = a.editDraft(cmd, ""); err != nil {
 					return err
 				}
-				if title == "" && !cmd.Flags().Changed("title") {
-					title = tag
-				}
-				opts.Tag = &tag
-				opts.Title = &title
-				opts.Draft = &draft
-				opts.Prerelease = &prerelease
+				opts.Body = &editorDraft.Body
 			}
-			if verb == "create" || verb == "edit" {
-				if verb == "edit" && cmd.Flags().Changed("tag") {
-					if len(args) != 1 || strings.TrimSpace(tag) == "" {
-						return clierr.Wrap(clierr.Usage, errors.New("--tag requires one release and a nonempty new tag"))
-					}
-					opts.Tag = &tag
+			if prompted {
+				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Create release " + fields.tag + " in " + target.Repo + "?", DefaultYes: true}); err != nil {
+					return err
 				}
-				if cmd.Flags().Changed("title") {
-					if strings.TrimSpace(title) == "" {
-						return clierr.Wrap(clierr.Usage, errors.New("release title cannot be empty"))
-					}
-					opts.Title = &title
+			}
+			item, err := service.Create(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			kind := "release"
+			if item.Draft {
+				kind = "draft release"
+			}
+			a.done(cmd, "Created %s %s in %s", kind, item.Tag, target.Repo)
+			var failures []error
+			for _, file := range files {
+				name := filepath.Base(file.Name())
+				asset, err := service.UploadAsset(cmd.Context(), item.ID, name, file)
+				if err != nil {
+					failures = append(failures, fmt.Errorf("release %s created; asset %s upload failed: %w", item.Tag, name, err))
+					continue
 				}
-				if cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") {
-					var err error
-					body, err = a.readBody(cmd, body, file)
-					if err != nil {
-						return err
-					}
-					opts.Body = &body
+				item.Assets = append(item.Assets, asset)
+				a.done(cmd, "Uploaded %s (%s)", asset.Name, terminal.Bytes(asset.Size))
+			}
+			if a.options.json != "" {
+				failures = append(failures, a.writeJSON(cmd, item))
+			} else {
+				failures = append(failures, a.printURL(cmd, item.URL))
+			}
+			return errors.Join(failures...)
+		},
+	}
+	fields.register(a, command)
+	command.Flags().StringVar(&fields.tag, "tag", "", "Release tag")
+	_ = command.Flags().MarkHidden("tag")
+	command.Flags().StringSliceVar(&assets, "asset", nil, "File to upload as an asset (repeatable)")
+	command.ValidArgsFunction = a.completeTags()
+	return command
+}
+
+func (a *application) releaseEditCommand() *cobra.Command {
+	var fields releaseFields
+	command := &cobra.Command{
+		Use:   "edit <tag>...",
+		Short: "Edit releases",
+		Example: `$ gt release edit v1.0.0 --title "1.0.0" --notes-file CHANGELOG.md
+$ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
+		Args: usageArgs(cobra.MinimumNArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+			var editorDraft terminal.Draft
+			defer finishDraft(&editorDraft, &runErr)
+			if err := validateTextSources(cmd, "notes", "notes-file"); err != nil {
+				return err
+			}
+			if fields.editor && len(args) != 1 {
+				return clierr.Wrap(clierr.Usage, errors.New("--editor requires one release"))
+			}
+			opts, err := fields.options(a, cmd)
+			if err != nil {
+				return err
+			}
+			if cmd.Flags().Changed("tag") {
+				if len(args) != 1 || strings.TrimSpace(fields.tag) == "" {
+					return clierr.Wrap(clierr.Usage, errors.New("--tag requires one release and a nonempty new tag"))
 				}
-				if cmd.Flags().Changed("target") {
-					opts.Target = &targetName
-				}
-				if cmd.Flags().Changed("draft") {
-					opts.Draft = &draft
-				}
-				if cmd.Flags().Changed("prerelease") {
-					opts.Prerelease = &prerelease
-				}
-				if verb == "edit" && !useEditor && opts == (services.ReleaseOptions{}) {
-					return clierr.Wrap(clierr.Usage, errors.New("supply release fields to edit"))
-				}
+				opts.Tag = &fields.tag
+			}
+			if !fields.editor && opts == (services.ReleaseOptions{}) {
+				return clierr.Wrap(clierr.Usage, errors.New("supply release fields to edit"))
 			}
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {
 				return err
 			}
 			service := services.Releases{Client: target.client, Repository: target.Repo}
-			if useEditor {
-				initial := ""
-				if verb == "edit" {
-					item, err := service.View(cmd.Context(), args[0])
-					if err != nil {
-						return err
-					}
-					initial = item.Body
-				}
-				editorDraft, err = a.editDraft(cmd, initial)
-				if err != nil {
-					return err
-				}
-				opts.Body = &editorDraft.Body
-			}
-			if verb == "delete" || prompted {
-				subject := strings.Join(args, " ")
-				if verb == "create" {
-					subject = tag
-				}
-				if err := a.confirm(cmd, fmt.Sprintf("%s release %s on %s", verb, subject, target.Repo)); err != nil {
-					return err
-				}
-			}
-			if verb == "create" {
-				item, err := service.Create(cmd.Context(), opts)
-				if err != nil {
-					return err
-				}
-				var failures []error
-				for _, file := range files {
-					if _, err := service.UploadAsset(cmd.Context(), item.ID, filepath.Base(file.Name()), file); err != nil {
-						failures = append(failures, fmt.Errorf("release %s created; asset %s upload failed: %w", item.Tag, filepath.Base(file.Name()), err))
-					}
-				}
-				if err := writeRecord(a, cmd, item, releaseRecord); err != nil {
-					return err
-				}
-				return errors.Join(failures...)
-			}
-			if verb == "view" {
+			if fields.editor {
 				item, err := service.View(cmd.Context(), args[0])
 				if err != nil {
 					return err
 				}
-				return writeRecord(a, cmd, item, releaseRecord)
+				if editorDraft, err = a.editDraft(cmd, item.Body); err != nil {
+					return err
+				}
+				opts.Body = &editorDraft.Body
 			}
-			return batch(a, cmd, args, func(name string) string { return "release " + name }, func(name string) (services.Release, error) {
-				item, err := service.View(cmd.Context(), name)
-				if err == nil {
-					switch verb {
-					case "edit":
-						item, err = service.Edit(cmd.Context(), item.ID, opts)
-					case "publish":
-						published := false
-						item, err = service.Edit(cmd.Context(), item.ID, services.ReleaseOptions{Draft: &published})
-					case "delete":
-						err = service.Delete(cmd.Context(), item, deleteTag)
-					}
+			return batchDone(a, cmd, args, func(tag string) string { return "release " + tag }, func(tag string) (services.Release, error) {
+				item, err := service.View(cmd.Context(), tag)
+				if err != nil {
+					return item, err
+				}
+				return service.Edit(cmd.Context(), item.ID, opts)
+			}, func(item services.Release) string { return "Edited release " + item.Tag + " in " + target.Repo })
+		},
+	}
+	fields.register(a, command)
+	command.Flags().StringVar(&fields.tag, "tag", "", "Change the release's tag (one release only)")
+	command.ValidArgsFunction = a.completeReleases()
+	return command
+}
+
+func (a *application) releasePublishCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:     "publish <tag>...",
+		Short:   "Publish draft releases",
+		Example: "$ gt release publish v1.1.0",
+		Args:    usageArgs(cobra.MinimumNArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := a.resolve(cmd.Context(), true)
+			if err != nil {
+				return err
+			}
+			service := services.Releases{Client: target.client, Repository: target.Repo}
+			results, failures := applyBatch(cmd, args, func(tag string) string { return "release " + tag }, func(tag string) (services.Release, error) {
+				item, err := service.View(cmd.Context(), tag)
+				if err != nil {
+					return item, err
+				}
+				if !item.Draft {
+					a.warn(cmd, "Release %s is already published", item.Tag)
+					return item, nil
+				}
+				published := false
+				if item, err = service.Edit(cmd.Context(), item.ID, services.ReleaseOptions{Draft: &published}); err == nil {
+					a.done(cmd, "Published release %s in %s", item.Tag, target.Repo)
 				}
 				return item, err
-			}, releaseRow)
-		}
-		group.AddCommand(command)
+			}, func(services.Release) {})
+			if a.options.json != "" {
+				failures = append(failures, writeBatchJSON(a, cmd, len(args), results))
+			}
+			return errors.Join(failures...)
+		},
 	}
-	group.AddCommand(a.releaseAssetCommand())
-	return group
+	command.ValidArgsFunction = a.completeReleases()
+	return command
+}
+
+func (a *application) releaseDeleteCommand() *cobra.Command {
+	var deleteTag bool
+	command := &cobra.Command{
+		Use:   "delete <tag>...",
+		Short: "Delete releases",
+		Long:  "Delete releases. Their tags stay unless --delete-tag removes them too.",
+		Example: `$ gt release delete v1.0.0-rc1
+$ gt release delete v1.0.0-rc1 v1.0.0-rc2 --delete-tag --yes`,
+		Annotations: map[string]string{"gt.confirm": "true", "gt.text": "release deletion does not return a resource"},
+		Args:        usageArgs(cobra.MinimumNArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := a.resolve(cmd.Context(), true)
+			if err != nil {
+				return err
+			}
+			subject := "release " + args[0]
+			if len(args) > 1 {
+				subject = fmt.Sprintf("%d releases (%s)", len(args), strings.Join(args, ", "))
+			}
+			if deleteTag {
+				subject += " with their tags"
+				if len(args) == 1 {
+					subject = "release " + args[0] + " and its tag"
+				}
+			}
+			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + " from " + target.Repo + "?", NonTTY: "delete " + subject + " from " + target.Repo}); err != nil {
+				return err
+			}
+			service := services.Releases{Client: target.client, Repository: target.Repo}
+			return batchDone(a, cmd, args, func(tag string) string { return "release " + tag }, func(tag string) (services.Release, error) {
+				item, err := service.View(cmd.Context(), tag)
+				if err == nil {
+					err = service.Delete(cmd.Context(), item, deleteTag)
+				}
+				return item, err
+			}, func(item services.Release) string {
+				if deleteTag {
+					return "Deleted release " + item.Tag + " and its tag from " + target.Repo
+				}
+				return "Deleted release " + item.Tag + " from " + target.Repo + " (tag kept; use --delete-tag)"
+			})
+		},
+	}
+	command.Flags().BoolVar(&deleteTag, "delete-tag", false, "Delete the release's Git tag too")
+	command.ValidArgsFunction = a.completeReleases()
+	return command
 }

@@ -54,24 +54,30 @@ func repositoryKind(item Repository, kind string) bool {
 // List returns repositories accessible to the account, or its selected collection.
 // It reports whether more repositories follow the selected page.
 func (s Repositories) List(ctx context.Context, opts RepositoryListOptions) ([]Repository, bool, error) {
+	page, err := s.ListPage(ctx, opts)
+	return page.Items, page.More, err
+}
+
+// ListPage is List that also reports the size of the collection when the server counts it.
+// A kind filter applies to the page, so the collection is not counted then.
+func (s Repositories) ListPage(ctx context.Context, opts RepositoryListOptions) (Page[Repository], error) {
 	isOrg := false
 	var err error
 	if opts.Owner != "" {
 		if _, isOrg, err = s.ownerID(ctx, opts.Owner); err != nil {
-			return nil, false, err
+			return Page[Repository]{}, err
 		}
 	}
-	var items []*gitea.Repository
-	var more bool
+	var window Page[*gitea.Repository]
 	if opts.Owner == "" && (opts.Starred || opts.Watched) {
 		// TODO(sdk): GetMyStarredRepos and GetMyWatchedRepos accept no ListOptions.
 		endpoint := "user/subscriptions"
 		if opts.Starred {
 			endpoint = "user/starred"
 		}
-		items, more, err = rawWindow[*gitea.Repository](ctx, s.Client, endpoint, nil, opts.Limit, opts.Page)
+		window, err = rawPage[*gitea.Repository](ctx, s.Client, endpoint, nil, opts.Limit, opts.Page)
 	} else {
-		items, more, err = listWindow(opts.Limit, opts.Page, func(limit, page int) ([]*gitea.Repository, http.Header, error) {
+		window, err = listPage(opts.Limit, opts.Page, func(limit, page int) ([]*gitea.Repository, http.Header, error) {
 			items, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Repository, *gitea.Response, error) {
 				switch {
 				case isOrg:
@@ -86,22 +92,22 @@ func (s Repositories) List(ctx context.Context, opts RepositoryListOptions) ([]R
 		})
 	}
 	if err != nil {
-		return nil, false, err
+		return Page[Repository]{}, err
 	}
-	result := make([]Repository, 0, len(items))
-	for _, item := range items {
+	result := Page[Repository]{Items: make([]Repository, 0, len(window.Items)), More: window.More, Total: window.Total, Counted: window.Counted && opts.Kind == ""}
+	for _, item := range window.Items {
 		if repo := repositoryFrom(item); repositoryKind(repo, opts.Kind) {
-			result = append(result, repo)
+			result.Items = append(result.Items, repo)
 		}
 	}
-	return result, more, nil
+	return result, nil
 }
 
 // Search searches repository names, descriptions or topics within one instance.
-func (s Repositories) Search(ctx context.Context, opts RepositorySearchOptions) ([]Repository, error) {
+func (s Repositories) Search(ctx context.Context, opts RepositorySearchOptions) (Page[Repository], error) {
 	options := gitea.SearchRepoOptions{
-		ListOptions: listOptions(opts.Limit, opts.Page), Keyword: opts.Query, KeywordIsTopic: opts.Topic,
-		KeywordInDescription: true, IsPrivate: opts.Private, IsArchived: opts.Archived, Type: gitea.RepoType(opts.Kind),
+		Keyword: opts.Query, KeywordIsTopic: opts.Topic, KeywordInDescription: true,
+		IsPrivate: opts.Private, IsArchived: opts.Archived, Type: gitea.RepoType(opts.Kind),
 	}
 	if opts.Sort != "" {
 		options.Sort, options.Order = opts.Sort, opts.Order
@@ -109,7 +115,7 @@ func (s Repositories) Search(ctx context.Context, opts RepositorySearchOptions) 
 	if opts.Owner != "" {
 		id, _, err := s.ownerID(ctx, opts.Owner)
 		if err != nil {
-			return nil, err
+			return Page[Repository]{}, err
 		}
 		options.OwnerID = id
 	}
@@ -117,14 +123,18 @@ func (s Repositories) Search(ctx context.Context, opts RepositorySearchOptions) 
 		return c.Users.GetMyUserInfo(ctx)
 	})
 	if err != nil {
-		return nil, err
+		return Page[Repository]{}, err
 	}
 	options.PrioritizedByOwnerID = account.ID
-	items, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Repository, *gitea.Response, error) {
-		return c.Repositories.SearchRepos(ctx, options)
+	window, err := listPage(opts.Limit, opts.Page, func(limit, page int) ([]*gitea.Repository, http.Header, error) {
+		options.ListOptions = listOptions(limit, page)
+		items, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Repository, *gitea.Response, error) {
+			return c.Repositories.SearchRepos(ctx, options)
+		})
+		return items, headerOf(resp), err
 	})
 	if err != nil {
-		return nil, err
+		return Page[Repository]{}, err
 	}
-	return convertAll(items, repositoryFrom), nil
+	return Page[Repository]{Items: convertAll(window.Items, repositoryFrom), More: window.More, Total: window.Total, Counted: window.Counted}, nil
 }

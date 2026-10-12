@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -71,4 +72,162 @@ func TestRepoDeleteAsksToTypeTheRepositoryName(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []string{"DELETE /api/v1/repos/alice/project"}, requests)
 	}
+}
+
+func TestRepoArchiveStates(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		args     []string
+		archived bool
+		requests []string
+		feedback string
+	}{
+		{"archive", []string{"repo", "archive", "alice/x", "--yes"}, false, []string{"GET", "PATCH"}, "✓ Archived repository alice/x\n"},
+		{"already archived", []string{"repo", "archive", "alice/x", "--yes"}, true, []string{"GET"}, "! alice/x is already archived\n"},
+		{"unarchive", []string{"repo", "unarchive", "alice/x"}, true, []string{"GET", "PATCH"}, "✓ Unarchived repository alice/x\n"},
+		{"not archived", []string{"repo", "unarchive", "alice/x"}, false, []string{"GET"}, "! alice/x is not archived\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var requests []string
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/api/v1/repos/alice/x", r.URL.Path)
+				requests = append(requests, r.Method)
+				archived := test.archived
+				if r.Method == http.MethodPatch {
+					requirePayload(t, fmt.Sprintf(`{"archived":%t}`, !archived), r.Body)
+					archived = !archived
+				}
+				_, _ = fmt.Fprintf(w, `{"full_name":"alice/x","archived":%t}`, archived)
+			}))
+			defer server.Close()
+			deps, out, diagnostics := repoTTYDeps(t, server.URL)
+			require.NoError(t, Execute(context.Background(), deps, test.args))
+			require.Equal(t, test.requests, requests)
+			require.Empty(t, out.String())
+			require.Equal(t, test.feedback, diagnostics.String())
+		})
+	}
+}
+
+func TestRepoArchiveAsksWithTheConsequence(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Git = upstreamCheckout(server)
+	prompt := &scriptedPrompter{}
+	deps.Prompter, deps.Streams.InTTY, deps.Streams.ErrTTY = prompt, true, true
+	err := Execute(context.Background(), deps, []string{"repo", "archive"})
+	require.Equal(t, clierr.Canceled, clierr.ExitCode(err), "%v", err)
+	require.Equal(t, []string{"Archive alice/project (from git remote upstream)? It becomes read-only."}, prompt.confirmations)
+}
+
+func TestRepoRenameFollowsTheRemote(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPatch+" /api/v1/repos/alice/project", r.Method+" "+r.URL.Path)
+		requirePayload(t, `{"name":"renamed"}`, r.Body)
+		_, _ = w.Write([]byte(`{"name":"renamed","full_name":"alice/renamed"}`))
+	}))
+	defer server.Close()
+	deps, out, diagnostics := repoTTYDeps(t, server.URL)
+	runner := &fakeGit{results: map[string]string{
+		"symbolic-ref --short HEAD":                                  "main",
+		"config --get branch.main.remote":                            "origin",
+		"remote get-url origin":                                      server.URL + "/alice/project.git",
+		"remote set-url origin " + server.URL + "/alice/renamed.git": "",
+	}}
+	deps.Git = runner
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rename", "renamed", "--yes"}))
+	require.Contains(t, runner.calls, "remote set-url origin "+server.URL+"/alice/renamed.git")
+	require.Empty(t, out.String())
+	require.Equal(t, "✓ Renamed repository alice/project to alice/renamed\n✓ Updated Git remote origin to alice/renamed\n", diagnostics.String())
+}
+
+func TestRenamedURL(t *testing.T) {
+	for _, test := range []struct{ raw, want string }{
+		{"https://gitea.test/alice/project.git", "https://gitea.test/alice/renamed.git"},
+		{"https://gitea.test/alice/project/", "https://gitea.test/alice/renamed"},
+		{"git@gitea-alias:alice/Project.git", "git@gitea-alias:alice/renamed.git"},
+		{"ssh://git@gitea.test:2222/alice/project", "ssh://git@gitea.test:2222/alice/renamed"},
+		{"https://gitea.test/alice/subproject.git", ""},
+	} {
+		renamed, ok := renamedURL(test.raw, "project", "renamed")
+		require.Equal(t, test.want != "", ok, test.raw)
+		require.Equal(t, test.want, renamed, test.raw)
+	}
+}
+
+func TestRepoForkReportsAnExistingFork(t *testing.T) {
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.Method + " " + r.URL.Path {
+		case "POST /api/v1/repos/bob/project/forks":
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"message":"repository is already forked by user [uname: alice, repo path: bob/project, fork path: alice/project-fork]"}`))
+		case "GET /api/v1/repos/bob/project/forks":
+			if r.URL.Query().Get("page") != "1" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"full_name":"carol/project","owner":{"login":"carol"}},{"full_name":"alice/project-fork","owner":{"login":"alice"}}]`))
+		case "GET /api/v1/repos/alice/project-fork":
+			_, _ = w.Write([]byte(`{"full_name":"alice/project-fork","fork":true,"html_url":"https://gitea.test/alice/project-fork","parent":{"full_name":"bob/project"}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, diagnostics := repoTTYDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project"}))
+	require.Equal(t, "! alice/project-fork already exists\n", diagnostics.String())
+	require.Equal(t, "https://gitea.test/alice/project-fork\n", out.String())
+	require.Equal(t, "GET /api/v1/repos/alice/project-fork", requests[len(requests)-1])
+}
+
+func TestRepoForkRefusesTheOwnersRepository(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"repo", "fork", "alice/project"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.ErrorContains(t, err, "cannot fork alice/project into alice: it already owns it; pass --org")
+}
+
+func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "POST /api/v1/repos/bob/project/forks", r.Method+" "+r.URL.Path)
+		requirePayload(t, `{"name":"mine"}`, r.Body)
+		_, _ = fmt.Fprintf(w, `{"full_name":"alice/mine","html_url":"https://gitea.test/alice/mine","clone_url":"http://%s/alice/mine.git"}`, r.Host)
+	}))
+	defer server.Close()
+	deps, out, diagnostics := repoTTYDeps(t, server.URL)
+	fork := server.URL + "/alice/mine.git"
+	runner := &fakeGit{results: map[string]string{
+		"rev-parse --is-inside-work-tree": "true",
+		"remote get-url origin":           server.URL + "/bob/project.git",
+		"remote rename origin upstream":   "",
+		"remote add -- origin " + fork:    "",
+	}}
+	deps.Git = runner
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"}))
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", "remote rename origin upstream", "remote add -- origin " + fork}, runner.calls)
+	require.Equal(t, "✓ Forked bob/project to alice/mine\n✓ Renamed Git remote origin to upstream\n✓ Added Git remote origin for alice/mine\n", diagnostics.String())
+	require.Equal(t, "https://gitea.test/alice/mine\n", out.String())
+}
+
+func TestRepoDeleteReportsTheDeletion(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodDelete+" /api/v1/repos/alice/x", r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	deps, out, diagnostics := repoTTYDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rm", "alice/x", "--yes"}))
+	require.Empty(t, out.String())
+	require.Equal(t, "✓ Deleted repository alice/x\n", diagnostics.String())
 }

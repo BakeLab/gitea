@@ -157,6 +157,8 @@ func TestMultiItemHumanOutputPagesOnce(t *testing.T) {
 			_, _ = w.Write([]byte("[" + issue(1) + "," + issue(2) + "]"))
 		case "/api/v1/repos/alice/project/issues/1", "/api/v1/repos/alice/project/issues/2":
 			_, _ = w.Write([]byte(issue(int(r.URL.Path[len(r.URL.Path)-1] - '0'))))
+		case "/api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","default_branch":"main"}`))
 		case "/api/v1/repos/alice/project/branches":
 			_, _ = w.Write([]byte(`[{"name":"main","commit":{"id":"abc"}},{"name":"dev","commit":{"id":"def"}}]`))
 		case "/api/v1/repos/alice/project/issues/5/comments":
@@ -172,7 +174,7 @@ func TestMultiItemHumanOutputPagesOnce(t *testing.T) {
 	}{
 		{[]string{"milestone", "issue", "list", "3"}, "1  Issue 1  closed\n2  Issue 2  closed\n"},
 		{[]string{"issue", "close", "1", "2"}, "1  Issue 1  closed\n2  Issue 2  closed\n"},
-		{[]string{"branch", "list"}, "main  abc  false\ndev   def  false\n"},
+		{[]string{"branch", "list"}, "Showing 2 of 2 branches in alice/project\n\nNAME            COMMIT  PROTECTED  UPDATED  MESSAGE\nmain (default)  abc\ndev             def\n"},
 		{[]string{"issue", "comment", "list", "5"}, "1 alice\none\n\n2 bob\ntwo\n\n"},
 	} {
 		t.Run(tc.args[0]+" "+tc.args[1], func(t *testing.T) {

@@ -61,7 +61,7 @@ func TestExplainNamesResourcesAndTellsWhyRepositoriesFail(t *testing.T) {
 		{"issue as pull request", []string{"pr", "view", "1", "-R", "alice/project"}, "#1 in alice/project is an issue, not a pull request; view it with: gt issue view 1"},
 		{"missing pull request", []string{"pr", "view", "999", "-R", "alice/project"}, "pull request #999 not found in alice/project"},
 		{"empty repository", []string{"pr", "list", "-R", "alice/empty"}, "alice/empty is empty; it has no pull requests"},
-		{"archived repository", []string{"issue", "create", "-R", "alice/old", "--title", "x", "--body", "y"}, "alice/old is archived (read-only); unarchive it with: gt repo edit alice/old --archived=false"},
+		{"archived repository", []string{"issue", "create", "-R", "alice/old", "--title", "x", "--body", "y"}, "alice/old is archived (read-only); unarchive it with: gt repo unarchive alice/old"},
 		{"existing pull request", []string{"pr", "create", "-R", "alice/project", "--head", "feat", "--base", "main", "--title", "x", "--body", "y"}, "pull request for feat into main already exists in alice/project; see https://example.org/alice/project/pulls/3"},
 		{"context added by the command", []string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, "pull request #3 is a draft; mark it ready for review first: Gitea API returned HTTP 405 for POST /api/v1/repos/alice/project/pulls/3/merge: Work in progress PRs cannot be merged"},
 		{"raw api response", []string{"api", "users/nobody"}, "not found (HTTP 404 GET /api/v1/users/nobody)"},

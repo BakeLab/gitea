@@ -44,8 +44,9 @@ func TestRepositoryForkSendsOrganizationOnlyWhenSelected(t *testing.T) {
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte(`{"id":2,"full_name":"bob/project","fork":true,"parent":{"id":1,"full_name":"alice/project"}}`))
 		}))
-		item, err := (Repositories{Client: client}).Fork(context.Background(), "alice/project", org)
+		item, existed, err := (Repositories{Client: client}).Fork(context.Background(), "alice/project", ForkOptions{Organization: org})
 		require.NoError(t, err)
+		require.False(t, existed)
 		require.Equal(t, "alice/project", item.Parent.FullName)
 	}
 }

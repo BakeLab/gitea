@@ -171,3 +171,25 @@ func TestCloneAddsSourceRemoteForMirrors(t *testing.T) {
 		require.Equal(t, []string{clone}, runner.calls, unsafe)
 	}
 }
+
+func TestClonePassesGitFlagsAndNamesTheUpstreamRemote(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"name":"project","full_name":"bob/project","fork":true,"clone_url":"http://%[1]s/bob/project.git","parent":{"full_name":"alice/project","default_branch":"main","clone_url":"http://%[1]s/alice/project.git"}}`, r.Host)
+	}))
+	defer server.Close()
+	deps, _, diagnostics := repoTTYDeps(t, server.URL)
+	clone := credentialCall(t, deps, server.URL, "alice", "clone", "--branch", "dev", "--", server.URL+"/bob/project.git")
+	parent := server.URL + "/alice/project.git"
+	runner := &fakeGit{results: map[string]string{
+		clone: "", "remote add -- parent " + parent: "", "config branch.main.remote parent": "",
+		"config branch.main.merge refs/heads/main": "", "config branch.main.pushRemote origin": "",
+	}}
+	deps.Git = runner
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "-u", "parent", "--", "--branch", "dev"}))
+	require.Equal(t, []string{clone, "remote add -- parent " + parent, "config branch.main.remote parent", "config branch.main.merge refs/heads/main", "config branch.main.pushRemote origin"}, runner.calls)
+	require.Equal(t, "✓ Cloned bob/project into project\n✓ Added remote parent for alice/project; gt commands in the clone target it (change with gt repo set-default)\n", diagnostics.String())
+	runner.calls = nil
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "--no-upstream", "--", "--branch", "dev"}))
+	require.Equal(t, []string{clone}, runner.calls)
+	require.ErrorContains(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "a", "b"}), "too many arguments")
+}

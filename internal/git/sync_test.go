@@ -5,128 +5,165 @@ package git
 
 import (
 	"context"
-	"strings"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestSyncValidatesBeforeChangingBranches(t *testing.T) {
-	for _, test := range []struct {
-		dirty, diverged bool
-		message         string
+// syncFixture is a clone of a bare remote whose main branch is one commit ahead of the clone's.
+type syncFixture struct {
+	t             *testing.T
+	runner        System
+	work          string
+	behind, ahead string
+}
+
+func newSyncFixture(t *testing.T) syncFixture {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("Git is not installed")
+	}
+	root := t.TempDir()
+	env := append(os.Environ(), "GIT_CONFIG_GLOBAL="+filepath.Join(root, "gitconfig"), "GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=gt", "GIT_AUTHOR_EMAIL=gt@example.invalid", "GIT_COMMITTER_NAME=gt", "GIT_COMMITTER_EMAIL=gt@example.invalid")
+	f := syncFixture{t: t, runner: System{Env: env}, work: filepath.Join(root, "work")}
+	remote, pusher := filepath.Join(root, "remote.git"), filepath.Join(root, "pusher")
+	f.git(root, "init", "--bare", "-b", "main", remote)
+	f.git(root, "clone", remote, pusher)
+	f.git(pusher, "commit", "--allow-empty", "-m", "first")
+	f.git(pusher, "push", "origin", "HEAD:main")
+	f.git(root, "clone", remote, f.work)
+	f.git(f.work, "switch", "-c", "experiment")
+	f.git(pusher, "commit", "--allow-empty", "-m", "second")
+	f.git(pusher, "push", "origin", "HEAD:main")
+	f.behind, f.ahead = f.git(f.work, "rev-parse", "main"), f.git(pusher, "rev-parse", "HEAD")
+	return f
+}
+
+func (f syncFixture) git(dir string, args ...string) string {
+	f.t.Helper()
+	output, err := f.runner.Output(context.Background(), dir, false, args...)
+	require.NoError(f.t, err, args)
+	return output
+}
+
+func (f syncFixture) sync(branch string) (SyncResult, error) {
+	return SyncBranch(context.Background(), f.runner, SyncOptions{Directory: f.work, Remote: "origin", Branch: branch})
+}
+
+func TestSyncBranchKeepsTheCheckedOutBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name, checkout string
+		prepare        func(f syncFixture)
+		want           func(f syncFixture) SyncResult
+		tracks         bool
 	}{
-		{true, false, "working tree has changes"},
-		{false, true, "cannot be fast-forwarded"},
+		{
+			name: "another branch is checked out", checkout: "experiment",
+			want: func(f syncFixture) SyncResult { return SyncResult{"main", f.ahead, f.behind, "origin"} },
+		},
+		{
+			name: "another branch with local changes", checkout: "experiment",
+			prepare: func(f syncFixture) {
+				require.NoError(t, os.WriteFile(filepath.Join(f.work, "draft.txt"), []byte("draft"), 0o600))
+			},
+			want: func(f syncFixture) SyncResult { return SyncResult{"main", f.ahead, f.behind, "origin"} },
+		},
+		{
+			name: "the branch is checked out", checkout: "main",
+			want: func(f syncFixture) SyncResult { return SyncResult{"main", f.ahead, f.behind, "origin"} },
+		},
+		{
+			name: "the branch is missing", checkout: "experiment",
+			prepare: func(f syncFixture) { f.git(f.work, "branch", "-D", "main") },
+			want:    func(f syncFixture) SyncResult { return SyncResult{"main", f.ahead, "", "origin"} },
+			tracks:  true,
+		},
+		{
+			name: "the branch is up to date", checkout: "experiment",
+			prepare: func(f syncFixture) {
+				f.git(f.work, "fetch", "origin")
+				f.git(f.work, "branch", "-f", "main", f.ahead)
+			},
+			want: func(f syncFixture) SyncResult { return SyncResult{"main", f.ahead, f.ahead, "origin"} },
+		},
+		{
+			name: "the branch is ahead", checkout: "main",
+			prepare: func(f syncFixture) {
+				f.git(f.work, "fetch", "origin")
+				f.git(f.work, "reset", "--hard", f.ahead)
+				f.git(f.work, "commit", "--allow-empty", "-m", "local")
+			},
+			want: func(f syncFixture) SyncResult {
+				local := f.git(f.work, "rev-parse", "main")
+				return SyncResult{"main", local, local, "origin"}
+			},
+		},
 	} {
-		runner := &checkoutRunner{dirty: test.dirty, diverged: test.diverged, localCommit: "previous"}
-		_, err := SyncBranch(context.Background(), runner, SyncOptions{Directory: "/work", Remote: "origin", Branch: "main"})
-		require.ErrorContains(t, err, test.message)
-		for _, call := range runner.calls {
-			require.False(t, strings.HasPrefix(call, "switch "))
-			require.False(t, strings.HasPrefix(call, "merge "))
-			if test.dirty {
-				require.False(t, strings.HasPrefix(call, "fetch "))
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSyncFixture(t)
+			if tc.checkout == "main" {
+				f.git(f.work, "switch", "main")
 			}
-		}
+			if tc.prepare != nil {
+				tc.prepare(f)
+			}
+			want := tc.want(f)
+			result, err := f.sync("main")
+			require.NoError(t, err)
+			require.Equal(t, tc.checkout, f.git(f.work, "branch", "--show-current"))
+			require.Equal(t, want.Commit, f.git(f.work, "rev-parse", "main"))
+			require.Equal(t, want, result)
+			if tc.tracks {
+				require.Equal(t, "origin", f.git(f.work, "config", "branch.main.remote"))
+				require.Equal(t, "refs/heads/main", f.git(f.work, "config", "branch.main.merge"))
+			}
+		})
 	}
-	runner := &checkoutRunner{localCommit: "previous"}
-	result, err := SyncBranch(context.Background(), runner, SyncOptions{Directory: "/work", Remote: "origin", Branch: "main", CredentialArgs: []string{"-c", "credential.helper=gt"}})
-	require.NoError(t, err)
-	require.Equal(t, SyncResult{Branch: "main", Commit: "abc123", Remote: "origin"}, result)
-	require.Contains(t, runner.calls, "-c credential.helper=gt fetch --no-tags -- origin refs/heads/main")
-	require.Equal(t, []string{"switch main", "merge --ff-only --no-edit abc123", "rev-parse --verify HEAD^{commit}"}, runner.calls[len(runner.calls)-3:])
 }
 
-type syncFailureRunner struct {
-	checkoutRunner
-	missing, changed bool
-	reads            int
-}
-
-func (r *syncFailureRunner) Output(ctx context.Context, dir string, prompt bool, args ...string) (string, error) {
-	if len(args) == 3 && args[0] == "rev-parse" && strings.HasPrefix(args[2], "refs/heads/") {
-		r.reads++
-		if r.missing {
-			return "", &CommandError{ExitCode: 1}
-		}
-		if r.changed && r.reads == 2 {
-			return "other-commit", nil
-		}
-	}
-	return r.checkoutRunner.Output(ctx, dir, prompt, args...)
-}
-
-func TestSyncRejectsMissingOrChangedBranch(t *testing.T) {
-	for _, test := range []struct {
-		missing, changed bool
-		message          string
+func TestSyncBranchRefusesWhatItCannotFastForward(t *testing.T) {
+	for _, tc := range []struct {
+		name, message string
+		prepare       func(f syncFixture)
 	}{
-		{true, false, "local branch is unavailable"},
-		{false, true, "local branch changed while fetching"},
+		{
+			name: "local changes on the checked-out branch", message: "working tree has changes",
+			prepare: func(f syncFixture) {
+				f.git(f.work, "switch", "main")
+				require.NoError(t, os.WriteFile(filepath.Join(f.work, "draft.txt"), []byte("draft"), 0o600))
+			},
+		},
+		{
+			name: "diverged history", message: "main and origin/main have diverged",
+			prepare: func(f syncFixture) {
+				f.git(f.work, "switch", "main")
+				f.git(f.work, "commit", "--allow-empty", "-m", "local")
+				f.git(f.work, "switch", "experiment")
+			},
+		},
 	} {
-		runner := &syncFailureRunner{missing: test.missing, changed: test.changed}
-		_, err := SyncBranch(context.Background(), runner, SyncOptions{Directory: "/work", Remote: "origin", Branch: "main"})
-		require.ErrorContains(t, err, test.message)
-		for _, call := range runner.calls {
-			require.False(t, strings.HasPrefix(call, "switch "))
-			require.False(t, strings.HasPrefix(call, "merge "))
-			if test.missing {
-				require.False(t, strings.HasPrefix(call, "fetch "))
-			}
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSyncFixture(t)
+			tc.prepare(f)
+			branch, before := f.git(f.work, "branch", "--show-current"), f.git(f.work, "rev-parse", "main")
+			_, err := f.sync("main")
+			require.ErrorContains(t, err, tc.message)
+			require.Equal(t, branch, f.git(f.work, "branch", "--show-current"))
+			require.Equal(t, before, f.git(f.work, "rev-parse", "main"))
+		})
 	}
 }
 
-type aheadSyncRunner struct{ checkoutRunner }
-
-func (r *aheadSyncRunner) Output(ctx context.Context, dir string, prompt bool, args ...string) (string, error) {
-	if len(args) == 3 && args[2] == "HEAD^{commit}" {
-		r.calls = append(r.calls, strings.Join(args, " "))
-		return r.localCommit, nil
-	}
-	if len(args) == 4 && args[0] == "merge-base" && args[2] == "previous" {
-		r.calls = append(r.calls, strings.Join(args, " "))
-		return "", &CommandError{ExitCode: 1}
-	}
-	return r.checkoutRunner.Output(ctx, dir, prompt, args...)
-}
-
-func TestSyncPreservesBranchAheadOfRemote(t *testing.T) {
-	runner := &aheadSyncRunner{localCommit: "previous"}
-	result, err := SyncBranch(context.Background(), runner, SyncOptions{Directory: "/work", Remote: "origin", Branch: "main"})
-	require.NoError(t, err)
-	require.Equal(t, "previous", result.Commit)
-	require.Contains(t, runner.calls, "merge-base --is-ancestor abc123 previous")
-	require.Equal(t, "switch main", runner.calls[len(runner.calls)-2])
-	for _, call := range runner.calls {
-		require.False(t, strings.HasPrefix(call, "merge "))
-	}
-}
-
-func TestSyncEqualHistoryDoesNotMerge(t *testing.T) {
-	runner := &checkoutRunner{}
-	result, err := SyncBranch(context.Background(), runner, SyncOptions{Directory: "/work", Remote: "origin", Branch: "main"})
-	require.NoError(t, err)
-	require.Equal(t, "abc123", result.Commit)
-	for _, call := range runner.calls {
-		require.False(t, strings.HasPrefix(call, "merge-base "))
-		require.False(t, strings.HasPrefix(call, "merge "))
-	}
-}
-
-type changedHeadRunner struct{ checkoutRunner }
-
-func (r *changedHeadRunner) Output(ctx context.Context, dir string, prompt bool, args ...string) (string, error) {
-	if len(args) == 3 && args[2] == "HEAD^{commit}" {
-		return "unexpected", nil
-	}
-	return r.checkoutRunner.Output(ctx, dir, prompt, args...)
-}
-
-func TestSyncRejectsUnexpectedFinalHead(t *testing.T) {
-	runner := &changedHeadRunner{}
-	result, err := SyncBranch(context.Background(), runner, SyncOptions{Directory: "/work", Remote: "origin", Branch: "main"})
-	require.ErrorContains(t, err, "HEAD changed during sync")
-	require.Equal(t, SyncResult{}, result)
+func TestSyncBranchValidatesItsInput(t *testing.T) {
+	f := newSyncFixture(t)
+	_, err := SyncBranch(context.Background(), f.runner, SyncOptions{Directory: f.work, Remote: "origin"})
+	require.ErrorContains(t, err, "requires a remote and branch")
+	_, err = f.sync("bad..name")
+	require.Error(t, err)
+	_, err = SyncBranch(context.Background(), f.runner, SyncOptions{Directory: t.TempDir(), Remote: "origin", Branch: "main"})
+	require.Error(t, err)
 }

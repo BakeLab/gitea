@@ -419,13 +419,6 @@ const (
 	pr review cancel-request
 `
 	examplesToWrite = `
-	branch create
-	branch delete
-	branch list
-	branch protect
-	branch rename
-	branch unprotect
-	branch view
 	issue attachment delete
 	issue attachment download
 	issue attachment edit
@@ -494,45 +487,15 @@ const (
 	pr review view
 	pr status
 	pr view
-	release asset delete
-	release asset download
-	release asset edit
-	release asset list
-	release asset upload
-	release create
-	release delete
-	release edit
-	release list
-	release publish
-	release view
-	repo archive
-	repo clone
-	repo create
-	repo delete
-	repo edit
-	repo fork
-	repo list
-	repo migrate
-	repo set-default
-	repo sync
-	repo view
 	search issue
 	search pr
-	search repo
 	status
 	time create
 	time delete
 	time list
 	time reset
-	wiki create
-	wiki delete
-	wiki edit
-	wiki list
-	wiki revisions
-	wiki view
 `
 	longsToWrite = `
-	branch
 	issue
 	issue attachment
 	issue comment
@@ -542,11 +505,6 @@ const (
 	pr
 	pr attachment
 	pr comment
-	release
-	release asset
-	repo
-	search
 	time
-	wiki
 `
 )

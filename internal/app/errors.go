@@ -167,7 +167,7 @@ func conflictHint(ctx context.Context, apiErr *transport.APIError, conflict *ser
 	switch conflict.Reason {
 	case services.ReasonArchived:
 		if conflict.Scope != "" {
-			return "unarchive it with: gt repo edit " + conflict.Scope + " --archived=false"
+			return "unarchive it with: gt repo unarchive " + conflict.Scope
 		}
 	case services.ReasonExists:
 		return existsHint(ctx, apiErr, conflict)

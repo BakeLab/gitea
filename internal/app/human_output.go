@@ -340,3 +340,11 @@ func (a *application) morePagesHint(cmd *cobra.Command, more bool, page int) err
 	_, err := fmt.Fprintf(cmd.ErrOrStderr(), "more results available; use --page %d\n", page+1)
 	return err
 }
+
+// yesNo renders a boolean cell.
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
+}

@@ -45,6 +45,30 @@ func (s Repositories) Generate(ctx context.Context, source string, opts Reposito
 	return repositoryFrom(&response), nil
 }
 
+// Licenses lists the license templates that repository creation accepts.
+func (s Repositories) Licenses(ctx context.Context) ([]string, error) {
+	licenses, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.LicensesTemplateListEntry, *gitea.Response, error) {
+		return c.Templates.ListLicenses(ctx)
+	})
+	return convertAll(licenses, func(license *gitea.LicensesTemplateListEntry) string { return license.Key }), err
+}
+
+// Gitignores lists the .gitignore templates that repository creation accepts.
+func (s Repositories) Gitignores(ctx context.Context) ([]string, error) {
+	names, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]string, *gitea.Response, error) {
+		return c.Templates.ListGitignores(ctx)
+	})
+	return names, err
+}
+
+// LabelTemplates lists the label sets that repository creation accepts.
+func (s Repositories) LabelTemplates(ctx context.Context) ([]string, error) {
+	names, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]string, *gitea.Response, error) {
+		return c.Templates.ListLabels(ctx)
+	})
+	return names, err
+}
+
 // RepositoryMigrationOptions is explicit server-side import input. Credentials stay in request bodies.
 type RepositoryMigrationOptions struct {
 	Name           string        `json:"repo_name"`

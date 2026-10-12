@@ -52,13 +52,6 @@ func timeField(label, raw string, d terminal.Display) terminal.Field {
 	return terminal.Field{Label: label, Value: terminal.RelativeTime(now, t)}
 }
 
-func yesNo(value bool) string {
-	if value {
-		return "yes"
-	}
-	return "no"
-}
-
 // countOf words a count, such as "1 member" or "2 members".
 func countOf(n int, singular, plural string) string {
 	if n == 1 {

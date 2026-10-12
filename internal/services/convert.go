@@ -26,6 +26,8 @@ func repositoryFrom(repo *gitea.Repository) Repository {
 		FullName: repo.FullName, Description: repo.Description, URL: repo.HTMLURL, Private: repo.Private,
 		DefaultBranch: repo.DefaultBranch, CloneURL: repo.CloneURL, SSHURL: repo.SSHURL,
 		Archived: repo.Archived, Template: repo.Template, Fork: repo.Fork, Mirror: repo.Mirror, OriginalURL: repo.OriginalURL,
+		Empty: repo.Empty, Stars: repo.Stars, Forks: repo.Forks, OpenIssues: repo.OpenIssues, OpenPulls: repo.OpenPulls,
+		Topics: repo.Topics, UpdatedAt: timestamp(repo.Updated),
 	}
 	if repo.Parent != nil {
 		parent := repositoryFrom(repo.Parent)

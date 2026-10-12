@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -33,13 +34,81 @@ func TestBulkBranchProtectionContinuesAfterFailure(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	deps, out, diagnostics := serverDeps(t, server.URL)
+	deps, out, diagnostics := repoTTYDeps(t, server.URL)
 	err := Execute(context.Background(), deps, []string{"branch", "unprotect", "failed", "succeeded", "-R", "owner/repo", "--no-input"})
 	require.Error(t, err)
 	require.Empty(t, names)
 	err = Execute(context.Background(), deps, []string{"branch", "unprotect", "failed", "succeeded", "-R", "owner/repo", "--yes"})
-	require.ErrorContains(t, err, "failed")
+	require.ErrorContains(t, err, "unprotect failed")
 	require.Equal(t, []string{"failed", "succeeded"}, names)
 	require.Empty(t, out.String())
-	require.Contains(t, diagnostics.String(), "succeeded")
+	require.Equal(t, "✓ Unprotected succeeded in owner/repo\n", diagnostics.String())
+}
+
+func TestBranchProtectChecksTheBranchAndIsIdempotent(t *testing.T) {
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/x/branches/main", "GET /api/v1/repos/alice/x/branches/dev":
+			_, _ = w.Write([]byte(`{"name":"main"}`))
+		case "POST /api/v1/repos/alice/x/branch_protections":
+			var rule struct {
+				Name string `json:"rule_name"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&rule))
+			if rule.Name == "main" {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"message":"Branch protection already exist"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"rule_name":"dev"}`))
+		case "DELETE /api/v1/repos/alice/x/branch_protections/dev":
+			w.WriteHeader(http.StatusNotFound)
+		case "GET /api/v1/repos/alice/x":
+			_, _ = w.Write([]byte(`{"full_name":"alice/x"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, diagnostics := repoTTYDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"branch", "protect", "nope", "-R", "alice/x"})
+	require.EqualError(t, err, `protect nope: branch "nope" not found in alice/x`)
+	require.Equal(t, []string{"GET /api/v1/repos/alice/x/branches/nope"}, requests)
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "protect", "main", "dev", "-R", "alice/x"}))
+	require.Equal(t, "! main is already protected in alice/x; change its rule on the web\n"+
+		"✓ Protected dev in alice/x (1 approval required, no direct pushes)\n", diagnostics.String())
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "unprotect", "dev", "-R", "alice/x", "--yes"}))
+	require.Equal(t, "! dev is not protected in alice/x\n", diagnostics.String())
+}
+
+func TestBranchCreateFromATag(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requirePayload(t, `{"new_branch_name":"hotfix","old_ref_name":"v1.0.0"}`, r.Body)
+		_, _ = w.Write([]byte(`{"name":"hotfix","commit":{"id":"abcdef123"}}`))
+	}))
+	defer server.Close()
+	deps, out, diagnostics := repoTTYDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "create", "hotfix", "--source", "v1.0.0", "-R", "alice/x"}))
+	require.Empty(t, out.String())
+	require.Equal(t, "✓ Created branch hotfix from v1.0.0 in alice/x at abcdef1\n", diagnostics.String())
+}
+
+func TestBranchDeleteTakesSeveralBranches(t *testing.T) {
+	var deleted []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodDelete, r.Method)
+		deleted = append(deleted, strings.TrimPrefix(r.URL.Path, "/api/v1/repos/alice/x/branches/"))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	deps, _, diagnostics := repoTTYDeps(t, server.URL)
+	prompt := &scriptedPrompter{accept: true}
+	deps.Prompter, deps.Streams.InTTY, deps.Streams.ErrTTY = prompt, true, true
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "rm", "old-a", "old-b", "-R", "alice/x"}))
+	require.Equal(t, []string{"Delete 2 branches (old-a, old-b) from alice/x?"}, prompt.confirmations)
+	require.Equal(t, []string{"old-a", "old-b"}, deleted)
+	require.Equal(t, "✓ Deleted branch old-a from alice/x\n✓ Deleted branch old-b from alice/x\n", diagnostics.String())
 }

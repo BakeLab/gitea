@@ -299,3 +299,12 @@ var ansiSequence = regexp.MustCompile("\x1b\\[[0-9;]*m")
 func withoutANSI(s string) string {
 	return ansiSequence.ReplaceAllString(s, "")
 }
+
+// rawMarkdown keeps Markdown bodies unrendered so terminal views can be compared byte for byte.
+func rawMarkdown(t *testing.T, deps Dependencies) {
+	t.Helper()
+	require.NoError(t, deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
+		s.Preferences.Markdown = "raw"
+		return nil
+	}))
+}

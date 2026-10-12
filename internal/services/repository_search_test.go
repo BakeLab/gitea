@@ -112,10 +112,10 @@ func TestRepositorySearchSendsExplicitFalseFilters(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[]}`))
 	}))
 	value := false
-	items, err := (Repositories{Client: client}).Search(context.Background(), RepositorySearchOptions{Query: "two words", Private: &value, Archived: &value, Topic: true, Limit: 30, Page: 1})
+	page, err := (Repositories{Client: client}).Search(context.Background(), RepositorySearchOptions{Query: "two words", Private: &value, Archived: &value, Topic: true, Limit: 30, Page: 1})
 	require.NoError(t, err)
-	require.NotNil(t, items)
-	require.Empty(t, items)
+	require.NotNil(t, page.Items)
+	require.Empty(t, page.Items)
 }
 
 func TestRepositorySearchScopesOwner(t *testing.T) {
@@ -136,7 +136,7 @@ func TestRepositorySearchScopesOwner(t *testing.T) {
 			_, _ = w.Write([]byte(`{"data":[{"id":4,"full_name":"acme/tool"}]}`))
 		}
 	}))
-	items, err := (Repositories{Client: client}).Search(context.Background(), RepositorySearchOptions{Owner: "acme", Kind: "fork", Sort: "updated", Order: "desc", Limit: 30, Page: 1})
+	page, err := (Repositories{Client: client}).Search(context.Background(), RepositorySearchOptions{Owner: "acme", Kind: "fork", Sort: "updated", Order: "desc", Limit: 30, Page: 1})
 	require.NoError(t, err)
-	require.Equal(t, []Repository{{ID: 4, FullName: "acme/tool"}}, items)
+	require.Equal(t, []Repository{{ID: 4, FullName: "acme/tool"}}, page.Items)
 }

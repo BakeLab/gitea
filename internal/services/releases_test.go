@@ -155,7 +155,7 @@ func TestReleaseFromMapsServerFields(t *testing.T) {
 	published := "2026-10-02T12:00:00Z"
 	require.Equal(t, Release{
 		ID: 3, Tag: "v1", Target: "main", Title: "One", Body: "Notes", URL: "https://gitea.test/alice/project/releases/tag/v1",
-		Draft: true, Prerelease: true, CreatedAt: "2026-10-01T12:00:00+02:00", PublishedAt: &published,
+		Draft: true, Prerelease: true, Assets: []ReleaseAsset{}, CreatedAt: "2026-10-01T12:00:00+02:00", PublishedAt: &published,
 	}, releaseFrom(release))
 }
 
@@ -173,7 +173,7 @@ func TestReleaseListAndViewEscapeTags(t *testing.T) {
 	service := Releases{Client: client, Repository: "alice/project"}
 	items, err := service.List(context.Background(), 10, 2)
 	require.NoError(t, err)
-	require.Equal(t, []Release{{ID: 1, Tag: "v1"}}, items)
+	require.Equal(t, []Release{{ID: 1, Tag: "v1", Assets: []ReleaseAsset{}}}, items)
 	item, err := service.View(context.Background(), "v1/beta one")
 	require.NoError(t, err)
 	require.Equal(t, "v1/beta one", item.Tag)

@@ -36,7 +36,7 @@ const (
 // help omits --repo, --remote and --cwd.
 var noRepoCommands = []string{
 	"gt admin", "gt alias", "gt auth", "gt completion", "gt config", "gt help", "gt man", "gt org",
-	"gt repo create", "gt repo list", "gt search repo", "gt ssh-key", "gt team", "gt version",
+	"gt repo create", "gt repo list", "gt repo migrate", "gt search repo", "gt ssh-key", "gt team", "gt version",
 }
 
 // writeHelp prints the help page of cmd.

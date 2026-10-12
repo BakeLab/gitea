@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -14,22 +15,25 @@ import (
 
 // Release describes a repository release.
 type Release struct {
-	ID          int64   `json:"id"`
-	Tag         string  `json:"tag"`
-	Target      string  `json:"target"`
-	Title       string  `json:"title"`
-	Body        string  `json:"body"`
-	URL         string  `json:"url"`
-	Draft       bool    `json:"draft"`
-	Prerelease  bool    `json:"prerelease"`
-	CreatedAt   string  `json:"created_at"`
-	PublishedAt *string `json:"published_at"`
+	ID          int64          `json:"id"`
+	Tag         string         `json:"tag"`
+	Target      string         `json:"target"`
+	Title       string         `json:"title"`
+	Body        string         `json:"body"`
+	URL         string         `json:"url"`
+	Draft       bool           `json:"draft"`
+	Prerelease  bool           `json:"prerelease"`
+	Author      string         `json:"author"`
+	Assets      []ReleaseAsset `json:"assets"`
+	CreatedAt   string         `json:"created_at"`
+	PublishedAt *string        `json:"published_at"`
 }
 
 func releaseFrom(release *gitea.Release) Release {
 	return Release{
 		ID: release.ID, Tag: release.TagName, Target: release.Target, Title: release.Title, Body: release.Note, URL: release.HTMLURL,
-		Draft: release.IsDraft, Prerelease: release.IsPrerelease, CreatedAt: timestamp(release.CreatedAt), PublishedAt: optionalTimestamp(&release.PublishedAt),
+		Draft: release.IsDraft, Prerelease: release.IsPrerelease, Author: login(release.Publisher), Assets: convertAll(release.Attachments, assetFrom),
+		CreatedAt: timestamp(release.CreatedAt), PublishedAt: optionalTimestamp(&release.PublishedAt),
 	}
 }
 
@@ -53,19 +57,46 @@ func (s Releases) endpoint() string { return "repos/" + s.Repository + "/release
 
 // List returns a non-nil page of releases.
 func (s Releases) List(ctx context.Context, limit, page int) ([]Release, error) {
-	releases, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.Release, *gitea.Response, error) {
-		return c.Releases.ListReleases(ctx, owner, repo, gitea.ListReleasesOptions{ListOptions: listOptions(limit, page)})
+	window, err := s.ListPage(ctx, limit, page)
+	return window.Items, err
+}
+
+// ListPage is List that also reports whether more releases follow and how many there are.
+func (s Releases) ListPage(ctx context.Context, limit, page int) (Page[Release], error) {
+	window, err := listPage(limit, page, func(limit, page int) ([]*gitea.Release, http.Header, error) {
+		var headers http.Header
+		releases, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.Release, *gitea.Response, error) {
+			releases, resp, err := c.Releases.ListReleases(ctx, owner, repo, gitea.ListReleasesOptions{ListOptions: listOptions(limit, page)})
+			headers = headerOf(resp)
+			return releases, resp, err
+		})
+		return releases, headers, err
 	})
 	if err != nil {
-		return nil, err
+		return Page[Release]{}, err
 	}
-	return convertAll(releases, releaseFrom), nil
+	return Page[Release]{Items: convertAll(window.Items, releaseFrom), More: window.More, Total: window.Total, Counted: window.Counted}, nil
 }
 
 // View retrieves a release by its tag, including numeric tags.
 func (s Releases) View(ctx context.Context, tag string) (Release, error) {
 	return repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
 		return c.Releases.GetReleaseByTag(ctx, owner, repo, tag)
+	})
+}
+
+// Latest retrieves the most recent release that is neither a draft nor a prerelease.
+func (s Releases) Latest(ctx context.Context) (Release, error) {
+	release, err := repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
+		return c.Releases.GetLatestRelease(ctx, owner, repo)
+	})
+	return release, Classify(err, "latest release", "", s.Repository)
+}
+
+// Archive opens the source archive of the repository at ref; format is zip or tar.gz.
+func (s Releases) Archive(ctx context.Context, ref, format string) (io.ReadCloser, error) {
+	return repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (io.ReadCloser, *gitea.Response, error) {
+		return c.Repositories.GetArchiveReader(ctx, owner, repo, ref, gitea.ArchiveType("."+format))
 	})
 }
 

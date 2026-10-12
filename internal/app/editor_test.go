@@ -115,6 +115,9 @@ func TestBodySourcesRejectInvalidInputBeforeAuthentication(t *testing.T) {
 				want := "mutually exclusive"
 				if len(input) == 1 {
 					want = "--body-file must name a file or -"
+					if command[0] == "release" {
+						want = "--notes-file must name a file or -"
+					}
 				}
 				requireUsageBeforeRequests(t, want, append(append(append([]string{}, command...), input...), "--no-input")...)
 			}

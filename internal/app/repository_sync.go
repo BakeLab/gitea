@@ -4,6 +4,7 @@
 package app
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,53 +18,145 @@ import (
 
 func (a *application) repositorySyncCommand() *cobra.Command {
 	var branch string
-	command := &cobra.Command{Use: "sync [repository]", Short: "Fast-forward a local branch from the selected repository remote", Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
-		if cmd.Flags().Changed("branch") && strings.TrimSpace(branch) == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--branch cannot be empty"))
-		}
-		if err := a.repositoryArgument(args); err != nil {
-			return err
-		}
-		target, err := a.resolve(cmd.Context(), true)
-		if err != nil {
-			return err
-		}
-		snapshot, err := a.deps.Settings.Load()
-		if err != nil {
-			return err
-		}
-		remote, err := a.checkoutRemote(cmd.Context(), target, snapshot)
-		if err != nil {
-			return clierr.Wrap(clierr.Usage, err)
-		}
-		if branch == "" {
-			repository, err := (services.Repositories{Client: target.client}).View(cmd.Context(), target.Repo)
+	command := &cobra.Command{
+		Use:   "sync [<repository>]",
+		Short: "Sync a branch with its remote or its fork's parent",
+		Long: `Fast-forward a local branch to the branch of the same name on the repository's Git remote.
+
+The branch defaults to the repository's default branch. It is created when it is missing, and it is
+never checked out: the branch you are on stays checked out. When the branch is checked out, the
+working tree must be clean. Branches that have diverged from the remote are left unchanged.
+
+Given a repository that has no remote in the current directory, sync updates it on the server
+instead: a fork's branch is fast-forwarded to its parent's, and a pull mirror fetches its source.`,
+		Example: `# Fast-forward the default branch from the repository's remote
+$ gt repo sync
+
+# Fast-forward another branch
+$ gt repo sync --branch release/1.0
+
+# Update a fork on the server from its parent
+$ gt repo sync bob/project`,
+		Annotations: map[string]string{"gt.arguments": repositoryArguments},
+		Args:        usageArgs(cobra.MaximumNArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("branch") && strings.TrimSpace(branch) == "" {
+				return clierr.Wrap(clierr.Usage, errors.New("--branch cannot be empty"))
+			}
+			if err := a.repositoryArgument(args); err != nil {
+				return err
+			}
+			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {
 				return err
 			}
-			branch = repository.DefaultBranch
-		}
-		raw, err := a.git(cmd.Context(), "remote", "get-url", remote)
-		if err != nil {
-			return err
-		}
-		if !target.ownsRemote(raw) {
-			return clierr.Wrap(clierr.Usage, errors.New("selected Git remote changed; resolve the repository again before sync"))
-		}
-		credentials, err := a.gitTransportArguments(target, settings.RemoteIsSSH(raw))
-		if err != nil {
-			return err
-		}
-		result, err := git.SyncBranch(cmd.Context(), a.deps.Git, git.SyncOptions{Directory: a.options.cwd, Remote: remote, Branch: branch, CredentialArgs: credentials, Prompt: a.policy(snapshot).CanPrompt(a.deps.Streams)})
-		if err != nil {
-			return err
-		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, result)
-		}
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Synced %s (%s) from %s\n", result.Branch, result.Commit, result.Remote)
-		return err
-	}}
-	command.Flags().StringVarP(&branch, "branch", "b", "", "Local and remote branch (default: repository default branch)")
+			snapshot, err := a.deps.Settings.Load()
+			if err != nil {
+				return err
+			}
+			inside, _ := a.gitProbe().Output(cmd.Context(), a.options.cwd, false, "rev-parse", "--is-inside-work-tree")
+			remote, err := "", errNoMatchingRemote
+			if inside == "true" {
+				remote, err = a.checkoutRemote(cmd.Context(), target, snapshot)
+			}
+			switch {
+			case errors.Is(err, errNoMatchingRemote) && len(args) > 0:
+				return a.syncOnServer(cmd, target, branch)
+			case inside != "true":
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("repo sync needs a Git clone of %s; run it inside one, or pass a fork to update it on the server: gt repo sync OWNER/REPO", target.Repo))
+			case errors.Is(err, errNoMatchingRemote):
+				return clierr.Wrap(clierr.Usage, errors.New("no Git remote of this clone points to "+target.Repo+"; add one with git remote add, or pass --remote"))
+			case err != nil:
+				return clierr.Wrap(clierr.Usage, err)
+			}
+			if branch == "" {
+				repository, err := (services.Repositories{Client: target.client}).View(cmd.Context(), target.Repo)
+				if err != nil {
+					return err
+				}
+				branch = repository.DefaultBranch
+			}
+			raw, err := a.git(cmd.Context(), "remote", "get-url", remote)
+			if err != nil {
+				return err
+			}
+			if !target.ownsRemote(raw) {
+				return clierr.Wrap(clierr.Usage, errors.New("selected Git remote changed; resolve the repository again before sync"))
+			}
+			credentials, err := a.gitTransportArguments(target, settings.RemoteIsSSH(raw))
+			if err != nil {
+				return err
+			}
+			result, err := git.SyncBranch(cmd.Context(), a.deps.Git, git.SyncOptions{Directory: a.options.cwd, Remote: remote, Branch: branch, CredentialArgs: credentials, Prompt: a.policy(snapshot).CanPrompt(a.deps.Streams)})
+			if err != nil {
+				return err
+			}
+			if a.options.json != "" {
+				return a.writeJSON(cmd, result)
+			}
+			a.reportSync(cmd, result, remote+"/"+result.Branch)
+			return nil
+		},
+	}
+	command.Flags().StringVarP(&branch, "branch", "b", "", "Branch to sync (default: the repository's default branch)")
+	_ = command.RegisterFlagCompletionFunc("branch", a.completeBranches())
+	command.ValidArgsFunction = a.completeRepos()
 	return command
+}
+
+// syncOnServer updates the repository of t on the server: a fork's branch, the default branch
+// unless named, fast-forwards to its parent's, and a pull mirror fetches its source.
+func (a *application) syncOnServer(cmd *cobra.Command, t target, branch string) error {
+	repositories := services.Repositories{Client: t.client}
+	item, err := repositories.View(cmd.Context(), t.Repo)
+	if err != nil {
+		return err
+	}
+	switch {
+	case item.Mirror:
+		if err := repositories.MirrorSync(cmd.Context(), item.FullName); err != nil {
+			return err
+		}
+		a.done(cmd, "Started updating the mirror %s from its source", item.FullName)
+		return a.writeMutationJSON(cmd, git.SyncResult{Remote: mirrorSourceURL(item)})
+	case !item.Fork || item.Parent == nil:
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is neither a fork nor a mirror, and has no Git remote here; run gt repo sync inside a clone of it", item.FullName))
+	}
+	branch = cmp.Or(branch, item.DefaultBranch)
+	branches := services.Branches{Client: t.client}
+	before, err := branches.View(cmd.Context(), item.FullName, branch)
+	if err != nil {
+		return err
+	}
+	if _, err := repositories.MergeUpstream(cmd.Context(), item.FullName, branch); err != nil {
+		return err
+	}
+	after, err := branches.View(cmd.Context(), item.FullName, branch)
+	if err != nil {
+		return err
+	}
+	result := git.SyncResult{Branch: branch, Commit: after.SHA, Previous: before.SHA, Remote: item.Parent.FullName}
+	if result.Previous == result.Commit {
+		a.done(cmd, "%s %s is already up to date with %s", item.FullName, branch, item.Parent.FullName)
+	} else {
+		a.done(cmd, "Synced %s %s from %s (fast-forward %s..%s)", item.FullName, branch, item.Parent.FullName, shortSHA(result.Previous), shortSHA(result.Commit))
+	}
+	return a.writeMutationJSON(cmd, result)
+}
+
+// reportSync tells how a sync from source, such as origin/main, changed the branch.
+func (a *application) reportSync(cmd *cobra.Command, result git.SyncResult, source string) {
+	switch result.Previous {
+	case result.Commit:
+		a.done(cmd, "%s is already up to date with %s", result.Branch, source)
+	case "":
+		a.done(cmd, "Created %s from %s (%s)", result.Branch, source, shortSHA(result.Commit))
+	default:
+		a.done(cmd, "Synced %s from %s (fast-forward %s..%s)", result.Branch, source, shortSHA(result.Previous), shortSHA(result.Commit))
+	}
+}
+
+// shortSHA abbreviates a commit ID to seven characters, as Gitea and Git show them.
+func shortSHA(sha string) string {
+	return sha[:min(len(sha), 7)]
 }

@@ -82,27 +82,41 @@ func (s Wiki) page(ctx context.Context, op repoOperation[*gitea.WikiPage]) (Wiki
 
 // List returns a non-nil page of wiki metadata.
 func (s Wiki) List(ctx context.Context, limit, page int) ([]WikiPage, error) {
-	pages, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.WikiPageMetaData, *gitea.Response, error) {
-		return c.Wiki.ListPages(ctx, owner, repo, gitea.ListWikiPagesOptions{ListOptions: listOptions(limit, page)})
+	window, err := s.ListPage(ctx, limit, page)
+	return window.Items, err
+}
+
+// wikiPageSize is the page size for reading the whole wiki; Gitea replaces a limit of 1 with its
+// default page size.
+const wikiPageSize = 50
+
+// ListPage is List that also reports whether more pages follow and how many there are. It reads
+// the whole page list and pages it on the client, because the server pages it inconsistently.
+func (s Wiki) ListPage(ctx context.Context, limit, page int) (Page[WikiPage], error) {
+	all, err := listAll(func(page int) ([]*gitea.WikiPageMetaData, error) {
+		return repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.WikiPageMetaData, *gitea.Response, error) {
+			return c.Wiki.ListPages(ctx, owner, repo, gitea.ListWikiPagesOptions{ListOptions: listOptions(wikiPageSize, page)})
+		})
 	})
 	if err != nil {
 		if apiError, ok := errors.AsType[*transport.APIError](err); !ok || apiError.Status != http.StatusNotFound {
-			return nil, err
+			return Page[WikiPage]{}, err
 		}
 		// An uninitialized wiki returns 404. Verify repository visibility and
 		// wiki configuration before treating that response as an empty list.
 		repository, checkErr := (Repositories{Client: s.Client}).get(ctx, s.Repository)
 		if checkErr != nil {
-			return nil, checkErr
+			return Page[WikiPage]{}, checkErr
 		}
 		if !repository.HasWiki {
-			return nil, err
+			return Page[WikiPage]{}, err
 		}
-		return []WikiPage{}, nil
+		return Page[WikiPage]{Items: []WikiPage{}, Counted: true}, nil
 	}
-	return convertAll(pages, func(item *gitea.WikiPageMetaData) WikiPage {
+	items, err := pageOf(convertAll(all, func(item *gitea.WikiPageMetaData) WikiPage {
 		return wikiPageFrom(item.Title, item.HTMLURL, item.LastCommit)
-	}), nil
+	}), limit, page)
+	return Page[WikiPage]{Items: items, More: page*limit < len(all), Total: len(all), Counted: true}, err
 }
 
 // View retrieves and decodes a wiki page.

@@ -9,21 +9,27 @@ import (
 	"fmt"
 )
 
-// SyncOptions selects one existing local branch and its source remote branch.
+// SyncOptions selects the local branch to fast-forward and the remote whose branch of the same name it follows.
 type SyncOptions struct {
 	Directory, Remote, Branch string
 	CredentialArgs            []string
 	Prompt                    bool
 }
 
-// SyncResult reports a completed local fast-forward.
+// SyncResult reports a synced branch. Previous is the branch's commit before the sync, empty when
+// the sync created the branch; it equals Commit when there was nothing to sync. For a sync on the
+// server, Remote names the repository the branch was synced from.
 type SyncResult struct {
-	Branch string `json:"branch"`
-	Commit string `json:"commit"`
-	Remote string `json:"remote"`
+	Branch   string `json:"branch"`
+	Commit   string `json:"commit"`
+	Previous string `json:"previous"`
+	Remote   string `json:"remote"`
 }
 
-// SyncBranch fetches and fast-forwards an existing branch without resetting commits.
+// SyncBranch fast-forwards the local branch to the remote's branch of the same name, creating it
+// when it is missing, and never changes which branch is checked out. The checked-out branch merges
+// with --ff-only and needs a clean working tree; another branch moves with update-ref, which fails
+// if the branch changed meanwhile. A branch that already contains the remote history is kept.
 func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResult, error) {
 	run := func(args ...string) (string, error) { return runner.Output(ctx, opts.Directory, opts.Prompt, args...) }
 	if opts.Remote == "" || opts.Branch == "" {
@@ -35,20 +41,27 @@ func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResul
 	if err := requireWorkTree(run, "sync"); err != nil {
 		return SyncResult{}, err
 	}
-	status, err := run("status", "--porcelain=v1", "--untracked-files=normal")
+	ref := "refs/heads/" + opts.Branch
+	head, err := optional(run("symbolic-ref", "--quiet", "HEAD"))
 	if err != nil {
 		return SyncResult{}, err
 	}
-	if status != "" {
-		return SyncResult{}, errors.New("working tree has changes; commit or stash them before syncing")
+	checkedOut := head == ref
+	if checkedOut {
+		status, err := run("status", "--porcelain=v1", "--untracked-files=normal")
+		if err != nil {
+			return SyncResult{}, err
+		}
+		if status != "" {
+			return SyncResult{}, fmt.Errorf("working tree has changes; commit or stash them before syncing %s", opts.Branch)
+		}
 	}
-	localRef := "refs/heads/" + opts.Branch + "^{commit}"
-	previous, err := run("rev-parse", "--verify", localRef)
+	previous, err := optional(run("rev-parse", "--verify", "--quiet", ref+"^{commit}"))
 	if err != nil {
-		return SyncResult{}, fmt.Errorf("local branch is unavailable; create it before syncing: %w", err)
+		return SyncResult{}, err
 	}
 	fetch := append([]string{}, opts.CredentialArgs...)
-	fetch = append(fetch, "fetch", "--no-tags", "--", opts.Remote, "refs/heads/"+opts.Branch)
+	fetch = append(fetch, "fetch", "--quiet", "--no-tags", "--", opts.Remote, ref)
 	if _, err := run(fetch...); err != nil {
 		return SyncResult{}, err
 	}
@@ -56,39 +69,57 @@ func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResul
 	if err != nil {
 		return SyncResult{}, err
 	}
-	current, err := run("rev-parse", "--verify", localRef)
-	if err != nil {
-		return SyncResult{}, err
+	result := SyncResult{Branch: opts.Branch, Commit: commit, Previous: previous, Remote: opts.Remote}
+	if previous == commit {
+		return result, nil
 	}
-	if current != previous {
-		return SyncResult{}, errors.New("local branch changed while fetching; retry sync")
-	}
-	if previous != commit {
+	if previous != "" {
 		if _, err := run("merge-base", "--is-ancestor", previous, commit); err != nil {
 			if failure, ok := errors.AsType[*CommandError](err); !ok || failure.ExitCode != 1 {
 				return SyncResult{}, err
 			}
 			if _, err := run("merge-base", "--is-ancestor", commit, previous); err != nil {
-				return SyncResult{}, fmt.Errorf("branch cannot be fast-forwarded; resolve divergence before syncing: %w", err)
+				return SyncResult{}, fmt.Errorf("%s and %s/%s have diverged; merge or rebase before syncing: %w", opts.Branch, opts.Remote, opts.Branch, err)
 			}
-			// The local branch already contains the remote history.
-			commit = previous
+			result.Commit = previous
+			return result, nil
 		}
 	}
-	if _, err := run("switch", opts.Branch); err != nil {
+	if !checkedOut {
+		// The old value makes update-ref fail if the branch moved, or appeared, while fetching.
+		if _, err := run("update-ref", "-m", "gt repo sync", ref, commit, previous); err != nil {
+			return SyncResult{}, fmt.Errorf("%s changed while fetching; retry sync: %w", opts.Branch, err)
+		}
+		if previous == "" {
+			for _, setting := range [][2]string{{"remote", opts.Remote}, {"merge", ref}} {
+				if _, err := run("config", "branch."+opts.Branch+"."+setting[0], setting[1]); err != nil {
+					return SyncResult{}, fmt.Errorf("created %s, but could not set it to track %s: %w", opts.Branch, opts.Remote, err)
+				}
+			}
+		}
+		return result, nil
+	}
+	current, err := run("rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
 		return SyncResult{}, err
 	}
-	if previous != commit {
-		if _, err := run("merge", "--ff-only", "--no-edit", commit); err != nil {
-			return SyncResult{}, fmt.Errorf("branch was selected but sync failed: %w", err)
-		}
+	if current != previous {
+		return SyncResult{}, fmt.Errorf("%s changed while fetching; retry sync", opts.Branch)
 	}
-	actual, err := run("rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil {
-		return SyncResult{}, fmt.Errorf("sync finished, but HEAD could not be verified: %w", err)
+	if _, err := run("merge", "--ff-only", "--no-edit", commit); err != nil {
+		return SyncResult{}, fmt.Errorf("could not fast-forward %s: %w", opts.Branch, err)
 	}
-	if actual != commit {
+	if actual, err := run("rev-parse", "--verify", "HEAD^{commit}"); err != nil || actual != commit {
 		return SyncResult{}, errors.New("HEAD changed during sync; inspect the working tree before retrying")
 	}
-	return SyncResult{Branch: opts.Branch, Commit: commit, Remote: opts.Remote}, nil
+	return result, nil
+}
+
+// optional returns "" without an error for a Git command that exits with status 1 to report
+// that what it looked for does not exist, such as rev-parse --verify --quiet.
+func optional(output string, err error) (string, error) {
+	if failure, ok := errors.AsType[*CommandError](err); ok && failure.ExitCode == 1 {
+		return "", nil
+	}
+	return output, err
 }

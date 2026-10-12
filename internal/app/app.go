@@ -416,28 +416,6 @@ func (a *application) confirm(cmd *cobra.Command, description string) error {
 	return terminal.Confirm(cmd.Context(), description, a.options.yes, a.deps.Streams, a.policy(s), a.deps.Prompter)
 }
 
-// confirmTyped asks the user to type answer before an irreversible action unless --yes was supplied.
-func (a *application) confirmTyped(cmd *cobra.Command, description, answer string) error {
-	if a.options.yes {
-		return nil
-	}
-	s, err := a.deps.Settings.Load()
-	if err != nil {
-		return err
-	}
-	if !a.policy(s).CanPrompt(a.deps.Streams) {
-		return clierr.Wrap(clierr.Usage, errors.New("confirmation required: supply --yes"))
-	}
-	typed, err := a.deps.Prompter.Input(cmd.Context(), description+" Type "+answer+" to confirm:")
-	if err != nil {
-		return err
-	}
-	if !strings.EqualFold(strings.TrimSpace(typed), answer) {
-		return clierr.Wrap(clierr.Canceled, errors.New("operation canceled"))
-	}
-	return nil
-}
-
 // require prompts for a missing required value under the prompt policy.
 func (a *application) require(cmd *cobra.Command, value *string, flag string) (bool, error) {
 	s, err := a.deps.Settings.Load()
@@ -546,6 +524,9 @@ func commandOutputFields(cmd *cobra.Command) []string {
 	case "asset":
 		return jsonFields[services.ReleaseAsset]()
 	case "release":
+		if cmd.Name() == "upload" {
+			return jsonFields[services.ReleaseAsset]()
+		}
 		return jsonFields[services.Release]()
 	case "secret":
 		return jsonFields[services.ActionSecret]()
