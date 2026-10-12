@@ -7,7 +7,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+)
+
+// Branch configuration keys that record the pull request and base remote of a checked-out PR branch.
+const (
+	pullNumberKey     = "gitea-cli-pr"
+	pullBaseRemoteKey = "gitea-cli-base-remote"
 )
 
 // CheckoutOptions identifies the base remote and how to check out the PR commit.
@@ -150,6 +157,13 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 		}
 		if _, err := run("config", "branch."+options.Branch+".merge", "refs/heads/"+options.HeadBranch); err != nil {
 			return CheckoutResult{}, fmt.Errorf("checked out the branch, but could not configure tracking: %w", err)
+		}
+	}
+	if !options.Detached {
+		for _, setting := range [][2]string{{pullNumberKey, strconv.FormatInt(options.Number, 10)}, {pullBaseRemoteKey, options.Remote}} {
+			if _, err := run("config", "branch."+options.Branch+"."+setting[0], setting[1]); err != nil {
+				return CheckoutResult{}, fmt.Errorf("checked out the branch, but could not record its pull request: %w", err)
+			}
 		}
 	}
 	return CheckoutResult{Branch: options.Branch, Commit: commit, Detached: options.Detached, Remote: fetchRemote, Tracking: tracking}, nil

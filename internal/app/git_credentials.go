@@ -106,7 +106,7 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 }
 
 func (a *application) setupGitCommand() *cobra.Command {
-	var local bool
+	var local, keepHelpers bool
 	command := &cobra.Command{Use: "setup-git", Short: "Explicitly register gt as a scoped Git credential helper", Annotations: textOutput("setup-git configures Git"), Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		target, err := a.resolveTarget(cmd.Context(), false, false)
 		if err != nil {
@@ -117,9 +117,10 @@ func (a *application) setupGitCommand() *cobra.Command {
 			return err
 		}
 		pinned, _ := a.selectedUser()
-		return git.SetupCredentials(cmd.Context(), a.deps.Git, git.CredentialSetup{Directory: a.options.cwd, Local: local, Instance: target.Host, Executable: executable, User: pinned, ConfigDirectory: configDir})
+		return git.SetupCredentials(cmd.Context(), a.deps.Git, git.CredentialSetup{Directory: a.options.cwd, Local: local, KeepHelpers: keepHelpers, Instance: target.Host, Executable: executable, User: pinned, ConfigDirectory: configDir})
 	}}
 	command.Flags().BoolVar(&local, "local", false, "Configure only the current Git repository instead of global Git configuration")
+	command.Flags().BoolVar(&keepHelpers, "keep-helpers", false, "Keep other credential helpers for the instance; they are asked first and store gt's token")
 	return command
 }
 

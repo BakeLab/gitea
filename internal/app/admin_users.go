@@ -73,10 +73,9 @@ func (a *application) adminCommand() *cobra.Command {
 			}
 			command.Flags().StringVar(&password, "password", "", "Password (prefer --password-file)")
 			command.Flags().StringVar(&passwordFile, "password-file", "", "Read password from file or - for stdin; remove one trailing line ending")
-			command.Flags().BoolVar(&mustChangePassword, "must-change-password", true, "Require password change on next sign-in (use =false to disable)")
+			command.Flags().BoolVar(&mustChangePassword, "must-change-password", verb == "create", "Require password change on next sign-in (use =false to disable)")
 		}
 		command.RunE = func(cmd *cobra.Command, args []string) error {
-			prompted := false
 			if verb == "create" {
 				if len(args) > 0 {
 					if cmd.Flags().Changed("username") {
@@ -88,11 +87,9 @@ func (a *application) adminCommand() *cobra.Command {
 					value *string
 					flag  string
 				}{{&username, "username"}, {&email, "email"}} {
-					completed, err := a.require(cmd, field.value, field.flag)
-					if err != nil {
+					if _, err := a.require(cmd, field.value, field.flag); err != nil {
 						return err
 					}
-					prompted = prompted || completed
 				}
 				opts.Email = &email
 				opts.FullName = &fullName
@@ -159,14 +156,13 @@ func (a *application) adminCommand() *cobra.Command {
 						if password != confirmation {
 							return clierr.Wrap(clierr.Usage, errors.New("passwords do not match"))
 						}
-						prompted = true
 					}
 					if password == "" {
 						return clierr.Wrap(clierr.Usage, errors.New("password cannot be empty"))
 					}
 					opts.Password = password
-					opts.MustChangePassword = &mustChangePassword
-				} else if cmd.Flags().Changed("must-change-password") {
+				}
+				if verb == "create" || cmd.Flags().Changed("must-change-password") {
 					opts.MustChangePassword = &mustChangePassword
 				}
 
@@ -178,7 +174,7 @@ func (a *application) adminCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if verb == "delete" || prompted {
+			if verb == "delete" {
 				if err := a.confirm(cmd, verb+" account "+username+" on "+target.Host); err != nil {
 					return err
 				}

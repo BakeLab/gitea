@@ -78,7 +78,6 @@ func (a *application) actionValueCommand(secret bool) *cobra.Command {
 			if strings.EqualFold(name, "CI") || strings.HasPrefix(strings.ToUpper(name), "GITEA_") || strings.HasPrefix(strings.ToUpper(name), "GITHUB_") {
 				return clierr.Wrap(clierr.Usage, errors.New("CI and names beginning GITEA_ or GITHUB_ are reserved"))
 			}
-			prompted := false
 			if verb == "set" {
 				var err error
 				if value, err = a.readSecret(cmd, value, file, "value", "value-file"); err != nil {
@@ -100,7 +99,6 @@ func (a *application) actionValueCommand(secret bool) *cobra.Command {
 					if err != nil {
 						return err
 					}
-					prompted = true
 				}
 				if value == "" {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("%s value cannot be empty", kind))
@@ -113,7 +111,7 @@ func (a *application) actionValueCommand(secret bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if verb == "delete" || prompted {
+			if verb == "delete" {
 				if err := a.confirm(cmd, verb+" Actions "+kind+" "+name); err != nil {
 					return err
 				}

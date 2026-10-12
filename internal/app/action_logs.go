@@ -12,6 +12,7 @@ import (
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -69,6 +70,7 @@ func (a *application) runLogsCommand() *cobra.Command {
 				return fmt.Errorf("job %d does not belong to run %d", selected, run)
 			}
 		}
+		out := terminal.SafeWriter(cmd.OutOrStdout(), a.deps.Streams.OutTTY, true)
 		if follow {
 			if len(jobs) != 1 {
 				return clierr.Wrap(clierr.Usage, errors.New("--follow requires exactly one job; select --job"))
@@ -76,7 +78,7 @@ func (a *application) runLogsCommand() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 			defer cancel()
 			return service.FollowJobLogs(ctx, run, jobs[0].ID, interval, func(chunk []byte) error {
-				n, err := cmd.OutOrStdout().Write(chunk)
+				n, err := out.Write(chunk)
 				if err == nil && n != len(chunk) {
 					return io.ErrShortWrite
 				}
@@ -84,14 +86,14 @@ func (a *application) runLogsCommand() *cobra.Command {
 			})
 		}
 		for _, job := range jobs {
-			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "Job %d: %s\n", job.ID, job.Name); err != nil {
+			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "Job %d: %s\n", job.ID, terminal.SafeLine(job.Name)); err != nil {
 				return err
 			}
 			logs, err := service.JobLogs(cmd.Context(), job.ID)
 			if err != nil {
 				return err
 			}
-			_, copyErr := io.Copy(cmd.OutOrStdout(), logs)
+			_, copyErr := io.Copy(out, logs)
 			closeErr := logs.Close()
 			if copyErr != nil {
 				return copyErr

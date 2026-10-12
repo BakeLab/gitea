@@ -185,6 +185,18 @@ func (a *application) authCommand() *cobra.Command {
 				return err
 			}
 			method = settings.AuthOAuth
+		} else if a.deps.Streams.InTTY {
+			if !a.policy(snapshot).CanPrompt(a.deps.Streams) {
+				return clierr.Wrap(clierr.Usage, errors.New("--with-token reads the token from stdin; pipe it in, for example: gt auth login --with-token < token.txt"))
+			}
+			token, err := a.deps.Prompter.SecretInput(cmd.Context(), "Paste an access token")
+			if err != nil {
+				return err
+			}
+			credential.AccessToken = strings.TrimSpace(token)
+			if credential.AccessToken == "" {
+				return clierr.Wrap(clierr.Usage, errors.New("access token cannot be empty"))
+			}
 		} else {
 			data, err := io.ReadAll(io.LimitReader(a.deps.Streams.In, 65537))
 			if err != nil {
@@ -214,7 +226,7 @@ func (a *application) authCommand() *cobra.Command {
 	login.Flags().BoolVar(&oauth, "oauth", false, "Authorize through a browser using OAuth PKCE")
 	login.Flags().StringVar(&clientID, "client-id", "", "OAuth client ID registered on the instance (default: the instance's stored ID, then gt's)")
 	login.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification for this instance")
-	login.Flags().BoolVar(&withToken, "with-token", false, "Read a personal access token from stdin")
+	login.Flags().BoolVar(&withToken, "with-token", false, "Read a personal access token from stdin, or prompt for it on a terminal")
 	login.Flags().StringVar(&sshKey, "ssh-key", "", "Authenticate with an SSH private key via HTTP signatures")
 	login.Flags().StringVar(&sshAgentPrincipal, "ssh-agent-principal", "", "Authenticate with an ssh-agent certificate principal via HTTP signatures")
 	login.Flags().StringVar(&sshAgentKey, "ssh-agent-key", "", "Authenticate with an ssh-agent public key fingerprint via HTTP signatures")

@@ -64,3 +64,30 @@ func TestRunLogsStreamWithoutMixingDiagnosticsAndVerifyJobMembership(t *testing.
 	require.Empty(t, out.String())
 	require.Empty(t, diagnostics.String())
 }
+
+func TestRunLogsKeepOnlyColorsOnATerminal(t *testing.T) {
+	const logs = "\x1b[36mstep\x1b[0m \x1b]0;PWNED\x07done\x1b[2J\r\n"
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/actions/runs/7/jobs":
+			if r.URL.Query().Get("page") == "1" {
+				_, _ = w.Write([]byte(`{"jobs":[{"id":9,"name":"Build\u001b]0;PWNED\u0007"}]}`))
+			} else {
+				_, _ = w.Write([]byte(`{"jobs":[]}`))
+			}
+		case "/api/v1/repos/owner/repo/actions/jobs/9/logs":
+			_, _ = w.Write([]byte(logs))
+		default:
+			t.Errorf("unexpected endpoint %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	for tty, want := range map[bool]string{false: logs, true: "\x1b[36mstep\x1b[0m ]0;PWNEDdone[2J\n"} {
+		deps, out, diagnostics := serverDeps(t, server.URL)
+		deps.Streams.OutTTY = tty
+		require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--job=9", "--no-input"}))
+		require.Equal(t, want, out.String(), "tty=%t", tty)
+		require.Equal(t, "Job 9: Build]0;PWNED\n", diagnostics.String())
+	}
+}

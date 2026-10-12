@@ -17,6 +17,7 @@ import (
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -209,6 +210,9 @@ func (a *application) apiCommand() *cobra.Command {
 			}
 		}
 		return writeOutput(cmd, output, func(destination io.Writer) error {
+			if output == "" || output == "-" {
+				destination = terminal.SafeWriter(destination, a.deps.Streams.OutTTY, false)
+			}
 			return (services.API{Client: target.client}).Visit(cmd.Context(), services.APIOptions{Endpoint: endpoint, Method: method, Body: body, Headers: headers, Paginate: paginate, MaxPages: maxPages}, func(response *http.Response) error {
 				if include {
 					if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "%s %s\n", response.Proto, response.Status); err != nil {

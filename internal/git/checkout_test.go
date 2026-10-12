@@ -68,7 +68,7 @@ func TestPullCheckoutValidatesBeforeChangingGitState(t *testing.T) {
 	result, err := CheckoutPull(context.Background(), runner, options)
 	require.NoError(t, err)
 	require.Equal(t, CheckoutResult{Branch: "pr/7", Commit: "abc123", Remote: "origin"}, result)
-	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "check-ref-format --branch pr/7", "status --porcelain=v1 --untracked-files=normal", "for-each-ref --format=%(refname) refs/heads/", "fetch --no-tags -- origin refs/pull/7/head", "rev-parse --verify FETCH_HEAD^{commit}", "switch --create pr/7 abc123"}, runner.calls)
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "check-ref-format --branch pr/7", "status --porcelain=v1 --untracked-files=normal", "for-each-ref --format=%(refname) refs/heads/", "fetch --no-tags -- origin refs/pull/7/head", "rev-parse --verify FETCH_HEAD^{commit}", "switch --create pr/7 abc123", "config branch.pr/7.gitea-cli-pr 7", "config branch.pr/7.gitea-cli-base-remote origin"}, runner.calls)
 }
 
 func TestPullCheckoutRejectsChangedHead(t *testing.T) {
@@ -103,6 +103,7 @@ func TestDetachedCheckoutDoesNotCreateOrChangeBranches(t *testing.T) {
 	require.Equal(t, CheckoutResult{Detached: true, Commit: "abc123", Remote: "origin"}, result)
 	require.Equal(t, "switch --detach abc123", runner.calls[len(runner.calls)-1])
 	for _, call := range runner.calls {
+		require.False(t, strings.HasPrefix(call, "config "))
 		require.False(t, strings.HasPrefix(call, "for-each-ref"))
 		require.False(t, strings.HasPrefix(call, "check-ref-format"))
 		require.NotContains(t, call, "--create")
@@ -126,7 +127,7 @@ func TestPullCheckoutReusesMatchingBranch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "abc123", result.Commit)
 	require.Contains(t, runner.calls, "rev-parse --verify refs/heads/pr/7^{commit}")
-	require.Equal(t, "switch pr/7", runner.calls[len(runner.calls)-1])
+	require.Equal(t, "switch pr/7", runner.calls[len(runner.calls)-3])
 	runner = &checkoutRunner{collision: true}
 	_, err = CheckoutPull(context.Background(), runner, CheckoutOptions{Directory: "/work", Remote: "origin", Number: 7, Branch: "pr/7", ExpectedCommit: "different"})
 	require.ErrorContains(t, err, "already exists with a different commit")
@@ -149,7 +150,7 @@ func TestPullCheckoutUpdatesOnlyByFastForward(t *testing.T) {
 			}
 		} else {
 			require.NoError(t, err)
-			require.Equal(t, []string{"switch pr/7", "merge --ff-only --no-edit abc123"}, runner.calls[len(runner.calls)-2:])
+			require.Equal(t, []string{"switch pr/7", "merge --ff-only --no-edit abc123"}, runner.calls[len(runner.calls)-4:len(runner.calls)-2])
 		}
 	}
 }
@@ -166,6 +167,7 @@ func TestPullCheckoutTracksHeadBranch(t *testing.T) {
 	require.Contains(t, runner.calls, "fetch --no-tags -- pulls/bob refs/heads/feature")
 	require.Contains(t, runner.calls, "config branch.pr/7.remote pulls/bob")
 	require.Contains(t, runner.calls, "config branch.pr/7.merge refs/heads/feature")
+	require.Equal(t, []string{"config branch.pr/7.gitea-cli-pr 7", "config branch.pr/7.gitea-cli-base-remote origin"}, runner.calls[len(runner.calls)-2:])
 	for _, call := range runner.calls {
 		require.NotContains(t, call, "refs/pull/")
 	}

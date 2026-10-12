@@ -71,6 +71,7 @@ func TestCheckoutMatchesRemoteThroughEnvironmentSSHHost(t *testing.T) {
 		"status --porcelain=v1 --untracked-files=normal": "", "for-each-ref --format=%(refname) refs/heads/": "",
 		"fetch --no-tags -- origin refs/heads/feature": "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --create pr/7 abc123": "",
 		"config branch.pr/7.remote origin": "", "config branch.pr/7.merge refs/heads/feature": "",
+		"config branch.pr/7.gitea-cli-pr 7": "", "config branch.pr/7.gitea-cli-base-remote origin": "",
 	}}
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", "7", "--repo", "alice/project", "--remote", "origin", "--no-input", "--json"}))
 	require.JSONEq(t, `{"branch":"pr/7","commit":"abc123","detached":false,"remote":"origin","tracking":"origin/feature"}`, out.String())
@@ -97,6 +98,7 @@ func TestSSHCheckoutUsesAccountKeyOnlyForFetch(t *testing.T) {
 		"status --porcelain=v1 --untracked-files=normal": "", "for-each-ref --format=%(refname) refs/heads/": "",
 		fetch: "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --create pr/7 abc123": "",
 		"config branch.pr/7.remote origin": "", "config branch.pr/7.merge refs/heads/feature": "",
+		"config branch.pr/7.gitea-cli-pr 7": "", "config branch.pr/7.gitea-cli-base-remote origin": "",
 	}}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", "7", "--repo", "alice/project", "--remote", "origin", "--no-input", "--json"}))

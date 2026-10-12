@@ -37,6 +37,34 @@ func TestTeamRepositoryPolicyPreservesUnitPermissions(t *testing.T) {
 	require.Equal(t, 1, mutations)
 }
 
+func TestTeamEditMergesUnitsUnlessReplaced(t *testing.T) {
+	for _, test := range []struct {
+		replace bool
+		reads   int
+		want    map[string]any
+	}{
+		{false, 1, map[string]any{"repo.code": "write", "repo.issues": "read", "repo.wiki": "write"}},
+		{true, 0, map[string]any{"repo.wiki": "write"}},
+	} {
+		reads := 0
+		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, "/api/v1/teams/5", r.URL.Path)
+			if r.Method == http.MethodGet {
+				reads++
+				_, _ = w.Write([]byte(`{"id":5,"permission":"write","units_map":{"repo.code":"write","repo.issues":"read","repo.wiki":"none"}}`))
+				return
+			}
+			body := requestJSON(t, r)
+			require.Equal(t, test.want, body["units_map"])
+			require.NotContains(t, body, "permission")
+			_, _ = w.Write([]byte(`{"id":5}`))
+		}))
+		_, err := (Teams{Client: client}).Edit(context.Background(), 5, TeamOptions{Units: map[string]string{"repo.wiki": "write"}, ReplaceUnits: test.replace})
+		require.NoError(t, err)
+		require.Equal(t, test.reads, reads)
+	}
+}
+
 func TestTeamCreateSendsPermissionAndUnits(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)

@@ -145,7 +145,7 @@ func (s Webhooks) Edit(ctx context.Context, id int64, opts WebhookOptions) (Webh
 		return Webhook{}, &CapabilityError{Feature: "webhook secret editing", Reason: "Gitea's edit API does not update the signing secret; recreate the hook to rotate it"}
 	}
 	if opts.Authorization == nil {
-		return Webhook{}, &CapabilityError{Feature: "webhook editing without an authorization choice", Reason: "Gitea replaces authorization and can hide its existing value; supply --authorization-header-file or --clear-authorization"}
+		return Webhook{}, &CapabilityError{Feature: "webhook editing without an authorization choice", Reason: "Gitea drops the stored authorization header on every edit and never returns it, so the caller must send it again or clear it"}
 	}
 	current, err := s.get(ctx, id)
 	if err != nil {

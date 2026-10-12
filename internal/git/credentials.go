@@ -57,9 +57,12 @@ func CredentialArguments(instance, executable, user, configDir string) ([]string
 type CredentialSetup struct {
 	Directory, Instance, Executable, User, ConfigDirectory string
 	Local                                                  bool
+	// KeepHelpers adds gt's helper after other helpers instead of resetting them for the instance.
+	KeepHelpers bool
 }
 
-// SetupCredentials adds a scoped helper without removing other credential helpers.
+// SetupCredentials installs a helper scoped to the instance. Unless KeepHelpers is set, an empty
+// helper first resets other helpers for the instance, so they neither answer for gt nor store its token.
 func SetupCredentials(ctx context.Context, runner Runner, options CredentialSetup) error {
 	normalized, err := settings.NormalizeHost(options.Instance)
 	if err != nil {
@@ -100,8 +103,17 @@ func SetupCredentials(ctx context.Context, runner Runner, options CredentialSetu
 			return err
 		}
 	}
-	if slices.Contains(helpers, helper) {
-		return nil
+	if options.KeepHelpers {
+		if slices.Contains(helpers, helper) {
+			return nil
+		}
+	} else {
+		if slices.Equal(helpers, []string{"", helper}) {
+			return nil
+		}
+		if _, err := runner.Output(ctx, cwd, false, "config", scope, "--replace-all", prefix+"helper", ""); err != nil {
+			return err
+		}
 	}
 	_, err = runner.Output(ctx, cwd, false, "config", scope, "--add", prefix+"helper", helper)
 	return err

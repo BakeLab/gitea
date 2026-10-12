@@ -23,7 +23,7 @@ func (r discoverRunner) Output(_ context.Context, dir string, prompt bool, args 
 }
 
 func TestDiscoverRemote(t *testing.T) {
-	const head, tracking = "symbolic-ref --short HEAD", "config --get branch.main.remote"
+	const head, tracking, base = "symbolic-ref --short HEAD", "config --get branch.main.remote", "config --get branch.main.gitea-cli-base-remote"
 	for _, test := range []struct {
 		name      string
 		runner    discoverRunner
@@ -33,7 +33,10 @@ func TestDiscoverRemote(t *testing.T) {
 	}{
 		{name: "preferred", preferred: "fork", want: "fork"},
 		{name: "branch upstream", runner: discoverRunner{head: "main", tracking: "fork", "remote": "origin\nfork"}, want: "fork"},
-		{name: "branch upstream with slashes", runner: discoverRunner{head: "main", tracking: "pulls/bob/project", "remote": "origin\npulls/bob/project"}, want: "pulls/bob/project"},
+		{name: "branch upstream with slashes", runner: discoverRunner{head: "main", tracking: "team/fork", "remote": "origin\nteam/fork"}, want: "team/fork"},
+		{name: "pull head remote", runner: discoverRunner{head: "main", tracking: "pulls/bob/project", "remote": "origin\npulls/bob/project"}, want: "origin"},
+		{name: "recorded pull base", runner: discoverRunner{head: "main", tracking: "fork", base: "upstream", "remote": "origin\nupstream\nfork"}, want: "upstream"},
+		{name: "removed pull base", runner: discoverRunner{head: "main", tracking: "fork", base: "gone", "remote": "origin\nfork"}, want: "fork"},
 		{name: "local branch upstream", runner: discoverRunner{head: "main", tracking: ".", "remote": "origin\nfork"}, want: "origin"},
 		{name: "upstream remote", runner: discoverRunner{"remote": "origin\nupstream"}, want: "upstream"},
 		{name: "origin remote", runner: discoverRunner{"remote": "fork\norigin"}, want: "origin"},

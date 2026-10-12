@@ -30,11 +30,33 @@ func TestAdminPromptAndFlagsReachEquivalentPayloads(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"admin", "user", "create", "account", "--full-name", "Test Account"}))
 	require.Equal(t, []string{"email"}, prompt.asked)
 	require.Len(t, prompt.secrets, 2)
-	require.Len(t, prompt.confirmations, 1)
+	require.Empty(t, prompt.confirmations)
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"admin", "user", "create", "account", "--full-name", "Test Account", "--email", "account@example.test", "--password", " preserved password ", "--no-input"}))
 	require.Equal(t, payloads[0], payloads[1])
 	require.Len(t, prompt.asked, 1)
 	require.Len(t, prompt.secrets, 2)
 	require.NotContains(t, out.String(), "password")
+}
+
+func TestAdminUserEditSetsMustChangePasswordOnlyWhenPassed(t *testing.T) {
+	var edits []map[string]any
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch {
+			var payload map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			edits = append(edits, payload)
+		}
+		_, _ = w.Write([]byte(`{"id":2,"login":"bob"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	for _, flags := range [][]string{{"--password", "new password"}, {"--password", "new password", "--must-change-password"}, {"--must-change-password=false"}} {
+		require.NoError(t, Execute(context.Background(), deps, append([]string{"admin", "user", "edit", "bob", "--no-input"}, flags...)))
+	}
+	require.Len(t, edits, 3)
+	require.Equal(t, "new password", edits[0]["password"])
+	require.Nil(t, edits[0]["must_change_password"])
+	require.Equal(t, true, edits[1]["must_change_password"])
+	require.Equal(t, false, edits[2]["must_change_password"])
 }

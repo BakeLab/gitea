@@ -6,6 +6,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -47,6 +48,8 @@ type TeamOptions struct {
 	CanCreateRepo   *bool             `json:"can_create_org_repo,omitempty"`
 	AllRepositories *bool             `json:"includes_all_repositories,omitempty"`
 	Units           map[string]string `json:"units_map,omitempty"`
+	// ReplaceUnits makes Edit replace the unit policy with Units instead of merging Units into it.
+	ReplaceUnits bool `json:"-"`
 }
 
 // Teams implements team, member and repository access operations.
@@ -101,19 +104,28 @@ func (s Teams) Create(ctx context.Context, org string, opts TeamOptions) (Team, 
 	return teamFrom(team), nil
 }
 
-// Edit preserves unit permissions when changing access to all repositories.
+// Edit merges Units into the current unit policy unless ReplaceUnits is set, and preserves unit
+// permissions when changing access to all repositories. Gitea replaces the whole policy on edit.
 func (s Teams) Edit(ctx context.Context, id int64, opts TeamOptions) (Team, error) {
-	if opts.AllRepositories != nil && opts.Permission == nil {
+	repositoryPolicy := opts.AllRepositories != nil && opts.Permission == nil
+	if repositoryPolicy || (opts.Units != nil && !opts.ReplaceUnits) {
 		current, err := s.View(ctx, id)
 		if err != nil {
 			return Team{}, err
 		}
-		if current.Permission == "owner" {
-			return Team{}, &CapabilityError{Feature: "owner-team repository policy editing", Reason: "owner teams already manage all organization repositories"}
+		if repositoryPolicy {
+			if current.Permission == "owner" {
+				return Team{}, &CapabilityError{Feature: "owner-team repository policy editing", Reason: "owner teams already manage all organization repositories"}
+			}
+			opts.Permission = &current.Permission
 		}
-		opts.Permission = &current.Permission
-		if opts.Units == nil {
+		switch {
+		case opts.Units == nil:
 			opts.Units = current.Units
+		case !opts.ReplaceUnits:
+			units := maps.Clone(current.Units)
+			maps.Copy(units, opts.Units)
+			opts.Units = units
 		}
 	}
 	var team gitea.Team

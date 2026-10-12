@@ -161,6 +161,28 @@ func TestAPIHeadersPreserveRawResponseAndRejectCredentialOverrides(t *testing.T)
 	require.Equal(t, 1, calls)
 }
 
+func TestAPIStripsTerminalControlsOnlyOnATerminalStdout(t *testing.T) {
+	const body = "plain \x1b]0;PWNED\x07\x1b[31mtext\x00\n"
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+	for tty, want := range map[bool]string{false: body, true: "plain ]0;PWNED[31mtext\n"} {
+		deps, out, _ := serverDeps(t, server.URL)
+		deps.Streams.OutTTY = tty
+		require.NoError(t, Execute(context.Background(), deps, []string{"api", "user/data"}))
+		require.Equal(t, want, out.String(), "tty=%t", tty)
+	}
+	deps, out, _ := serverDeps(t, server.URL)
+	deps.Streams.OutTTY = true
+	path := filepath.Join(t.TempDir(), "response")
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user/data", "--output-file", path}))
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, body, string(data))
+	require.Empty(t, out.String())
+}
+
 type rejectAPIInput struct{ t *testing.T }
 
 func (r rejectAPIInput) Read([]byte) (int, error) {

@@ -14,12 +14,17 @@ import (
 var ErrAmbiguousRemote = errors.New("ambiguous repository: select --remote or --repo")
 
 // DiscoverRemote names the remote used for repository discovery: preferred when set, otherwise
-// the current branch's upstream remote, then upstream, origin, or the only remote.
+// the base remote pr checkout recorded for the current branch, the current branch's upstream
+// remote unless it is a pulls/<owner>/<repo> head remote, then upstream, origin, or the only remote.
 func DiscoverRemote(ctx context.Context, runner Runner, dir, preferred string) (string, error) {
 	if preferred != "" {
 		return preferred, nil
 	}
-	if _, remote := CurrentUpstreamRemote(ctx, runner, dir); remote != "" {
+	branch, remote := CurrentUpstreamRemote(ctx, runner, dir)
+	if base := pullBaseRemote(ctx, runner, dir, branch); base != "" {
+		return base, nil
+	}
+	if remote != "" && !strings.HasPrefix(remote, "pulls/") {
 		return remote, nil
 	}
 	names, err := runner.Output(ctx, dir, false, "remote")
@@ -60,4 +65,21 @@ func UpstreamRemote(ctx context.Context, runner Runner, dir, branch string) stri
 		return ""
 	}
 	return remote
+}
+
+// pullBaseRemote returns the base remote pr checkout recorded for branch, or "" when there is
+// none or that remote no longer exists.
+func pullBaseRemote(ctx context.Context, runner Runner, dir, branch string) string {
+	if branch == "" {
+		return ""
+	}
+	base, err := runner.Output(ctx, dir, false, "config", "--get", "branch."+branch+"."+pullBaseRemoteKey)
+	if err != nil || base == "" {
+		return ""
+	}
+	names, err := runner.Output(ctx, dir, false, "remote")
+	if err != nil || !slices.Contains(strings.Fields(names), base) {
+		return ""
+	}
+	return base
 }

@@ -76,7 +76,7 @@ func (a *application) webhookCommand() *cobra.Command {
 			command.Flags().StringVar(&filter, "branch-filter", "", "Branch glob for push events")
 			command.Flags().StringVar(&authorization, "authorization-header", "", "Authorization value (prefer file input)")
 			command.Flags().StringVar(&authorizationFile, "authorization-header-file", "", "Read authorization value from file or -")
-			command.Flags().BoolVar(&clearAuthorization, "clear-authorization", false, "Explicitly clear delivery authorization")
+			command.Flags().BoolVar(&clearAuthorization, "clear-authorization", false, "Send no authorization header; on edit, this removes the stored one")
 			command.Flags().StringToStringVar(&config, "config", nil, "Adapter-specific configuration, for example channel=alerts")
 			if verb == "create" {
 				command.Flags().StringVar(&kind, "type", "gitea", "Webhook adapter type")
@@ -88,7 +88,6 @@ func (a *application) webhookCommand() *cobra.Command {
 		command.RunE = func(cmd *cobra.Command, args []string) error {
 			var id int64
 			var err error
-			prompted := false
 			opts := services.WebhookOptions{}
 			if verb != "create" {
 				id, err = number(args[0])
@@ -116,7 +115,7 @@ func (a *application) webhookCommand() *cobra.Command {
 					return clierr.Wrap(clierr.Usage, &services.CapabilityError{Feature: "webhook secret editing", Reason: "Gitea does not update signing secrets through its edit API; recreate the hook to rotate it"})
 				}
 				if verb == "edit" && authSources == 0 {
-					return clierr.Wrap(clierr.Usage, errors.New("editing requires --authorization-header, --authorization-header-file, or --clear-authorization because Gitea replaces authorization"))
+					return clierr.Wrap(clierr.Usage, errors.New("editing a webhook drops its stored authorization header unless it is sent again, and Gitea never returns it: pass --authorization-header-file or --authorization-header (use --clear-authorization only for a hook without one)"))
 				}
 				if len(args) > 0 && verb == "create" {
 					if cmd.Flags().Changed("url") {
@@ -125,8 +124,7 @@ func (a *application) webhookCommand() *cobra.Command {
 					endpoint = args[0]
 				}
 				if verb == "create" {
-					prompted, err = a.require(cmd, &endpoint, "url")
-					if err != nil {
+					if _, err := a.require(cmd, &endpoint, "url"); err != nil {
 						return err
 					}
 				}
@@ -200,12 +198,8 @@ func (a *application) webhookCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if verb == "delete" || prompted {
-				subject := endpoint
-				if verb == "delete" {
-					subject = args[0]
-				}
-				if err := a.confirm(cmd, verb+" webhook "+subject); err != nil {
+			if verb == "delete" {
+				if err := a.confirm(cmd, "delete webhook "+args[0]); err != nil {
 					return err
 				}
 			}

@@ -87,6 +87,26 @@ func TestLoginValidatesUserEnvironmentWithFlagPrecedence(t *testing.T) {
 	}
 }
 
+func TestLoginWithTokenPromptsWithoutEchoOnATerminal(t *testing.T) {
+	server := newAuthenticatedServer(http.NotFoundHandler())
+	defer server.Close()
+	args := []string{"auth", "login", "--host", server.URL, "--with-token", "--credential-store", "file"}
+	deps, _, _ := testDeps(t)
+	deps.Streams.In = strings.NewReader("echoed-token\n")
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	prompt := &scriptedPrompter{secret: " private-login-token "}
+	deps.Prompter = prompt
+	err := Execute(context.Background(), deps, append(args, "--no-input"))
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.ErrorContains(t, err, "gt auth login --with-token < token.txt")
+	require.Empty(t, prompt.secrets)
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.Equal(t, []string{"Paste an access token"}, prompt.secrets)
+	credential, err := deps.Credentials.Load(server.URL, "alice", settings.StoreFile)
+	require.NoError(t, err)
+	require.Equal(t, "private-login-token", credential.AccessToken)
+}
+
 func TestLoginInsecureInstance(t *testing.T) {
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"login":"alice"}`))

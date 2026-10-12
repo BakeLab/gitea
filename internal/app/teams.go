@@ -5,6 +5,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -34,7 +35,7 @@ func (a *application) teamCommand() *cobra.Command {
 	group.AddCommand(list)
 	for _, verb := range []string{"view", "create", "edit", "delete"} {
 		var name, description, permission string
-		var createRepo, allRepos bool
+		var createRepo, allRepos, force, replaceUnits bool
 		var units map[string]string
 		command := &cobra.Command{Use: verb + " <id>", Short: titleCase(verb) + " an organization team", Args: argsExact(1)}
 		switch verb {
@@ -42,19 +43,24 @@ func (a *application) teamCommand() *cobra.Command {
 			command.Use = "create <org>"
 		case "delete":
 			command.Annotations = textOutput("team deletion does not return a resource")
+			command.Flags().BoolVar(&force, "force", false, "Allow deleting the organization's owner team")
 		}
 		if verb == "create" || verb == "edit" {
 			command.Flags().StringVar(&name, "name", "", "Team name")
 			command.Flags().StringVar(&description, "description", "", "Team description")
 			command.Flags().StringVar(&permission, "permission", "read", "Default access: read, write, admin")
-			command.Flags().StringToStringVar(&units, "unit", nil, "Unit permissions, for example repo.code=write,repo.issues=read (replaces unit policy)")
+			unitUsage := "Unit permissions, for example repo.code=write,repo.issues=read"
+			if verb == "edit" {
+				unitUsage = "Unit permissions to change, for example repo.wiki=write; merged into the current policy"
+				command.Flags().BoolVar(&replaceUnits, "unit-replace", false, "Replace the whole unit policy with --unit; omitted units lose access")
+			}
+			command.Flags().StringToStringVar(&units, "unit", nil, unitUsage)
 			command.Flags().BoolVar(&createRepo, "can-create-repo", false, "Allow creating organization repositories")
 			command.Flags().BoolVar(&allRepos, "all-repositories", false, "Access every organization repository")
 		}
 		command.RunE = func(cmd *cobra.Command, args []string) error {
 			var id int64
 			var err error
-			prompted := false
 			opts := services.TeamOptions{}
 			if verb != "create" {
 				id, err = number(args[0])
@@ -66,6 +72,9 @@ func (a *application) teamCommand() *cobra.Command {
 				if err := oneOf("permission", permission, "read", "write", "admin"); err != nil {
 					return err
 				}
+				if replaceUnits && !cmd.Flags().Changed("unit") {
+					return clierr.Wrap(clierr.Usage, errors.New("--unit-replace requires --unit"))
+				}
 				if cmd.Flags().Changed("unit") && (len(units) == 0 || permission == "admin") {
 					return clierr.Wrap(clierr.Usage, errors.New("--unit needs a nonempty policy and cannot restrict administrator access"))
 				}
@@ -75,8 +84,7 @@ func (a *application) teamCommand() *cobra.Command {
 					}
 				}
 				if verb == "create" {
-					prompted, err = a.require(cmd, &name, "name")
-					if err != nil {
+					if _, err := a.require(cmd, &name, "name"); err != nil {
 						return err
 					}
 					opts.Name = &name
@@ -104,6 +112,7 @@ func (a *application) teamCommand() *cobra.Command {
 				}
 				if cmd.Flags().Changed("unit") {
 					opts.Units = units
+					opts.ReplaceUnits = replaceUnits
 				}
 				if cmd.Flags().Changed("can-create-repo") {
 					opts.CanCreateRepo = &createRepo
@@ -120,15 +129,6 @@ func (a *application) teamCommand() *cobra.Command {
 				return err
 			}
 			service := services.Teams{Client: target.client}
-			if verb == "delete" || prompted {
-				subject := args[0]
-				if verb == "create" {
-					subject = name + " in " + args[0]
-				}
-				if err := a.confirm(cmd, verb+" team "+subject+" on "+target.Host); err != nil {
-					return err
-				}
-			}
 			var item services.Team
 			switch verb {
 			case "view":
@@ -138,7 +138,7 @@ func (a *application) teamCommand() *cobra.Command {
 			case "edit":
 				item, err = service.Edit(cmd.Context(), id, opts)
 			case "delete":
-				return service.Delete(cmd.Context(), id)
+				return a.deleteTeam(cmd, service, id, force)
 			}
 			if err != nil {
 				return err
@@ -149,6 +149,31 @@ func (a *application) teamCommand() *cobra.Command {
 	}
 	group.AddCommand(a.teamAccessCommand(false), a.teamAccessCommand(true))
 	return group
+}
+
+// deleteTeam names the team in its confirmation and deletes an organization's owner team only
+// with --force, after the user types its name.
+func (a *application) deleteTeam(cmd *cobra.Command, service services.Teams, id int64, force bool) error {
+	team, err := service.View(cmd.Context(), id)
+	if err != nil {
+		return err
+	}
+	subject, answer := fmt.Sprintf("team %q (ID %d)", team.Name, team.ID), team.Name
+	if team.Organization != "" {
+		subject += " from " + team.Organization
+		answer = team.Organization + "/" + team.Name
+	}
+	if team.Permission != "owner" {
+		err = a.confirm(cmd, "Delete "+subject+"?")
+	} else if !force {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is the organization's owner team and its members would lose owner access; pass --force to delete it", subject))
+	} else {
+		err = a.confirmTyped(cmd, "Delete owner "+subject+"? Its members lose owner access.", answer)
+	}
+	if err != nil {
+		return err
+	}
+	return service.Delete(cmd.Context(), id)
 }
 
 func (a *application) teamAccessCommand(repository bool) *cobra.Command {

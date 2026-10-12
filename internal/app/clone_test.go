@@ -100,6 +100,7 @@ func TestCloneAddsUpstreamRemoteForForks(t *testing.T) {
 		"remote add -- upstream " + parent:             "",
 		"config branch.main.remote upstream":           "",
 		"config branch.main.merge refs/heads/main":     "",
+		"config branch.main.pushRemote origin":         "",
 	}}
 	deps.Git = runner
 	cwd := t.TempDir()
@@ -109,9 +110,10 @@ func TestCloneAddsUpstreamRemoteForForks(t *testing.T) {
 		"remote add -- upstream " + parent,
 		"config branch.main.remote upstream",
 		"config branch.main.merge refs/heads/main",
+		"config branch.main.pushRemote origin",
 	}, runner.calls)
 	clone := filepath.Join(cwd, "destination")
-	require.Equal(t, []string{cwd, clone, clone, clone}, runner.dirs)
+	require.Equal(t, []string{cwd, clone, clone, clone, clone}, runner.dirs)
 	require.JSONEq(t, `{"id":8,"full_name":"bob/project","fork":true}`, out.String())
 }
 

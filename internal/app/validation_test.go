@@ -233,7 +233,7 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"webhook", "create", "https://host/path", "--authorization-header", "first\nsecond"}, "authorization header must be a single line"},
 		{[]string{"webhook", "create", "https://host/path", "--events", ""}, "--events needs at least one trigger"},
 		{[]string{"webhook", "create", "https://host/path", "--config", "secret=private"}, "--config cannot override the URL, secret, or webhook scope"},
-		{[]string{"webhook", "edit", "1", "--active=false"}, "editing requires --authorization-header, --authorization-header-file, or --clear-authorization because Gitea replaces authorization"},
+		{[]string{"webhook", "edit", "1", "--active=false"}, "editing a webhook drops its stored authorization header unless it is sent again, and Gitea never returns it: pass --authorization-header-file or --authorization-header (use --clear-authorization only for a hook without one)"},
 		{[]string{"webhook", "delete", "not-an-id"}, "invalid resource number \"not-an-id\""},
 		{[]string{"webhook", "list", "--org", "organization", "--account"}, "--org, --account, --global, and --repo select mutually exclusive scopes"},
 		{[]string{"webhook", "list", "--global", "-R", "owner/repo"}, "--org, --account, --global, and --repo select mutually exclusive scopes"},
@@ -257,8 +257,6 @@ func TestConfirmationsNameResolvedValues(t *testing.T) {
 	}{
 		{[]string{"wiki", "create"}, map[string]string{"title": "Home", "body": "text"}, "create wiki page Home on alice/project"},
 		{[]string{"release", "create"}, map[string]string{"tag": "v1.0.0"}, "create release v1.0.0 on alice/project"},
-		{[]string{"webhook", "create"}, map[string]string{"url": "https://hooks.test/path"}, "create webhook https://hooks.test/path"},
-		{[]string{"team", "create", "acme"}, map[string]string{"name": "Developers"}, "create team Developers in acme"},
 		{[]string{"time", "delete", "5", "7"}, nil, "delete tracked time entry 7 on alice/project #5"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
@@ -276,6 +274,41 @@ func TestConfirmationsNameResolvedValues(t *testing.T) {
 			require.Equal(t, clierr.Canceled, clierr.ExitCode(err), "%v", err)
 			require.Len(t, prompt.confirmations, 1)
 			require.Contains(t, prompt.confirmations[0], tc.want)
+		})
+	}
+}
+
+func TestPromptedCreateSubmitsWithoutConfirmation(t *testing.T) {
+	for _, tc := range []struct {
+		args          []string
+		inputs        map[string]string
+		secret, write string
+	}{
+		{[]string{"secret", "set", "TOKEN"}, nil, "private", "PUT /api/v1/repos/alice/project/actions/secrets/TOKEN"},
+		{[]string{"variable", "set", "MODE"}, map[string]string{"Variable value": "fast"}, "", "POST /api/v1/repos/alice/project/actions/variables/MODE"},
+		{[]string{"webhook", "create"}, map[string]string{"url": "https://hooks.test/path"}, "", "POST /api/v1/repos/alice/project/hooks"},
+		{[]string{"team", "create", "acme"}, map[string]string{"name": "Developers"}, "", "POST /api/v1/orgs/acme/teams"},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			var writes []string
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				writes = append(writes, r.Method+" "+r.URL.Path)
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"id":1}`))
+			}))
+			defer server.Close()
+			deps, _, _ := testDeps(t)
+			deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
+			prompt := &scriptedPrompter{inputs: tc.inputs, secret: tc.secret}
+			deps.Prompter = prompt
+			deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+			require.NoError(t, Execute(context.Background(), deps, tc.args))
+			require.Empty(t, prompt.confirmations)
+			require.Equal(t, []string{tc.write}, writes)
 		})
 	}
 }
