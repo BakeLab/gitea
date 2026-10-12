@@ -75,8 +75,7 @@ func (a *application) instanceTarget(ctx context.Context) (target, error) {
 	return a.resolveTarget(ctx, false, false)
 }
 
-// credentialLabel describes how an account authenticates: "token, keyring", "OAuth, file store" or
-// "SSH key".
+// credentialLabel describes how an account authenticates, such as "token, keyring".
 func credentialLabel(account settings.Account) string {
 	switch account.AuthMethod {
 	case settings.AuthSSH:
@@ -130,14 +129,9 @@ how to log in, where to keep the token and whether git should use gt for the ins
 
 Create a token on the instance under Settings > Applications. Logging in to an account
 that gt already has replaces its stored credential after a confirmation (or with --yes).`,
-		Example: `# Log in interactively
-$ gt auth login
-# Log in with a token from a file or a secret store
+		Example: `$ gt auth login
 $ gt auth login --host gitea.com --with-token < token.txt
-# Log in in the browser, with read-only access to repositories
-$ gt auth login --host gitea.com --oauth --scopes read:repository,read:user
-# Sign requests with an SSH key instead of a token
-$ gt auth login --host gitea.com --ssh-key ~/.ssh/id_ed25519`,
+$ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			selected := 0
 			for _, chosen := range []bool{withToken, oauth, sshKey != "", sshAgentPrincipal != "", sshAgentKey != ""} {
@@ -377,16 +371,12 @@ func defaultSSHKey() string {
 		return ""
 	}
 	for _, name := range []string{"id_ed25519", "id_ecdsa", "id_rsa"} {
-		if path := filepath.Join(home, ".ssh", name); fileExists(path) {
+		path := filepath.Join(home, ".ssh", name)
+		if _, err := os.Stat(path); err == nil {
 			return path
 		}
 	}
 	return ""
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 // authStatusRow is one account, or the environment token, that auth status reports.

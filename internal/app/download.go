@@ -21,7 +21,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// downloadFlags are the destination flags of a download command.
 type downloadFlags struct {
 	// output is a file, an existing directory to download into, or - for standard output.
 	output string
@@ -31,8 +30,6 @@ type downloadFlags struct {
 	clobber, skipExisting bool
 }
 
-// register adds -O/--output (and its older name --output-file), -D/--dir, --clobber and
-// --skip-existing to cmd.
 func (f *downloadFlags) register(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	flags.StringVarP(&f.output, "output", "O", "", "File or directory to write to, or - for standard output (default: the download's name)")
@@ -43,10 +40,8 @@ func (f *downloadFlags) register(cmd *cobra.Command) {
 	flags.BoolVar(&f.skipExisting, "skip-existing", false, "Keep an existing file and skip the download")
 }
 
-// destination returns the path a download named name is written to: --output (inside it when it
-// is a directory), else name inside --dir or the working directory, or "-" for standard
-// output. skip reports an existing file that --skip-existing keeps. It fails before anything
-// is downloaded when the file exists without --clobber or --skip-existing.
+// destination returns where a download named name goes, or "-" for standard output. It fails
+// before anything is downloaded when the file exists without --clobber or --skip-existing.
 func (f downloadFlags) destination(name string) (path string, skip bool, err error) {
 	switch {
 	case f.output != "" && f.dir != "":

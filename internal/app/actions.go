@@ -57,7 +57,6 @@ $ gt workflow list --json id,state --jq '.[] | select(.state != "active") | .id'
 	}
 }
 
-// workflowColumns head workflowRow.
 var workflowColumns = []terminal.Column{{Header: "Name", Flex: true}, {Header: "File"}, {Header: "State"}, {Header: "Path", PipedOnly: true}, {Header: "URL", PipedOnly: true}}
 
 func workflowRow(item services.Workflow) []terminal.Cell {
@@ -129,7 +128,6 @@ $ gt workflow view ci --web`,
 	return cmd
 }
 
-// renderWorkflow shows a workflow with its recent runs.
 func (a *application) renderWorkflow(t target, workflow services.Workflow, runs []services.Run) string {
 	d := a.display()
 	rows := make([][]terminal.Cell, len(runs))
@@ -279,7 +277,6 @@ func (a *application) nextStep(cmd *cobra.Command, format string, args ...any) {
 	}
 }
 
-// inputValues parses key=value workflow inputs.
 func inputValues(fields []string) (map[string]string, error) {
 	values := map[string]string{}
 	for _, field := range fields {

@@ -122,10 +122,6 @@ func (p *dispatchingPrompter) Ask(_ context.Context, title string, validate func
 	return answer, validate(answer)
 }
 
-func (p *dispatchingPrompter) AskText(context.Context, string, string) (string, error) {
-	return "", nil
-}
-
 func (p *dispatchingPrompter) ConfirmDefault(_ context.Context, title string, defaultYes bool) (bool, error) {
 	p.asked = append(p.asked, title)
 	return !defaultYes, nil

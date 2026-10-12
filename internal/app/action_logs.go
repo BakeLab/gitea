@@ -34,8 +34,6 @@ prefixing each line with its job's name when it follows several jobs. With --out
 it downloads the logs of the whole run as a ZIP archive instead.`,
 		Example: `# print the logs of every job of a run
 $ gt run logs 34
-# print the logs of the failed jobs
-$ gt run logs 34 --failed
 # follow the logs of one job while it runs
 $ gt run logs 34 --job build --follow
 # download the logs as a ZIP archive

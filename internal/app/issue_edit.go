@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// errNothingToEdit is the shared answer to edit commands without anything to change.
 var errNothingToEdit = clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --title (see --help)"))
 
 func (a *application) issueEditCommand() *cobra.Command {
@@ -25,16 +24,14 @@ func (a *application) issueEditCommand() *cobra.Command {
 starting from its current values. Label and assignee flags add to or remove from each issue's
 current values; the --set flags replace them.`, Example: `$ gt issue edit 12 --title "Crash on start" --add-label bug
 $ gt issue edit 12 13 --add-assignee @me --milestone v1.0
-$ gt issue edit 12 --remove-label wontfix --remove-milestone
-$ gt issue edit 12 --body-file notes.md`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+$ gt issue edit 12 --remove-label wontfix --remove-milestone`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var draft terminal.Draft
 		defer finishDraft(&draft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
 			return err
 		}
-		prompt := a.canPrompt()
 		if !localFlagsChanged(cmd) {
-			if !prompt || a.deps.IssueEditForm == nil {
+			if !a.canPrompt() || a.deps.IssueEditForm == nil {
 				return errNothingToEdit
 			}
 			target, numbers, err := a.resolveRefs(cmd, args, issueRef)
@@ -128,7 +125,6 @@ $ gt issue edit 12 --body-file notes.md`, Annotations: map[string]string{"gt.arg
 	return cmd
 }
 
-// editedIssue words the done line of an issue edit.
 func editedIssue(t target) func(services.Issue) string {
 	return func(item services.Issue) string {
 		return "Edited " + discussionNoun(item.Kind) + " " + refLabel(t.Repo, item.Number, item.Title)

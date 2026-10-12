@@ -45,15 +45,6 @@ func TestPromptPolicy(t *testing.T) {
 	} {
 		require.Equal(t, tc.expected, tc.policy.CanPrompt(tc.streams))
 	}
-	prompt := &askingPrompt{}
-	value := "supplied"
-	asked, err := RequireInput(context.Background(), &value, "title", "title", nil, Streams{}, Policy{}, prompt)
-	require.NoError(t, err)
-	require.False(t, asked)
-	require.Empty(t, prompt.titles)
-	value = ""
-	_, err = RequireInput(context.Background(), &value, "title", "title", nil, Streams{}, Policy{}, prompt)
-	require.ErrorContains(t, err, "--title")
 }
 
 // askingPrompt answers Asker prompts from scripted answers. Ask skips answers that validate rejects,
@@ -99,17 +90,19 @@ func TestConfirmAction(t *testing.T) {
 		c        Confirmation
 		yes      bool
 		streams  Streams
-		prompt   Prompter
+		prompt   *askingPrompt
 		code     int
 		message  string
 		rejected []string
+		defaults []bool
 	}{
 		{name: "accepted by flag", c: deleteLabel, yes: true, prompt: &askingPrompt{}},
 		{name: "names the action without a terminal", c: deleteLabel, prompt: &askingPrompt{}, code: clierr.Usage, message: `confirmation required to delete label "bug" from alice/x; rerun with --yes`},
 		{name: "names the prompted action without a terminal", c: Confirmation{Prompt: "Delete alice/x? It becomes read-only."}, prompt: &askingPrompt{}, code: clierr.Usage, message: "confirmation required to delete alice/x; rerun with --yes"},
 		{name: "without a terminal or action", c: Confirmation{Prompt: "Go?", DefaultYes: true}, prompt: &askingPrompt{}, code: clierr.Usage, message: "confirmation required; rerun with --yes"},
-		{name: "accepted", c: deleteLabel, streams: terminal, prompt: &askingPrompt{accept: true}},
-		{name: "declined", c: deleteLabel, streams: terminal, prompt: &askingPrompt{}, code: clierr.Canceled, message: "canceled"},
+		{name: "accepted", c: deleteLabel, streams: terminal, prompt: &askingPrompt{accept: true}, defaults: []bool{false}},
+		{name: "passes the default", c: Confirmation{Prompt: "Create pull request?", DefaultYes: true}, streams: terminal, prompt: &askingPrompt{accept: true}, defaults: []bool{true}},
+		{name: "declined", c: deleteLabel, streams: terminal, prompt: &askingPrompt{}, code: clierr.Canceled, message: "canceled", defaults: []bool{false}},
 		{name: "re-prompts until the name is typed", c: typed, streams: terminal, prompt: &askingPrompt{answers: []string{"alice/y", " Alice/X "}}, rejected: []string{"alice/y"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -121,20 +114,10 @@ func TestConfirmAction(t *testing.T) {
 			if tc.code == clierr.Canceled {
 				require.ErrorIs(t, err, ErrCanceled)
 			}
-			if asker, ok := tc.prompt.(*askingPrompt); ok {
-				require.Equal(t, tc.rejected, asker.rejected)
-			}
+			require.Equal(t, tc.rejected, tc.prompt.rejected)
+			require.Equal(t, tc.defaults, tc.prompt.defaults)
 		})
 	}
-}
-
-func TestConfirmActionPassesTheDefault(t *testing.T) {
-	prompt := &askingPrompt{accept: true}
-	streams := Streams{InTTY: true, ErrTTY: true}
-	require.NoError(t, ConfirmAction(context.Background(), Confirmation{Prompt: "Create pull request?", DefaultYes: true}, false, streams, Policy{Enabled: true}, prompt))
-	require.NoError(t, ConfirmAction(context.Background(), Confirmation{Prompt: "Delete branch?"}, false, streams, Policy{Enabled: true}, prompt))
-	require.Equal(t, []bool{true, false}, prompt.defaults)
-	require.Equal(t, []string{"Create pull request?", "Delete branch?"}, prompt.titles)
 }
 
 func TestRequireInput(t *testing.T) {
@@ -155,6 +138,9 @@ func TestRequireInput(t *testing.T) {
 	require.Equal(t, []string{"", "red"}, asker.rejected)
 	require.Equal(t, []string{"Color (hex)"}, asker.titles)
 
+	asked, err = RequireInput(context.Background(), &value, "color", "Color (hex)", hex, Streams{}, policy, asker)
+	require.NoError(t, err, "a supplied value needs no prompt")
+	require.False(t, asked)
 	value = ""
 	_, err = RequireInput(context.Background(), &value, "color", "Color (hex)", hex, Streams{}, policy, asker)
 	require.EqualError(t, err, "missing required input: supply --color")

@@ -23,7 +23,6 @@ type labelScope func(*cobra.Command) (services.Labels, error)
 // labelColors are the colors of new labels created without --color, from Gitea's default labels.
 var labelColors = []string{"ee0701", "fbca04", "84b6eb", "cc317c", "c2e0c6", "0e8a16", "1d76db", "5319e7", "d4c5f9", "e99695", "bfd4f2", "006b75"}
 
-// labelArguments is the ARGUMENTS help of commands that take labels.
 const labelArguments = `A label can be supplied by its name, such as "bug" or "kind/feature", or by its ID. A
 number is an ID first, then a name.`
 
@@ -90,7 +89,6 @@ func labelName(s services.Labels, item services.Label) string {
 	return fmt.Sprintf("label %q in %s", item.Name, s.Scope())
 }
 
-// labelFields are the fields of label create and edit.
 type labelFields struct {
 	name, color, description string
 	exclusive, archived      bool
@@ -184,7 +182,12 @@ $ gt label create bug -c ee0701 --force`, Args: usageArgs(cobra.MaximumNArgs(1))
 		if err != nil {
 			return forceHint(err)
 		}
-		return a.reportLabel(cmd, s, item, updated)
+		verb := "Created"
+		if updated {
+			verb = "Updated"
+		}
+		a.done(cmd, "%s %s", verb, labelName(s, item))
+		return a.jsonResult(cmd, item)
 	}}
 	fields.register(cmd, "Label `name`")
 	_ = cmd.Flags().MarkHidden("name")
@@ -226,16 +229,6 @@ func forceHint(err error) error {
 		conflict.Hint = "pass --force to update it"
 	}
 	return err
-}
-
-// reportLabel reports a created or updated label as JSON or with a ✓ line.
-func (a *application) reportLabel(cmd *cobra.Command, s services.Labels, item services.Label, updated bool) error {
-	verb := "Created"
-	if updated {
-		verb = "Updated"
-	}
-	a.done(cmd, "%s %s", verb, labelName(s, item))
-	return a.jsonResult(cmd, item)
 }
 
 func (a *application) labelEditCommand(scope labelScope, complete cobra.CompletionFunc) *cobra.Command {
@@ -317,7 +310,6 @@ $ gt label export --repo alice/old | gt label import - --repo alice/new`, Args: 
 	return cmd
 }
 
-// importLabels creates the labels of a label file, or of stdin for "-".
 func (a *application) importLabels(cmd *cobra.Command, scope labelScope, file string, force bool) error {
 	data, err := readFileOrStdin(cmd.InOrStdin(), file)
 	if err != nil {
@@ -331,12 +323,7 @@ func (a *application) importLabels(cmd *cobra.Command, scope labelScope, file st
 	if err != nil {
 		return err
 	}
-	return a.createLabels(cmd, s, rows, force)
-}
-
-// createLabels creates each label in rows, continuing past failures. A label that exists already
-// is updated with force and fails otherwise.
-func (a *application) createLabels(cmd *cobra.Command, s services.Labels, rows []services.LabelOptions, force bool) error {
+	// Each row is created, or updated with force, continuing past failures.
 	existing, err := s.All(cmd.Context())
 	if err != nil {
 		return err

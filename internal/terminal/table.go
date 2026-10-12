@@ -11,9 +11,8 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// Display describes the output that tables and views render for. On a terminal (TTY) they align,
-// truncate and style text for people; otherwise they write plain tab-separated or key/value text
-// for scripts, without header, color or links.
+// Display describes the output that tables and views render for: a terminal (TTY), or plain text
+// for scripts.
 type Display struct {
 	TTY bool
 	// Color enables SGR colors and emphasis on a TTY.
@@ -42,9 +41,9 @@ type Column struct {
 	Prefix string
 }
 
-// Cell is one value in a Table. On color terminals Color (a name such as green, or six-digit
-// RGB hex), Bold and Muted style the text after alignment, so escape sequences never count
-// toward the column width. Link applies to the first column only.
+// Cell is one value in a Table. Color (a name such as green), Bold and Muted style the text after
+// alignment, so escape sequences never count toward the column width. Link applies to the first
+// column only.
 type Cell struct {
 	Text, Link, Color string
 	Bold, Muted       bool
@@ -87,10 +86,8 @@ func (c Cell) style(text string, d Display, link bool) string {
 func (c Cell) Render(d Display) string { return c.style(SafeLine(c.Text), d, false) }
 
 // Table renders rows under columns; rows may have more cells than there are columns. On a TTY it
-// prints an uppercase header row when any column has a header, aligns columns two spaces apart,
-// and shrinks Flex columns until rows fit the display width. Otherwise it writes one line of
-// tab-separated cells per row. Cell text passes through SafeLine either way, so server data can
-// neither break the layout nor reach the terminal as escape sequences. No rows render as nothing.
+// aligns columns under an uppercase header and shrinks Flex columns to the display width;
+// otherwise it writes tab-separated lines. Cell text passes through SafeLine either way.
 func Table(columns []Column, rows [][]Cell, d Display) string {
 	if len(rows) == 0 {
 		return ""
@@ -144,10 +141,24 @@ func Table(columns []Column, rows [][]Cell, d Display) string {
 			widths[j] = max(widths[j], runewidth.StringWidth(line[j]))
 		}
 	}
-	fitWidth(widths, d.Width, func(j int) (bool, int) {
-		c := column(shown[j])
-		return c.Flex, max(c.Min, runewidth.StringWidth(headers[j]), 8)
-	})
+	// Narrow the widest flexible column above its floor, one cell at a time, until the row fits.
+	excess := 2*(len(widths)-1) - d.Width
+	for _, w := range widths {
+		excess += w
+	}
+	for ; d.Width > 0 && excess > 0; excess-- {
+		widest := -1
+		for j, w := range widths {
+			c := column(shown[j])
+			if c.Flex && w > max(c.Min, runewidth.StringWidth(headers[j]), 8) && (widest < 0 || w > widths[widest]) {
+				widest = j
+			}
+		}
+		if widest < 0 {
+			break
+		}
+		widths[widest]--
+	}
 
 	writeLine := func(cells []string, style func(j int, text string) string) {
 		var line strings.Builder
@@ -175,31 +186,6 @@ func Table(columns []Column, rows [][]Cell, d Display) string {
 		})
 	}
 	return b.String()
-}
-
-// fitWidth narrows flexible columns, always the widest one first, until the row and its two-space
-// gaps fit limit or every flexible column reached its floor. A limit of 0 disables fitting.
-func fitWidth(widths []int, limit int, flex func(j int) (bool, int)) {
-	if limit <= 0 {
-		return
-	}
-	excess := 2 * (len(widths) - 1)
-	for _, w := range widths {
-		excess += w
-	}
-	excess -= limit
-	for ; excess > 0; excess-- {
-		widest := -1
-		for j, w := range widths {
-			if ok, floor := flex(j); ok && w > floor && (widest < 0 || w > widths[widest]) {
-				widest = j
-			}
-		}
-		if widest < 0 {
-			return
-		}
-		widths[widest]--
-	}
 }
 
 // SafeLine reduces server text to one line: SafeText, with tabs and line breaks as spaces.

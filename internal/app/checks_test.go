@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -109,17 +110,7 @@ func TestChecksSummaryAndExitCodes(t *testing.T) {
 		{name: "none", statuses: `[]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch {
-				case r.URL.Path == "/api/v1/repos/alice/x/pulls/8":
-					_, _ = w.Write([]byte(`{"number":8,"head":{"sha":"abc"}}`))
-				case r.URL.Query().Get("page") == "1":
-					_, _ = w.Write([]byte(tc.statuses))
-				default:
-					_, _ = w.Write([]byte(`[]`))
-				}
-			}))
-			defer server.Close()
+			server := checksServer(t, tc.statuses)
 			deps, out, diagnostics := serverDeps(t, server.URL)
 			plainTTY(t, &deps, server.URL)
 			err := Execute(context.Background(), deps, []string{"pr", "checks", "8", "-R", "alice/x"})
@@ -135,18 +126,24 @@ func TestChecksSummaryAndExitCodes(t *testing.T) {
 	}
 }
 
-func TestChecksWatchTimeoutCountsPendingChecks(t *testing.T) {
+// checksServer serves pull request alice/x#8 whose head commit has statuses.
+func checksServer(t *testing.T, statuses string) *httptest.Server {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/repos/alice/x/pulls/8":
 			_, _ = w.Write([]byte(`{"number":8,"head":{"sha":"abc"}}`))
 		case r.URL.Query().Get("page") == "1":
-			_, _ = w.Write([]byte(`[{"id":1,"context":"a","status":"pending"},{"id":2,"context":"b","status":"pending"}]`))
+			_, _ = w.Write([]byte(statuses))
 		default:
 			_, _ = w.Write([]byte(`[]`))
 		}
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestChecksWatchTimeoutCountsPendingChecks(t *testing.T) {
+	server := checksServer(t, `[{"id":1,"context":"a","status":"pending"},{"id":2,"context":"b","status":"pending"}]`)
 	deps, _, _ := serverDeps(t, server.URL)
 	err := Execute(context.Background(), deps, []string{"pr", "checks", "8", "-R", "alice/x", "--watch", "--interval=1ms", "--timeout=30ms"})
 	require.EqualError(t, err, "timed out after 30ms waiting for 2 pending checks")

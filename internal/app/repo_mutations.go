@@ -166,14 +166,12 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 					return services.Classify(err, "branch", strconv.Quote(defaultBranch), t.Repo)
 				}
 			}
-			if options.Archived != nil && *options.Archived {
-				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Archive " + t.Repo + "? It becomes read-only."}); err != nil {
-					return err
-				}
-			}
 			// Gitea refuses topic changes on an archived repository, so archiving comes last.
 			repo, archive := t.Repo, options.Archived != nil && *options.Archived
 			if archive {
+				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Archive " + t.Repo + "? It becomes read-only."}); err != nil {
+					return err
+				}
 				options.Archived = nil
 			}
 			if options != (services.RepositoryEdit{}) {
@@ -241,12 +239,9 @@ func (a *application) repoCloneCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "clone <repository> [<directory>] [-- <gitflags>...]",
 		Short: "Clone a repository locally",
-		Long: `Clone a repository with the configured Git protocol (git_protocol: https or ssh) and gt's
-credentials. Git flags can follow --.
-
-A fork's parent is added as the "upstream" remote, which its default branch pulls from while pushes
-stay on the fork; gt commands in the clone then target the parent. A pull mirror's source is added
-as the "source" remote.`,
+		Long: `Clone a repository with the configured Git protocol and gt's credentials. Git flags can
+follow --. A fork's parent is added as the "upstream" remote, and gt commands in the clone then
+target the parent.`,
 		Example: `# Clone a repository into ./project
 $ gt repo clone alice/project
 
@@ -304,12 +299,11 @@ func (a *application) repoForkCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "fork [<repository>] [-- <gitflags>...]",
 		Short: "Fork a repository",
-		Long: `Fork a repository for your account, or into an organization with --org. When the account or
-organization already has a fork, gt reports it instead of failing.
+		Long: `Fork a repository for your account, or into an organization with --org. An existing fork is
+reported instead of failing.
 
-With --clone, the fork is cloned, and its parent is added as the "upstream" remote; Git flags can
-follow --. Inside a clone of the repository, --remote adds the fork as the "origin" remote (or
---remote-name), renaming the current "origin" to "upstream".`,
+--clone clones the fork (Git flags can follow --). Inside a clone of the repository, --remote adds
+the fork as "origin" and renames the current "origin" to "upstream".`,
 		Example: `# Fork the repository of the current clone and add the fork as origin
 $ gt repo fork --remote
 
@@ -502,16 +496,11 @@ func (a *application) inferredRepository(t target, verb string, refuseYes bool) 
 	if t.RepoSource == "--repo" {
 		return "", nil
 	}
-	source := describeRepoSource(t.RepoSource)
+	source := strings.Replace(t.RepoSource, "remote ", "git remote ", 1)
 	if refuseYes && a.options.yes {
 		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("--yes requires an explicit repository, not one inferred from %s: gt repo %s %s --yes", source, verb, t.Repo))
 	}
 	return " (from " + source + ")", nil
-}
-
-// describeRepoSource words a repository source for people: git remote upstream, GITEA_CLI_REPO, ...
-func describeRepoSource(source string) string {
-	return strings.Replace(source, "remote ", "git remote ", 1)
 }
 
 // repoArchiveCommand builds repo archive, or repo unarchive.
@@ -581,7 +570,7 @@ $ gt repo archive alice/old-project --yes`,
 }
 
 func (a *application) repoRenameCommand() *cobra.Command {
-	command := &cobra.Command{
+	return &cobra.Command{
 		Use:   "rename <new-name>",
 		Short: "Rename a repository",
 		Long:  "Rename a repository; its owner stays the same. Gitea redirects the old name to the new one.",
@@ -625,16 +614,13 @@ $ gt repo rename new-name -R alice/old-name`,
 			return a.jsonResult(cmd, item)
 		},
 	}
-	return command
 }
 
 func (a *application) repoDeleteCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "delete [<repository>]",
 		Short: "Delete a repository",
-		Long: `Delete a repository with its issues, pull requests, releases and wiki. This cannot be undone.
-
-Type the repository's name to confirm. With --yes, name the repository explicitly.`,
+		Long:  "Delete a repository with its issues, pull requests, releases and wiki. This cannot be undone.",
 		Example: `# Delete a repository after typing its name
 $ gt repo delete alice/old-project
 

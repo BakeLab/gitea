@@ -37,12 +37,10 @@ type discussionComment struct {
 	meta                             [2]string
 }
 
-// stateBadge shows a discussion state, such as Open or Merged, in its color.
 func stateBadge(state string) terminal.Cell {
 	return terminal.Cell{Text: titleCase(state), Color: stateColors[state]}
 }
 
-// labelCells shows labels in their colors.
 func labelCells(labels []services.Label) []terminal.Cell {
 	cells := make([]terminal.Cell, len(labels))
 	for i, label := range labels {
@@ -151,7 +149,6 @@ func pullView(item services.Pull, repo string, details pullDetails) discussionVi
 	if checks != "" {
 		checksHint = fmt.Sprintf("%s (gt pr checks %d)", checks, item.Number)
 	}
-	reviews := details.reviews
 	return discussionView{
 		number: item.Number, comments: item.Comments, summary: summary,
 		view: terminal.View{
@@ -176,7 +173,7 @@ func pullView(item services.Pull, repo string, details pullDetails) discussionVi
 			}
 		},
 		extraComments: func(cmd *cobra.Command, t target, n int64) ([]discussionComment, error) {
-			return pullReviewComments(cmd, t, n, reviews)
+			return pullReviewComments(cmd, t, n, details.reviews)
 		},
 	}
 }

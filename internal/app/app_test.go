@@ -266,15 +266,13 @@ func TestCommandHelpShowsRelevantFlagsOnly(t *testing.T) {
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "--help"}))
 	require.Contains(t, out.String(), "\nFLAGS\n  -L, --limit int          Maximum number of results (1..1000) (default 30)\n      --org organization ")
-	for _, args := range [][]string{{"version", "--help"}, {"alias", "list", "--help"}, {"auth", "status", "--help"}} {
+	for _, args := range [][]string{{"alias", "list", "--help"}, {"auth", "status", "--help"}, {"version", "--help"}} {
 		out.Reset()
 		require.NoError(t, Execute(context.Background(), deps, args))
 		require.NotContains(t, out.String(), "--repo", args)
 		require.Contains(t, out.String(), globalFlagsLine, args)
 	}
-	out.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"version", "--help"}))
-	require.NotContains(t, out.String(), "--json fields")
+	require.NotContains(t, out.String(), "--json fields", "version prints text")
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "--help"}))
 	require.Contains(t, out.String(), "\nUSAGE\n  gt issue <command> [flags]\n\nAVAILABLE COMMANDS\n  attachment:  ")

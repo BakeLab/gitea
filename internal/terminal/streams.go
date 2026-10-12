@@ -66,8 +66,7 @@ func (p Policy) Validate(s Streams) error {
 	return nil
 }
 
-// ErrCanceled reports a declined confirmation or an aborted prompt. It exits with code 3 and is
-// meant to be reported as "Canceled." rather than as an error.
+// ErrCanceled reports a declined confirmation or an aborted prompt; it exits with code 3.
 var ErrCanceled = clierr.Wrap(clierr.Canceled, errors.New("canceled"))
 
 // Prompter abstracts cancellable input collection and confirmation.
@@ -99,9 +98,8 @@ func promptError(ctx context.Context, err error) error {
 	return err
 }
 
-// errNoTerminalSize refuses forms on a terminal without a size, such as a pty that `script` opens
-// without a terminal. Forms size their fields from it, and a zero size panics in bubbles; nobody
-// could see the form there anyway.
+// errNoTerminalSize refuses forms on a terminal without a size, such as a pty that `script` opens:
+// a zero size panics in bubbles.
 var errNoTerminalSize = clierr.Wrap(clierr.Usage, errors.New("terminal size unknown; pass the values as flags or use --no-input"))
 
 func (p *FormPrompter) runForm(ctx context.Context, form *huh.Form) error {

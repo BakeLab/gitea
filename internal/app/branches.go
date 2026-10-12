@@ -18,23 +18,17 @@ import (
 
 // validateBranch rejects invalid Git refs before making requests.
 func validateBranch(name string) error {
-	if name == "" || name == "@" || strings.HasPrefix(name, "-") || strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".") || strings.Contains(name, "..") || strings.Contains(name, "@{") || strings.Contains(name, "//") || strings.ContainsAny(name, " ~^:?*[\\\t\r\n") {
-		return clierr.Wrap(clierr.Usage, errors.New("invalid branch name"))
-	}
+	invalid := name == "" || name == "@" || strings.HasPrefix(name, "-") || strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".") || strings.Contains(name, "..") || strings.Contains(name, "@{") || strings.Contains(name, "//") || strings.ContainsAny(name, " ~^:?*[\\\t\r\n") ||
+		strings.ContainsFunc(name, func(r rune) bool { return r < 32 || r == 127 })
 	for part := range strings.SplitSeq(name, "/") {
-		if strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
-			return clierr.Wrap(clierr.Usage, errors.New("invalid branch name"))
-		}
+		invalid = invalid || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock")
 	}
-	for _, r := range name {
-		if r < 32 || r == 127 {
-			return clierr.Wrap(clierr.Usage, errors.New("invalid branch name"))
-		}
+	if invalid {
+		return clierr.Wrap(clierr.Usage, errors.New("invalid branch name"))
 	}
 	return nil
 }
 
-// validateBranches validates every branch name.
 func validateBranches(names []string) error {
 	for _, name := range names {
 		if err := validateBranch(name); err != nil {
@@ -249,7 +243,10 @@ $ gt branch delete old-a old-b --yes`,
 			if err != nil {
 				return err
 			}
-			subject := branchSubject(args)
+			subject := "branch " + args[0]
+			if len(args) > 1 {
+				subject = fmt.Sprintf("%d branches (%s)", len(args), strings.Join(args, ", "))
+			}
 			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + " from " + target.Repo + "?"}); err != nil {
 				return err
 			}
@@ -263,14 +260,6 @@ $ gt branch delete old-a old-b --yes`,
 	return command
 }
 
-// branchSubject names one or more branches in a prompt: "branch main" or "2 branches (a, b)".
-func branchSubject(names []string) string {
-	if len(names) == 1 {
-		return "branch " + names[0]
-	}
-	return fmt.Sprintf("%d branches (%s)", len(names), strings.Join(names, ", "))
-}
-
 func (a *application) branchProtectCommand() *cobra.Command {
 	var rule services.Protection
 	var pattern string
@@ -278,12 +267,8 @@ func (a *application) branchProtectCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "protect <branch>...",
 		Short: "Protect branches",
-		Long: `Add a protection rule for each branch. By default nobody can push to a protected branch directly
-and pull requests need one approving review to merge; --allow-push lets users or teams push, and
---required-approvals changes the review count.
-
-The branches must exist. --pattern protects every branch that matches a glob instead, such as
-release/*, including branches created later.`,
+		Long: `Add a protection rule for each existing branch, or with --pattern for every branch matching a
+glob. By default nobody can push directly and pull requests need one approving review.`,
 		Example: `# Require two approvals and passing CI on main
 $ gt branch protect main --required-approvals 2 --status-check ci/build
 

@@ -21,11 +21,7 @@ func (a *application) adminCommand() *cobra.Command {
 	group := &cobra.Command{Use: "admin", Short: "Manage instance administration", Long: "Administer the Gitea instance. These commands need an administrator account."}
 	users := &cobra.Command{Use: "user", Short: "Manage registered accounts", Long: `List, view, create, edit and delete the accounts of the instance. These commands need an
 administrator account.`}
-	users.AddCommand(a.adminUserListCommand(), a.adminUserViewCommand())
-	for _, verb := range []string{"create", "edit"} {
-		users.AddCommand(a.adminUserChangeCommand(verb))
-	}
-	users.AddCommand(a.adminUserDeleteCommand())
+	users.AddCommand(a.adminUserListCommand(), a.adminUserViewCommand(), a.adminUserChangeCommand("create"), a.adminUserChangeCommand("edit"), a.adminUserDeleteCommand())
 	group.AddCommand(users)
 	return group
 }
@@ -149,7 +145,6 @@ $ gt admin user view bob --json email,admin`,
 	}
 }
 
-// adminUserChangeCommand creates or edits an account.
 func (a *application) adminUserChangeCommand(verb string) *cobra.Command {
 	var username, email, fullName, description, website, location, visibility, password, passwordFile string
 	var admin, active, restricted, prohibitLogin, mustChangePassword, allowGitHook, allowImportLocal, allowCreateOrganization bool
@@ -330,9 +325,8 @@ func (a *application) adminUserDeleteCommand() *cobra.Command {
 	var purge bool
 	cmd := &cobra.Command{
 		Use: "delete <username>", Short: "Delete an account", Args: argsExact(1), ValidArgsFunction: a.completeAdminUsers(),
-		Long: `Delete an account. Gitea refuses while the user owns repositories or is the last owner of an
-organization: transfer or delete those first, or pass --purge to delete the account with
-everything it owns. A purge cannot be undone, so a terminal asks you to type the username.`,
+		Long: `Delete an account. Gitea refuses while the user owns repositories or organizations, unless
+--purge deletes the account with everything it owns.`,
 		Example: `$ gt admin user delete spammer
 # also delete the user's repositories, packages and organization memberships
 $ gt admin user delete spammer --purge`,

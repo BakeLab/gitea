@@ -44,12 +44,9 @@ func (a *application) repoMigrateCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "migrate [<clone-url>]",
 		Short: "Import a repository from another server",
-		Long: `Import a repository into Gitea from a Git URL, or from another forge with --service, which also
-copies its issues, labels, milestones, pull requests, releases or wiki on request. --mirror creates
-a pull mirror that Gitea updates from the source instead.
-
-The repository is named after the last segment of the URL unless --name is given. Imports from a
-forge with --service need an access token for it.`,
+		Long: `Import a repository from a Git URL, or from another forge with --service (which needs an access
+token and can also copy issues, pull requests, releases and more). --mirror creates a pull mirror
+instead. The name defaults to the last segment of the URL.`,
 		Example: `# Import a public Git repository
 $ gt repo migrate https://github.com/go-gitea/gitea.git
 
@@ -81,7 +78,7 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 			if err := validateMigrationFlags(cmd, opts, passwordFile, tokenFile); err != nil {
 				return err
 			}
-			validURL := func(raw string) error { return validateMigrationURL(raw) }
+			validURL := validateMigrationURL
 			if cmd.Flags().Changed("server-path") {
 				validURL = nil
 			}
@@ -95,7 +92,7 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 				}
 			}
 			opts.Name = cmp.Or(opts.Name, migrationName(opts.CloneURL))
-			named, err := a.requireInput(cmd, &opts.Name, "name", "Repository name", func(name string) error { return validateRepositoryName(name) })
+			named, err := a.requireInput(cmd, &opts.Name, "name", "Repository name", validateRepositoryName)
 			if err != nil {
 				return err
 			}

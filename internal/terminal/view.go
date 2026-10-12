@@ -35,12 +35,9 @@ func (f Field) text(d Display) string {
 	return strings.Join(values, ", ")
 }
 
-// View is one resource for human readers, such as an issue, a release or a repository.
-//
-// On a TTY it shows the bold title with its muted ID, a line of badges and muted metadata, the
-// aligned non-empty fields, the body (markdown rendered when the display allows), and the footer
-// "View this <kind> on Gitea: <url>". Otherwise it writes "key:\tvalue" lines for the title, the
-// fields and the URL, then "--" and the raw body, for scripts.
+// View is one resource for human readers, such as an issue. On a TTY it shows the title, badges,
+// fields, body and a "View this <kind> on Gitea" footer; piped, "key:\tvalue" lines, "--" and the
+// raw body.
 type View struct {
 	Title, ID string
 	// Badges, such as the state, start the line under the title; Meta completes it, for example

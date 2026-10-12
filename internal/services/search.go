@@ -6,7 +6,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"time"
 
@@ -107,12 +106,9 @@ func (s Issues) searchRepository(ctx context.Context, opts DiscussionSearchOptio
 			query.MentionedBy = account
 		}
 	}
-	return listPage(opts.Limit, opts.Page, func(limit, page int) ([]*gitea.Issue, http.Header, error) {
-		query.ListOptions = listOptions(limit, page)
-		issues, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Issue, *gitea.Response, error) {
-			return c.Issues.ListRepoIssues(ctx, owner, repo, query)
-		})
-		return issues, headerOf(resp), err
+	return callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Issue, *gitea.Response, error) {
+		query.ListOptions = list
+		return c.Issues.ListRepoIssues(ctx, owner, repo, query)
 	})
 }
 

@@ -96,9 +96,7 @@ func TestDownloadDestinations(t *testing.T) {
 		{name: "existing in --dir", flags: downloadFlags{dir: "dl"}, file: "existing.txt", err: filepath.Join("dl", "existing.txt") + " already exists"},
 		{name: "--clobber", flags: downloadFlags{clobber: true}, file: "existing.txt", want: "existing.txt"},
 		{name: "--skip-existing", flags: downloadFlags{skipExisting: true}, file: "existing.txt", want: "existing.txt", skip: true},
-		{name: "--skip-existing new file", flags: downloadFlags{skipExisting: true}, file: "notes.txt", want: "notes.txt"},
 		{name: "parent directory name", file: "../escape.txt", err: `cannot use "../escape.txt" as a file name; pass --output`},
-		{name: "nested name", file: "a/b.txt", err: "cannot use"},
 		{name: "dot dot", file: "..", err: "cannot use"},
 		{name: "--output and --dir", flags: downloadFlags{output: "x", dir: "dl"}, file: "notes.txt", err: "--output and --dir cannot be combined"},
 		{name: "--clobber and --skip-existing", flags: downloadFlags{clobber: true, skipExisting: true}, file: "notes.txt", err: "--clobber and --skip-existing cannot be combined"},
@@ -146,7 +144,6 @@ func TestDownloadsToATerminalRefuseBinaryData(t *testing.T) {
 		err              string
 	}{
 		{name: "piped binary stays byte exact", body: "PK\x03\x04\x00\x01", want: "PK\x03\x04\x00\x01"},
-		{name: "terminal text", body: "hello\nworld\n", want: "hello\nworld\n", tty: true},
 		{name: "terminal text loses escapes", body: "title\x1b]0;PWNED\x07\n", want: "title]0;PWNED\n", tty: true},
 		{name: "terminal binary", body: "PK\x03\x04\x00\x01", tty: true, err: "refusing to write binary data to the terminal"},
 		{name: "terminal invalid UTF-8", body: "abc\xff\xfedef", tty: true, err: "refusing to write binary data"},

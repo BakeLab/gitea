@@ -5,7 +5,6 @@ package services
 
 import (
 	"context"
-	"net/http"
 
 	gitea "gitea.dev/sdk"
 )
@@ -77,18 +76,15 @@ func (s Repositories) ListPage(ctx context.Context, opts RepositoryListOptions) 
 		}
 		window, err = rawPage[*gitea.Repository](ctx, s.Client, endpoint, nil, opts.Limit, opts.Page)
 	} else {
-		window, err = listPage(opts.Limit, opts.Page, func(limit, page int) ([]*gitea.Repository, http.Header, error) {
-			items, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Repository, *gitea.Response, error) {
-				switch {
-				case isOrg:
-					return c.Repositories.ListOrgRepos(ctx, opts.Owner, gitea.ListOrgReposOptions{ListOptions: listOptions(limit, page)})
-				case opts.Owner != "":
-					return c.Repositories.ListUserRepos(ctx, opts.Owner, gitea.ListReposOptions{ListOptions: listOptions(limit, page)})
-				default:
-					return c.Repositories.ListMyRepos(ctx, gitea.ListReposOptions{ListOptions: listOptions(limit, page)})
-				}
-			})
-			return items, headerOf(resp), err
+		window, err = callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Repository, *gitea.Response, error) {
+			switch {
+			case isOrg:
+				return c.Repositories.ListOrgRepos(ctx, opts.Owner, gitea.ListOrgReposOptions{ListOptions: list})
+			case opts.Owner != "":
+				return c.Repositories.ListUserRepos(ctx, opts.Owner, gitea.ListReposOptions{ListOptions: list})
+			default:
+				return c.Repositories.ListMyRepos(ctx, gitea.ListReposOptions{ListOptions: list})
+			}
 		})
 	}
 	if err != nil {
@@ -126,12 +122,9 @@ func (s Repositories) Search(ctx context.Context, opts RepositorySearchOptions) 
 		return Page[Repository]{}, err
 	}
 	options.PrioritizedByOwnerID = account.ID
-	window, err := listPage(opts.Limit, opts.Page, func(limit, page int) ([]*gitea.Repository, http.Header, error) {
-		options.ListOptions = listOptions(limit, page)
-		items, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Repository, *gitea.Response, error) {
-			return c.Repositories.SearchRepos(ctx, options)
-		})
-		return items, headerOf(resp), err
+	window, err := callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Repository, *gitea.Response, error) {
+		options.ListOptions = list
+		return c.Repositories.SearchRepos(ctx, options)
 	})
 	if err != nil {
 		return Page[Repository]{}, err

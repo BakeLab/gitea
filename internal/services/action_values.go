@@ -68,19 +68,15 @@ func (s ActionSecrets) ListPage(ctx context.Context, limit, page int) (Page[Acti
 	if s.Scope.Account {
 		return Page[ActionSecret]{}, &CapabilityError{Feature: "account secret listing", Reason: "Gitea exposes account secret set/delete operations only"}
 	}
-	window, err := listPage(limit, page, func(limit, page int) ([]*gitea.Secret, http.Header, error) {
-		options := listOptions(limit, page)
-		secrets, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Secret, *gitea.Response, error) {
-			if s.Scope.Organization != "" {
-				return c.Actions.ListOrgSecrets(ctx, s.Scope.Organization, gitea.ListOrgActionsSecretOption{ListOptions: options})
-			}
-			owner, repo, err := splitRepository(s.Scope.Repository)
-			if err != nil {
-				return nil, nil, err
-			}
-			return c.Actions.ListRepoSecrets(ctx, owner, repo, gitea.ListRepoActionsSecretOption{ListOptions: options})
-		})
-		return secrets, headerOf(resp), err
+	window, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Secret, *gitea.Response, error) {
+		if s.Scope.Organization != "" {
+			return c.Actions.ListOrgSecrets(ctx, s.Scope.Organization, gitea.ListOrgActionsSecretOption{ListOptions: list})
+		}
+		owner, repo, err := splitRepository(s.Scope.Repository)
+		if err != nil {
+			return nil, nil, err
+		}
+		return c.Actions.ListRepoSecrets(ctx, owner, repo, gitea.ListRepoActionsSecretOption{ListOptions: list})
 	})
 	return convertPage(window, secretFrom), err
 }
@@ -146,14 +142,11 @@ func (s ActionVariables) ListPage(ctx context.Context, limit, page int) (Page[Ac
 	var window Page[*gitea.ActionsVariable]
 	var err error
 	if s.Scope.Account || s.Scope.Organization != "" {
-		window, err = listPage(limit, page, func(limit, page int) ([]*gitea.ActionsVariable, http.Header, error) {
-			variables, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.ActionsVariable, *gitea.Response, error) {
-				if s.Scope.Account {
-					return c.Actions.ListUserVariables(ctx, listOptions(limit, page))
-				}
-				return c.Actions.ListOrgVariables(ctx, s.Scope.Organization, gitea.ListOrgActionsVariableOption{ListOptions: listOptions(limit, page)})
-			})
-			return variables, headerOf(resp), err
+		window, err = callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.ActionsVariable, *gitea.Response, error) {
+			if s.Scope.Account {
+				return c.Actions.ListUserVariables(ctx, list)
+			}
+			return c.Actions.ListOrgVariables(ctx, s.Scope.Organization, gitea.ListOrgActionsVariableOption{ListOptions: list})
 		})
 	} else {
 		window, err = rawPage[*gitea.ActionsVariable](ctx, s.Client, s.repoVariables(""), nil, limit, page)

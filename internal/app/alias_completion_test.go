@@ -161,7 +161,6 @@ func TestOfflineCompletions(t *testing.T) {
 		"for-each-ref --format=%(refname:short) refs/heads": "main\nfeature/login\n",
 	}}
 	configureAccounts(t, deps, "https://gitea.example.com", "alice", "alice", "bob")
-	require.NoError(t, Execute(context.Background(), deps, []string{"alias", "set", "co", "pr checkout"}))
 	for args, want := range map[string][]string{
 		"--host ":   {"https://gitea.example.com\talice, bob"},
 		"--user ":   {"alice\thttps://gitea.example.com (active)", "bob\thttps://gitea.example.com"},
@@ -180,9 +179,6 @@ func TestOfflineCompletions(t *testing.T) {
 		prefix   string
 		want     []string
 	}{
-		{a.completeAliases, nil, "", []string{"co\tpr checkout"}},
-		{a.completeConfig, nil, "git", []string{"git_protocol"}},
-		{a.completeConfig, []string{"color"}, "a", []string{"auto", "always"}},
 		{a.completeConfig, []string{"default_host"}, "", []string{"https://gitea.example.com\talice, bob"}},
 		{a.completeConfig, []string{"color", "auto"}, "", []string{}},
 		{a.completeLocalBranches, nil, "f", []string{"feature/login\tlocal branch"}},

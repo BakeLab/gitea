@@ -61,10 +61,8 @@ func (a *application) repoSetDefaultCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "set-default [<repository>]",
 		Short: "Set the default repository for this clone",
-		Long: `Set the repository that gt commands use in the current Git clone, instead of the one found through
-its Git remotes. It is saved as gt.repository in the clone's Git configuration.
-
-Without an argument, the repository that gt selects now is saved.`,
+		Long: `Set the repository that gt commands use in the current Git clone instead of the one of its Git
+remotes (saved as gt.repository in the clone's Git configuration).`,
 		Example: `# Make gt commands in this clone use the fork's parent
 $ gt repo set-default alice/project
 
@@ -280,7 +278,6 @@ $ gt repo view alice/project --web`,
 	return view
 }
 
-// repositoryView shows a repository with its README as the body.
 func (a *application) repositoryView(item services.Repository, readme string) terminal.View {
 	badges := []terminal.Cell{{Text: "public", Color: "green"}}
 	if item.Private {

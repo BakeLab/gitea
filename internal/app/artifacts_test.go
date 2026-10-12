@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -97,7 +98,7 @@ func TestRunDownloadExtractsArtifactsByName(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			require.Equal(t, filepathReplace(tc.out, dir), diagnostics.String())
+			require.Equal(t, strings.ReplaceAll(tc.out, "{dir}", dir), diagnostics.String())
 			for name, content := range tc.files {
 				data, err := os.ReadFile(filepath.Join(dir, name))
 				require.NoError(t, err, name)
@@ -151,11 +152,6 @@ func TestExtractZipKeepsPermissionBits(t *testing.T) {
 		require.Equal(t, executable, info.Mode().Perm()&0o100 != 0, name)
 		require.Zero(t, info.Mode()&os.ModeSetuid, name)
 	}
-}
-
-// filepathReplace puts dir in place of {dir} in text.
-func filepathReplace(text, dir string) string {
-	return string(bytes.ReplaceAll([]byte(text), []byte("{dir}"), []byte(dir)))
 }
 
 func TestArtifactListShowsSizesAndExpiry(t *testing.T) {

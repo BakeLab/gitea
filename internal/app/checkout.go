@@ -75,12 +75,8 @@ var errNoMatchingRemote = errors.New("no Git remote matches the selected reposit
 func (a *application) pullCheckoutCommand() *cobra.Command {
 	var branch string
 	var detached, update bool
-	cmd := &cobra.Command{Use: "checkout {<number> | <url> | <branch>}", Aliases: []string{"co"}, Short: "Check out a pull request", Long: `Check out the head of a pull request in a local branch.
-
-The branch takes the name of the pull request's head branch when that name is free or
-already points at the head; otherwise it is OWNER/BRANCH for a fork, or pr/NUMBER. gt
-records the pull request in the branch's Git configuration, so that pr commands without an
-argument select it, and the branch tracks the head branch, so that git push updates it.`, Annotations: pullArgumentsAnnotation(nil), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "checkout {<number> | <url> | <branch>}", Aliases: []string{"co"}, Short: "Check out a pull request", Long: `Check out the head of a pull request in a local branch that tracks the head branch, so
+that git push updates it and pr commands without an argument select the pull request.`, Annotations: pullArgumentsAnnotation(nil), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if detached && (cmd.Flags().Changed("branch") || update) {
 			return clierr.Wrap(clierr.Usage, errors.New("--detach and --branch/--update are mutually exclusive"))
 		}
@@ -156,7 +152,6 @@ argument select it, and the branch tracks the head branch, so that git push upda
 	cmd.ValidArgsFunction = a.completePulls("open")
 	cmd.Example = `$ gt pr checkout 13
 $ gt pr co feature/login
-$ gt pr checkout 13 --branch review-13
 $ gt pr checkout 13 --update`
 	return cmd
 }

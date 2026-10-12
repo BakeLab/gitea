@@ -67,17 +67,6 @@ func (f *actionScopeFlags) resolve(a *application, cmd *cobra.Command) (services
 	return scope, t, nil
 }
 
-// actionValueLong explains the scopes of secrets or variables.
-func actionValueLong(kind, use string) string {
-	return fmt.Sprintf(`Manage the Actions %[1]ss that workflows %[2]s.
-
-A %[1]s belongs to a repository, to an organization (--org), whose repositories all see it, or
-to your user account (--account), which all your repositories see. Without --org or --account,
-gt uses the repository of the working directory or --repo. Names are stored upper-cased.
-
-Note that the global --user flag selects the account gt acts as, not a scope.`, kind, use)
-}
-
 func (a *application) actionValueCommand(secret bool) *cobra.Command {
 	kind, use := "variable", "read with ${{ vars.NAME }}"
 	if secret {
@@ -86,7 +75,13 @@ func (a *application) actionValueCommand(secret bool) *cobra.Command {
 	group := &cobra.Command{
 		Use:   kind,
 		Short: fmt.Sprintf("Manage Actions %ss for a repository, organization, or your account", kind),
-		Long:  actionValueLong(kind, use),
+		Long: fmt.Sprintf(`Manage the Actions %[1]ss that workflows %[2]s.
+
+A %[1]s belongs to a repository, to an organization (--org), whose repositories all see it, or
+to your user account (--account), which all your repositories see. Without --org or --account,
+gt uses the repository of the working directory or --repo. Names are stored upper-cased.
+
+Note that the global --user flag selects the account gt acts as, not a scope.`, kind, use),
 	}
 	group.AddCommand(a.actionValueListCommand(secret, kind), a.actionValueSetCommand(secret, kind), a.actionValueDeleteCommand(secret, kind))
 	if !secret {
@@ -178,8 +173,6 @@ $ gt variable set --env-file .env`
 $ gt secret set DEPLOY_TOKEN
 # set an organization secret from standard input
 $ echo -n "$TOKEN" | gt secret set NPM_TOKEN --org acme
-# set a secret of your account from a file
-$ gt secret set SSH_KEY --account --body-file key.pem
 # set the secrets of a dotenv file
 $ gt secret set --env-file .env`
 	}

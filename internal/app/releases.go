@@ -139,7 +139,6 @@ $ gt release view v1.0.0 --web`,
 	return command
 }
 
-// releaseView shows a release with its notes as the body.
 func (a *application) releaseView(item services.Release, latest int64) terminal.View {
 	view := terminal.View{Title: cmp.Or(item.Title, item.Tag), Body: item.Body, Kind: "release", URL: item.URL}
 	if item.Title != "" && item.Title != item.Tag {
@@ -187,7 +186,6 @@ func (f *releaseFields) register(a *application, cmd *cobra.Command) {
 	_ = cmd.RegisterFlagCompletionFunc("target", a.completeBranches())
 }
 
-// options returns the release fields whose flags were passed.
 func (f *releaseFields) options(a *application, cmd *cobra.Command) (services.ReleaseOptions, error) {
 	opts := services.ReleaseOptions{}
 	changed := cmd.Flags().Changed

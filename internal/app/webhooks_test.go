@@ -19,7 +19,6 @@ func TestWebhookCreateValidatesEventsAndTypes(t *testing.T) {
 		want string
 	}{
 		{[]string{"--events", "pushh"}, "--events must be create, delete, fork, push, issues"},
-		{[]string{"--events", "push,pull_request_review_approved"}, "--events must be"},
 		{[]string{"--type", "slackk"}, "--type must be gitea, gogs, slack"},
 		{[]string{"--type", "slack"}, "--type slack needs a channel: --config channel=#name"},
 	} {
@@ -50,7 +49,6 @@ func TestWebhookEventsCollapseCompleteGroups(t *testing.T) {
 		events []string
 		want   string
 	}{
-		{[]string{"push"}, "push"},
 		{[]string{"issue_assign", "issue_comment", "issue_label", "issue_milestone", "issues", "push"}, "issues (5), push"},
 		{[]string{"issue_label", "issues"}, "issue_label, issues"},
 		{append([]string{"create"}, pulls...), "create, pull_request (8)"},

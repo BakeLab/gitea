@@ -37,7 +37,7 @@ func (t debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // failureMessage returns the sanitized server message of a failed response and keeps its body
-// readable, so --debug shows what the server said when gt explains the failure in its own words.
+// readable for the caller.
 func failureMessage(req *http.Request, resp *http.Response) string {
 	if resp.StatusCode < 400 {
 		return ""

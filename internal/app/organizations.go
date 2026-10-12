@@ -19,7 +19,6 @@ import (
 
 var visibilities = []string{"public", "limited", "private"}
 
-// visibilityColors color the visibility of organizations and accounts.
 var visibilityColors = map[string]string{"public": "green", "limited": "yellow", "private": "red"}
 
 // timeField shows an API timestamp relative to now on a TTY, and as RFC3339 for scripts.
@@ -36,14 +35,6 @@ func timeField(label, raw string, d terminal.Display) terminal.Field {
 		now = time.Now()
 	}
 	return terminal.Field{Label: label, Value: terminal.RelativeTime(now, t)}
-}
-
-// countOf words a count, such as "1 member" or "2 members".
-func countOf(n int, singular, plural string) string {
-	if n == 1 {
-		return "1 " + singular
-	}
-	return strconv.Itoa(n) + " " + plural
 }
 
 func (a *application) organizationCommand() *cobra.Command {
@@ -104,7 +95,7 @@ $ gt org list --all`,
 }
 
 func (a *application) organizationViewCommand() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use: "view <org>", Short: "View an organization", Args: argsExact(1),
 		Example: `$ gt org view acme
 # print the description only
@@ -131,7 +122,6 @@ $ gt org view acme --jq .description`,
 			})
 		},
 	}
-	return cmd
 }
 
 func organizationView(org services.Organization, size services.OrganizationSize, address string) terminal.View {
@@ -149,7 +139,11 @@ func organizationView(org services.Organization, size services.OrganizationSize,
 		singular, plural string
 	}{{"Members", size.Members, "member", "members"}, {"Teams", size.Teams, "team", "teams"}, {"Repositories", size.Repositories, "repository", "repositories"}} {
 		if count.n != nil {
-			counts = append(counts, countOf(*count.n, count.singular, count.plural))
+			noun := count.plural
+			if *count.n == 1 {
+				noun = count.singular
+			}
+			counts = append(counts, strconv.Itoa(*count.n)+" "+noun)
 			view.Fields = append(view.Fields, terminal.Field{Label: count.label, Value: strconv.Itoa(*count.n), PipedOnly: true})
 		}
 	}
@@ -200,7 +194,6 @@ func organizationFlags(cmd *cobra.Command, create bool) func() services.Organiza
 	}
 }
 
-// organizationName rejects an empty organization argument.
 func organizationName(raw string) (string, error) {
 	if name := strings.TrimSpace(raw); name != "" {
 		return name, nil
@@ -270,11 +263,7 @@ $ gt org edit acme --visibility private`,
 func (a *application) organizationDeleteCommand() *cobra.Command {
 	return &cobra.Command{
 		Use: "delete <org>", Short: "Delete an organization", Args: argsExact(1), ValidArgsFunction: a.completeOrgs(),
-		Long: `Delete an organization with its teams. Gitea refuses while the organization owns
-repositories: transfer or delete them first.
-
-The deletion cannot be undone, so a terminal asks you to type the organization's name; --yes
-skips the question.`,
+		Long: "Delete an organization with its teams. Gitea refuses while the organization owns repositories.",
 		Example: `$ gt org delete acme-old
 $ gt org delete acme-old --yes`,
 		Annotations: map[string]string{"gt.text": "organization deletion does not return a resource", "gt.confirm": "true"},
@@ -371,7 +360,6 @@ func (a *application) completeOrganizationMembers() cobra.CompletionFunc {
 	}
 }
 
-// organizationVisibilityCommand publicizes or conceals an organization membership.
 func (a *application) organizationVisibilityCommand(public bool) *cobra.Command {
 	verb, alias, short, state := "conceal", "private", "Hide a membership", "concealed"
 	if public {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/transport"
+	gitea "gitea.dev/sdk"
 )
 
 // maxListPages bounds exhaustive listings so a misbehaving server cannot loop forever.
@@ -97,6 +98,16 @@ func listPage[T any](limit, page int, fetch func(limit, page int) ([]T, http.Hea
 	next, total, counted = pageHints(headers)
 	more := len(result) > limit || next || (counted && total > offset+limit)
 	return Page[T]{Items: result[:min(len(result), limit)], More: more, Total: total, Counted: counted}, nil
+}
+
+// callPage is listPage over an SDK list call.
+func callPage[T any](ctx context.Context, client *transport.Client, limit, page int, list func(context.Context, *gitea.Client, gitea.ListOptions) ([]T, *gitea.Response, error)) (Page[T], error) {
+	return listPage(limit, page, func(limit, page int) ([]T, http.Header, error) {
+		items, resp, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) ([]T, *gitea.Response, error) {
+			return list(ctx, c, listOptions(limit, page))
+		})
+		return items, headerOf(resp), err
+	})
 }
 
 // rawPage is listPage over a raw JSON collection endpoint; it sets limit and page on query.

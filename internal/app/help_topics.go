@@ -153,9 +153,8 @@ func availableCommands(cmd *cobra.Command) []commandList {
 	return append(lists, other, topics)
 }
 
-// helpFlags renders the flags of cmd and the global flags that apply to it: --repo, --remote and --cwd
-// unless it never selects a repository, --json and --jq when it outputs JSON (--jq alone when it
-// filters raw JSON), and --yes when it asks for confirmation. Persistent flags of parent commands, such as --org, count as its own.
+// helpFlags renders the flags of cmd, counting parents' persistent flags such as --org as its own, and
+// the global flags that apply to it: --repo, --remote and --cwd, --json and --jq, and --yes.
 func helpFlags(cmd *cobra.Command) (local, inherited string) {
 	globals := cmd.Root().PersistentFlags()
 	var own []*pflag.Flag

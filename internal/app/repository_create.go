@@ -36,11 +36,9 @@ func (a *application) repoCreateCommand() *cobra.Command {
 		Short:   "Create a repository",
 		Long: `Create a repository for your account, or for an organization as ORG/NAME or with --org.
 
-A new repository is empty unless --auto-init adds a first commit with a README and, optionally, a
-.gitignore and a license from the server's templates. --template copies another repository instead.
-
---source publishes an existing local Git repository: it adds the new repository as a remote of
-it (origin unless --remote names another), and --push pushes the current branch there.`,
+--auto-init adds a first commit with a README, .gitignore and license; --template copies another
+repository. --source adds the new repository as a remote of a local Git repository, and --push
+pushes its current branch there.`,
 		Example: `# Create a private repository with a README and an MIT license
 $ gt repo create project --private --auto-init --license MIT
 
@@ -83,7 +81,7 @@ $ gt repo create project --source . --push`,
 					return err
 				}
 			}
-			prompted, err := a.requireInput(cmd, &opts.Name, "name", "Repository name", func(name string) error { return validateRepositoryName(name) })
+			prompted, err := a.requireInput(cmd, &opts.Name, "name", "Repository name", validateRepositoryName)
 			if err != nil {
 				return err
 			}
@@ -130,11 +128,8 @@ $ gt repo create project --source . --push`,
 			}
 			var item services.Repository
 			if template != "" {
-				templateOpts.Name = opts.Name
-				templateOpts.Owner = org
-				templateOpts.Description = opts.Description
-				templateOpts.Private = opts.Private
-				templateOpts.DefaultBranch = opts.DefaultBranch
+				templateOpts.Name, templateOpts.Owner, templateOpts.Description = opts.Name, org, opts.Description
+				templateOpts.Private, templateOpts.DefaultBranch = opts.Private, opts.DefaultBranch
 				item, err = service.Generate(cmd.Context(), target.Repo, templateOpts)
 			} else {
 				item, err = service.Create(cmd.Context(), org, opts)

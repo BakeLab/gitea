@@ -145,9 +145,8 @@ func unreachable(err error) string {
 	return ""
 }
 
-// timeoutError words an expired --timeout as "timed out after 4s waiting for run 34" instead
-// of "context deadline exceeded". Other errors are returned unchanged; the result still matches
-// context.DeadlineExceeded, so the exit code stays the same.
+// timeoutError words an expired --timeout as "timed out after 4s waiting for run 34" instead of
+// "context deadline exceeded", keeping the exit code. Other errors are returned unchanged.
 func timeoutError(err error, d time.Duration, format string, args ...any) error {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		return err
@@ -156,7 +155,7 @@ func timeoutError(err error, d time.Duration, format string, args ...any) error 
 	if format != "" {
 		text += " " + fmt.Sprintf(format, args...)
 	}
-	return &explainedError{text: text, err: err}
+	return explain(err, "%s", text)
 }
 
 // shortDuration formats d without zero units, such as 1h, 1h30m or 45s.

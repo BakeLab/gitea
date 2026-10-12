@@ -55,13 +55,11 @@ func collapsedEvents(events []string) string {
 	return strings.Join(shown, ", ")
 }
 
-// webhookScope holds the scope flags of the webhook commands.
 type webhookScope struct {
 	org             string
 	account, global bool
 }
 
-// service resolves the target and the webhooks of the selected scope.
 func (s *webhookScope) service(a *application, cmd *cobra.Command) (target, services.Webhooks, error) {
 	scopes := 0
 	for _, selected := range []bool{s.org != "", s.account, s.global, a.options.repo != ""} {
@@ -89,7 +87,6 @@ func webhookScopeName(scope services.WebhookScope) string {
 	return scope.Repository
 }
 
-// webhookSettingsURL is the settings page of a webhook.
 func webhookSettingsURL(t target, scope services.WebhookScope, id int64) string {
 	hook := strconv.FormatInt(id, 10)
 	switch {
@@ -361,10 +358,8 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 			return err
 		}
 		askAuthorization := !create && authSources == 0
-		if askAuthorization {
-			if !a.canPrompt() {
-				return clierr.Wrap(clierr.Usage, errors.New("editing a webhook drops its stored authorization header unless it is sent again, and Gitea never returns it: pass --authorization-header-file or --authorization-header (use --clear-authorization only for a hook without one)"))
-			}
+		if askAuthorization && !a.canPrompt() {
+			return clierr.Wrap(clierr.Usage, errors.New("editing a webhook drops its stored authorization header unless it is sent again, and Gitea never returns it: pass --authorization-header-file or --authorization-header (use --clear-authorization only for a hook without one)"))
 		}
 		if strings.ContainsAny(authorization, "\r\n") {
 			return clierr.Wrap(clierr.Usage, errors.New("authorization header must be a single line"))

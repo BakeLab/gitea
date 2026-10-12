@@ -40,7 +40,6 @@ func parseTeam(raw string) (teamRef, error) {
 	return teamRef{}, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid team %q: use ORG/TEAM, such as acme/developers, or a team ID", raw))
 }
 
-// find looks the team up on the instance.
 func (r teamRef) find(ctx context.Context, service services.Teams) (services.Team, error) {
 	if r.org != "" {
 		return service.Find(ctx, r.org, r.name)
@@ -63,7 +62,6 @@ func (a *application) team(cmd *cobra.Command, raw string) (target, services.Tea
 	return t, service, team, err
 }
 
-// teamURL is the page of a team on its instance.
 func teamURL(t target, team services.Team) string {
 	return webURL(t, "org", team.Organization, "teams", strings.ToLower(team.Name))
 }
@@ -284,7 +282,6 @@ func (f *teamFlags) unitPolicy(cmd *cobra.Command, create bool) (map[string]stri
 	return policy, nil
 }
 
-// options returns the supplied team fields.
 func (f *teamFlags) options(cmd *cobra.Command) services.TeamOptions {
 	opts := services.TeamOptions{}
 	for _, field := range []struct {
@@ -436,10 +433,7 @@ func (a *application) teamDeleteCommand() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use: "delete <team>", Short: "Delete a team", Args: argsExact(1), ValidArgsFunction: a.completeTeams(),
-		Long: `Delete a team. Its members lose the access the team gave them.
-
-Deleting an organization's owner team takes away owner access, so it needs --force and, on a
-terminal, typing ORG/TEAM.`,
+		Long: "Delete a team. Deleting an organization's owner team needs --force.",
 		Example: `$ gt team delete acme/reviewers
 $ gt team delete 7 --yes`,
 		Annotations: map[string]string{"gt.text": "team deletion does not return a resource", "gt.confirm": "true", "gt.arguments": teamArguments},
@@ -610,7 +604,6 @@ its organization. Repositories are named alone, such as service, or as ORG/NAME.
 	return group
 }
 
-// teamRepoAccessCommand grants or revokes team access to repositories.
 func (a *application) teamRepoAccessCommand(grant bool) *cobra.Command {
 	verb, short, example := "remove", "Revoke team access to repositories", "$ gt team repo remove acme/developers legacy"
 	annotations := map[string]string{"gt.text": "team access changes do not return a resource", "gt.arguments": teamArguments, "gt.confirm": "true"}

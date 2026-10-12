@@ -6,7 +6,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -72,22 +71,19 @@ func (s Times) ListPage(ctx context.Context, opts TimeOptions) (Page[TrackedTime
 	if opts.Before != nil {
 		query.Before = *opts.Before
 	}
-	records, err := listPage(opts.Limit, opts.Page, func(limit, page int) ([]*gitea.TrackedTime, http.Header, error) {
-		query.ListOptions = listOptions(limit, page)
-		records, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.TrackedTime, *gitea.Response, error) {
-			if opts.Mine {
-				return c.Issues.ListMyTrackedTimes(ctx, query)
-			}
-			owner, repo, err := splitRepository(s.Repository)
-			if err != nil {
-				return nil, nil, err
-			}
-			if opts.Issue != 0 {
-				return c.Issues.ListIssueTrackedTimes(ctx, owner, repo, opts.Issue, query)
-			}
-			return c.Issues.ListRepoTrackedTimes(ctx, owner, repo, query)
-		})
-		return records, headerOf(resp), err
+	records, err := callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.TrackedTime, *gitea.Response, error) {
+		query.ListOptions = list
+		if opts.Mine {
+			return c.Issues.ListMyTrackedTimes(ctx, query)
+		}
+		owner, repo, err := splitRepository(s.Repository)
+		if err != nil {
+			return nil, nil, err
+		}
+		if opts.Issue != 0 {
+			return c.Issues.ListIssueTrackedTimes(ctx, owner, repo, opts.Issue, query)
+		}
+		return c.Issues.ListRepoTrackedTimes(ctx, owner, repo, query)
 	})
 	items := convertAll(records.Items, func(record *gitea.TrackedTime) TrackedTime { return trackedTimeFrom(record, s.Repository) })
 	return Page[TrackedTime]{Items: items, More: records.More, Total: records.Total, Counted: records.Counted}, err

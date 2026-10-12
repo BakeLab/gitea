@@ -18,7 +18,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// milestoneArguments is the ARGUMENTS help of commands that take milestones.
 const milestoneArguments = `A milestone can be supplied by its title, such as "v1.0", or by its ID. A number is an ID
 first, then a title; --by-name matches it as a title only.`
 
@@ -164,7 +163,6 @@ $ gt milestone view 3 --web`, Annotations: map[string]string{"gt.arguments": mil
 	return cmd
 }
 
-// milestoneFields are the fields of milestone create and edit.
 type milestoneFields struct {
 	title, description, descriptionFile, deadline string
 	useEditor                                     bool
@@ -211,7 +209,6 @@ func (a *application) milestoneOptions(cmd *cobra.Command, f *milestoneFields) (
 	return opts, nil
 }
 
-// formOptions turns milestone form values into options.
 func formOptions(values terminal.MilestoneFormValues) services.MilestoneOptions {
 	deadline := time.Time{}
 	if values.Deadline != nil {
@@ -225,7 +222,7 @@ func (a *application) milestoneCreateCommand(service milestoneService) *cobra.Co
 	var fields milestoneFields
 	var state string
 	cmd := &cobra.Command{Use: "create [<title>]", Aliases: []string{"new"}, Short: "Create a milestone", Long: `Create a milestone. Without flags on a terminal, a form asks for the title, description
-and due date. The new milestone's URL is printed, so scripts can capture it.`, Example: `$ gt milestone create v1.0 --deadline 2026-12-31 --description "First release"
+and due date.`, Example: `$ gt milestone create v1.0 --deadline 2026-12-31 --description "First release"
 $ gt milestone create --title v2.0 --editor`, Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		if err := validateTextSources(cmd, "description", "description-file"); err != nil {
 			return err
@@ -238,12 +235,11 @@ $ gt milestone create --title v2.0 --editor`, Args: usageArgs(cobra.MaximumNArgs
 				return err
 			}
 		}
-		prompt := a.canPrompt()
 		var opts services.MilestoneOptions
 		var draft terminal.Draft
 		var err error
 		defer finishDraft(&draft, &runErr)
-		if !localFlagsChanged(cmd) && prompt && a.deps.MilestoneForm != nil {
+		if !localFlagsChanged(cmd) && a.canPrompt() && a.deps.MilestoneForm != nil {
 			values, err := a.deps.MilestoneForm.EditMilestone(cmd.Context(), "", terminal.MilestoneFormValues{})
 			if err != nil {
 				return err
@@ -291,8 +287,7 @@ $ gt milestone edit 3 --editor`, Annotations: map[string]string{"gt.arguments": 
 		if err := validateTextSources(cmd, "description", "description-file"); err != nil {
 			return err
 		}
-		prompt := a.canPrompt()
-		form := !localFlagsChanged(cmd) && prompt && a.deps.MilestoneForm != nil
+		form := !localFlagsChanged(cmd) && a.canPrompt() && a.deps.MilestoneForm != nil
 		if !form && !localFlagsChanged(cmd) {
 			return errNothingToEdit
 		}
@@ -370,7 +365,6 @@ $ gt milestone delete 7 --yes`, Annotations: map[string]string{"gt.confirm": "tr
 	return cmd
 }
 
-// findMilestone resolves a milestone argument, a title or an ID.
 func findMilestone(cmd *cobra.Command, s services.Milestones, raw string, byName bool) (services.Milestone, error) {
 	if strings.TrimSpace(raw) == "" {
 		return services.Milestone{}, clierr.Wrap(clierr.Usage, errors.New("milestone title or ID cannot be empty"))

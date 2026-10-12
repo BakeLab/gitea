@@ -5,7 +5,6 @@ package services
 
 import (
 	"context"
-	"net/http"
 	"strconv"
 
 	"gitea.dev/cli/internal/transport"
@@ -31,11 +30,8 @@ type SSHKeys struct{ Client *transport.Client }
 
 // List returns a page of public keys.
 func (s SSHKeys) List(ctx context.Context, limit, page int) (Page[SSHKey], error) {
-	keys, err := listPage(limit, page, func(limit, page int) ([]*gitea.PublicKey, http.Header, error) {
-		keys, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.PublicKey, *gitea.Response, error) {
-			return c.Users.ListMyPublicKeys(ctx, gitea.ListPublicKeysOptions{ListOptions: listOptions(limit, page)})
-		})
-		return keys, headerOf(resp), err
+	keys, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.PublicKey, *gitea.Response, error) {
+		return c.Users.ListMyPublicKeys(ctx, gitea.ListPublicKeysOptions{ListOptions: list})
 	})
 	return convertPage(keys, sshKeyFrom), err
 }

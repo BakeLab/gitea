@@ -210,12 +210,10 @@ var rootGroups = map[string]string{
 	"run": "actions", "secret": "actions", "variable": "actions", "workflow": "actions",
 }
 
-// verbAliases are the gh-style short names that every command with a common verb accepts.
-// Commands add other gh verbs, such as new, co, add and get, to their own Aliases.
+// verbAliases are the gh-style short names of common verbs; commands add others to their own Aliases.
 var verbAliases = map[string]string{"list": "ls", "delete": "rm"}
 
-// addVerbAliases gives every list and delete command its short name, and lets its flags be named
-// in the plural.
+// addVerbAliases gives every list and delete command its short name and accepts plural flag names.
 func addVerbAliases(cmd *cobra.Command) {
 	if alias, ok := verbAliases[cmd.Name()]; ok && cmd.HasParent() && !slices.Contains(cmd.Aliases, alias) {
 		cmd.Aliases = append(cmd.Aliases, alias)
@@ -415,11 +413,9 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 
 var jsonFieldList = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(,[A-Za-z][A-Za-z0-9_]*)*$`)
 
-// joinJSONFields accepts `--json number,title` like `--json=number,title`. A field-shaped word after a
-// bare --json stays a positional argument only when the selected command does not output those fields
-// and accepts the word as an argument, so a misspelled field reports the available fields rather than
-// an argument count. A bare --json still selects every field. Unknown commands, such as aliases before
-// expansion, are joined.
+// joinJSONFields accepts `--json number,title` like `--json=number,title`. The word stays a positional
+// argument only when the command neither outputs those fields nor rejects the argument, so a
+// misspelled field lists the available fields. Unknown commands, such as unexpanded aliases, are joined.
 func joinJSONFields(root *cobra.Command, args []string) []string {
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--" {

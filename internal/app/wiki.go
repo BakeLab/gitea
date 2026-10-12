@@ -26,7 +26,6 @@ func (a *application) wikiCommand() *cobra.Command {
 	return group
 }
 
-// completeWikiPages completes the titles of the repository's wiki pages.
 func (a *application) completeWikiPages() cobra.CompletionFunc {
 	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
 		pages, err := services.Wiki{Client: t.client, Repository: t.Repo}.ListPage(ctx, completionLimit, 1)
@@ -92,7 +91,6 @@ func (a *application) wikiViewCommand() *cobra.Command {
 	return command
 }
 
-// wikiView shows a wiki page with its content as the body.
 func (a *application) wikiView(item services.WikiPage) terminal.View {
 	var meta []string
 	if item.Author != "" {
@@ -138,7 +136,7 @@ func (a *application) wikiRevisionsCommand() *cobra.Command {
 				},
 				Context: "revisions of wiki page " + strconv.Quote(args[0]), Empty: "no revisions of wiki page " + strconv.Quote(args[0]),
 			}
-			return writeTable(a, cmd, items, spec, listPage{Number: page, Counted: false, More: false})
+			return writeTable(a, cmd, items, spec, listPage{Number: page})
 		},
 	}
 	positiveIntVar(command, &page, "page", 1, math.MaxInt, "Revision page (server controls page size)")

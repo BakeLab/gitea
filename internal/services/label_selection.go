@@ -41,10 +41,9 @@ func (s Labels) Find(ctx context.Context, raws []string, byName bool) ([]Label, 
 	return result, nil
 }
 
-// CreateUnique creates a label unless existing, the labels of the scope, has one with its name,
-// ignoring case. Then update edits that label with the supplied fields, keeping its name, and
-// otherwise CreateUnique fails: Gitea would create a second label that name filters cannot tell
-// apart. It reports whether it updated a label.
+// CreateUnique creates a label unless existing has one with its name, ignoring case: Gitea would
+// create a second label that name filters cannot tell apart. Then update edits that label, keeping
+// its name, or CreateUnique fails. It reports whether it updated a label.
 func (s Labels) CreateUnique(ctx context.Context, existing []Label, opts LabelOptions, update bool) (Label, bool, error) {
 	current, err := s.finder(true).Find(existing, deref(opts.Name))
 	if errors.As(err, new(*NotFoundError)) {

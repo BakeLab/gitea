@@ -24,7 +24,6 @@ func (a *application) discussionSearchCommand(pulls bool) *cobra.Command {
 	var updated timeRange
 	opts.Pulls = pulls
 	example := fmt.Sprintf(`$ gt search %[1]s "login error"
-$ gt search %[1]s --author @me --state all
 # Search one repository; its labels and milestones are checked
 $ gt search %[1]s crash -R alice/project --label bug --milestone v1.0`, noun)
 	if pulls {

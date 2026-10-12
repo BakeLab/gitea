@@ -163,10 +163,8 @@ var (
 	wikiTitle = regexp.MustCompile(`\[title: (.+?)(?:\.md)?\]`)
 )
 
-// Classify names the resource of a failed request for the user: a 404 becomes a NotFoundError
-// for kind key in scope, a refusal Gitea explains (archived repository, merged pull request,
-// existing resource, ...) becomes a ConflictError, and an unknown user the request named becomes
-// a NotFoundError for that user. Other errors are returned unchanged.
+// Classify names the resource of a failed request: a 404 or an unknown user becomes a
+// NotFoundError, a refusal Gitea explains a ConflictError. Other errors are returned unchanged.
 func Classify(err error, kind, key, scope string) error {
 	apiErr, ok := errors.AsType[*transport.APIError](err)
 	if !ok {

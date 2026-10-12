@@ -165,11 +165,9 @@ func (a *application) releaseDownloadCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "download [<tag>] [<asset>...]",
 		Short: "Download release assets",
-		Long: `Download assets of a release, by name or ID, or those matching --pattern; without either, every
-asset. --archive downloads the source code archive instead. Without a tag, the latest release is used.
-
-Files are written to the current directory under their names, to --dir, or to --output; an existing
-file is replaced only with --clobber. --output - writes one asset to standard output.`,
+		Long: `Download the assets of a release (default: the latest) by name or ID, those matching --pattern,
+or all of them; --archive downloads the source code instead. Existing files are replaced only with
+--clobber, and --output - writes one asset to standard output.`,
 		Example: `# Download every asset of the latest release
 $ gt release download
 
@@ -285,7 +283,6 @@ func selectAssets(release services.Release, names, patterns []string) ([]service
 	return selected, nil
 }
 
-// downloadArchive downloads the source code of the tag as a zip or tar.gz file.
 func (a *application) downloadArchive(cmd *cobra.Command, service services.Releases, flags downloadFlags, tag, format string) error {
 	_, repo, _ := strings.Cut(service.Repository, "/")
 	name := repo + "-" + strings.ReplaceAll(tag, "/", "-") + "." + format
@@ -311,7 +308,6 @@ func (a *application) downloadArchive(cmd *cobra.Command, service services.Relea
 	return nil
 }
 
-// countingReader counts the bytes read through it.
 type countingReader struct {
 	reader io.Reader
 	n      int64

@@ -21,14 +21,11 @@ func (a *application) repositorySyncCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "sync [<repository>]",
 		Short: "Sync a branch with its remote or its fork's parent",
-		Long: `Fast-forward a local branch to the branch of the same name on the repository's Git remote.
+		Long: `Fast-forward a local branch (default: the repository's default branch) to the same branch on
+the repository's Git remote, without switching branches. Diverged branches are left unchanged.
 
-The branch defaults to the repository's default branch. It is created when it is missing, and it is
-never checked out: the branch you are on stays checked out. When the branch is checked out, the
-working tree must be clean. Branches that have diverged from the remote are left unchanged.
-
-Given a repository that has no remote in the current directory, sync updates it on the server
-instead: a fork's branch is fast-forwarded to its parent's, and a pull mirror fetches its source.`,
+Given a repository without a Git remote here, sync updates it on the server instead: a fork
+fast-forwards to its parent, and a pull mirror fetches its source.`,
 		Example: `# Fast-forward the default branch from the repository's remote
 $ gt repo sync
 

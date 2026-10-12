@@ -71,7 +71,6 @@ func (a *application) addPullMutations(group *cobra.Command) {
 	group.AddCommand(a.pullCreateCommand(), a.pullStateCommand(true), a.pullStateCommand(false), a.pullDiffCommand(), a.pullReviewCommand(), a.pullMergeCommand())
 }
 
-// pullStateCommand builds gt pr close, or gt pr reopen when closing is false.
 func (a *application) pullStateCommand(closing bool) *cobra.Command {
 	verb, done, state := "reopen", "Reopened", "open"
 	if closing {
@@ -252,7 +251,6 @@ var mergeVerbs = map[string]string{
 	"merge": "Merged", "rebase": "Rebased and merged", "rebase-merge": "Rebased and merged", "squash": "Squashed and merged", "fast-forward-only": "Merged",
 }
 
-// mergeMethods are the merge styles in Gitea's order.
 var mergeMethods = []string{"merge", "rebase", "rebase-merge", "squash", "fast-forward-only"}
 
 func (a *application) pullMergeCommand() *cobra.Command {

@@ -194,10 +194,7 @@ ssh_certificate_principal, ssh_key_fingerprint.`}
 	get := &cobra.Command{
 		Use: "get <key>", Short: "Print the value of a setting", Args: argsExact(1), ValidArgsFunction: a.completeConfig,
 		Example: `$ gt config get editor
-# Show where the value comes from
 $ gt config get default_host --show-source
-# Read an instance or account setting
-$ gt config get ssh_host --host https://gitea.com
 $ gt config get ssh_key --host https://gitea.com --user alice`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			snapshot, err := a.settings()
@@ -259,11 +256,6 @@ $ gt config list --host https://gitea.com`,
 		Use: "set <key> <value>", Short: "Change a setting", Args: argsExact(2), ValidArgsFunction: a.completeConfig,
 		Annotations: textOutput("config set does not return a resource"),
 		Example: `$ gt config set editor "code --wait"
-$ gt config set git_protocol ssh
-# Keep raw markdown and plain IDs on a terminal
-$ gt config set markdown raw
-$ gt config set hyperlinks never
-# Change an instance or account setting
 $ gt config set ssh_host git.example.com:2222 --host https://example.com
 $ gt config set ssh_key ~/.ssh/id_ed25519 --host https://example.com --user alice`,
 		RunE: func(cmd *cobra.Command, args []string) error {

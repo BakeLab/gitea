@@ -220,8 +220,7 @@ $ gt pr create
 # Take the title and body from the commits, without questions
 $ gt pr create --fill
 
-$ gt pr create -t "Add login" -b "Closes #1" -B develop -r carol -l enhancement
-$ gt pr create --draft --fill`
+$ gt pr create -t "Add login" -b "Closes #1" -B develop -r carol -l enhancement`
 	return create
 }
 
@@ -316,13 +315,14 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 	if err != nil {
 		return err
 	}
-	selectables, err := (services.Pulls{Client: target.client, Repository: target.Repo}).CreateSelectables(cmd.Context())
+	service := services.Pulls{Client: target.client, Repository: target.Repo}
+	selectables, err := service.CreateSelectables(cmd.Context())
 	if err != nil {
 		return err
 	}
 	baseOwner, _, _ := strings.Cut(target.Repo, "/")
 	headOwner, headBranch := a.defaultPullHead(cmd.Context())
-	template, err := (services.Pulls{Client: target.client, Repository: target.Repo}).Template(cmd.Context(), repo.DefaultBranch)
+	template, err := service.Template(cmd.Context(), repo.DefaultBranch)
 	if err != nil {
 		return err
 	}
@@ -361,7 +361,7 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 	if err := a.ensureHeadPublished(cmd, target, snapshot, options.Head); err != nil {
 		return err
 	}
-	item, err := (services.Pulls{Client: target.client, Repository: target.Repo}).Create(cmd.Context(), options)
+	item, err := service.Create(cmd.Context(), options)
 	if err != nil {
 		return err
 	}

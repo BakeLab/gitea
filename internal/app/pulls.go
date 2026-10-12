@@ -23,8 +23,6 @@ one select the pull request of the current branch.`}
 	group.Annotations = pullArgumentsAnnotation(nil)
 	group.Example = `$ gt pr list --author @me
 $ gt pr create --fill
-$ gt pr checkout 13
-$ gt pr review --approve
 $ gt pr merge --squash --delete-branch`
 	group.AddCommand(a.pullChecksCommand(), a.pullCheckoutCommand(), a.pullCleanCommand(), a.statusCommand(true))
 	group.AddCommand(a.pullListCommand(), a.pullViewCommand())
@@ -88,9 +86,8 @@ each pull request, which gt only makes when --json names them.`, Args: argsExact
 		if localFlagsChanged(cmd, "state", "limit", "page", "sort") {
 			empty = "no " + noun + " match your filters in " + t.Repo
 		}
-		columns := []terminal.Column{{Header: "ID", Prefix: "#"}, {Header: "Title", Flex: true}, {Header: "Branch", Flex: true, Min: 12}, {Header: "State", PipedOnly: state == "open"}, {Header: "Author"}, {Header: "Created"}}
 		return writeTable(a, cmd, items, listSpec[services.Pull]{
-			Columns: columns,
+			Columns: []terminal.Column{{Header: "ID", Prefix: "#"}, {Header: "Title", Flex: true}, {Header: "Branch", Flex: true, Min: 12}, {Header: "State", PipedOnly: state == "open"}, {Header: "Author"}, {Header: "Created"}},
 			Row: func(item services.Pull) []terminal.Cell {
 				state := pullState(item)
 				return []terminal.Cell{
@@ -125,8 +122,6 @@ each pull request, which gt only makes when --json names them.`, Args: argsExact
 	_ = cmd.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
 	cmd.Example = `$ gt pr list
 $ gt pr list --author @me --state all
-$ gt pr list -l bug -B main --draft
-$ gt pr list --state merged -L 10
 $ gt pr list --json number,title,head --jq '.[] | select(.head == "feature/login")'`
 	return cmd
 }
@@ -180,7 +175,6 @@ $ gt pr view
 # View #13 with its comments and reviews
 $ gt pr view 13 --comments
 
-$ gt pr view https://gitea.com/owner/repo/pulls/13 --web
 $ gt pr view feature/login --json number,state,review_decision`
 	return cmd
 }

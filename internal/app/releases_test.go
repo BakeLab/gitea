@@ -36,7 +36,6 @@ func TestReleaseViewShowsTheLatestReleaseWithNotesAndAssets(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _ := repoTTYDeps(t, server.URL)
-	deps.Getenv = serverEnv(server.URL, map[string]string{"TERM": "dumb"})
 	rawMarkdown(t, deps)
 	require.NoError(t, Execute(context.Background(), deps, []string{"release", "view", "-R", "alice/project"}))
 	require.Equal(t, `First release v0.1.0

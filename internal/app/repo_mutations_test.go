@@ -38,10 +38,12 @@ func TestRepoDeleteAndArchiveRequireExplicitRepositoryWithYes(t *testing.T) {
 		require.ErrorContains(t, err, "--yes requires an explicit repository, not one inferred from git remote upstream: gt repo "+verb+" alice/project --yes")
 	}
 	require.Empty(t, requests)
-	deps, _, _ := serverDeps(t, server.URL)
+	deps, out, diagnostics := repoTTYDeps(t, server.URL)
 	deps.Git = upstreamCheckout(server)
-	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "delete", "alice/project", "--yes"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rm", "alice/project", "--yes"}))
 	require.Equal(t, []string{"DELETE /api/v1/repos/alice/project"}, requests)
+	require.Empty(t, out.String())
+	require.Equal(t, "✓ Deleted repository alice/project\n", diagnostics.String())
 }
 
 func TestRepoDeleteAsksToTypeTheRepositoryName(t *testing.T) {
@@ -197,16 +199,4 @@ func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
 	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", "remote rename origin upstream", "remote add -- origin " + fork}, runner.calls)
 	require.Equal(t, "✓ Forked bob/project to alice/mine\n✓ Renamed Git remote origin to upstream\n✓ Added Git remote origin for alice/mine\n", diagnostics.String())
 	require.Equal(t, "https://gitea.test/alice/mine\n", out.String())
-}
-
-func TestRepoDeleteReportsTheDeletion(t *testing.T) {
-	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodDelete+" /api/v1/repos/alice/x", r.Method+" "+r.URL.Path)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-	deps, out, diagnostics := repoTTYDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rm", "alice/x", "--yes"}))
-	require.Empty(t, out.String())
-	require.Equal(t, "✓ Deleted repository alice/x\n", diagnostics.String())
 }

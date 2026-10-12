@@ -19,7 +19,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// pullArguments documents the pull request argument of pr commands in their ARGUMENTS section.
 const pullArguments = `A pull request can be supplied as argument in any of the following formats:
 - by number, such as "13" or "#13"
 - by URL, such as "https://gitea.com/OWNER/REPO/pulls/13"
@@ -27,7 +26,6 @@ const pullArguments = `A pull request can be supplied as argument in any of the 
 
 Without an argument, the pull request of the current branch is selected.`
 
-// pullArgumentsAnnotation adds the ARGUMENTS section to a pr command's help.
 func pullArgumentsAnnotation(annotations map[string]string) map[string]string {
 	if annotations == nil {
 		annotations = map[string]string{}
@@ -43,7 +41,6 @@ var reviewStates = map[string]string{
 	"comment": "COMMENT", "pending": "PENDING",
 }
 
-// reviewType holds the flags that choose the type of a review.
 type reviewType struct {
 	approve, requestChanges, comment, pending bool
 	// event is the hidden spelling of the type that gt 0.x and scripts use.
@@ -138,12 +135,6 @@ $ gt pr review --approve
 # Request changes on #13
 $ gt pr review 13 -r -b "Please hash the password"
 
-# Comment with a body read from a file
-$ gt pr review 13 -c -F notes.md
-
-# Review interactively: pick the type, write the body, optionally annotate the diff
-$ gt pr review 13
-
 # Start a pending review with inline comments, then submit it
 $ gt pr review 13 --pending --comments-file inline.json
 $ gt pr review submit 13 --approve`
@@ -152,9 +143,8 @@ func (a *application) pullReviewCommand() *cobra.Command {
 	review := a.reviewCreateCommand("review [<number> | <url> | <branch>]", "Review a pull request or manage its reviews")
 	review.Long = `Submit a review on a pull request, or manage existing reviews with the commands below.
 
-Without an argument, the pull request of the current branch is reviewed. Choose the review
-type with --approve, --request-changes or --comment. On a terminal, leaving the type out
-opens an interactive review that also offers to annotate the diff in your editor.`
+Choose the review type with --approve, --request-changes or --comment. On a terminal, leaving
+the type out opens an interactive review that also offers to annotate the diff in your editor.`
 	review.Example = reviewExamples
 	review.SuggestionsMinimumDistance = 2
 	create := a.reviewCreateCommand("create [<number> | <url> | <branch>]", `Submit a review (same as "gt pr review")`)
@@ -169,7 +159,6 @@ $ gt pr review create --comment -b "Looks good overall"`
 	return review
 }
 
-// reviewCreateCommand builds gt pr review and its explicit form gt pr review create.
 func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
 	var kind reviewType
 	var body, file, commentsFile, commit string
@@ -263,7 +252,6 @@ func (a *application) reportReview(cmd *cobra.Command, t target, pull services.P
 	return a.created(cmd, item, item.URL)
 }
 
-// readInlineComments reads the inline comments of --comments-file, a JSON array.
 func readInlineComments(path string) ([]services.InlineComment, error) {
 	if path == "" {
 		return nil, nil
@@ -296,7 +284,6 @@ func readInlineComments(path string) ([]services.InlineComment, error) {
 	return comments, nil
 }
 
-// reviewInteractively asks for the review type, body and inline comments, then submits the review.
 func (a *application) reviewInteractively(cmd *cobra.Command, args []string) error {
 	t, n, err := a.pullSelector(cmd, args)
 	if err != nil {

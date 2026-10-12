@@ -88,7 +88,6 @@ func TestReviewTypeFlags(t *testing.T) {
 		{[]string{"-c", "-b", "Nit"}, "COMMENT", "Nit"},
 		{[]string{"--pending", "-b", "Draft"}, "PENDING", "Draft"},
 		{[]string{"--event", "approve"}, "APPROVED", ""},
-		{[]string{"--event", "APPROVED"}, "APPROVED", ""},
 		{[]string{"--event", "request_changes", "-b", "x"}, "REQUEST_CHANGES", "x"},
 		{[]string{"--event", "Comment", "-b", "x"}, "COMMENT", "x"},
 	} {

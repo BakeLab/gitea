@@ -111,31 +111,6 @@ func TestWatchReportsEveryPollWithJobsUntilTheRunCompletes(t *testing.T) {
 	require.True(t, errors.Is(err, context.Canceled))
 }
 
-func TestRunCancellationPreservesHistory(t *testing.T) {
-	for _, force := range []bool{false, true} {
-		t.Run(fmt.Sprint(force), func(t *testing.T) {
-			mutations := 0
-			action := "cancel"
-			if force {
-				action = "force-cancel"
-			}
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				mutations++
-				require.Equal(t, http.MethodPost, r.Method)
-				require.Equal(t, "/api/v1/repos/owner/repo/actions/runs/7/"+action, r.URL.Path)
-				_, _ = w.Write([]byte(`{"id":7,"status":"completed","conclusion":"cancelled"}`)) //nolint:misspell // Gitea API spelling.
-			}))
-			defer server.Close()
-			service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
-			result, err := service.CancelRun(context.Background(), 7, force)
-			require.NoError(t, err)
-			require.EqualValues(t, 7, result.ID)
-			require.Equal(t, "cancelled", result.Conclusion) //nolint:misspell // Gitea API spelling.
-			require.Equal(t, 1, mutations)
-		})
-	}
-}
-
 func TestActionMutationsUseTheirEndpoints(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -158,6 +133,15 @@ func TestActionMutationsUseTheirEndpoints(t *testing.T) {
 		{"delete", "/api/v1/repos/owner/repo/actions/runs/7", http.MethodDelete, func(s Actions) error {
 			return s.DeleteRun(context.Background(), 7)
 		}},
+		{"cancel", "/api/v1/repos/owner/repo/actions/runs/7/cancel", http.MethodPost, func(s Actions) error {
+			run, err := s.CancelRun(context.Background(), 7, false)
+			require.EqualValues(t, 7, run.ID)
+			return err
+		}},
+		{"force-cancel", "/api/v1/repos/owner/repo/actions/runs/7/force-cancel", http.MethodPost, func(s Actions) error {
+			_, err := s.CancelRun(context.Background(), 7, true)
+			return err
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mutations := 0
@@ -165,8 +149,7 @@ func TestActionMutationsUseTheirEndpoints(t *testing.T) {
 				mutations++
 				require.Equal(t, tc.method, r.Method)
 				require.Equal(t, tc.path, r.URL.Path)
-				if tc.name == "rerun" {
-					w.WriteHeader(http.StatusCreated)
+				if tc.method == http.MethodPost {
 					_, _ = w.Write([]byte(`{"id":7,"status":"waiting"}`))
 					return
 				}

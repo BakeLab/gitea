@@ -86,7 +86,6 @@ func TestRepoViewShowsStateAndReadme(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _ := repoTTYDeps(t, server.URL)
-	deps.Getenv = serverEnv(server.URL, map[string]string{"TERM": "dumb"})
 	rawMarkdown(t, deps)
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "view", "bob/project", "--branch", "develop"}))
 	require.Equal(t, `bob/project
@@ -151,7 +150,6 @@ func TestRepoViewOfAnEmptyRepositorySkipsTheReadme(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _ := repoTTYDeps(t, server.URL)
-	deps.Getenv = serverEnv(server.URL, map[string]string{"TERM": "dumb"})
 	rawMarkdown(t, deps)
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "view", "alice/empty"}))
 	require.Contains(t, out.String(), "private • empty • ★ 0")

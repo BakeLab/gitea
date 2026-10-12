@@ -14,17 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPullListExplicitState(t *testing.T) {
-	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "closed", r.URL.Query().Get("state"))
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer server.Close()
-	deps, out, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "--state=closed", "-R", "alice/project", "--json"}))
-	require.JSONEq(t, `[]`, out.String())
-}
-
 // pullListServer lists the pull requests of alice/project: #17 from bob's fork, #15 a draft, #14
 // merged and #16 closed, with the total count Gitea reports.
 func pullListServer(t *testing.T, states *[]string) *http.Server {

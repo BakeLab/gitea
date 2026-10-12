@@ -7,7 +7,6 @@ import (
 	"cmp"
 	"context"
 	"maps"
-	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
@@ -109,24 +108,21 @@ func (s Webhooks) from(hook *gitea.Hook) Webhook {
 
 // List returns a page of hook metadata.
 func (s Webhooks) List(ctx context.Context, limit, page int) (Page[Webhook], error) {
-	hooks, err := listPage(limit, page, func(limit, page int) ([]*gitea.Hook, http.Header, error) {
-		hooks, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Hook, *gitea.Response, error) {
-			opts := gitea.ListHooksOptions{ListOptions: listOptions(limit, page)}
-			switch {
-			case s.Scope.Global:
-				return c.Hooks.ListGlobalHooks(ctx, gitea.ListGlobalHooksOptions{ListOptions: opts.ListOptions})
-			case s.Scope.Account:
-				return c.Hooks.ListMyHooks(ctx, opts)
-			case s.Scope.Organization != "":
-				return c.Hooks.ListOrgHooks(ctx, s.Scope.Organization, opts)
-			}
-			owner, name, err := splitRepository(s.Scope.Repository)
-			if err != nil {
-				return nil, nil, err
-			}
-			return c.Hooks.ListRepoHooks(ctx, owner, name, opts)
-		})
-		return hooks, headerOf(resp), err
+	hooks, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Hook, *gitea.Response, error) {
+		opts := gitea.ListHooksOptions{ListOptions: list}
+		switch {
+		case s.Scope.Global:
+			return c.Hooks.ListGlobalHooks(ctx, gitea.ListGlobalHooksOptions{ListOptions: opts.ListOptions})
+		case s.Scope.Account:
+			return c.Hooks.ListMyHooks(ctx, opts)
+		case s.Scope.Organization != "":
+			return c.Hooks.ListOrgHooks(ctx, s.Scope.Organization, opts)
+		}
+		owner, name, err := splitRepository(s.Scope.Repository)
+		if err != nil {
+			return nil, nil, err
+		}
+		return c.Hooks.ListRepoHooks(ctx, owner, name, opts)
 	})
 	return convertPage(hooks, s.from), err
 }

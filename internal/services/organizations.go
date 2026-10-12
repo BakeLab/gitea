@@ -62,18 +62,15 @@ type Organizations struct{ Client *transport.Client }
 
 // List selects public organizations, your organizations, or a named user's organizations.
 func (s Organizations) List(ctx context.Context, mine bool, username string, limit, page int) (Page[Organization], error) {
-	orgs, err := listPage(limit, page, func(limit, page int) ([]*gitea.Organization, http.Header, error) {
-		orgs, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Organization, *gitea.Response, error) {
-			opts := gitea.ListOrgsOptions{ListOptions: listOptions(limit, page)}
-			switch {
-			case mine:
-				return c.Organizations.ListMyOrgs(ctx, opts)
-			case username != "":
-				return c.Organizations.ListUserOrgs(ctx, username, opts)
-			}
-			return c.Organizations.ListOrgs(ctx, opts)
-		})
-		return orgs, headerOf(resp), err
+	orgs, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Organization, *gitea.Response, error) {
+		opts := gitea.ListOrgsOptions{ListOptions: list}
+		switch {
+		case mine:
+			return c.Organizations.ListMyOrgs(ctx, opts)
+		case username != "":
+			return c.Organizations.ListUserOrgs(ctx, username, opts)
+		}
+		return c.Organizations.ListOrgs(ctx, opts)
 	})
 	return convertPage(orgs, organizationFrom), err
 }
@@ -215,15 +212,12 @@ type MemberListOptions struct {
 
 // Members lists the members of an organization.
 func (s Organizations) Members(ctx context.Context, name string, opts MemberListOptions) (Page[OrganizationMember], error) {
-	users, err := listPage(opts.Limit, opts.Page, func(limit, page int) ([]*gitea.User, http.Header, error) {
-		users, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.User, *gitea.Response, error) {
-			list := gitea.ListOrgMembershipOption{ListOptions: listOptions(limit, page)}
-			if opts.Public {
-				return c.Organizations.ListPublicOrgMembership(ctx, name, list)
-			}
-			return c.Organizations.ListOrgMembership(ctx, name, list)
-		})
-		return users, headerOf(resp), err
+	users, err := callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.User, *gitea.Response, error) {
+		membership := gitea.ListOrgMembershipOption{ListOptions: list}
+		if opts.Public {
+			return c.Organizations.ListPublicOrgMembership(ctx, name, membership)
+		}
+		return c.Organizations.ListOrgMembership(ctx, name, membership)
 	})
 	members := convertPage(users, memberFrom)
 	if err != nil || !(opts.Public || opts.Visibility) {

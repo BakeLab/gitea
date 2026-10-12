@@ -74,11 +74,8 @@ type AdminUsers struct{ Client *transport.Client }
 // List returns a page of the users whose username, full name or email contains query, or of
 // every user without one.
 func (s AdminUsers) List(ctx context.Context, query string, limit, page int) (Page[AdminUser], error) {
-	users, err := listPage(limit, page, func(limit, page int) ([]*gitea.User, http.Header, error) {
-		users, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.User, *gitea.Response, error) {
-			return c.Admin.ListUsers(ctx, gitea.AdminListUsersOptions{ListOptions: listOptions(limit, page), Query: query})
-		})
-		return users, headerOf(resp), err
+	users, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.User, *gitea.Response, error) {
+		return c.Admin.ListUsers(ctx, gitea.AdminListUsersOptions{ListOptions: list, Query: query})
 	})
 	return convertPage(users, adminUserFrom), err
 }

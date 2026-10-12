@@ -268,10 +268,9 @@ func (a *application) completeConfig(cmd *cobra.Command, args []string, toComple
 	return matching(configValues[args[0]], toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
-// apiCompletion completes the values that list fetches from the selected instance; requireRepo
-// selects whether list needs a repository. It never prompts, refreshes an OAuth token or retries,
-// and gives up after completionTimeout: failures complete nothing rather than file names. Values
-// already given as arguments are not offered again.
+// apiCompletion completes the values that list fetches from the selected instance, except those
+// already given. It never prompts, refreshes or retries, and failures complete nothing rather than
+// file names.
 func (a *application) apiCompletion(requireRepo bool, list func(ctx context.Context, t target, toComplete string) ([]cobra.Completion, error)) cobra.CompletionFunc {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 		ctx, cancel := completionContext(cmd)
@@ -489,8 +488,7 @@ func (a *application) completeRuns() cobra.CompletionFunc {
 	})
 }
 
-// completeSecrets completes Actions secret names in the scope that scope selects; a scope without an
-// organization or account selects the repository.
+// completeSecrets completes Actions secret names in the selected scope.
 func (a *application) completeSecrets(scope func() services.ActionScope) cobra.CompletionFunc {
 	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
 		items, err := services.ActionSecrets{Client: t.client, Scope: actionScope(scope, t)}.ListPage(ctx, completionLimit, 1)
@@ -498,8 +496,7 @@ func (a *application) completeSecrets(scope func() services.ActionScope) cobra.C
 	})
 }
 
-// completeVariables completes Actions variable names in the scope that scope selects; a scope without
-// an organization or account selects the repository.
+// completeVariables completes Actions variable names in the selected scope.
 func (a *application) completeVariables(scope func() services.ActionScope) cobra.CompletionFunc {
 	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
 		items, err := services.ActionVariables{Client: t.client, Scope: actionScope(scope, t)}.ListPage(ctx, completionLimit, 1)

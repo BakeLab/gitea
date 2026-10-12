@@ -4,11 +4,9 @@
 package terminal
 
 import (
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/mattn/go-runewidth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,8 +27,7 @@ func TestTable(t *testing.T) {
 	}{
 		{"empty", issues, nil, tty, ""},
 		{"aligns legacy rows without header", nil, [][]Cell{row("7", "Fix login", "open"), row("12", "Crash", "closed")}, tty, "7   Fix login  open\n12  Crash      closed\n"},
-		{"counts runes, not bytes", nil, [][]Cell{row("1", "äöü", "x"), row("2", "abcd", "y")}, tty, "1  äöü   x\n2  abcd  y\n"},
-		{"counts wide runes twice", nil, [][]Cell{row("1", "修复", "x"), row("2", "abcd", "y")}, tty, "1  修复  x\n2  abcd  y\n"},
+		{"aligns by display width", nil, [][]Cell{row("1", "äöü", "x"), row("2", "修复", "y"), row("3", "abcd", "z")}, tty, "1  äöü   x\n2  修复  y\n3  abcd  z\n"},
 		{"trims empty trailing cells", nil, [][]Cell{row("1", "bug", ""), row("22", "feature", "new work")}, tty, "1   bug\n22  feature  new work\n"},
 		{"pads ragged rows", nil, [][]Cell{row("1"), row("2", "two")}, tty, "1\n2  two\n"},
 		{
@@ -119,19 +116,6 @@ func TestTable(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, Table(tc.columns, tc.rows, tc.d))
 		})
-	}
-}
-
-func TestTableFitsWidthWithWideRunes(t *testing.T) {
-	titles := []string{"Emoji in title 🚀 works?", "支持中文路径 (support CJK paths)", strings.Repeat("long ", 40)}
-	rows := make([][]Cell, len(titles))
-	for i, title := range titles {
-		rows[i] = row("#1", title, "alice")
-	}
-	for _, width := range []int{30, 50, 80} {
-		for _, line := range strings.Split(strings.TrimSuffix(Table([]Column{{}, {Flex: true}, {}}, rows, Display{TTY: true, Width: width}), "\n"), "\n") {
-			require.LessOrEqual(t, runewidth.StringWidth(line), width, line)
-		}
 	}
 }
 

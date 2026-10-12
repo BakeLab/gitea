@@ -185,8 +185,6 @@ func (a *application) runViewCommand() *cobra.Command {
 		Long:  "View a workflow run with its jobs and their steps.",
 		Example: `# view a run with its jobs and steps
 $ gt run view 34
-# view a run from its URL
-$ gt run view https://gitea.example.com/alice/project/actions/runs/34
 # print the logs of every job of a run
 $ gt run view 34 --log
 # get the conclusion of each job as JSON
@@ -481,9 +479,8 @@ $ gt run watch 34 --timeout 10m && echo deployed`,
 	return cmd
 }
 
-// watchRun polls run id until it completes. A terminal shows the run view, redrawn in place on
-// the alternate screen, then the final view and a summary; otherwise each change of state is
-// reported on stderr, and the completed run printed. It fails when the run does not succeed.
+// watchRun polls run id until it completes, redrawing the run view on the alternate screen of a
+// terminal, or else reporting each change of state on stderr.
 func (a *application) watchRun(cmd *cobra.Command, t target, id int64, interval, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
@@ -661,7 +658,6 @@ func (a *application) unfinished(t target, run services.Run) error {
 	return fmt.Errorf("run %d is still %s; cancel it first: gt run cancel %d%s", run.ID, run.Status, run.ID, a.suggestedRepo(t))
 }
 
-// findJob returns the job of run that raw names by ID or name.
 func findJob(jobs []services.Job, raw string, run int64) (services.Job, error) {
 	return services.NameOrID[services.Job]{
 		Kind: "job", Scope: fmt.Sprintf("run %d", run),

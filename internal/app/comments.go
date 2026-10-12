@@ -16,7 +16,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// commentTitle is the prompt for a comment body.
 const commentTitle = "Comment (markdown):"
 
 // commentNouns are the words for the commands of an issue or pull request comment group.
@@ -65,7 +64,6 @@ func commentName(t target, comment services.Comment) string {
 	return fmt.Sprintf("comment %d on %s#%d", comment.ID, t.Repo, comment.IssueNumber)
 }
 
-// commentFlags are the body flags of commands that write a comment.
 type commentFlags struct {
 	body, file string
 	useEditor  bool
@@ -142,7 +140,6 @@ func (a *application) commentOn(cmd *cobra.Command, t target, n int64, kind refK
 	return a.created(cmd, comment, comment.URL)
 }
 
-// lastComment returns the newest comment on n by the account gt acts as.
 func lastComment(cmd *cobra.Command, t target, n int64) (services.Comment, error) {
 	items, err := (services.Comments{Client: t.client, Repository: t.Repo}).List(cmd.Context(), n)
 	if err != nil {
@@ -156,14 +153,22 @@ func lastComment(cmd *cobra.Command, t target, n int64) (services.Comment, error
 	return services.Comment{}, fmt.Errorf("%s has no comments on %s#%d", t.login(), t.Repo, n)
 }
 
-// comment returns comment id, which a command of kind may change: pr commands refuse comments on
-// issues.
-func (a *application) comment(cmd *cobra.Command, t target, id int64, kind refKind) (services.Comment, error) {
+// comment returns the comment that the ID argument names, which a command of kind may change: pr
+// commands refuse comments on issues.
+func (a *application) comment(cmd *cobra.Command, arg string, kind refKind) (target, services.Comment, error) {
+	id, err := number(arg)
+	if err != nil {
+		return target{}, services.Comment{}, err
+	}
+	t, err := a.resolve(cmd.Context(), true)
+	if err != nil {
+		return t, services.Comment{}, err
+	}
 	current, err := (services.Comments{Client: t.client, Repository: t.Repo}).View(cmd.Context(), id)
 	if err == nil && kind == pullRef && !current.Pull {
 		err = fmt.Errorf("comment %d in %s is on an issue, not a pull request; use %s %d", id, t.Repo, issueCommandPath(cmd), id)
 	}
-	return current, err
+	return t, current, err
 }
 
 // editComment replaces the text of comment, prefilling the prompt or editor with it.
@@ -184,8 +189,7 @@ func (a *application) editComment(cmd *cobra.Command, t target, comment services
 
 // deleteComment deletes comment after a confirmation that defaults to no.
 func (a *application) deleteComment(cmd *cobra.Command, t target, comment services.Comment) error {
-	name := commentName(t, comment)
-	return a.deleteConfirmed(cmd, name, func() error {
+	return a.deleteConfirmed(cmd, commentName(t, comment), func() error {
 		return (services.Comments{Client: t.client, Repository: t.Repo}).Delete(cmd.Context(), comment.ID)
 	})
 }
@@ -262,10 +266,7 @@ func (a *application) commentCommand(kind refKind) *cobra.Command {
 
 Without --body, --body-file or --editor, the configured editor opens, or a multi-line prompt
 asks for the comment. The subcommands list, view, edit and delete comments by their ID.`, kind.article()), Example: fmt.Sprintf(`$ gt %[1]s comment %[2]s --body "Fixed in #14"
-$ gt %[1]s comment %[2]s --body-file notes.md
-# Change or remove your last comment
 $ gt %[1]s comment %[2]s --edit-last --body "Fixed in #15"
-$ gt %[1]s comment %[2]s --delete-last --yes
 $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments, "gt.confirm": "true"}, Args: commentArgs(kind), RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			if localFlagsChanged(cmd) {
@@ -329,15 +330,7 @@ $ gt %[1]s comment list %[2]s --json id,author,body`, words.group, words.example
 	list.ValidArgsFunction = a.completeDiscussions(kind)
 
 	view := &cobra.Command{Use: "view <comment-id>", Short: "View a comment", Example: fmt.Sprintf("$ gt %s comment view 81", words.group), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := number(args[0])
-		if err != nil {
-			return err
-		}
-		t, err := a.resolve(cmd.Context(), true)
-		if err != nil {
-			return err
-		}
-		comment, err := a.comment(cmd, t, id, kind)
+		t, comment, err := a.comment(cmd, args[0], kind)
 		if err != nil {
 			return err
 		}
@@ -365,15 +358,7 @@ $ gt %[1]s comment edit 81`, words.group), Args: argsExact(1), RunE: func(cmd *c
 		if err := editFlags.validate(cmd); err != nil {
 			return err
 		}
-		id, err := number(args[0])
-		if err != nil {
-			return err
-		}
-		t, err := a.resolve(cmd.Context(), true)
-		if err != nil {
-			return err
-		}
-		comment, err := a.comment(cmd, t, id, kind)
+		t, comment, err := a.comment(cmd, args[0], kind)
 		if err != nil {
 			return err
 		}
@@ -382,15 +367,7 @@ $ gt %[1]s comment edit 81`, words.group), Args: argsExact(1), RunE: func(cmd *c
 	editFlags.register(edit)
 
 	remove := &cobra.Command{Use: "delete <comment-id>", Short: "Delete a comment", Example: fmt.Sprintf("$ gt %s comment delete 81 --yes", words.group), Annotations: map[string]string{"gt.text": "comment deletion does not return a resource", "gt.confirm": "true"}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := number(args[0])
-		if err != nil {
-			return err
-		}
-		t, err := a.resolve(cmd.Context(), true)
-		if err != nil {
-			return err
-		}
-		comment, err := a.comment(cmd, t, id, kind)
+		t, comment, err := a.comment(cmd, args[0], kind)
 		if err != nil {
 			return err
 		}
@@ -415,7 +392,6 @@ func commentArgs(kind refKind) cobra.PositionalArgs {
 	}
 }
 
-// completeDiscussions completes the open issues or pull requests that a command of kind takes.
 func (a *application) completeDiscussions(kind refKind) cobra.CompletionFunc {
 	if kind == pullRef {
 		return firstArg(a.completePulls("open"))

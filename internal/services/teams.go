@@ -125,11 +125,8 @@ type Teams struct{ Client *transport.Client }
 
 // List lists teams in one organization.
 func (s Teams) List(ctx context.Context, org string, limit, page int) (Page[Team], error) {
-	teams, err := listPage(limit, page, func(limit, page int) ([]*gitea.Team, http.Header, error) {
-		teams, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Team, *gitea.Response, error) {
-			return c.Organizations.ListOrgTeams(ctx, org, gitea.ListTeamsOptions{ListOptions: listOptions(limit, page)})
-		})
-		return teams, headerOf(resp), err
+	teams, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Team, *gitea.Response, error) {
+		return c.Organizations.ListOrgTeams(ctx, org, gitea.ListTeamsOptions{ListOptions: list})
 	})
 	return inOrganization(convertPage(teams, teamFrom), org), err
 }
@@ -274,11 +271,8 @@ func (s Teams) Delete(ctx context.Context, id int64) error {
 
 // Members lists members of a team.
 func (s Teams) Members(ctx context.Context, id int64, limit, page int) (Page[OrganizationMember], error) {
-	users, err := listPage(limit, page, func(limit, page int) ([]*gitea.User, http.Header, error) {
-		users, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.User, *gitea.Response, error) {
-			return c.Organizations.ListTeamMembers(ctx, id, gitea.ListTeamMembersOptions{ListOptions: listOptions(limit, page)})
-		})
-		return users, headerOf(resp), err
+	users, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.User, *gitea.Response, error) {
+		return c.Organizations.ListTeamMembers(ctx, id, gitea.ListTeamMembersOptions{ListOptions: list})
 	})
 	return convertPage(users, memberFrom), err
 }
@@ -296,11 +290,8 @@ func (s Teams) SetMember(ctx context.Context, id int64, username string, add boo
 
 // Repositories lists repositories accessible to a team.
 func (s Teams) Repositories(ctx context.Context, id int64, limit, page int) (Page[Repository], error) {
-	repos, err := listPage(limit, page, func(limit, page int) ([]*gitea.Repository, http.Header, error) {
-		repos, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Repository, *gitea.Response, error) {
-			return c.Organizations.ListTeamRepositories(ctx, id, gitea.ListTeamRepositoriesOptions{ListOptions: listOptions(limit, page)})
-		})
-		return repos, headerOf(resp), err
+	repos, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Repository, *gitea.Response, error) {
+		return c.Organizations.ListTeamRepositories(ctx, id, gitea.ListTeamRepositoriesOptions{ListOptions: list})
 	})
 	return convertPage(repos, repositoryFrom), err
 }

@@ -42,8 +42,7 @@ func (a *application) display() terminal.Display {
 	}
 }
 
-// writeHuman pages multi-line human list/view text. JSON callers must not use it.
-// --no-input does not disable paging.
+// writeHuman pages human list and view text; --no-input does not disable paging.
 func (a *application) writeHuman(cmd *cobra.Command, text string) error {
 	preferences, _ := a.preferences()
 	return terminal.WriteHuman(cmd.Context(), a.deps.Streams, preferences.Pager, a.deps.Pager, text)
@@ -76,10 +75,8 @@ type listPage struct {
 	Counted bool
 }
 
-// writeTable writes items as a JSON array, or as a table through the pager. On a TTY the table has
-// a header row and, with a spec Context, a context line that also points at the next page; an empty
-// list prints the spec's Empty message to stderr instead. Piped tables are tab-separated, and the
-// next-page hint goes to stderr.
+// writeTable writes items as a JSON array, or as a table through the pager: on a TTY with a header,
+// the spec's Context line, or its Empty message on stderr; piped as TSV with the next-page hint on stderr.
 func writeTable[T any](a *application, cmd *cobra.Command, items []T, spec listSpec[T], page listPage) error {
 	if a.options.json != "" {
 		return a.writeJSON(cmd, items)

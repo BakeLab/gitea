@@ -134,17 +134,10 @@ without quotes; jq does not need to be installed.
 On a terminal, JSON responses are indented and colored. A response outside 2xx prints
 its body, then fails with the HTTP status.`
 
-// apiExamples are the examples of gt api.
-const apiExamples = `# The login of the authenticated account
-$ gt api user --jq .login
-# Open issues of the current repository, as number and title
-$ gt api 'repos/{owner}/{repo}/issues?state=open' --jq '.[] | "\(.number) \(.title)"'
+const apiExamples = `$ gt api user --jq .login
 # Create an issue: -f sends strings, -F typed values
 $ gt api repos/{owner}/{repo}/issues -f title="Crash on start" -F labels='[3]'
-# Every page of the account's repositories
-$ gt api user/repos --paginate --jq '.[].full_name'
-# Send a JSON body from a file
-$ gt api -X PATCH repos/alice/project --input settings.json`
+$ gt api user/repos --paginate --jq '.[].full_name'`
 
 func (a *application) apiCommand() *cobra.Command {
 	var method, input, output string
@@ -293,9 +286,8 @@ func (a *application) apiCommand() *cobra.Command {
 	return cmd
 }
 
-// apiResponse writes response bodies for gt api: filtered by the jq query, as indented and colored
-// JSON on a terminal, otherwise as received, without terminal controls on a terminal. Output to a
-// terminal, JSON and pages end with a newline.
+// apiResponse writes response bodies for gt api: filtered by --jq, indented and colored JSON on a
+// terminal, otherwise as received (minus terminal controls on a terminal), ending with a newline.
 type apiResponse struct {
 	tty, color, paginate bool
 	query                string

@@ -20,7 +20,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// issueArguments is the ARGUMENTS help of commands that take issue references.
 const issueArguments = `An issue can be supplied as argument in any of the following formats:
 - by number, e.g. "123" or "#123"
 - by URL, e.g. "https://gitea.com/OWNER/REPO/issues/123"
@@ -44,8 +43,7 @@ func (a *application) issueListCommand() *cobra.Command {
 Labels and milestones must exist in the repository.`, Example: `$ gt issue list --label bug --state all
 $ gt issue list --assignee @me --json number,title
 # Issues and pull requests in a milestone, as tab-separated values
-$ gt issue list --kind all --milestone v1.0 | cut -f1,2
-$ gt issue list --search "login" --web`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+$ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		var err error
 		if opts.Since, opts.Before, err = updated.parse(a.deps.Now()); err != nil {
 			return err
@@ -194,13 +192,9 @@ func (a *application) issueCreateCommand() *cobra.Command {
 	var useEditor, web bool
 	var assignees, labelNames, attachmentPaths []string
 	cmd := &cobra.Command{Use: "create", Aliases: []string{"new"}, Short: "Create an issue", Long: `Create an issue in a repository. Without flags on a terminal, a form asks for the title and
-body, then optionally for assignees, a milestone, labels and a due date. The new issue's URL
-is printed, so scripts can capture it.`, Example: `$ gt issue create
+body, then optionally for assignees, a milestone, labels and a due date.`, Example: `$ gt issue create
 $ gt issue create --title "Crash on start" --body "Steps to reproduce…" --label bug --milestone v1.0
-$ gt issue create -t "Update docs" -F notes.md -a @me
-# Start from a repository issue template, or continue in the browser
-$ gt issue create --template "Bug report"
-$ gt issue create --title "Idea" --web`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
+$ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
 		var draft terminal.Draft
 		defer finishDraft(&draft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
@@ -230,8 +224,7 @@ $ gt issue create --title "Idea" --web`, Args: argsExact(0), RunE: func(cmd *cob
 				return err
 			}
 		}
-		prompt := a.canPrompt()
-		if !localFlagsChanged(cmd) && prompt && a.deps.IssueForm != nil {
+		if !localFlagsChanged(cmd) && a.canPrompt() && a.deps.IssueForm != nil {
 			return a.createIssueInteractively(cmd)
 		}
 		var target target
@@ -461,7 +454,6 @@ func milestoneFlag(cmd *cobra.Command, value string) (selected string, remove bo
 	return strings.TrimSpace(value), false, nil
 }
 
-// milestoneID resolves a milestone title or ID in the target repository.
 func milestoneID(cmd *cobra.Command, t target, raw string) (int64, error) {
 	milestone, err := (services.Milestones{Client: t.client, Repository: t.Repo}).FindOne(cmd.Context(), raw, false)
 	return milestone.ID, err
@@ -539,7 +531,6 @@ func (f *metadataFlags) register(cmd *cobra.Command) {
 	flags.StringSliceVar(&f.setAssignees, "set-assignees", nil, "Replace all assignees; an empty value clears them")
 }
 
-// completeMetadataFlags completes the label and assignee flags of metadataFlags.
 func (a *application) completeMetadataFlags(cmd *cobra.Command) {
 	for _, name := range []string{"add-label", "remove-label", "set-labels"} {
 		_ = cmd.RegisterFlagCompletionFunc(name, a.completeLabels())

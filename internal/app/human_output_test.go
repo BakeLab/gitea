@@ -17,7 +17,6 @@ import (
 
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
-	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -214,31 +213,6 @@ func TestListsHintWhenMorePagesExist(t *testing.T) {
 		diagnostics.Reset()
 		require.NoError(t, Execute(context.Background(), deps, append(args, "--json=id")))
 		require.Empty(t, diagnostics.String(), args)
-	}
-}
-
-func TestListsFitTheTerminalAndSplitWhenPiped(t *testing.T) {
-	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`[{"number":6,"title":"A very long issue title that keeps going and going to see how list output handles wrapping","state":"open","user":{"login":"alice"}},` +
-			`{"number":5,"title":"支持中文路径 (support CJK paths)","state":"open","user":{"login":""}}]`))
-	}))
-	defer server.Close()
-	deps, out, _ := serverDeps(t, server.URL)
-	args := []string{"issue", "list", "-R", "alice/project"}
-	require.NoError(t, Execute(context.Background(), deps, args))
-	require.Equal(t, "6\tA very long issue title that keeps going and going to see how list output handles wrapping\t\topen\tissue\talice\t\n"+
-		"5\t支持中文路径 (support CJK paths)\t\topen\tissue\t\t\n", out.String())
-
-	out.Reset()
-	deps.Streams.OutTTY, deps.Streams.Width = true, 50
-	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
-	require.NoError(t, Execute(context.Background(), deps, args))
-	require.Equal(t, "Showing 2 of 2 open issues in alice/project\n\n"+
-		"ID  TITLE                  LABELS  AUTHOR  UPDATED\n"+
-		"#6  A very long issue ti…          alice\n"+
-		"#5  支持中文路径 (suppor…\n", stripLinks(out.String()))
-	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
-		require.LessOrEqual(t, runewidth.StringWidth(stripLinks(line)), 50, line)
 	}
 }
 

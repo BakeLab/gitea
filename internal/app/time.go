@@ -66,8 +66,7 @@ func (a *application) timeListCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "list", Short: "List tracked time", Long: `List the time tracked in a repository, on one issue with --issue, or by yourself across
 repositories with --mine. On a terminal, the total of the listed time follows the table.`, Example: `$ gt time list
 $ gt time list --issue 12
-$ gt time list --mine --since 168h
-$ gt time list --username @me --json issue_number,seconds`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+$ gt time list --mine --since 168h`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		if (opts.Mine && (issue != "" || opts.Username != "")) || (issue != "" && opts.Username != "") {
 			return clierr.Wrap(clierr.Usage, errors.New("--mine, --issue and --username select mutually exclusive scopes"))
 		}

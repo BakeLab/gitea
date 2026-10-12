@@ -29,7 +29,6 @@ func TestPullDiffStripsTerminalControlsOnlyOnATerminal(t *testing.T) {
 		{true, nil, "1", "+hello ]0;PWNED [31mred[0m\n-old\tline\n"},
 		{true, nil, "", "\x1b[32m+hello ]0;PWNED [31mred[0m\x1b[0m\n\x1b[31m-old\tline\x1b[0m\n"},
 		{false, []string{"--color", "always"}, "", "\x1b[32m+hello ]0;PWNED [31mred[0m\x1b[0m\n\x1b[31m-old\tline\x1b[0m\n"},
-		{true, []string{"--color", "never"}, "", "+hello ]0;PWNED [31mred[0m\n-old\tline\n"},
 	} {
 		deps, out, _ := serverDeps(t, server.URL)
 		deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": tc.color})

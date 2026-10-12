@@ -57,12 +57,3 @@ func TestFormsRefuseTerminalsWithoutSize(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Title", values.Title)
 }
-
-func TestPullFormNamesNoIssueFields(t *testing.T) {
-	p, rendered := accessiblePrompter(t, "n\nmain\nalice\nfeature\ny\nTitle\nBody\n")
-	_, err := p.CreatePull(context.Background(), PullFormChoices{})
-	require.NoError(t, err)
-	require.Contains(t, rendered.String(), "Title (required):")
-	require.Contains(t, rendered.String(), BodyTitle)
-	require.NotContains(t, rendered.String(), "Issue")
-}

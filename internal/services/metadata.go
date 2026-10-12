@@ -212,11 +212,8 @@ func (s Milestones) ListPage(ctx context.Context, state string, limit, page int)
 	if err != nil {
 		return Page[Milestone]{}, err
 	}
-	milestones, err := listPage(limit, page, func(limit, page int) ([]*gitea.Milestone, http.Header, error) {
-		milestones, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Milestone, *gitea.Response, error) {
-			return c.Repositories.ListMilestones(ctx, owner, repo, gitea.ListMilestoneOption{ListOptions: listOptions(limit, page), State: gitea.StateType(state)})
-		})
-		return milestones, headerOf(resp), err
+	milestones, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Milestone, *gitea.Response, error) {
+		return c.Repositories.ListMilestones(ctx, owner, repo, gitea.ListMilestoneOption{ListOptions: list, State: gitea.StateType(state)})
 	})
 	return convertPage(milestones, milestoneFrom), err
 }

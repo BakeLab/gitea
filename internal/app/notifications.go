@@ -340,7 +340,6 @@ func notificationsWith(statuses []string) string {
 	return distinct[0] + " or " + distinct[1] + " notifications"
 }
 
-// notificationStatus is unread, read or pinned.
 func notificationStatus(item services.Notification) string {
 	switch {
 	case item.Pinned:

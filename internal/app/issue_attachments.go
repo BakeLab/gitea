@@ -48,13 +48,21 @@ func (a *application) issueAttachmentCommand(kind refKind) *cobra.Command {
 	group := &cobra.Command{Use: "attachment", Short: "Manage the attachments of " + kind.noun() + "s", Long: fmt.Sprintf(`List, view, upload, download, rename and delete the files attached to %s. Attachments
 are addressed by the %s number and the attachment ID that attachment list shows.`, kind.article(), kind.noun())}
 	annotations := map[string]string{"gt.arguments": words.arguments}
-	// discussionTarget resolves the issue or pull request argument of an attachment command.
 	discussionTarget := func(cmd *cobra.Command, raw string) (target, int64, error) {
 		t, n, err := a.resolveRef(cmd, raw, kind)
 		if err == nil && kind == pullRef {
 			err = requirePull(cmd, t, n)
 		}
 		return t, n, err
+	}
+	// attachmentArgs checks the attachment ID before any request.
+	attachmentArgs := func(cmd *cobra.Command, args []string) (target, int64, int64, error) {
+		id, err := number(args[1])
+		if err != nil {
+			return target{}, 0, 0, err
+		}
+		t, n, err := discussionTarget(cmd, args[0])
+		return t, n, id, err
 	}
 	completeFirst := a.completeDiscussions(kind)
 
@@ -77,7 +85,7 @@ are addressed by the %s number and the attachment ID that attachment list shows.
 	pageFlags(list, &limit, &page)
 
 	view := &cobra.Command{Use: "view {<number> | <url>} <attachment-id>", Short: "View an attachment", Example: fmt.Sprintf("$ gt %s attachment view %s 9", words.group, words.example), Annotations: annotations, Args: argsExact(2), ValidArgsFunction: completeFirst, RunE: func(cmd *cobra.Command, args []string) error {
-		t, n, id, err := a.attachmentArgs(cmd, args, discussionTarget)
+		t, n, id, err := attachmentArgs(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -121,7 +129,7 @@ $ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.grou
 		if strings.TrimSpace(newName) == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("supply a nonempty --name"))
 		}
-		t, n, id, err := a.attachmentArgs(cmd, args, discussionTarget)
+		t, n, id, err := attachmentArgs(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -135,7 +143,7 @@ $ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.grou
 	edit.Flags().StringVar(&newName, "name", "", "New file `name`")
 
 	remove := &cobra.Command{Use: "delete {<number> | <url>} <attachment-id>", Short: "Delete an attachment", Example: fmt.Sprintf("$ gt %s attachment delete %s 9 --yes", words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments, "gt.confirm": "true", "gt.text": "attachment deletion does not return a resource"}, Args: argsExact(2), ValidArgsFunction: completeFirst, RunE: func(cmd *cobra.Command, args []string) error {
-		t, n, id, err := a.attachmentArgs(cmd, args, discussionTarget)
+		t, n, id, err := attachmentArgs(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -144,8 +152,7 @@ $ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.grou
 		if err != nil {
 			return err
 		}
-		name := attachmentName(t, n, item)
-		return a.deleteConfirmed(cmd, name, func() error { return service.DeleteAttachment(cmd.Context(), n, id) })
+		return a.deleteConfirmed(cmd, attachmentName(t, n, item), func() error { return service.DeleteAttachment(cmd.Context(), n, id) })
 	}}
 
 	var destination downloadFlags
@@ -155,7 +162,7 @@ skips the download.`, Example: fmt.Sprintf(`$ gt %[1]s attachment download %[2]s
 $ gt %[1]s attachment download %[2]s 9 --output crash.log --clobber
 # Write the file to standard output
 $ gt %[1]s attachment download %[2]s 9 -O - | less`, words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments, "gt.text": "attachment downloads are binary"}, Args: argsExact(2), ValidArgsFunction: completeFirst, RunE: func(cmd *cobra.Command, args []string) error {
-		t, n, id, err := a.attachmentArgs(cmd, args, discussionTarget)
+		t, n, id, err := attachmentArgs(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -183,15 +190,4 @@ $ gt %[1]s attachment download %[2]s 9 -O - | less`, words.group, words.example)
 	destination.register(download)
 	group.AddCommand(list, view, upload, edit, remove, download)
 	return group
-}
-
-// attachmentArgs resolves the issue or pull request and attachment ID arguments of an attachment
-// command, checking the ID before any request.
-func (a *application) attachmentArgs(cmd *cobra.Command, args []string, resolve func(*cobra.Command, string) (target, int64, error)) (target, int64, int64, error) {
-	id, err := number(args[1])
-	if err != nil {
-		return target{}, 0, 0, err
-	}
-	t, n, err := resolve(cmd, args[0])
-	return t, n, id, err
 }
