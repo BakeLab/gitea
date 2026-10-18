@@ -312,6 +312,15 @@ func TestHelpConfirmAndArgumentsAnnotations(t *testing.T) {
 	require.Contains(t, out.String(), "\nEXAMPLES\n  # Drop issue 7\n  $ gt issue drop 7\n")
 }
 
+func TestHelpDefaultsToCurrentBranchOnlyWhereThePullRequestIsOptional(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	for path, defaults := range map[string]bool{"pr review list": true, "pr view": true, "pr review view": false, "pr review dismiss": false, "pr checkout": false} {
+		out.Reset()
+		require.NoError(t, Execute(context.Background(), deps, append(strings.Fields(path), "--help")))
+		require.Equal(t, defaults, strings.Contains(out.String(), "Without an argument, the pull request of the current branch"), path)
+	}
+}
+
 func TestHelpTopicsAndUnknownTopics(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	for args, want := range map[string]string{

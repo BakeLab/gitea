@@ -29,7 +29,7 @@ gt exits with 8 while checks are pending and with 1 when a check failed, like gh
 		if interval <= 0 || timeout <= 0 {
 			return clierr.Wrap(clierr.Usage, errors.New("--interval and --timeout must be positive"))
 		}
-		t, n, err := a.pullSelector(cmd, args)
+		t, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ gt exits with 8 while checks are pending and with 1 when a check failed, like gh
 	cmd.Flags().DurationVar(&interval, "interval", 5*time.Second, "Time between refreshes with --watch")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "Longest time to wait with --watch")
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the pull request in the browser")
-	cmd.ValidArgsFunction = a.completePulls("open")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("open"))
 	cmd.Example = `# Show the checks of the current branch's pull request
 $ gt pr checks
 

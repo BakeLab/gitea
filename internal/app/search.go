@@ -62,7 +62,7 @@ $ gt search repo go --topic --sort updated --order desc`,
 	pageFlags(command, &opts.Limit, &opts.Page)
 	flags.StringVar(&opts.Owner, "owner", "", "Only repositories of this user or organization")
 	enumFlag(command, &opts.Kind, "type", "", "", "Only repositories of this kind", "fork", "source", "mirror")
-	enumFlag(command, &opts.Sort, "sort", "", "alpha", "Sort by", "alpha", "created", "updated", "size", "id")
+	enumFlag(command, &opts.Sort, "sort", "", "", "Sort by (default: alphabetical, your own repositories first)", "alpha", "created", "updated", "size", "id")
 	enumFlag(command, &opts.Order, "order", "", "asc", "Sort order", "asc", "desc")
 	flags.BoolVar(&opts.Topic, "topic", false, "Match repository topics")
 	flags.BoolVar(&private, "private", false, "Only private repositories (use =false for public)")

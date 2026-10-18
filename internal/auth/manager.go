@@ -87,6 +87,12 @@ func (m Manager) register(instance, user string, account settings.Account, optio
 			}
 			undo = append(undo, func() error { return m.credentials.Delete(instance, user, account.CredentialStore) })
 		}
+		if exists && credential != nil && !previous.Tokenless() {
+			// Logging in again replaces the credential; settings made with gt config set stay.
+			kept := previous
+			kept.AuthMethod, kept.CredentialStore = account.AuthMethod, account.CredentialStore
+			account = kept
+		}
 		host.Users[user] = account
 		host.User = user
 		if options.OAuthClientID != "" {

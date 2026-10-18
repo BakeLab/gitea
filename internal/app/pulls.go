@@ -150,7 +150,7 @@ func (a *application) pullViewCommand() *cobra.Command {
 		if comments && a.options.json != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--comments cannot be combined with --json or --jq; use gt pr comment list <number> --json or gt pr review list <number> --json"))
 		}
-		t, n, err := a.pullSelector(cmd, args)
+		t, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -166,7 +166,7 @@ func (a *application) pullViewCommand() *cobra.Command {
 		if details.reviews, err = (services.Reviews{Client: t.client, Repository: t.Repo}).All(cmd.Context(), n); err != nil {
 			return err
 		}
-		item.ReviewDecision = services.ReviewDecision(services.LatestReviews(details.reviews), len(item.Reviewers)+len(item.ReviewerTeams) > 0)
+		item.ReviewDecision = services.ReviewDecision(details.reviews, len(item.Reviewers)+len(item.ReviewerTeams) > 0)
 		if a.options.json != "" {
 			return a.writeJSON(cmd, item)
 		}
@@ -179,7 +179,7 @@ func (a *application) pullViewCommand() *cobra.Command {
 	}}
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the pull request in the browser")
 	cmd.Flags().BoolVarP(&comments, "comments", "c", false, "Show comments and reviews")
-	cmd.ValidArgsFunction = a.completePulls("all")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("all"))
 	cmd.Example = `# View the pull request of the current branch
 $ gt pr view
 

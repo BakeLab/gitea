@@ -234,3 +234,30 @@ func TestReleaseAssetRenameAndDelete(t *testing.T) {
 	require.Equal(t, ReleaseAsset{ID: 2, Name: "renamed.bin"}, asset)
 	require.NoError(t, service.DeleteAsset(context.Background(), 1, 2))
 }
+
+func TestReleaseCreateReportsAnUnresolvableTargetNotAMissingRelease(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"target not found"}`))
+	}))
+	target, tag := "deadbeef", "v1"
+	_, err := Releases{Client: client, Repository: "alice/project"}.Create(context.Background(), ReleaseOptions{Tag: &tag, Title: &tag, Target: &target})
+	var notFound *NotFoundError
+	require.ErrorAs(t, err, &notFound)
+	require.EqualError(t, err, `target "deadbeef" not found in alice/project`)
+}
+
+func TestReleaseTagExistsDistinguishesMissingFromFailing(t *testing.T) {
+	status := http.StatusNotFound
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"message":"x"}`))
+	}))
+	service := Releases{Client: client, Repository: "alice/project"}
+	exists, err := service.TagExists(context.Background(), "v1")
+	require.NoError(t, err)
+	require.False(t, exists)
+	status = http.StatusInternalServerError
+	_, err = service.TagExists(context.Background(), "v1")
+	require.Error(t, err)
+}

@@ -53,12 +53,27 @@ func (s Comments) List(ctx context.Context, n int64) ([]Comment, error) {
 }
 
 // Page applies CLI pagination to the unpaginated comment collection.
-func (s Comments) Page(ctx context.Context, n int64, limit, page int) ([]Comment, error) {
+func (s Comments) Page(ctx context.Context, n int64, limit, page int) (Page[Comment], error) {
 	items, err := s.List(ctx, n)
 	if err != nil {
-		return nil, err
+		return Page[Comment]{}, err
 	}
-	return pageOf(items, limit, page)
+	window, err := pageOf(items, limit, page)
+	if err != nil {
+		return Page[Comment]{}, err
+	}
+	return Page[Comment]{Items: window, More: len(items) > page*limit, Total: len(items), Counted: true}, nil
+}
+
+// NotPlainCommentError reports a comment that the single-comment endpoint answers with no body,
+// such as an inline review comment. Such comments can still be edited and deleted by ID.
+type NotPlainCommentError struct {
+	ID         int64
+	Repository string
+}
+
+func (e NotPlainCommentError) Error() string {
+	return fmt.Sprintf("comment %d in %s is not a plain comment, such as an inline review comment, which this command cannot show", e.ID, e.Repository)
 }
 
 // View retrieves a comment by its repository-scoped ID.
@@ -73,7 +88,7 @@ func (s Comments) View(ctx context.Context, id int64) (Comment, error) {
 	})
 	if status == http.StatusNoContent {
 		// Gitea answers without a body for the comments that are not plain ones, such as inline review comments.
-		return Comment{}, fmt.Errorf("comment %d in %s is not a plain comment, such as an inline review comment, which this command cannot show", id, s.Repository)
+		return Comment{}, NotPlainCommentError{ID: id, Repository: s.Repository}
 	}
 	return item, Classify(err, "comment", strconv.FormatInt(id, 10), s.Repository)
 }

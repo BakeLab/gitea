@@ -133,8 +133,34 @@ func (s Wiki) ListPage(ctx context.Context, limit, page int) (Page[WikiPage], er
 	return Page[WikiPage]{Items: items, More: page*limit < len(all), Total: len(all), Counted: true}, err
 }
 
+// disabled explains a 404 from the wiki API. Gitea answers a bare 404 when the wiki is disabled or
+// the repository is missing, which says nothing about the page itself. It returns nil for any other
+// error, and the repository lookup's error when the repository cannot be read.
+func (s Wiki) disabled(ctx context.Context, err error) error {
+	if !IsNotFound(err) {
+		return nil
+	}
+	repository, checkErr := (Repositories{Client: s.Client}).get(ctx, s.Repository)
+	if checkErr != nil {
+		return checkErr
+	}
+	if !repository.HasWiki {
+		return fmt.Errorf("the wiki of %s is disabled; turn it on with: gt repo edit --enable-wiki -R %s", s.Repository, s.Repository)
+	}
+	return nil
+}
+
 // View retrieves and decodes a wiki page.
 func (s Wiki) View(ctx context.Context, name string) (WikiPage, error) {
+	item, err := s.lookup(ctx, name)
+	if err := s.disabled(ctx, err); err != nil {
+		return WikiPage{}, err
+	}
+	return item, err
+}
+
+// lookup is View without the check for a disabled wiki.
+func (s Wiki) lookup(ctx context.Context, name string) (WikiPage, error) {
 	item, err := s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
 		return c.Wiki.GetPage(ctx, owner, repo, name)
 	})
@@ -150,22 +176,37 @@ func (s Wiki) Create(ctx context.Context, opts WikiOptions) (WikiPage, error) {
 	item, err := s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
 		return c.Wiki.CreatePage(ctx, owner, repo, wikiOptions(opts))
 	})
+	if err := s.disabled(ctx, err); err != nil {
+		return WikiPage{}, err
+	}
 	return item, Classify(err, "wiki page", strconv.Quote(opts.Title), s.Repository)
 }
 
-// Edit replaces page content and optionally changes its title.
-func (s Wiki) Edit(ctx context.Context, name string, opts WikiOptions) (WikiPage, error) {
+// Edit replaces page content and optionally changes its title. It reports whether the title
+// changed. Gitea's edit creates a page that does not exist and overwrites one the new title
+// names, so both are checked first.
+func (s Wiki) Edit(ctx context.Context, name string, opts WikiOptions) (WikiPage, bool, error) {
+	current, err := s.View(ctx, name)
+	if err != nil {
+		return WikiPage{}, false, err
+	}
+	renamed := opts.Title != "" && opts.Title != current.Title
 	if opts.Title == "" {
-		current, err := s.View(ctx, name)
-		if err != nil {
-			return WikiPage{}, err
-		}
 		opts.Title = current.Title
+	}
+	if renamed {
+		existing, err := s.lookup(ctx, opts.Title)
+		if err == nil && existing.Title != current.Title {
+			return WikiPage{}, false, &ConflictError{Reason: ReasonExists, Kind: "wiki page", Key: strconv.Quote(opts.Title), Scope: s.Repository}
+		}
+		if err != nil && !IsNotFound(err) {
+			return WikiPage{}, false, err
+		}
 	}
 	item, err := s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
 		return c.Wiki.EditPage(ctx, owner, repo, name, wikiOptions(opts))
 	})
-	return item, Classify(err, "wiki page", strconv.Quote(name), s.Repository)
+	return item, renamed, Classify(err, "wiki page", strconv.Quote(name), s.Repository)
 }
 
 // Delete removes a named wiki page.
@@ -173,16 +214,24 @@ func (s Wiki) Delete(ctx context.Context, name string) error {
 	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
 		return c.Wiki.DeletePage(ctx, owner, repo, name)
 	})
+	if err := s.disabled(ctx, err); err != nil {
+		return err
+	}
 	return Classify(err, "wiki page", strconv.Quote(name), s.Repository)
 }
 
-// Revisions returns one server-paginated page of wiki commits.
-func (s Wiki) Revisions(ctx context.Context, name string, page int) ([]WikiRevision, error) {
+// wikiRevisionPageSize is Gitea's default number of wiki commits per page ([git] COMMITS_RANGE_SIZE).
+const wikiRevisionPageSize = 50
+
+// Revisions returns one server-paginated page of wiki commits and the total the server counted.
+func (s Wiki) Revisions(ctx context.Context, name string, page int) (Page[WikiRevision], error) {
 	revisions, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiCommitList, *gitea.Response, error) {
 		return c.Wiki.GetPageRevisions(ctx, owner, repo, name, gitea.ListWikiPageRevisionsOptions{Page: page})
 	})
 	if err != nil {
-		return nil, err
+		return Page[WikiRevision]{}, err
 	}
-	return convertAll(revisions.WikiCommits, wikiRevisionFrom), nil
+	items := convertAll(revisions.WikiCommits, wikiRevisionFrom)
+	total := int(revisions.Count)
+	return Page[WikiRevision]{Items: items, Total: total, Counted: true, More: (page-1)*wikiRevisionPageSize+len(items) < total}, nil
 }

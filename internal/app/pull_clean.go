@@ -20,7 +20,7 @@ import (
 func (a *application) pullCleanCommand() *cobra.Command {
 	var ignoreSHA bool
 	cmd := &cobra.Command{Use: "clean [<number> | <url> | <branch>]", Short: "Delete the branches of a merged or closed pull request", Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
-		target, n, err := a.pullSelector(cmd, args)
+		target, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -120,7 +120,7 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		return a.jsonResult(cmd, result)
 	}}
 	cmd.Flags().BoolVar(&ignoreSHA, "ignore-sha", false, "Find the local branch by name instead of commit hash")
-	cmd.ValidArgsFunction = a.completePulls("closed")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("closed"))
 	cmd.Example = `# After #13 was merged, delete its branch locally and on Gitea
 $ gt pr clean 13`
 	return cmd

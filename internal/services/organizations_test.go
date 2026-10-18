@@ -6,7 +6,9 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/transport"
@@ -108,6 +110,38 @@ func TestOrganizationCreateSendsSuppliedPreferences(t *testing.T) {
 	require.Equal(t, Organization{ID: 5, Name: "acme", Visibility: "limited", RepoAdminChangeTeamAccess: true}, item)
 }
 
+func TestOrganizationMembershipChecksReportWhatGiteaRefuses(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/orgs/acme/members/bob":
+			http.Redirect(w, r, "/org/acme/public_members", http.StatusSeeOther)
+		case "/api/v1/orgs/acme/members/bbo":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"user does not exist [uid: 0, name: bbo]"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	service := Organizations{Client: client}
+	_, err := service.IsMember(context.Background(), "acme", "bob")
+	require.True(t, IsForbidden(err), "%v", err)
+	_, err = service.IsMember(context.Background(), "acme", "bbo")
+	require.EqualError(t, err, `user "bbo" not found`)
+	member, err := service.IsMember(context.Background(), "acme", "carol")
+	require.NoError(t, err)
+	require.False(t, member)
+}
+
+func TestOrganizationCreateNamesTheTakenName(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"message":"user already exists [name: bob]"}`))
+	}))
+	name := "bob"
+	_, err := (Organizations{Client: client}).Create(context.Background(), OrganizationOptions{Name: &name})
+	require.EqualError(t, err, `name "bob" already exists`)
+}
+
 func TestOrganizationMembershipRequests(t *testing.T) {
 	var requests []string
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -161,4 +195,31 @@ func TestOrganizationMembersCheckEachMembership(t *testing.T) {
 			require.Equal(t, tc.counted, members.Counted)
 		})
 	}
+}
+
+func TestOrganizationPublicMembersReadLaterPages(t *testing.T) {
+	// The first server page holds only concealed members; a public one follows on page 2.
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/orgs/acme/public_members" && r.URL.Query().Get("page") == "1":
+			var users []string
+			for i := range 50 {
+				users = append(users, fmt.Sprintf(`{"id":%d,"login":"hidden%d"}`, i+10, i))
+			}
+			w.Header().Set("Link", `<http://x/api/v1/orgs/acme/public_members?page=2>; rel="next"`)
+			_, _ = w.Write([]byte("[" + strings.Join(users, ",") + "]"))
+		case r.URL.Path == "/api/v1/orgs/acme/public_members":
+			_, _ = w.Write([]byte(`[{"id":1,"login":"alice"}]`))
+		case r.URL.Path == "/api/v1/orgs/acme/public_members/alice":
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasPrefix(r.URL.Path, "/api/v1/orgs/acme/public_members/hidden"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	members, err := (Organizations{Client: client}).Members(context.Background(), "acme", MemberListOptions{Public: true, Visibility: true, Limit: 1, Page: 1})
+	require.NoError(t, err)
+	require.Equal(t, []OrganizationMember{{ID: 1, Username: "alice", Visibility: MembershipPublic}}, members.Items)
+	require.False(t, members.More)
 }

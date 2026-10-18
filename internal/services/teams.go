@@ -67,8 +67,8 @@ func (t Team) Access() string {
 	var level string
 	var granted []string
 	for _, unit := range TeamUnits {
-		access := t.Units[unit]
-		if access == "" || access == "none" {
+		access := t.UnitLevel(unit)
+		if access == "none" {
 			continue
 		}
 		if level != "" && access != level {
@@ -84,6 +84,22 @@ func (t Team) Access() string {
 		return level
 	}
 	return level + " (" + strings.Join(granted, ", ") + ")"
+}
+
+// UnitLevel is the access the team has to unit: the higher of the unit's own level and the team
+// permission, which Gitea grants on every unit, capped at the levels the unit allows.
+func (t Team) UnitLevel(unit string) string {
+	levels := UnitAccess(unit)
+	level := "none"
+	for _, candidate := range []string{t.Units[unit], t.Permission} {
+		if candidate == "write" && !slices.Contains(levels, "write") {
+			candidate = "read"
+		}
+		if slices.Index(levels, candidate) > slices.Index(levels, level) {
+			level = candidate
+		}
+	}
+	return level
 }
 
 // Slug names the team as ORG/TEAM, or by name alone when its organization is unknown.
@@ -234,6 +250,7 @@ func (s Teams) Create(ctx context.Context, org string, opts TeamOptions) (Team, 
 // permissions when changing access to all repositories. Gitea replaces the whole policy on edit.
 func (s Teams) Edit(ctx context.Context, id int64, opts TeamOptions) (Team, error) {
 	repositoryPolicy := opts.AllRepositories != nil && opts.Permission == nil
+	changesPermission := opts.Permission != nil
 	if repositoryPolicy || (opts.Units != nil && !opts.ReplaceUnits) {
 		current, err := s.View(ctx, id)
 		if err != nil {
@@ -258,6 +275,22 @@ func (s Teams) Edit(ctx context.Context, id int64, opts TeamOptions) (Team, erro
 			opts.Units = units
 		}
 	}
+	// Gitea 28 keeps an admin team admin when one request changes its permission and sets units_map,
+	// so change the permission alone first and then apply the units.
+	if changesPermission && opts.Units != nil {
+		first := TeamOptions{Name: opts.Name, Permission: opts.Permission}
+		if first.Name == nil {
+			current, err := s.View(ctx, id)
+			if err != nil {
+				return Team{}, err
+			}
+			first.Name = &current.Name
+		}
+		// TODO(sdk): EditTeamOption requires a name of at most 30 characters and a permission, and EditTeam should return the team.
+		if err := sendJSON(ctx, s.Client, http.MethodPatch, fmt.Sprintf("teams/%d", id), first, nil); err != nil {
+			return Team{}, err
+		}
+	}
 	var team gitea.Team
 	// TODO(sdk): EditTeamOption requires a name of at most 30 characters and a permission, and EditTeam should return the team.
 	if err := sendJSON(ctx, s.Client, http.MethodPatch, fmt.Sprintf("teams/%d", id), opts, &team); err != nil {
@@ -273,12 +306,23 @@ func (s Teams) Delete(ctx context.Context, id int64) error {
 	})
 }
 
+// TeamMember identifies a team member without exposing private profile fields.
+type TeamMember struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	FullName string `json:"full_name"`
+}
+
+func teamMemberFrom(user *gitea.User) TeamMember {
+	return TeamMember{ID: user.ID, Username: user.UserName, FullName: user.FullName}
+}
+
 // Members lists members of a team.
-func (s Teams) Members(ctx context.Context, id int64, limit, page int) (Page[OrganizationMember], error) {
+func (s Teams) Members(ctx context.Context, id int64, limit, page int) (Page[TeamMember], error) {
 	users, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.User, *gitea.Response, error) {
 		return c.Organizations.ListTeamMembers(ctx, id, gitea.ListTeamMembersOptions{ListOptions: list})
 	})
-	return convertPage(users, memberFrom), err
+	return convertPage(users, teamMemberFrom), err
 }
 
 // SetMember adds or removes one team membership.

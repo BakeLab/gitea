@@ -193,7 +193,7 @@ func (a *application) notificationWatchCommand(scope func(*cobra.Command) (notif
 		Long: `Print notifications as they arrive or change, until Ctrl-C or --timeout. On a terminal
 it runs until stopped; otherwise it stops after a minute unless --timeout says otherwise.
 With --json it prints one JSON object per line.`,
-		Example: "$ gt notification watch\n# Stream new pull request notifications to a script\n$ gt notification watch --type pull --json id,repository,title | ./notify.sh",
+		Example: "$ gt notification watch\n# Stream pull request notifications to a script, starting with the current ones\n$ gt notification watch --type pull --json id,repository,title --timeout 0 | ./notify.sh",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			listed, err := a.notificationOptions(opts, updated)
 			if err != nil {
@@ -284,10 +284,14 @@ pinned.`,
 			if err := writeView(a, cmd, item, func(item services.Notification) terminal.View { return notificationView(item, comment, a.display()) }); err != nil {
 				return err
 			}
+			// Marking is a side effect of viewing: a token without write:notification, or an
+			// administrator reading another user's thread, still gets the view.
 			if item.Unread && !item.Pinned {
-				_, err = s.Mark(cmd.Context(), id, "read")
+				if _, err := s.Mark(cmd.Context(), id, "read"); err != nil {
+					a.warn(cmd, "Could not mark notification %d as read: %v", id, err)
+				}
 			}
-			return err
+			return nil
 		},
 	}
 }
@@ -380,17 +384,24 @@ func notificationView(item services.Notification, comment *services.Comment, d t
 		Title: item.Title, Meta: meta, Kind: notificationKinds[item.Type], URL: item.URL,
 		Badges: []terminal.Cell{{Text: titleCase(item.State), Color: stateColors[item.State]}, {Text: notificationStatus(item), Muted: true}},
 		Fields: []terminal.Field{{Label: "Notification", Value: strconv.FormatInt(item.ID, 10)}, {Label: "Type", Value: notificationKinds[item.Type]}, {Label: "Repository", Value: item.Repository}},
-		Body:   "_No comments yet._",
 	}
+	if d.TTY {
+		view.Body = "_No comments yet._"
+	}
+	view.Fields = append(view.Fields,
+		terminal.Field{Label: "State", Value: item.State, PipedOnly: true},
+		terminal.Field{Label: "Status", Value: notificationStatus(item), PipedOnly: true})
 	if item.Number != 0 {
 		view.ID = "#" + strconv.FormatInt(item.Number, 10)
 	}
 	if comment != nil {
 		when := ""
-		if created := terminal.ParseTime(comment.CreatedAt); !created.IsZero() {
+		if created := terminal.ParseTime(comment.CreatedAt); d.TTY && !created.IsZero() {
 			when = ", " + terminal.RelativeTime(d.Now, created)
 		}
-		view.Fields = append(view.Fields, terminal.Field{Label: "Latest comment", Value: comment.Author + when})
+		commented := timeField("Commented", comment.CreatedAt, d)
+		commented.PipedOnly = true
+		view.Fields = append(view.Fields, terminal.Field{Label: "Latest comment", Value: comment.Author + when}, commented)
 		view.Body = comment.Body
 	}
 	return view

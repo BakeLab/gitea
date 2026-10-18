@@ -24,6 +24,7 @@ type Review struct {
 	Body          string `json:"body"`
 	State         string `json:"state"`
 	Author        string `json:"author"`
+	Team          string `json:"team"`
 	URL           string `json:"url"`
 	Commit        string `json:"commit"`
 	SubmittedAt   string `json:"submitted_at"`
@@ -31,9 +32,21 @@ type Review struct {
 	Dismissed     bool   `json:"dismissed"`
 }
 
+// Reviewer names who the review is by, or for a request to a team, "team NAME".
+func (r Review) Reviewer() string {
+	if r.Author == "" && r.Team != "" {
+		return "team " + r.Team
+	}
+	return r.Author
+}
+
 func reviewFrom(review *gitea.PullReview) Review {
+	team := ""
+	if review.ReviewerTeam != nil {
+		team = review.ReviewerTeam.Name
+	}
 	return Review{
-		ID: review.ID, Body: review.Body, State: string(review.State), Author: login(review.Reviewer), URL: review.HTMLURL,
+		ID: review.ID, Body: review.Body, State: string(review.State), Author: login(review.Reviewer), Team: team, URL: review.HTMLURL,
 		Commit: review.CommitID, SubmittedAt: timestamp(review.Submitted), CommentsCount: review.CodeCommentsCount, Dismissed: review.Dismissed,
 	}
 }
@@ -48,6 +61,7 @@ type ReviewComment struct {
 	URL       string `json:"url"`
 	Path      string `json:"path"`
 	Line      int64  `json:"line"`
+	OldLine   int64  `json:"old_line"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -55,8 +69,20 @@ type ReviewComment struct {
 func reviewCommentFrom(comment *gitea.PullReviewComment) ReviewComment {
 	return ReviewComment{
 		ID: comment.ID, ReviewID: comment.ReviewID, Body: comment.Body, Author: login(comment.Reviewer), Resolver: login(comment.Resolver),
-		URL: comment.HTMLURL, Path: comment.Path, Line: int64(comment.LineNum), CreatedAt: timestamp(comment.Created), UpdatedAt: timestamp(comment.Updated),
+		URL: comment.HTMLURL, Path: comment.Path, Line: int64(comment.LineNum), OldLine: int64(comment.OldLineNum), CreatedAt: timestamp(comment.Created), UpdatedAt: timestamp(comment.Updated),
 	}
+}
+
+// Location names the file and line a comment is on: "app.go:8", or "app.go:4 (old)" for a
+// removed line, which has only an old position.
+func (c ReviewComment) Location() string {
+	switch {
+	case c.Line > 0:
+		return fmt.Sprintf("%s:%d", c.Path, c.Line)
+	case c.OldLine > 0:
+		return fmt.Sprintf("%s:%d (old)", c.Path, c.OldLine)
+	}
+	return c.Path
 }
 
 // InlineComment supplies an explicit file position for review creation.
@@ -104,6 +130,24 @@ func (s Reviews) List(ctx context.Context, n int64, limit, page int) ([]Review, 
 		return nil, err
 	}
 	return convertAll(reviews, reviewFrom), nil
+}
+
+// ListPage lists a window of reviews of pull request n. It reaches past the server's smaller
+// page size, which List would silently take as the whole window.
+func (s Reviews) ListPage(ctx context.Context, n int64, limit, page int) (Page[Review], error) {
+	window, err := listPage(limit, page, func(limit, page int) ([]*gitea.PullReview, http.Header, error) {
+		var headers http.Header
+		reviews, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.PullReview, *gitea.Response, error) {
+			reviews, resp, err := c.PullRequests.ListPullReviews(ctx, owner, name, n, gitea.ListPullReviewsOptions{ListOptions: listOptions(limit, page)})
+			headers = headerOf(resp)
+			return reviews, resp, err
+		})
+		return reviews, headers, err
+	})
+	if err != nil {
+		return Page[Review]{}, err
+	}
+	return convertPage(window, reviewFrom), nil
 }
 
 // Pending returns the reviews that login started on pull request n and has not submitted yet.
@@ -243,12 +287,19 @@ func LatestReviews(reviews []Review) []Review {
 	return latest
 }
 
-// ReviewDecision summarizes the latest reviews like gh: changes_requested when a reviewer's latest
+// ReviewDecision summarizes reviews like gh: changes_requested when a reviewer's latest decisive
 // review requests changes, else approved when one approves, else review_required while reviews
-// are requested, else "". Dismissed reviews do not count.
-func ReviewDecision(latest []Review, requested bool) string {
+// are requested, else "". Comment reviews are not decisive (as in gh and Gitea) and dismissed
+// reviews do not count.
+func ReviewDecision(reviews []Review, requested bool) string {
+	decisive := make([]Review, 0, len(reviews))
+	for _, review := range reviews {
+		if review.State != string(gitea.ReviewStateComment) {
+			decisive = append(decisive, review)
+		}
+	}
 	decision := ""
-	for _, review := range latest {
+	for _, review := range LatestReviews(decisive) {
 		switch {
 		case review.Dismissed:
 		case review.State == string(gitea.ReviewStateRequestChanges):
@@ -268,7 +319,8 @@ func ReviewDecision(latest []Review, requested bool) string {
 func (s Reviews) reviewComments(ctx context.Context, n int64, reviews []Review, skipEmpty bool) ([]ReviewComment, error) {
 	results := []ReviewComment{}
 	for _, review := range reviews {
-		if skipEmpty && review.CommentsCount == 0 {
+		// Pending reviews are drafts that only their author and admins see; an explicit review ID still lists them.
+		if skipEmpty && (review.CommentsCount == 0 || review.State == string(gitea.ReviewStatePending)) {
 			continue
 		}
 		comments, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.PullReviewComment, *gitea.Response, error) {

@@ -237,3 +237,22 @@ func TestFailedReplacementRestoresTheCredential(t *testing.T) {
 	_, err = credentials.Load("https://example.org", "alice", settings.StoreFile)
 	require.Error(t, err)
 }
+
+func TestReplacingATokenKeepsTheAccountSSHSettings(t *testing.T) {
+	config := settings.New(t.TempDir())
+	credentials := &Store{Dir: config.Dir, Keyring: &memoryKeyring{values: map[string]string{}}}
+	manager := newTestManager(t, config, credentials)
+	require.NoError(t, manager.Register("https://example.org", "alice", settings.StoreFile, settings.AuthToken, HostOptions{}, Credential{AccessToken: "old"}))
+	require.NoError(t, config.Transaction(settings.TargetHosts, func(s *settings.Snapshot) (func() error, error) {
+		host := s.Hosts.Hosts["https://example.org"]
+		account := host.Users["alice"]
+		account.SSHKey, account.SSHAgent = "/keys/id", true
+		host.Users["alice"] = account
+		s.Hosts.Hosts["https://example.org"] = host
+		return nil, nil
+	}))
+	require.NoError(t, manager.Register("https://example.org", "alice", settings.StoreKeyring, settings.AuthOAuth, HostOptions{Replace: true}, Credential{AccessToken: "new"}))
+	s, err := config.Load()
+	require.NoError(t, err)
+	require.Equal(t, settings.Account{AuthMethod: settings.AuthOAuth, CredentialStore: settings.StoreKeyring, SSHKey: "/keys/id", SSHAgent: true}, s.Hosts.Hosts["https://example.org"].Users["alice"])
+}

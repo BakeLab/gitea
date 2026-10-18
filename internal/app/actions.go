@@ -169,6 +169,10 @@ Inputs are checked against the inputs that the workflow declares: unknown inputs
 required inputs and values that a choice or boolean input does not accept are refused. In a
 terminal, gt asks for missing required inputs, or for every input when none is given.
 
+The workflow is looked up among those the server lists from the default branch, so it must exist
+there; --ref only selects the branch or tag whose version of it runs, as in gh. List them with
+gt workflow list.
+
 Without --ref, the workflow runs on the checked-out branch, which must be on the server, or on
 the default branch when the repository does not come from the working directory.`,
 		Example: `# run a workflow on the default or current branch
@@ -196,6 +200,10 @@ $ gt workflow run nightly --follow`,
 			}
 			service := services.Actions{Client: t.client, Repository: t.Repo}
 			workflow, err := service.FindWorkflow(cmd.Context(), args[0])
+			if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Kind == "workflow" {
+				// Like gh, the workflow comes from the server's list, so --ref cannot add one.
+				return fmt.Errorf("%w; workflows are listed from the default branch and must exist there, even with --ref; see gt workflow list%s", err, a.suggestedRepo(t))
+			}
 			if err != nil {
 				return err
 			}

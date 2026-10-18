@@ -106,7 +106,7 @@ $ gt time list --mine --since 168h`, Args: argsExact(0), RunE: func(cmd *cobra.C
 		}
 		spec := listSpec[services.TrackedTime]{
 			Columns: []terminal.Column{{Header: "ID"}, {Header: "Issue", Flex: true}, {Header: "User"}, {Header: "Spent"}, {Header: "When"}},
-			Row:     trackedTimeRow(target.Repo), Empty: "no time tracked " + where, Context: "time records " + where,
+			Row:     trackedTimeRow(target.Repo, !a.display().TTY), Empty: "no time tracked " + where, Context: "time records " + where,
 		}
 		return a.writeTimes(cmd, page, opts.Page, spec, total)
 	}}
@@ -135,7 +135,7 @@ func (a *application) writeTimes(cmd *cobra.Command, page services.Page[services
 		sum += item.Seconds
 		rows[i] = spec.Row(item)
 	}
-	text := terminal.Table(spec.Columns, rows, d) + "Total: " + spent(sum) + "\n"
+	text := terminal.Table(spec.Columns, rows, d) + "Total: " + spentFor(!d.TTY, sum) + "\n"
 	if d.TTY {
 		text = showing(len(page.Items), servicePage(page, number), spec.Context) + "\n\n" + text
 	}
@@ -149,8 +149,17 @@ func (a *application) writeTimes(cmd *cobra.Command, page services.Page[services
 	return a.morePagesHint(cmd, page.More, number)
 }
 
+// spentFor is spent on a terminal; when exact (piped output) it keeps every second as a Go
+// duration such as 1h2m3s, which spent drops from durations of an hour or more.
+func spentFor(exact bool, seconds int64) string {
+	if exact {
+		return trackedDuration(seconds).String()
+	}
+	return spent(seconds)
+}
+
 // trackedTimeRow shows a record in repo; records of other repositories name theirs.
-func trackedTimeRow(repo string) func(services.TrackedTime) []terminal.Cell {
+func trackedTimeRow(repo string, exact bool) func(services.TrackedTime) []terminal.Cell {
 	return func(item services.TrackedTime) []terminal.Cell {
 		issue := "#" + strconv.FormatInt(item.IssueNumber, 10)
 		if !strings.EqualFold(item.Repository, repo) {
@@ -160,7 +169,7 @@ func trackedTimeRow(repo string) func(services.TrackedTime) []terminal.Cell {
 			{Text: strconv.FormatInt(item.ID, 10)},
 			{Text: strings.TrimSpace(issue + " " + item.IssueTitle)},
 			{Text: item.User},
-			{Text: spent(item.Seconds)},
+			{Text: spentFor(exact, item.Seconds)},
 			{Time: terminal.ParseTime(item.CreatedAt)},
 		}
 	}

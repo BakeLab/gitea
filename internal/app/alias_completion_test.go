@@ -56,6 +56,22 @@ func complete(t *testing.T, deps Dependencies, out *bytes.Buffer, args ...string
 	return lines[:len(lines)-1], cobra.ShellCompDirective(directive)
 }
 
+func TestPullCompletionStopsAfterTheLastPositionalArgument(t *testing.T) {
+	requests := 0
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`[{"id":9,"number":9,"title":"More"}]`))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	for _, args := range []string{"pr view 5 ", "pr review list 5 ", "pr review view 5 9 ", "pr review submit 5 9 ", "pr review reply 5 9 "} {
+		items, directive := complete(t, deps, out, append(strings.Fields(args), "-R", "owner/repo", "")...)
+		require.Empty(t, items, args)
+		require.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive, args)
+	}
+	require.Zero(t, requests, "no argument is left to complete")
+}
+
 func TestEnumFlagsShareValidationAndCompletion(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	var state string
@@ -383,6 +399,20 @@ func TestInstanceCompletions(t *testing.T) {
 		require.Equal(t, tc.want, values, tc.name)
 		require.Equal(t, tc.directive, directive, tc.name)
 	}
+}
+
+func TestCompleteArgumentBranchesUsesTheNamedRepository(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/repos/bob/tool/branches", r.URL.Path)
+		_, _ = w.Write([]byte(`[{"name":"develop"}]`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	a := &application{deps: deps}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	values, _ := a.completeArgumentBranches()(cmd, []string{"bob/tool"}, "")
+	require.Equal(t, []string{"develop"}, values)
 }
 
 func TestCompletionInstallHelp(t *testing.T) {

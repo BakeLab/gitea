@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -99,6 +100,25 @@ var repositorySwitches = []struct {
 // validTopic is the form Gitea accepts for a lowercased topic name.
 var validTopic = regexp.MustCompile(`^[a-z0-9][-.a-z0-9]{0,34}$`)
 
+// maxTopics is the number of topics Gitea allows per repository.
+const maxTopics = 25
+
+// finalTopics returns current without the removed topics and with the added ones, lowercased like Gitea does.
+func finalTopics(current, add, remove []string) []string {
+	removed := make(map[string]bool, len(remove))
+	for _, topic := range remove {
+		removed[strings.ToLower(topic)] = true
+	}
+	var topics []string
+	for _, topic := range slices.Concat(current, add) {
+		topic = strings.ToLower(topic)
+		if !removed[topic] && !slices.Contains(topics, topic) {
+			topics = append(topics, topic)
+		}
+	}
+	return topics
+}
+
 func (a *application) repoEditCommand() *cobra.Command {
 	var name, website, defaultBranch, description, visibility, mergeStyle string
 	var addTopics, removeTopics []string
@@ -162,6 +182,9 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid topic %q: use up to 35 letters, digits, - or ., starting with a letter or digit", topic))
 				}
 			}
+			if len(addTopics) > maxTopics {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("a repository has at most %d topics, got %d to add", maxTopics, len(addTopics)))
+			}
 			if options == (services.RepositoryEdit{}) && len(addTopics)+len(removeTopics) == 0 {
 				return clierr.Wrap(clierr.Usage, errors.New("supply a setting to change; see gt repo edit --help"))
 			}
@@ -181,6 +204,20 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 					}
 				}
 			}
+			// Topics are replaced in one request; compute and check them before anything changes.
+			var topics []string
+			setTopics := false
+			if len(addTopics)+len(removeTopics) > 0 {
+				current, err := service.Topics(cmd.Context(), t.Repo)
+				if err != nil {
+					return fmt.Errorf("list topics: %w", err)
+				}
+				topics = finalTopics(current, addTopics, removeTopics)
+				if len(topics) > maxTopics {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("a repository has at most %d topics, the edit would leave %d", maxTopics, len(topics)))
+				}
+				setTopics = !slices.Equal(slices.Sorted(slices.Values(topics)), slices.Sorted(slices.Values(finalTopics(current, nil, nil))))
+			}
 			// Gitea refuses topic changes on an archived repository, so archiving comes last.
 			repo, archive := t.Repo, options.Archived != nil && *options.Archived
 			if archive {
@@ -193,26 +230,27 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 				}
 				options.Archived = nil
 			}
-			if options != (services.RepositoryEdit{}) {
+			settings := options != (services.RepositoryEdit{})
+			if settings {
 				item, err := service.Edit(cmd.Context(), t.Repo, options)
 				if err != nil {
 					return err
 				}
 				repo = item.FullName
 			}
-			for _, topic := range addTopics {
-				if err := service.AddTopic(cmd.Context(), repo, topic); err != nil {
-					return fmt.Errorf("add topic %q: %w", topic, err)
-				}
-			}
-			for _, topic := range removeTopics {
-				// A topic the repository does not have is already removed.
-				if err := service.RemoveTopic(cmd.Context(), repo, topic); err != nil && !services.IsNotFound(err) {
-					return fmt.Errorf("remove topic %q: %w", topic, err)
+			if setTopics {
+				if err := service.SetTopics(cmd.Context(), repo, topics); err != nil {
+					if settings {
+						return fmt.Errorf("repository settings were changed, but setting the topics failed: %w", err)
+					}
+					return fmt.Errorf("set topics: %w", err)
 				}
 			}
 			if archive {
 				if _, err := service.Edit(cmd.Context(), repo, services.RepositoryEdit{Archived: &archive}); err != nil {
+					if settings || setTopics {
+						return fmt.Errorf("the other changes were applied, but archiving failed: %w", err)
+					}
 					return err
 				}
 			}

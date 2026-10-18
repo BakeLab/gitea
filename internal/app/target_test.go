@@ -88,7 +88,7 @@ func TestAccountNamesMatchCaseInsensitively(t *testing.T) {
 }
 
 func TestEnvironmentCredentialVerifiesSelectedAccountBeforeMutation(t *testing.T) {
-	for _, selection := range []string{"--user", "GITEA_CLI_USER", "active instance account"} {
+	for _, selection := range []string{"--user", "GITEA_CLI_USER"} {
 		t.Run(selection, func(t *testing.T) {
 			reads, mutations := 0, 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -112,9 +112,6 @@ func TestEnvironmentCredentialVerifiesSelectedAccountBeforeMutation(t *testing.T
 			args := []string{"issue", "create", "-R", "alice/project", "--title", "Issue", "--body", "Body", "--no-input", "--json"}
 			if selection == "--user" {
 				args = append(args, "--user", "bob")
-			}
-			if selection == "active instance account" {
-				configureHost(t, deps, host, settings.Host{User: "bob", Users: tokenAccounts(settings.StoreKeyring, "bob")})
 			}
 			err := Execute(context.Background(), deps, args)
 			require.ErrorContains(t, err, "does not belong to the selected account")
@@ -357,4 +354,43 @@ func TestRepositoryDiscoveryOutsideCheckoutWritesNoGitDiagnostics(t *testing.T) 
 	require.ErrorContains(t, err, "repository required")
 	require.Empty(t, out.String())
 	require.Empty(t, diagnostics.String())
+}
+
+func TestEnvironmentCredentialOverridesTheActiveAccount(t *testing.T) {
+	created := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "token private-test-token", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/base/api/v1/user" {
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+			return
+		}
+		created = true
+		_, _ = w.Write([]byte(`{"id":9,"number":3,"title":"Issue","state":"open"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := testDeps(t)
+	host := server.URL + "/base"
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": host, "GITEA_TOKEN": "private-test-token"})
+	configureHost(t, deps, host, settings.Host{User: "bob", Users: tokenAccounts(settings.StoreKeyring, "bob")})
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--title", "Issue", "--body", "Body", "--no-input", "--json"}))
+	require.True(t, created)
+}
+
+func TestRepositoryFlagNamedLikeADirectoryIsAmbiguous(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"full_name":"` + strings.TrimPrefix(r.URL.Path, "/api/v1/repos/") + `"}`))
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "project"), 0o755))
+	deps, out, _ := testDeps(t)
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	err := Execute(context.Background(), deps, []string{"repo", "view", "-R", "project", "--cwd", dir, "--no-input", "--json=full_name"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.ErrorContains(t, err, `"project" is both a repository name and a directory here; use OWNER/project`)
+	// A qualified name, or a bare name without such a directory, is unambiguous.
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "view", "-R", "alice/project", "--cwd", dir, "--no-input", "--json=full_name"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "view", "-R", "other", "--cwd", dir, "--no-input", "--json=full_name"}))
+	require.Contains(t, out.String(), "alice/other")
 }

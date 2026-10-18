@@ -107,7 +107,8 @@ func (a *application) authCommand() *cobra.Command {
 gt keeps the accounts of each instance in hosts.yml and their tokens in the system
 keyring, or in a private file when you choose so. One account per instance is active;
 --user or GITEA_CLI_USER selects another for a single command. GITEA_TOKEN, together with
-GITEA_INSTANCE_URL or GITEA_CLI_HOST, replaces the stored credentials of its instance. See
+GITEA_INSTANCE_URL or GITEA_CLI_HOST, replaces the stored credentials of its instance for the
+active account too; it must belong to the account that --user or GITEA_CLI_USER names. See
 gt help environment for how commands select the instance.`}
 	group.AddCommand(a.loginCommand(), a.logoutCommand(), a.authStatusCommand(), a.authSwitchCommand(), a.authRefreshCommand(), a.authTokenCommand(), a.setupGitCommand(), a.gitCredentialCommand())
 	return group
@@ -424,7 +425,7 @@ func (a *application) authStatusCommand() *cobra.Command {
 		Use: "status", Short: "Show the accounts gt can use", Args: argsExact(0),
 		Long: `Show the accounts gt can use on each instance, the active one, and how they
 authenticate. Fails with exit code 4 when there is no account, or when a credential is
-missing or rejected.`,
+missing or rejected. With --json it exits 0 either way; read credential_available, verified and error.`,
 		Example: `$ gt auth status
 # Check the credentials against their instances
 $ gt auth status --verify
@@ -654,6 +655,9 @@ selects another. With two accounts, gt auth switch toggles between them; with mo
 asks which one on a terminal.`,
 		Example: "$ gt auth switch\n$ gt auth switch bob\n$ gt auth switch bob --host gitea.com",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.positionalAccount(args); err != nil {
+				return err
+			}
 			t, err := a.instanceTarget(cmd.Context())
 			if err != nil {
 				return err
@@ -664,9 +668,6 @@ asks which one on a terminal.`,
 			}
 			names := slices.Sorted(maps.Keys(users))
 			requested := a.options.user
-			if len(args) == 1 {
-				requested = args[0]
-			}
 			var user string
 			switch {
 			case requested != "":
@@ -709,6 +710,18 @@ asks which one on a terminal.`,
 	}
 }
 
+// positionalAccount treats the account argument of auth switch and auth logout like --user.
+func (a *application) positionalAccount(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	if a.options.user != "" && !strings.EqualFold(a.options.user, args[0]) {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("--user %s and the account %s differ", a.options.user, args[0]))
+	}
+	a.options.user = args[0]
+	return nil
+}
+
 // chooseAccount asks which of the accounts of instance to use, or explains how to name one.
 func (a *application) chooseAccount(cmd *cobra.Command, instance string, names []string, active string) (string, error) {
 	chooser, ok := a.chooser()
@@ -734,11 +747,8 @@ other credential helpers are asked to forget what they stored for the account on
 instance, such as a copy of its token that a keychain kept after a push.`,
 		Example: "$ gt auth logout\n$ gt auth logout bob --host gitea.com\n# Without confirmation\n$ gt auth logout alice --yes",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 {
-				if a.options.user != "" && !strings.EqualFold(a.options.user, args[0]) {
-					return clierr.Wrap(clierr.Usage, fmt.Errorf("--user %s and the account %s differ", a.options.user, args[0]))
-				}
-				a.options.user = args[0]
+			if err := a.positionalAccount(args); err != nil {
+				return err
 			}
 			t, err := a.instanceTarget(cmd.Context())
 			if err != nil {
@@ -836,8 +846,8 @@ $ gt auth token --host gitea.com --user alice`,
 			if instance, err := settings.ResolveHost(a.tokenInstance(), s.Hosts.Hosts); err != nil || instance != t.Host {
 				token = ""
 			}
-			if token != "" && t.User != "" {
-				// Like connect, print the environment token only for the account it authenticates.
+			if token != "" && t.explicitUser() {
+				// Like connect, print the environment token only for the account --user or GITEA_CLI_USER names.
 				actual, err := services.CurrentAccount(cmd.Context(), a.deps.Client(t.Host, token, t.host.Insecure))
 				if err != nil {
 					return err

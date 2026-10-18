@@ -16,7 +16,7 @@ var ErrAmbiguousRemote = errors.New("ambiguous repository: select --remote or --
 
 // DiscoverRemote names the remote used for repository discovery: preferred when set, otherwise
 // the base remote pr checkout recorded for the current branch, the current branch's upstream
-// remote unless it is a pulls/<owner>/<repo> head remote, then upstream, origin, or the only remote.
+// remote unless it is a pulls/<owner>/<repo> head remote or origin beside an upstream remote (a fork clone), then upstream, origin, or the only remote.
 // When repository is not nil, it names the repository of a remote gt can act on, or returns ""
 // for one on another forge. Those steps then skip such remotes, and the other remotes decide when
 // they name exactly one repository; with none of them usable the choice is the name-based one.
@@ -43,19 +43,23 @@ func DiscoverRemote(ctx context.Context, runner Runner, dir, preferred string, r
 	if strings.HasPrefix(tracking, "pulls/") {
 		tracking = ""
 	}
+	names, namesErr := runner.Output(ctx, dir, false, "remote")
+	available := strings.Fields(names)
+	// In a fork clone, branches pushed to the fork track origin, but the base repository is upstream.
+	if tracking == "origin" && slices.Contains(available, "upstream") {
+		tracking = ""
+	}
 	for _, remote := range []string{pullBaseRemote(ctx, runner, dir, branch), tracking} {
 		if try(remote) {
 			return remote, nil
 		}
 	}
-	names, err := runner.Output(ctx, dir, false, "remote")
-	if err != nil {
+	if namesErr != nil {
 		if fallback != "" {
 			return fallback, nil
 		}
-		return "", err
+		return "", namesErr
 	}
-	available := strings.Fields(names)
 	for _, name := range []string{"upstream", "origin"} {
 		if slices.Contains(available, name) && try(name) {
 			return name, nil

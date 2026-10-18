@@ -539,6 +539,9 @@ func commandOutputFields(cmd *cobra.Command) []string {
 	case "org":
 		return jsonFields[services.Organization]()
 	case "member":
+		if cmd.Parent().Parent() != nil && cmd.Parent().Parent().Name() == "team" {
+			return jsonFields[services.TeamMember]()
+		}
 		return jsonFields[services.OrganizationMember]()
 	case "asset":
 		return jsonFields[services.ReleaseAsset]()

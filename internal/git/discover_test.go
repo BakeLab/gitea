@@ -38,6 +38,8 @@ func TestDiscoverRemote(t *testing.T) {
 		{name: "recorded pull base", runner: discoverRunner{head: "main", tracking: "fork", base: "upstream", "remote": "origin\nupstream\nfork"}, want: "upstream"},
 		{name: "removed pull base", runner: discoverRunner{head: "main", tracking: "fork", base: "gone", "remote": "origin\nfork"}, want: "fork"},
 		{name: "local branch upstream", runner: discoverRunner{head: "main", tracking: ".", "remote": "origin\nfork"}, want: "origin"},
+		{name: "fork clone branch tracking origin", runner: discoverRunner{head: "main", tracking: "origin", "remote": "origin\nupstream"}, want: "upstream"},
+		{name: "branch tracking origin without upstream", runner: discoverRunner{head: "main", tracking: "origin", "remote": "origin\nfork"}, want: "origin"},
 		{name: "upstream remote", runner: discoverRunner{"remote": "origin\nupstream"}, want: "upstream"},
 		{name: "origin remote", runner: discoverRunner{"remote": "fork\norigin"}, want: "origin"},
 		{name: "sole remote", runner: discoverRunner{"remote": "fork"}, want: "fork"},

@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -102,6 +104,10 @@ func (a *application) resolveRequest(ctx context.Context, req targetRequest) (ta
 	}
 	// A bare repository NAME belongs to the account gt acts as, which is known only now.
 	if t.Repo != "" && !strings.Contains(t.Repo, "/") {
+		// A name that is also a directory here may be meant as that checkout, as in gt -R ./project.
+		if info, statErr := os.Stat(filepath.Join(cmp.Or(a.options.cwd, "."), t.Repo)); statErr == nil && info.IsDir() && t.RepoSource == "--repo" {
+			return t, clierr.Wrap(clierr.Usage, fmt.Errorf("%q is both a repository name and a directory here; use OWNER/%s for the repository, or --cwd %s for that checkout", t.Repo, t.Repo, t.Repo))
+		}
 		owner := cmp.Or(a.options.sudo, t.User)
 		if owner == "" {
 			return t, clierr.Wrap(clierr.Usage, fmt.Errorf("cannot tell who owns repository %q; use OWNER/%s", t.Repo, t.Repo))
@@ -186,11 +192,13 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 		if err != nil {
 			return t, err
 		}
-		// The message must not reveal which account the token belongs to.
-		if !services.MatchAccount(t.User, actual) {
+		// Like GH_TOKEN, the token overrides the stored credentials whichever account is active;
+		// only an account that --user or GITEA_CLI_USER names must match. The message must not reveal
+		// which account the token belongs to.
+		if t.explicitUser() && !services.MatchAccount(t.User, actual) {
 			return t, clierr.Wrap(clierr.Authentication, errEnvironmentAccount)
 		}
-		if t.User == "" {
+		if !t.explicitUser() {
 			t.UserSource = "GITEA_TOKEN authenticated account"
 		}
 		t.User = actual
@@ -206,6 +214,11 @@ func (a *application) repositorySource(ctx context.Context, t *target, s setting
 	if req.repo != "" {
 		if err := a.agreesWithRepoFlag(req, s.Hosts.Hosts); err != nil {
 			return "", err
+		}
+		if a.options.repo != "" && !a.namesInstance(req.repo) && a.namesInstance(a.options.repo) {
+			// The argument agrees with --repo and only lacks its instance.
+			t.RepoSource = "--repo"
+			return a.options.repo, nil
 		}
 		t.RepoSource = req.repoSource
 		return req.repo, nil
@@ -423,6 +436,11 @@ func (a *application) selectAccount(ctx context.Context, t *target, s settings.S
 	}
 	t.User, t.UserSource = matched, "interactive account selection"
 	return nil
+}
+
+// explicitUser reports whether the user named the account with --user or GITEA_CLI_USER.
+func (t target) explicitUser() bool {
+	return t.User != "" && (t.UserSource == "--user" || t.UserSource == "GITEA_CLI_USER")
 }
 
 // accountError explains why user has no stored credential on the target's instance.

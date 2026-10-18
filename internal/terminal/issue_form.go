@@ -36,7 +36,9 @@ type BodyEditor func(context.Context, string) (Draft, error)
 
 // IssueFormChoices supplies options for an interactive issue create form.
 type IssueFormChoices struct {
-	Templates  []IssueTemplateChoice
+	Templates []IssueTemplateChoice
+	// Template, when set, is used instead of asking: the form starts with its body and an empty title.
+	Template   *IssueTemplateChoice
 	Assignees  []string
 	Milestones []IssueMilestoneChoice
 	Labels     []IssueLabelChoice
@@ -64,7 +66,9 @@ type IssueForm interface {
 // CreateIssue runs the interactive issue create form on stderr.
 func (p *FormPrompter) CreateIssue(ctx context.Context, choices IssueFormChoices) (IssueFormValues, error) {
 	title, body := "", ""
-	if len(choices.Templates) > 0 {
+	if choices.Template != nil {
+		body = choices.Template.Body
+	} else if len(choices.Templates) > 0 {
 		options := []huh.Option[int]{huh.NewOption("[none]", -1)}
 		for i, template := range choices.Templates {
 			label := template.Name

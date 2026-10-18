@@ -129,3 +129,10 @@ func TestMarkdownDropsEscapesFromCharacterReferences(t *testing.T) {
 		}
 	}
 }
+
+func TestMarkdownKeepsOrdinaryCharacterReferences(t *testing.T) {
+	plain := Display{Width: 80}
+	require.Contains(t, Markdown("5 &lt; 6 &amp; &#169; &#x263a; &copy;", plain), "5 < 6 & © ☺ ©")
+	require.Contains(t, Markdown("a&#9;b", plain), "a\tb")
+	require.Equal(t, "ab", strings.TrimSpace(Markdown("a&#27;&#x1B;&#7;&#155;&#8238;b", plain)))
+}

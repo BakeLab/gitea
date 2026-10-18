@@ -121,3 +121,29 @@ func TestReleaseDownloadSelectsAssetsOfTheLatestRelease(t *testing.T) {
 	err = Execute(context.Background(), deps, []string{"release", "download", "v1", "notes.txt", "gt-linux", "-O", filepath.Join(dir, "one"), "-R", "owner/repo"})
 	require.ErrorContains(t, err, "--output names one file, but 2 assets match; pass --dir")
 }
+
+func TestReleaseDownloadCreatesDirAndRefusesDuplicateNames(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/owner/repo/releases/tags/v1":
+			_, _ = w.Write([]byte(`{"id":1,"tag_name":"v1","assets":[{"id":1,"name":"app","size":5,"uuid":"aaa"},{"id":2,"name":"app","size":5,"uuid":"bbb"},{"id":3,"name":"other","size":5,"uuid":"ccc"}]}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/repos/owner/repo/releases/1/assets/"):
+			id := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/owner/repo/releases/1/assets/")
+			_, _ = w.Write([]byte(`{"id":` + id + `,"uuid":"ccc"}`))
+		case strings.HasPrefix(r.URL.Path, "/attachments/"):
+			_, _ = w.Write([]byte("bytes"))
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := repoTTYDeps(t, server.URL)
+	dir := filepath.Join(t.TempDir(), "new", "dist")
+	err := Execute(context.Background(), deps, []string{"release", "download", "v1", "--dir", dir, "-R", "owner/repo"})
+	require.ErrorContains(t, err, "assets 1 and 2 are both named app")
+	_, statErr := os.Stat(filepath.Join(dir, "other"))
+	require.Error(t, statErr, "nothing is downloaded before the duplicate is reported")
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "download", "v1", "other", "--dir", dir, "-R", "owner/repo"}))
+	_, statErr = os.Stat(filepath.Join(dir, "other"))
+	require.NoError(t, statErr)
+}

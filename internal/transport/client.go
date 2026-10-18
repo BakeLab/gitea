@@ -111,7 +111,7 @@ type Client struct {
 }
 
 // UserAgent identifies gt to instances, proxies, and server logs.
-var UserAgent = "gt/" + version.Version + " (" + runtime.GOOS + "/" + runtime.GOARCH + ")"
+var UserAgent = "gt/" + version.Current() + " (" + runtime.GOOS + "/" + runtime.GOARCH + ")"
 
 type userAgentTransport struct{ base http.RoundTripper }
 

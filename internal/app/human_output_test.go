@@ -281,7 +281,10 @@ func TestWriteTable(t *testing.T) {
 			stderr: "more results available; use --page 3\n",
 		},
 		{name: "empty message on a terminal", tty: true, page: listPage{Number: 1}, stderr: "no open issues in alice/x\n"},
+		{name: "next-page hint instead of the empty message on a filtered page", tty: true, page: listPage{Number: 1, More: true}, stderr: "more results available; use --page 2\n"},
 		{name: "nothing when empty and piped", page: listPage{Number: 1}},
+		{name: "next-page hint when an empty page has more", tty: true, page: listPage{Number: 1, More: true}, stderr: "more results available; use --page 2\n"},
+		{name: "next-page hint when an empty page has more and piped", page: listPage{Number: 1, More: true}, stderr: "more results available; use --page 2\n"},
 		{name: "JSON", tty: true, json: "number", items: items[:1], page: listPage{Number: 1, More: true}, out: "[\n  {\n    \"number\": 12\n  }\n]\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

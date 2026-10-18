@@ -197,13 +197,13 @@ $ gt team view 2 --json units`,
 			return writeView(a, cmd, team, func(team services.Team) terminal.View {
 				var units []string
 				for _, unit := range slices.Concat(services.TeamUnits, services.ExternalTeamUnits) {
-					if access := team.Units[unit]; access != "" && access != "none" {
+					if access := team.UnitLevel(unit); access != "none" {
 						units = append(units, strings.TrimPrefix(unit, "repo.")+": "+access)
 					}
 				}
 				memberNames := ""
 				if !membersHidden {
-					memberNames = listedNames(members, func(member services.OrganizationMember) string { return member.Username })
+					memberNames = listedNames(members, func(member services.TeamMember) string { return member.Username })
 				}
 				repositories := listedNames(repos, func(repo services.Repository) string { return repo.FullName })
 				if team.AllRepositories {
@@ -425,11 +425,19 @@ $ gt team edit acme/developers --name devs --description "Core developers"`,
 			if opts.Units != nil && !opts.ReplaceUnits && (team.Permission == "admin" || team.Permission == "owner") {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("--unit cannot restrict the %s access of team %s; pass --permission read or write, or --unit-replace", team.Permission, team.Slug()))
 			}
+			// Gitea finds the owner team by its name, so renaming it leaves the organization without owners.
+			if team.Permission == "owner" && opts.Name != nil && !strings.EqualFold(*opts.Name, team.Name) {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("team %s is the organization's owner team and cannot be renamed", team.Slug()))
+			}
 			edited, err := service.Edit(cmd.Context(), team.ID, opts)
 			if err != nil {
 				return err
 			}
 			edited.Organization = team.Organization
+			// Some Gitea versions keep an admin team admin when permission and units_map are sent together.
+			if opts.Permission != nil && edited.Permission != "" && edited.Permission != *opts.Permission {
+				return fmt.Errorf("team %s was edited, but its permission is %s instead of the requested %s; other changes were applied", edited.Slug(), edited.Permission, *opts.Permission)
+			}
 			a.done(cmd, "Edited team %s (ID %d)", edited.Slug(), edited.ID)
 			return a.jsonResult(cmd, edited)
 		},
@@ -502,9 +510,9 @@ also makes them a member of the organization.`}
 			if err != nil {
 				return err
 			}
-			return writeTable(a, cmd, members.Items, listSpec[services.OrganizationMember]{
+			return writeTable(a, cmd, members.Items, listSpec[services.TeamMember]{
 				Columns: []terminal.Column{{Header: "Username"}, {Header: "Name", Flex: true}},
-				Row: func(member services.OrganizationMember) []terminal.Cell {
+				Row: func(member services.TeamMember) []terminal.Cell {
 					return []terminal.Cell{{Text: member.Username, Link: webURL(target, member.Username), Bold: true}, {Text: member.FullName}}
 				},
 				Context: "members of team " + team.Slug(), Empty: "no members in team " + team.Slug(),
@@ -543,7 +551,7 @@ $ gt team member add 2 bob carol`,
 		Annotations: map[string]string{"gt.text": "team membership changes do not return a resource", "gt.confirm": "true", "gt.arguments": teamArguments},
 		ValidArgsFunction: a.completeTeamThen(func(ctx context.Context, t target, team services.Team) ([]cobra.Completion, error) {
 			members, err := services.Teams{Client: t.client}.Members(ctx, team.ID, completionLimit, 1)
-			return describe(members.Items, func(member services.OrganizationMember) (string, string) { return member.Username, member.FullName }), err
+			return describe(members.Items, func(member services.TeamMember) (string, string) { return member.Username, member.FullName }), err
 		}),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, service, team, err := a.team(cmd, args[0])

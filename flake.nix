@@ -15,7 +15,8 @@
         devShells.default = pkgs.mkShell {
           name = "gitea-cli-dev-environment";
           buildInputs = with pkgs; [
-            go_1_27
+            # flake.lock may pin a nixpkgs that predates Go 1.27; go.mod's toolchain line then fetches it.
+            (pkgs.go_1_27 or pkgs.go)
             gopls
             gnumake
             # Add other dependencies here if needed

@@ -5,9 +5,12 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -103,7 +106,22 @@ func (s Releases) Create(ctx context.Context, opts ReleaseOptions) (Release, err
 			IsDraft: deref(opts.Draft), IsPrerelease: deref(opts.Prerelease),
 		})
 	})
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusNotFound && strings.Contains(apiErr.Message, "target") {
+		// The release does not exist yet, so a 404 here names the unresolvable target, not the release.
+		return item, &NotFoundError{Kind: "target", Key: strconv.Quote(deref(opts.Target)), Scope: s.Repository, Err: err}
+	}
 	return item, Classify(err, "release", deref(opts.Tag), s.Repository)
+}
+
+// TagExists reports whether the repository on the server has the tag.
+func (s Releases) TagExists(ctx context.Context, tag string) (bool, error) {
+	_, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Tag, *gitea.Response, error) {
+		return c.Repositories.GetTag(ctx, owner, repo, tag)
+	})
+	if IsNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // Edit changes only supplied release fields; Gitea ignores empty text fields.

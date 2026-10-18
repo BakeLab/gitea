@@ -33,6 +33,11 @@ func pageOf[T any](items []T, limit, page int) ([]T, error) {
 	return items[start:min(start+limit, len(items))], nil
 }
 
+// loadTogether runs the loaders concurrently and returns their errors joined.
+func loadTogether(loaders ...func() error) error {
+	return concurrently(len(loaders), func(i int) error { return loaders[i]() })
+}
+
 // listAll collects pages until the server returns an empty one.
 func listAll[T any](fetch func(page int) ([]T, error)) ([]T, error) {
 	result := []T{}

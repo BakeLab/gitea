@@ -6,8 +6,10 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/transport"
@@ -99,35 +101,75 @@ func (s Repositories) get(ctx context.Context, repo string) (*gitea.Repository, 
 	return item, Classify(err, "repository", repo, "")
 }
 
-// readmeNames are the README file names that Gitea shows, in order of preference.
-var readmeNames = []string{"readme.md", "readme.markdown", "readme", "readme.txt"}
+// readmeDirs are the directories Gitea searches for a README, in order; "" is the repository root.
+var readmeDirs = []string{".gitea", ".github", "", "docs"}
 
-// Readme returns the README in the top directory of the repository at ref: its file name and its
-// content, or "" when there is none.
-func (s Repositories) Readme(ctx context.Context, repo, ref string) (name, content string, err error) {
-	entries, err := repoCall(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.ContentsResponse, *gitea.Response, error) {
-		return c.Repositories.ListContents(ctx, owner, name, ref, "")
-	})
+// readmeRank orders README file names as Gitea does: Markdown first, then text, then any other
+// README.* such as README.rst. It returns -1 for names that are not a README.
+func readmeRank(name string) int {
+	switch lower := strings.ToLower(name); {
+	case lower == "readme.md":
+		return 0
+	case lower == "readme.markdown":
+		return 1
+	case lower == "readme.txt":
+		return 2
+	case lower == "readme":
+		return 3
+	case strings.HasPrefix(lower, "readme."):
+		return 4
+	}
+	return -1
+}
+
+// Readme returns the README of the repository at ref as Gitea's web view finds it, searching .gitea,
+// .github, the root and docs: its path and its content, or "" when there is none. An explicit ref
+// that does not exist is an error.
+func (s Repositories) Readme(ctx context.Context, repo, ref string) (path, content string, err error) {
+	list := func(dir string) ([]*gitea.ContentsResponse, error) {
+		return repoCall(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.ContentsResponse, *gitea.Response, error) {
+			return c.Repositories.ListContents(ctx, owner, name, ref, dir)
+		})
+	}
+	root, err := list("")
 	if err != nil {
+		if IsNotFound(err) && ref != "" {
+			return "", "", NotFound("branch", strconv.Quote(ref), repo)
+		}
 		// A reader without code access sees the repository but not its files.
 		if IsNotFound(err) || IsForbidden(err) {
 			return "", "", nil
 		}
 		return "", "", err
 	}
-	rank := len(readmeNames)
-	for _, entry := range entries {
-		if i := slices.Index(readmeNames, strings.ToLower(entry.Name)); entry.Type == "file" && i >= 0 && i < rank {
-			name, rank = entry.Name, i
+	for _, dir := range readmeDirs {
+		entries := root
+		if dir != "" {
+			i := slices.IndexFunc(root, func(e *gitea.ContentsResponse) bool { return e.Type == "dir" && e.Name == dir })
+			if i < 0 {
+				continue
+			}
+			if entries, err = list(dir); err != nil {
+				return "", "", err
+			}
+		}
+		rank := -1
+		for _, entry := range entries {
+			if r := readmeRank(entry.Name); entry.Type == "file" && r >= 0 && (rank < 0 || r < rank) {
+				path, rank = strings.TrimPrefix(dir+"/"+entry.Name, "/"), r
+			}
+		}
+		if path != "" {
+			break
 		}
 	}
-	if name == "" {
+	if path == "" {
 		return "", "", nil
 	}
-	data, err := repoCall(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]byte, *gitea.Response, error) {
-		return c.Repositories.GetFile(ctx, owner, repo, ref, name)
+	data, err := repoCall(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) ([]byte, *gitea.Response, error) {
+		return c.Repositories.GetFile(ctx, owner, name, ref, path)
 	})
-	return name, string(data), err
+	return path, string(data), err
 }
 
 // RepositoryPermissions holds server-side access flags used only for local decisions.
@@ -141,10 +183,17 @@ type RepositoryPermissions struct {
 // viewPermissions reads repository access flags without exposing them on Repository results.
 func (s Repositories) viewPermissions(ctx context.Context, repo string) (RepositoryPermissions, error) {
 	item, err := s.get(ctx, repo)
-	if err != nil || item.Permissions == nil {
+	if err != nil {
 		return RepositoryPermissions{}, err
 	}
-	return RepositoryPermissions{Admin: item.Permissions.Admin, Push: item.Permissions.Push, Pull: item.Permissions.Pull}, nil
+	return permissionsFrom(item), nil
+}
+
+func permissionsFrom(item *gitea.Repository) RepositoryPermissions {
+	if item.Permissions == nil {
+		return RepositoryPermissions{}
+	}
+	return RepositoryPermissions{Admin: item.Permissions.Admin, Push: item.Permissions.Push, Pull: item.Permissions.Pull}
 }
 
 // Assignee is a user that can be assigned on repository issues.
@@ -190,6 +239,13 @@ func (s Repositories) Create(ctx context.Context, org string, opts RepositoryOpt
 		Readme: opts.Readme, DefaultBranch: opts.DefaultBranch, TrustModel: gitea.TrustModel(opts.TrustModel),
 		ObjectFormatName: opts.ObjectFormat,
 	}
+	// TODO(sdk): CreateRepoOption.Validate counts the description in bytes, but Gitea allows 2048
+	// characters; a longer one is set by an edit once the repository exists.
+	description := opts.Description
+	later := len(description) > sdkDescriptionLimit
+	if later {
+		options.Description = ""
+	}
 	item, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Repository, *gitea.Response, error) {
 		if org != "" {
 			return c.Repositories.CreateOrgRepo(ctx, org, options)
@@ -197,10 +253,25 @@ func (s Repositories) Create(ctx context.Context, org string, opts RepositoryOpt
 		return c.Repositories.CreateRepo(ctx, options)
 	})
 	if err != nil {
+		if org != "" && IsNotFound(err) {
+			// The repository cannot be missing before it exists: the organization is.
+			return Repository{}, &NotFoundError{Kind: "organization", Key: strconv.Quote(org), Err: err}
+		}
 		return Repository{}, Classify(err, "repository", "", "")
 	}
-	return repositoryFrom(item), nil
+	created := repositoryFrom(item)
+	if later {
+		edited, err := s.Edit(ctx, created.FullName, RepositoryEdit{Description: &description})
+		if err != nil {
+			return created, fmt.Errorf("repository %s was created, but setting its description failed: %w", created.FullName, err)
+		}
+		return edited, nil
+	}
+	return created, nil
 }
+
+// sdkDescriptionLimit is the length in bytes that the SDK accepts for a new repository's description.
+const sdkDescriptionLimit = 2048
 
 // Edit updates only explicitly supplied resource fields.
 func (s Repositories) Edit(ctx context.Context, repo string, opts RepositoryEdit) (Repository, error) {
@@ -221,17 +292,17 @@ func (s Repositories) Edit(ctx context.Context, repo string, opts RepositoryEdit
 	return item, Classify(err, "repository", repo, "")
 }
 
-// AddTopic adds a topic to the repository.
-func (s Repositories) AddTopic(ctx context.Context, repo, topic string) error {
-	return repoDo(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
-		return c.Repositories.AddRepoTopic(ctx, owner, name, topic)
+// Topics lists the topics of the repository. Gitea allows at most 25, so one page holds them all.
+func (s Repositories) Topics(ctx context.Context, repo string) ([]string, error) {
+	return repoCall(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) ([]string, *gitea.Response, error) {
+		return c.Repositories.ListRepoTopics(ctx, owner, name, gitea.ListRepoTopicsOptions{ListOptions: gitea.ListOptions{Page: 1, PageSize: 50}})
 	})
 }
 
-// RemoveTopic removes a topic from the repository.
-func (s Repositories) RemoveTopic(ctx context.Context, repo, topic string) error {
+// SetTopics replaces the topics of the repository.
+func (s Repositories) SetTopics(ctx context.Context, repo string, topics []string) error {
 	return repoDo(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
-		return c.Repositories.DeleteRepoTopic(ctx, owner, name, topic)
+		return c.Repositories.SetRepoTopics(ctx, owner, name, topics)
 	})
 }
 

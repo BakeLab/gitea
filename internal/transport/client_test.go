@@ -135,7 +135,7 @@ func TestTransportBoundsOnlySetupAndSendsUserAgent(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, response.Body.Close())
 	}
-	want := "gt/" + version.Version + " (" + runtime.GOOS + "/" + runtime.GOARCH + ")"
+	want := "gt/" + version.Current() + " (" + runtime.GOOS + "/" + runtime.GOARCH + ")"
 	require.Equal(t, []string{want, want}, agents)
 }
 

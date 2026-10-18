@@ -123,7 +123,7 @@ func (a *application) pendingReview(cmd *cobra.Command, service services.Reviews
 }
 
 func (a *application) pullReviewDeleteCommand() *cobra.Command {
-	cmd := &cobra.Command{Use: "delete <number> <review-id>", Short: "Delete a review", Annotations: pullArgumentsAnnotation(textOutput("review deletion does not return a resource")), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "delete <number> <review-id>", Short: "Delete a review", Annotations: pullArgumentRequiredAnnotation(textOutput("review deletion does not return a resource")), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) error {
 		t, n, id, err := a.pullAndID(cmd, args)
 		if err != nil {
 			return err
@@ -133,7 +133,7 @@ func (a *application) pullReviewDeleteCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		subject := fmt.Sprintf("review %d by %s on %s#%d", id, item.Author, t.Repo, n)
+		subject := fmt.Sprintf("review %d by %s on %s#%d", id, item.Reviewer(), t.Repo, n)
 		return a.deleteConfirmed(cmd, subject, func() error { return service.Delete(cmd.Context(), n, id) })
 	}}
 	cmd.Annotations["gt.confirm"] = "true"
@@ -149,14 +149,13 @@ func (a *application) pullReviewDismissCommand(dismiss bool) *cobra.Command {
 	if dismiss {
 		use, short = "dismiss <number> <review-id>", "Dismiss an approval or change request"
 	}
-	cmd := &cobra.Command{Use: use, Short: short, Annotations: pullArgumentsAnnotation(nil), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+	cmd := &cobra.Command{Use: use, Short: short, Annotations: pullArgumentRequiredAnnotation(nil), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var draft terminal.Draft
 		defer finishDraft(&draft, &runErr)
 		var err error
-		if dismiss {
-			if err := validateBodySources(cmd); err != nil {
-				return err
-			}
+		// The reason is collected before any request when it comes from flags or cannot be
+		// prompted for; an editor or prompt waits until the review is known to be dismissable.
+		collect := func() error {
 			switch {
 			case useEditor:
 				draft, err = a.editDraft(cmd, "")
@@ -172,6 +171,24 @@ func (a *application) pullReviewDismissCommand(dismiss bool) *cobra.Command {
 			if strings.TrimSpace(body) == "" {
 				return clierr.Wrap(clierr.Usage, errors.New("a dismissal needs a reason; pass --body, --body-file or --editor"))
 			}
+			return nil
+		}
+		collected := false
+		if dismiss {
+			if err := validateBodySources(cmd); err != nil {
+				return err
+			}
+			snapshot, err := a.settings()
+			if err != nil {
+				return err
+			}
+			flagged := cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file")
+			if !useEditor && (flagged || !a.policy(snapshot).CanPrompt(a.deps.Streams)) {
+				if err := collect(); err != nil {
+					return err
+				}
+				collected = true
+			}
 		}
 		t, n, id, err := a.pullAndID(cmd, args)
 		if err != nil {
@@ -183,6 +200,19 @@ func (a *application) pullReviewDismissCommand(dismiss bool) *cobra.Command {
 			return err
 		}
 		subject := fmt.Sprintf("%s on %s#%d", reviewPossessive(current), t.Repo, n)
+		switch {
+		case dismiss && current.State != "APPROVED" && current.State != "REQUEST_CHANGES":
+			// Gitea refuses other review types with a misleading "permission denied".
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("only approvals and change requests can be dismissed; %s is not one", subject))
+		case !dismiss && !current.Dismissed:
+			a.warn(cmd, "%s is not dismissed", subject)
+			return a.jsonResult(cmd, current)
+		}
+		if dismiss && !collected {
+			if err := collect(); err != nil {
+				return err
+			}
+		}
 		if dismiss {
 			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Dismiss " + subject + "?"}); err != nil {
 				return err

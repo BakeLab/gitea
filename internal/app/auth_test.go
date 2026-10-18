@@ -841,3 +841,35 @@ func TestAuthStatusVerifyHonorsInstanceInsecureForEnvironmentToken(t *testing.T)
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--verify", "--json=user,verified"}))
 	require.JSONEq(t, `[{"user":"alice","verified":true}]`, out.String())
 }
+
+// An instance with REQUIRE_SIGNIN_VIEW answers every unsigned request, /api/v1/version included,
+// with 403; login must only make the signed requests.
+func TestAuthLoginSSHKeyNeverAsksTheVersionOfAPrivateInstance(t *testing.T) {
+	keyPath := writeAppTempSSHKey(t, "")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Signature") == "" {
+			http.Error(w, `{"message":"Only signed in user is allowed to call APIs."}`, http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"login":"alice"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := testDeps(t)
+	require.NoError(t, Execute(context.Background(), deps, []string{
+		"auth", "login", "--host", server.URL, "--ssh-key", keyPath, "--no-input", "--yes",
+	}))
+}
+
+func TestAuthSwitchTreatsThePositionalAccountLikeUser(t *testing.T) {
+	const instance = "https://example.org"
+	deps, _, _ := terminalDeps(t)
+	configureAccounts(t, deps, instance, "alice", "alice", "bob")
+	err := Execute(context.Background(), deps, []string{"auth", "switch", "bob", "--user", "alice"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.EqualError(t, err, "--user alice and the account bob differ")
+	s, err := deps.Settings.Load()
+	require.NoError(t, err)
+	require.Equal(t, "alice", s.Hosts.Hosts[instance].User)
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "switch", "BOB", "--user", "bob"}))
+}

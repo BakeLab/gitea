@@ -120,7 +120,7 @@ func (a *application) wikiRevisionsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			items, err := (services.Wiki{Client: target.client, Repository: target.Repo}).Revisions(cmd.Context(), args[0], page)
+			revisions, err := (services.Wiki{Client: target.client, Repository: target.Repo}).Revisions(cmd.Context(), args[0], page)
 			if err != nil {
 				return err
 			}
@@ -136,7 +136,7 @@ func (a *application) wikiRevisionsCommand() *cobra.Command {
 				},
 				Context: "revisions of wiki page " + strconv.Quote(args[0]), Empty: "no revisions of wiki page " + strconv.Quote(args[0]),
 			}
-			return writeTable(a, cmd, items, spec, listPage{Number: page})
+			return writeTable(a, cmd, revisions.Items, spec, servicePage(revisions, page))
 		},
 	}
 	positiveIntVar(command, &page, "page", 1, math.MaxInt, "Revision page (server controls page size)")
@@ -280,11 +280,11 @@ $ gt wiki edit Home --editor`,
 					}
 				}
 			}
-			item, err := service.Edit(cmd.Context(), args[0], services.WikiOptions{Title: content.title, Body: body, Message: content.message})
+			item, renamed, err := service.Edit(cmd.Context(), args[0], services.WikiOptions{Title: content.title, Body: body, Message: content.message})
 			if err != nil {
 				return err
 			}
-			if item.Title != args[0] {
+			if renamed {
 				a.done(cmd, "Renamed wiki page %q to %q in %s", args[0], item.Title, target.Repo)
 			} else {
 				a.done(cmd, "Edited wiki page %q in %s", item.Title, target.Repo)

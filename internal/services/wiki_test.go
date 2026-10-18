@@ -29,7 +29,7 @@ func TestWikiContentAndNamedPagePath(t *testing.T) {
 		_, _ = w.Write([]byte(`{"title":"Name with spaces","content_base64":"w7xuaWNvZGUKdGV4dA==","last_commit":{"sha":"abc","author":{"name":"Alice","email":"author@example.test","date":"2026-10-04T00:00:00Z"}}}`))
 	}))
 	service := Wiki{Client: client, Repository: "alice/project"}
-	item, err := service.Edit(context.Background(), "Name with spaces", WikiOptions{Body: "ünicode\ntext"})
+	item, _, err := service.Edit(context.Background(), "Name with spaces", WikiOptions{Body: "ünicode\ntext"})
 	require.NoError(t, err)
 	require.Equal(t, "ünicode\ntext", item.Body)
 	require.Equal(t, "Alice", item.Author)
@@ -96,7 +96,9 @@ func TestWikiListAndRevisionsMapCommits(t *testing.T) {
 	require.Equal(t, []WikiPage{{Title: "Draft"}}, last.Items)
 	revisions, err := service.Revisions(context.Background(), "Home", 3)
 	require.NoError(t, err)
-	require.Equal(t, []WikiRevision{{SHA: "abc", Message: "Edit", Author: "Alice", CreatedAt: "2026-10-04T00:00:00Z"}, {SHA: "def"}}, revisions)
+	require.Equal(t, []WikiRevision{{SHA: "abc", Message: "Edit", Author: "Alice", CreatedAt: "2026-10-04T00:00:00Z"}, {SHA: "def"}}, revisions.Items)
+	require.True(t, revisions.Counted)
+	require.Equal(t, 2, revisions.Total)
 }
 
 func TestWikiCreateAndDelete(t *testing.T) {
@@ -118,4 +120,36 @@ func TestWikiCreateAndDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, WikiPage{Title: "New", Body: "body", CommitCount: 1, Sidebar: "side", Footer: "foot"}, page)
 	require.NoError(t, service.Delete(context.Background(), "Old page"))
+}
+
+func TestWikiCreateExplainsADisabledWiki(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_wiki":false}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	_, err := (Wiki{Client: client, Repository: "alice/project"}).Create(context.Background(), WikiOptions{Title: "New", Body: "body"})
+	require.ErrorContains(t, err, "the wiki of alice/project is disabled")
+	require.NotErrorAs(t, err, new(*NotFoundError))
+}
+
+func TestWikiViewEditAndDeleteExplainADisabledWiki(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_wiki":false}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	service := Wiki{Client: client, Repository: "alice/project"}
+	_, viewErr := service.View(context.Background(), "Home")
+	_, _, editErr := service.Edit(context.Background(), "Home", WikiOptions{Body: "body"})
+	deleteErr := service.Delete(context.Background(), "Home")
+	for _, err := range []error{viewErr, editErr, deleteErr} {
+		require.ErrorContains(t, err, "the wiki of alice/project is disabled")
+		require.ErrorContains(t, err, "gt repo edit --enable-wiki")
+		require.NotErrorAs(t, err, new(*NotFoundError))
+	}
 }

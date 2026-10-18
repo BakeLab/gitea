@@ -68,7 +68,7 @@ func TestCommentEditEditorSeedsCurrentBody(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/issues/comments/7":
-			_, _ = w.Write([]byte(`{"id":7,"body":"current comment"}`))
+			_, _ = w.Write([]byte(`{"id":7,"body":"current comment","user":{"login":"alice"}}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/alice/project/issues/comments/7":
 			var options struct{ Body string }
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&options))
@@ -293,9 +293,8 @@ func TestReviewLifecycleEditorRejectsEmptyRequiredText(t *testing.T) {
 	for _, verb := range []string{"submit", "dismiss"} {
 		t.Run(verb, func(t *testing.T) {
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				require.Equal(t, "submit", verb)
 				require.Equal(t, http.MethodGet, r.Method)
-				_, _ = w.Write([]byte(`{"id":7,"body":"Saved draft"}`))
+				_, _ = w.Write([]byte(`{"id":7,"body":"Saved draft","state":"APPROVED","user":{"login":"bob"}}`))
 			}))
 			defer server.Close()
 			deps, out, _ := testDeps(t)

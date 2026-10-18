@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"testing"
 
 	gitea "gitea.dev/sdk"
@@ -51,6 +53,43 @@ func TestReviewCommentsContinueWhenServerCapsPageSize(t *testing.T) {
 	require.Equal(t, "bob", items[0].Resolver)
 	require.Equal(t, 3, reviewPages)
 	require.Equal(t, 2, collections)
+}
+
+func TestInlineCommentsSkipPendingReviews(t *testing.T) {
+	var fetched []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetched = append(fetched, r.URL.Path)
+		_, _ = w.Write([]byte(`[{"id":5,"pull_request_review_id":1}]`))
+	}))
+	reviews := []Review{{ID: 1, State: "COMMENT", CommentsCount: 1}, {ID: 2, State: "PENDING", CommentsCount: 1}}
+	items, err := (Reviews{Client: client, Repository: "owner/repo"}).Inline(context.Background(), 3, reviews)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, []string{"/api/v1/repos/owner/repo/pulls/3/reviews/1/comments"}, fetched)
+}
+
+func TestReviewListPageReachesPastServerPageCap(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		size, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		size = min(size, 2) // the server caps its pages at two items
+		var reviews []string
+		for id := (page-1)*size + 1; id <= min(page*size, 5); id++ {
+			reviews = append(reviews, fmt.Sprintf(`{"id":%d}`, id))
+		}
+		w.Header().Set("X-Total-Count", "5")
+		_, _ = w.Write([]byte("[" + strings.Join(reviews, ",") + "]"))
+	}))
+	window, err := (Reviews{Client: client, Repository: "owner/repo"}).ListPage(context.Background(), 3, 4, 1)
+	require.NoError(t, err)
+	require.Len(t, window.Items, 4)
+	require.EqualValues(t, 4, window.Items[3].ID)
+	require.True(t, window.More)
+	window, err = (Reviews{Client: client, Repository: "owner/repo"}).ListPage(context.Background(), 3, 4, 2)
+	require.NoError(t, err)
+	require.Len(t, window.Items, 1)
+	require.EqualValues(t, 5, window.Items[0].ID)
+	require.False(t, window.More)
 }
 
 func TestReviewDismissalReturnsTheUpdatedReview(t *testing.T) {
@@ -185,6 +224,17 @@ func TestReviewResolveAndReplyUseCommentEndpoints(t *testing.T) {
 	}, paths)
 }
 
+func TestReviewDecisionIgnoresCommentReviews(t *testing.T) {
+	reviews := []Review{
+		{ID: 1, Author: "bob", State: "REQUEST_CHANGES"},
+		{ID: 2, Author: "bob", State: "COMMENT"},
+		{ID: 3, Author: "carol", State: "APPROVED"},
+	}
+	assert.Equal(t, "changes_requested", ReviewDecision(reviews, false))
+	assert.Equal(t, "approved", ReviewDecision([]Review{{ID: 1, Author: "carol", State: "APPROVED"}, {ID: 2, Author: "carol", State: "COMMENT"}}, false))
+	assert.Equal(t, "", ReviewDecision([]Review{{ID: 1, Author: "carol", State: "COMMENT"}}, false))
+}
+
 func TestReviewFromMapsServerFields(t *testing.T) {
 	review := decode[gitea.PullReview](t, `{"id":2,"body":"LGTM","state":"APPROVED","user":{"login":"alice"},"html_url":"https://gitea.test/r/2",
 		"commit_id":"abc","submitted_at":"2026-10-01T12:00:00Z","comments_count":3,"dismissed":true}`)
@@ -192,6 +242,13 @@ func TestReviewFromMapsServerFields(t *testing.T) {
 		ID: 2, Body: "LGTM", State: "APPROVED", Author: "alice", URL: "https://gitea.test/r/2", Commit: "abc",
 		SubmittedAt: "2026-10-01T12:00:00Z", CommentsCount: 3, Dismissed: true,
 	}, reviewFrom(review))
+}
+
+func TestReviewFromNamesRequestedTeam(t *testing.T) {
+	review := reviewFrom(decode[gitea.PullReview](t, `{"id":251,"state":"REQUEST_REVIEW","user":null,"team":{"name":"devs"}}`))
+	require.Equal(t, "devs", review.Team)
+	require.Equal(t, "team devs", review.Reviewer())
+	require.Equal(t, "alice", Review{Author: "alice", Team: "devs"}.Reviewer())
 }
 
 func TestReviewCommentFromMapsServerFields(t *testing.T) {
@@ -202,4 +259,12 @@ func TestReviewCommentFromMapsServerFields(t *testing.T) {
 		ID: 5, ReviewID: 1, Body: "Nit", Author: "alice", Resolver: "bob", URL: "https://gitea.test/c/5", Path: "main.go", Line: 12,
 		CreatedAt: "2026-10-01T12:00:00Z", UpdatedAt: "2026-10-02T12:00:00Z",
 	}, reviewCommentFrom(comment))
+}
+
+func TestReviewCommentLocationNamesRemovedLines(t *testing.T) {
+	removed := reviewCommentFrom(decode[gitea.PullReviewComment](t, `{"id":6,"path":"main.go","position":0,"original_position":4}`))
+	require.EqualValues(t, 4, removed.OldLine)
+	require.Equal(t, "main.go:4 (old)", removed.Location())
+	require.Equal(t, "main.go:12", ReviewComment{Path: "main.go", Line: 12}.Location())
+	require.Equal(t, "main.go", ReviewComment{Path: "main.go"}.Location())
 }

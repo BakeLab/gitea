@@ -104,3 +104,33 @@ func TestReleaseCreateUploadsPositionalFiles(t *testing.T) {
 	require.Equal(t, "https://gitea.test/alice/project/releases/tag/v1.1.0\n", out.String())
 	require.Equal(t, "✓ Created draft release v1.1.0 in alice/project\n✓ Uploaded gt.bin (2 B)\n", diagnostics.String())
 }
+
+func TestReleaseCreateWithUnknownTargetNamesTheTargetAndHintsAtPushing(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"target not found"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Git = &fakeGit{results: map[string]string{"rev-parse --verify --quiet refs/tags/v2": "abc"}}
+	err := Execute(context.Background(), deps, []string{"release", "create", "v1", "--target", "v2", "-R", "alice/project"})
+	require.EqualError(t, Explain(context.Background(), deps, err), `target "v2" not found in alice/project; push it first: git push origin v2`)
+	deps.Git = &fakeGit{}
+	err = Execute(context.Background(), deps, []string{"release", "create", "v1", "--target", "nowhere", "-R", "alice/project"})
+	require.EqualError(t, Explain(context.Background(), deps, err), `target "nowhere" not found in alice/project`)
+}
+
+func TestReleaseCreateVerifyTagRefusesATagTheServerLacks(t *testing.T) {
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"tag does not exist"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Git = &fakeGit{results: map[string]string{"rev-parse --verify --quiet refs/tags/v1": "abc"}}
+	err := Execute(context.Background(), deps, []string{"release", "create", "v1", "--verify-tag", "-R", "alice/project"})
+	require.EqualError(t, err, "tag v1 not found in alice/project; push it first: git push origin v1")
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/tags/v1"}, requests)
+}

@@ -99,6 +99,11 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 			}
 		}
 	}
+	if existing {
+		if err := requireBranchFreeElsewhere(run, options.Branch); err != nil {
+			return CheckoutResult{}, err
+		}
+	}
 	fetchRemote := options.Remote
 	fetchRef := fmt.Sprintf("refs/pull/%d/head", options.Number)
 	tracking := ""
@@ -167,4 +172,26 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 		}
 	}
 	return CheckoutResult{Branch: options.Branch, Commit: commit, Detached: options.Detached, Remote: fetchRemote, Tracking: tracking}, nil
+}
+
+// requireBranchFreeElsewhere fails when branch is checked out in a linked worktree other than
+// the current one, which git switch would refuse with a message that does not say where.
+func requireBranchFreeElsewhere(run func(...string) (string, error), branch string) error {
+	top, err := run("rev-parse", "--show-toplevel")
+	if err != nil {
+		return err
+	}
+	listing, err := run("worktree", "list", "--porcelain")
+	if err != nil {
+		return err
+	}
+	path := ""
+	for line := range strings.SplitSeq(listing, "\n") {
+		if value, ok := strings.CutPrefix(line, "worktree "); ok {
+			path = value
+		} else if line == "branch refs/heads/"+branch && path != top {
+			return fmt.Errorf("branch %q is checked out in the worktree %s; pass --detach to check out the pull request without a branch, or choose another branch with --branch", branch, path)
+		}
+	}
+	return nil
 }

@@ -42,28 +42,48 @@ func TestIssueCreateSeedsFromTemplate(t *testing.T) {
 	run := func(args ...string) error {
 		return Execute(context.Background(), deps, append([]string{"issue", "create", "-R", "alice/project", "--no-input", "--json=number"}, args...))
 	}
-	require.NoError(t, run("--template", "bug report"))
+	err := run("--template", "bug report")
+	require.ErrorContains(t, err, "missing required input: supply --title", "the template title is a placeholder and is never filed")
+	require.NoError(t, run("--template", "bug report", "--title", "Crash"))
 	require.NoError(t, run("--template", "Bug Report", "--title", "Explicit", "--body", "Override"))
 	require.NoError(t, run("--template", "feature", "--title", "Idea", "--editor"))
 	require.Equal(t, "Describe the idea", editor.initial)
-	err := run("--template", "missing", "--title", "x")
+	err = run("--template", "missing", "--title", "x")
 	require.ErrorContains(t, err, `issue template "missing" does not exist; available: Bug Report, Feature`)
 	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 	err = run("--template", "feature")
 	require.ErrorContains(t, err, "missing required input: supply --title")
 	deps.Streams.In = strings.NewReader("From stdin")
-	require.NoError(t, run("--template", "bug report", "--body-file", "-"))
+	require.NoError(t, run("--template", "bug report", "--title", "Crash", "--body-file", "-"))
 	err = run("--template", "feature", "--body-file", "-")
 	require.ErrorContains(t, err, "--body-file - requires --title")
 	require.Len(t, created, 4)
 	for i, want := range []string{
-		`{"title":"[bug] ","body":"Steps:"}`,
+		`{"title":"Crash","body":"Steps:"}`,
 		`{"title":"Explicit","body":"Override"}`,
 		`{"title":"Idea","body":"edited idea"}`,
-		`{"title":"[bug] ","body":"From stdin"}`,
+		`{"title":"Crash","body":"From stdin"}`,
 	} {
 		requirePayload(t, want, strings.NewReader(created[i]))
 	}
+}
+
+func TestIssueCreateTemplateOpensFormWithTemplateBody(t *testing.T) {
+	var createPayload map[string]any
+	server := newAuthenticatedServer(selectablesHandler(t, true, func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&createPayload))
+		_, _ = w.Write([]byte(`{"number":9,"title":"Mine"}`))
+	}))
+	defer server.Close()
+	form := &recordingIssueForm{values: terminal.IssueFormValues{Title: "Mine", Body: "## Steps"}}
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.IssueForm = form
+	deps.Prompter = &scriptedPrompter{accept: true}
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--json=number", "--interactive", "--template", "bug"}))
+	require.Equal(t, 1, form.calls)
+	require.Equal(t, &terminal.IssueTemplateChoice{Name: "Bug", About: "Report", Body: "## Steps"}, form.choices.Template, "the form starts with the template body and an empty title")
+	require.Equal(t, "Mine", createPayload["title"])
 }
 
 func TestIssueCreateUploadsAttachmentsAndKeepsIssueOnFailure(t *testing.T) {

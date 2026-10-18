@@ -413,15 +413,29 @@ func (a *application) completeUsers() cobra.CompletionFunc {
 
 // completeBranches completes the local branches, then the repository's branches.
 func (a *application) completeBranches() cobra.CompletionFunc {
-	return mergeCompletions(a.completeLocalBranches, a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
-		items, err := services.Branches{Client: t.client}.ListPage(ctx, t.Repo, completionLimit, 1)
-		return describe(items.Items, func(item services.Branch) (string, string) {
-			if item.Protected {
-				return item.Name, "protected"
-			}
-			return item.Name, ""
-		}), err
-	}))
+	return mergeCompletions(a.completeLocalBranches, a.apiCompletion(true, listBranches))
+}
+
+// completeArgumentBranches is completeBranches for a command with a positional [<repository>]:
+// once that argument is given, it completes that repository's branches, not those of the clone here.
+func (a *application) completeArgumentBranches() cobra.CompletionFunc {
+	inClone := a.completeBranches()
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		if len(args) == 0 || a.options.repo != "" {
+			return inClone(cmd, args, toComplete)
+		}
+		return a.apiCompletionIn(args[0], true, listBranches)(cmd, args, toComplete)
+	}
+}
+
+func listBranches(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+	items, err := services.Branches{Client: t.client}.ListPage(ctx, t.Repo, completionLimit, 1)
+	return describe(items.Items, func(item services.Branch) (string, string) {
+		if item.Protected {
+			return item.Name, "protected"
+		}
+		return item.Name, ""
+	}), err
 }
 
 // completeTags completes the repository's tags.

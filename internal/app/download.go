@@ -87,6 +87,9 @@ func (a *application) download(cmd *cobra.Command, f downloadFlags, path string,
 	if path == "-" {
 		return writeTerminalSafe(cmd.OutOrStdout(), a.deps.Streams.OutTTY, body)
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o777); err != nil {
+		return err
+	}
 	return publish(cmd, path, false, f.clobber, func(destination io.Writer) error {
 		_, err := io.Copy(destination, body)
 		return err
@@ -168,6 +171,38 @@ func publish(cmd *cobra.Command, output string, private, replace bool, write fun
 	err = os.Link(file.Name(), output)
 	if errors.Is(err, os.ErrExist) {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s already exists", output))
+	}
+	if err != nil {
+		// Some filesystems, such as FAT and many network mounts, cannot hard link.
+		return copyExclusive(file.Name(), output, private, err)
+	}
+	return nil
+}
+
+// copyExclusive copies the finished temporary file to output, which must not exist, when linking
+// failed with linkErr. A failed copy removes the partial output.
+func copyExclusive(temporary, output string, private bool, linkErr error) error {
+	mode := os.FileMode(0o666)
+	if private {
+		mode = 0o600
+	}
+	destination, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if errors.Is(err, os.ErrExist) {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s already exists", output))
+	}
+	if err != nil {
+		return linkErr
+	}
+	source, err := os.Open(temporary)
+	if err == nil {
+		defer source.Close()
+		_, err = io.Copy(destination, source)
+	}
+	if closeErr := destination.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(output)
 	}
 	return err
 }

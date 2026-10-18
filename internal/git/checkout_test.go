@@ -17,6 +17,7 @@ type checkoutRunner struct {
 	dirty, collision bool
 	localCommit      string
 	diverged         bool
+	worktrees        string
 }
 
 func (r *checkoutRunner) Output(_ context.Context, dir string, prompt bool, args ...string) (string, error) {
@@ -38,6 +39,8 @@ func (r *checkoutRunner) Output(_ context.Context, dir string, prompt bool, args
 			return "true", nil
 		}
 		return "abc123", nil
+	case "worktree":
+		return r.worktrees, nil
 	case "status":
 		if r.dirty {
 			return "?? file", nil
@@ -171,4 +174,20 @@ func TestPullCheckoutTracksHeadBranch(t *testing.T) {
 	for _, call := range runner.calls {
 		require.NotContains(t, call, "refs/pull/")
 	}
+}
+
+func TestPullCheckoutRejectsBranchCheckedOutInAnotherWorktree(t *testing.T) {
+	options := CheckoutOptions{Directory: "/work", Remote: "origin", Number: 7, Branch: "pr/7", ExpectedCommit: "abc123", Update: true}
+	runner := &checkoutRunner{collision: true, localCommit: "abc123", worktrees: "worktree abc123\nHEAD 1\nbranch refs/heads/main\n\nworktree /other/tree\nHEAD 2\nbranch refs/heads/pr/7\n"}
+	_, err := CheckoutPull(context.Background(), runner, options)
+	require.ErrorContains(t, err, `branch "pr/7" is checked out in the worktree /other/tree`)
+	require.ErrorContains(t, err, "--detach")
+	for _, call := range runner.calls {
+		require.NotContains(t, call, "fetch")
+		require.NotContains(t, call, "switch")
+	}
+	// The current worktree holding the branch is fine.
+	runner = &checkoutRunner{collision: true, localCommit: "abc123", worktrees: "worktree abc123\nHEAD 1\nbranch refs/heads/pr/7\n"}
+	_, err = CheckoutPull(context.Background(), runner, options)
+	require.NoError(t, err)
 }

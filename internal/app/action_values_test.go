@@ -209,3 +209,10 @@ func TestVariableSetCountsCharactersNotBytes(t *testing.T) {
 	deps.Streams.In = strings.NewReader(strings.Repeat("é", 65537))
 	require.ErrorContains(t, Execute(context.Background(), deps, []string{"variable", "set", "WIDE", "-o", "acme"}), "65536 characters")
 }
+
+func TestParseEnvFileKeepsEscapedQuotes(t *testing.T) {
+	entries, err := parseEnvFile([]byte("A=\"say \\\"hi\\\" now\" # note\nB='it''s'\nC=\"back\\\\slash\\nline\"\n"))
+	require.NoError(t, err)
+	require.Equal(t, "say \"hi\" now", entries[0].value)
+	require.Equal(t, "back\\slash\nline", entries[2].value)
+}

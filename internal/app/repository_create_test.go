@@ -63,6 +63,18 @@ func TestRepositoryCreateClonesNewRepository(t *testing.T) {
 	require.JSONEq(t, `{"id":7,"full_name":"alice/project"}`, out.String())
 }
 
+func TestRepositoryCreateReportsFailedCloneAfterCreating(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"id":7,"name":"project","full_name":"alice/project","clone_url":%q}`, "http://"+r.Host+"/alice/project.git")
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	deps.Git = &fakeGit{}
+	err := Execute(context.Background(), deps, []string{"repo", "create", "project", "--clone", "--no-input", "--json=full_name"})
+	require.ErrorContains(t, err, "created alice/project, but could not clone it")
+	require.JSONEq(t, `{"full_name":"alice/project"}`, out.String())
+}
+
 func TestRepositoryCreateValidatesTemplatesBeforeCreating(t *testing.T) {
 	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +118,17 @@ func TestRepositoryCreatePublishesALocalRepository(t *testing.T) {
 	require.Equal(t, "✓ Created repository alice/project\n✓ Added Git remote origin for alice/project\n✓ Pushed the current branch to alice/project\n", diagnostics.String())
 	err := Execute(context.Background(), deps, []string{"repo", "create", "project", "--source", dir, "--auto-init"})
 	require.ErrorContains(t, err, "--source publishes a local repository")
+}
+
+func TestRepositoryMigrateAcceptsZeroMirrorInterval(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requirePayload(t, `{"repo_name":"gitea","clone_addr":"https://github.com/go-gitea/gitea.git","service":"git","mirror":true,"mirror_interval":"0"}`, r.Body)
+		_, _ = w.Write([]byte(`{"full_name":"alice/gitea","mirror":true,"html_url":"https://gitea.test/alice/gitea"}`))
+	}))
+	defer server.Close()
+	deps, _, diagnostics := repoTTYDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "migrate", "https://github.com/go-gitea/gitea.git", "--mirror", "--mirror-interval", "0"}))
+	require.Equal(t, "✓ Imported https://github.com/go-gitea/gitea.git into alice/gitea (pull mirror, synced manually)\n", diagnostics.String())
 }
 
 func TestRepositoryMigrateNamesTheRepositoryAfterItsSource(t *testing.T) {

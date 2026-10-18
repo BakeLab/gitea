@@ -4,6 +4,9 @@
 package app
 
 import (
+	"fmt"
+
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
@@ -51,6 +54,10 @@ func (a *application) requireInput(cmd *cobra.Command, value *string, flag, labe
 	s, err := a.settings()
 	if err != nil {
 		return false, err
+	}
+	if hidden := cmd.Flags().Lookup(flag); *value == "" && hidden != nil && hidden.Hidden && !a.policy(s).CanPrompt(a.deps.Streams) {
+		// --help does not list the flag, so point at the argument it stands in for.
+		return false, clierr.Wrap(clierr.Usage, fmt.Errorf("missing required input: %s (pass it as an argument)", label))
 	}
 	return terminal.RequireInput(cmd.Context(), value, flag, label, validate, a.deps.Streams, a.policy(s), a.deps.Prompter)
 }

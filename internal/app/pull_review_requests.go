@@ -47,7 +47,7 @@ func (a *application) pullReviewRequestCommand(add bool) *cobra.Command {
 	cmd.Flags().StringSliceVarP(&input.Users, "reviewer", "r", nil, "Reviewer usernames or email addresses; @me for yourself")
 	cmd.Flags().StringSliceVar(&input.Teams, "team", nil, "Teams of the repository's organization")
 	_ = cmd.RegisterFlagCompletionFunc("reviewer", a.completeUsers())
-	cmd.ValidArgsFunction = a.completePulls("open")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("open"))
 	if add {
 		cmd.Example = `$ gt pr review request 13 --reviewer carol,dave
 $ gt pr review request --team developers`

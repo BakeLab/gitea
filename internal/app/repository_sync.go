@@ -100,7 +100,7 @@ $ gt repo sync bob/project`,
 		},
 	}
 	command.Flags().StringVarP(&branch, "branch", "b", "", "Branch to sync (default: the repository's default branch)")
-	_ = command.RegisterFlagCompletionFunc("branch", a.completeBranches())
+	_ = command.RegisterFlagCompletionFunc("branch", a.completeArgumentBranches())
 	command.ValidArgsFunction = a.completeRepos()
 	return command
 }

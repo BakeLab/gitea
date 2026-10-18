@@ -477,7 +477,8 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	publicKey, err := ssh.NewPublicKey(privateKey.Public())
 	require.NoError(t, err)
 	keyFile := filepath.Join(t.TempDir(), "integration.pub")
-	require.NoError(t, os.WriteFile(keyFile, ssh.MarshalAuthorizedKey(publicKey), 0o600))
+	// The title defaults to the key comment.
+	require.NoError(t, os.WriteFile(keyFile, append(bytes.TrimSpace(ssh.MarshalAuthorizedKey(publicKey)), " integration\n"...), 0o600))
 	var key services.SSHKey
 	require.NoError(t, json.Unmarshal(execute("ssh-key", "create", keyFile, "--json"), &key))
 	require.Positive(t, key.ID)

@@ -6,6 +6,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -101,6 +102,13 @@ func (s Repositories) Migrate(ctx context.Context, opts RepositoryMigrationOptio
 		defer cancel()
 		s.Client = s.Client.WithTimeout(opts.Timeout)
 	}
+	// TODO(sdk): MigrateRepoOption.Validate counts the description in bytes, but Gitea allows 2048
+	// characters; a longer one is set by an edit once the (synchronous) migration is done.
+	description := opts.Description
+	later := len(description) > sdkDescriptionLimit
+	if later {
+		opts.Description = ""
+	}
 	item, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Repository, *gitea.Response, error) {
 		return c.Repositories.MigrateRepo(ctx, gitea.MigrateRepoOption{
 			RepoName: opts.Name, RepoOwner: opts.Owner, CloneAddr: opts.CloneURL, Service: gitea.GitServiceType(opts.Service),
@@ -117,5 +125,13 @@ func (s Repositories) Migrate(ctx context.Context, opts RepositoryMigrationOptio
 		}
 		return Repository{}, err
 	}
-	return repositoryFrom(item), nil
+	migrated := repositoryFrom(item)
+	if later {
+		edited, err := s.Edit(ctx, migrated.FullName, RepositoryEdit{Description: &description})
+		if err != nil {
+			return migrated, fmt.Errorf("repository %s was imported, but setting its description failed: %w", migrated.FullName, err)
+		}
+		return edited, nil
+	}
+	return migrated, nil
 }

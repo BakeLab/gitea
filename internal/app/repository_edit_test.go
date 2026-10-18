@@ -5,6 +5,8 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -54,15 +56,23 @@ func TestRepositoryEditReportsTheChangedSettings(t *testing.T) {
 	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
-		if r.Method == http.MethodPatch {
+		switch r.Method + " " + r.URL.Path {
+		case "PATCH /api/v1/repos/alice/project":
 			requirePayload(t, `{"description":"CLI","private":true}`, r.Body)
+		case "GET /api/v1/repos/alice/project/topics":
+			_, _ = w.Write([]byte(`{"topics":["old","keep"]}`))
+			return
+		case "PUT /api/v1/repos/alice/project/topics":
+			requirePayload(t, `{"topics":["keep","cli","go"]}`, r.Body)
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
 		_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
 	}))
 	defer server.Close()
 	deps, out, diagnostics := repoTTYDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "edit", "alice/project", "-d", "CLI", "--visibility", "private", "--add-topic", "cli,go", "--remove-topic", "old"}))
-	require.Equal(t, []string{"PATCH /api/v1/repos/alice/project", "PUT /api/v1/repos/alice/project/topics/cli", "PUT /api/v1/repos/alice/project/topics/go", "DELETE /api/v1/repos/alice/project/topics/old"}, requests)
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/topics", "PATCH /api/v1/repos/alice/project", "PUT /api/v1/repos/alice/project/topics"}, requests)
 	require.Empty(t, out.String())
 	require.Equal(t, "✓ Edited repository alice/project (add-topic, description, remove-topic, visibility)\n", diagnostics.String())
 }
@@ -82,8 +92,9 @@ func TestRepositoryEditArchivesAfterTheOtherChanges(t *testing.T) {
 	deps, _, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "edit", "alice/project", "-d", "CLI", "--archived", "--add-topic", "cli", "--yes"}))
 	require.Equal(t, []string{
+		"GET /api/v1/repos/alice/project/topics",
 		"PATCH /api/v1/repos/alice/project",
-		"PUT /api/v1/repos/alice/project/topics/cli",
+		"PUT /api/v1/repos/alice/project/topics",
 		"PATCH /api/v1/repos/alice/project archived",
 	}, requests)
 }
@@ -128,14 +139,44 @@ func TestRepositoryEditIgnoresRemovingAMissingTopic(t *testing.T) {
 	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
-		if r.Method == http.MethodDelete {
-			w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"full_name":"alice/project","topics":["other"]}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "edit", "alice/project", "-d", "new", "--remove-topic", "legacy"}))
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/topics", "PATCH /api/v1/repos/alice/project"}, requests)
+}
+
+func TestRepositoryEditRejectsTooManyTopicsBeforeChangingAnything(t *testing.T) {
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		var topics []string
+		for i := range 25 {
+			topics = append(topics, fmt.Sprintf("t%d", i))
+		}
+		data, _ := json.Marshal(map[string]any{"topics": topics})
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"repo", "edit", "alice/project", "-d", "new", "--add-topic", "extra"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.ErrorContains(t, err, "at most 25 topics")
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/topics"}, requests)
+}
+
+func TestRepositoryEditReportsSettingsAppliedWhenTheTopicsFail(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"Topic names are invalid"}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "edit", "alice/project", "-d", "new", "--remove-topic", "legacy"}))
-	require.Equal(t, []string{"PATCH /api/v1/repos/alice/project", "DELETE /api/v1/repos/alice/project/topics/legacy"}, requests)
+	err := Execute(context.Background(), deps, []string{"repo", "edit", "alice/project", "-d", "new", "--add-topic", "cli"})
+	require.ErrorContains(t, err, "repository settings were changed, but setting the topics failed")
 }

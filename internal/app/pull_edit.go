@@ -76,7 +76,7 @@ pull request, or mark it as a draft or ready for review.`, Annotations: pullArgu
 		if opts == (services.PullEdit{}) && !useEditor && !draft && !ready && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone") && !removeMilestone {
 			return clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --title (see gt pr edit --help)"))
 		}
-		t, n, err := a.pullSelector(cmd, args)
+		t, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -149,7 +149,7 @@ pull request, or mark it as a draft or ready for review.`, Annotations: pullArgu
 	}
 	_ = cmd.RegisterFlagCompletionFunc("base", a.completeBranches())
 	_ = cmd.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
-	cmd.ValidArgsFunction = a.completePulls("open")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("open"))
 	cmd.Example = `$ gt pr edit 13 --title "Add login support" --add-reviewer carol
 $ gt pr edit --base develop
 $ gt pr edit 13 --editor`
@@ -206,7 +206,7 @@ removes or adds that marker.`, Annotations: pullArgumentsAnnotation(nil), Args: 
 		return a.jsonResult(cmd, item)
 	}}
 	cmd.Flags().BoolVar(&undo, "undo", false, "Turn the pull request back into a draft")
-	cmd.ValidArgsFunction = a.completePulls("open")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("open"))
 	cmd.Example = `$ gt pr ready
 $ gt pr ready 15
 $ gt pr ready 15 --undo`

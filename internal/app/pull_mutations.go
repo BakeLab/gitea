@@ -79,7 +79,7 @@ func (a *application) pullStateCommand(closing bool) *cobra.Command {
 	var comment string
 	var deleteBranch bool
 	cmd := &cobra.Command{Use: verb + " [<number> | <url> | <branch>]", Short: titleCase(verb) + " a pull request", Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
-		t, n, err := a.pullSelector(cmd, args)
+		t, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func (a *application) pullStateCommand(closing bool) *cobra.Command {
 		return a.jsonResult(cmd, item)
 	}}
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "Leave a comment before changing the state")
-	cmd.ValidArgsFunction = a.completePulls(map[bool]string{true: "open", false: "closed"}[closing])
+	cmd.ValidArgsFunction = firstArg(a.completePulls(map[bool]string{true: "open", false: "closed"}[closing]))
 	if closing {
 		cmd.Flags().BoolVarP(&deleteBranch, "delete-branch", "d", false, "Delete the head branch on Gitea and, when it is checked out, locally")
 		cmd.Example = `$ gt pr close 13
@@ -176,7 +176,7 @@ func (a *application) pullDiffCommand() *cobra.Command {
 
 On a terminal the diff is colored and paged. Piped, it is written unchanged, so that
 gt pr diff 13 | git apply works.`, Annotations: pullArgumentsAnnotation(textOutput("diff returns patch text")), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
-		t, n, err := a.pullSelector(cmd, args)
+		t, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -219,7 +219,7 @@ gt pr diff 13 | git apply works.`, Annotations: pullArgumentsAnnotation(textOutp
 	cmd.Flags().BoolVar(&nameOnly, "name-only", false, "List only the names of the changed files")
 	enumFlag(cmd, &color, "color", "", "auto", "Color the diff", "auto", "always", "never")
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the changed files in the browser")
-	cmd.ValidArgsFunction = a.completePulls("all")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("all"))
 	cmd.Example = `$ gt pr diff
 $ gt pr diff 13 --name-only
 $ gt pr diff 13 | git apply`
@@ -384,7 +384,7 @@ the base branch.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.co
 		}
 		return c.Root().FlagErrorFunc()(c, err)
 	})
-	cmd.ValidArgsFunction = a.completePulls("open")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("open"))
 	cmd.Example = `# Merge the pull request of the current branch with the repository's default style
 $ gt pr merge
 

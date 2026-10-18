@@ -96,7 +96,7 @@ func (a *application) currentPullStatus(cmd *cobra.Command) (*services.Pull, pul
 	if err != nil {
 		return nil, details, ""
 	}
-	t, n, err := a.pullSelector(cmd, nil)
+	t, n, err := a.pullSelectorAny(cmd, nil)
 	if err != nil {
 		return nil, details, branch
 	}
@@ -106,7 +106,7 @@ func (a *application) currentPullStatus(cmd *cobra.Command) (*services.Pull, pul
 		return nil, details, branch
 	}
 	if details.reviews, err = (services.Reviews{Client: t.client, Repository: t.Repo}).All(cmd.Context(), n); err == nil {
-		pull.ReviewDecision = services.ReviewDecision(services.LatestReviews(details.reviews), len(pull.Reviewers)+len(pull.ReviewerTeams) > 0)
+		pull.ReviewDecision = services.ReviewDecision(details.reviews, len(pull.Reviewers)+len(pull.ReviewerTeams) > 0)
 	}
 	if pull.HeadSHA != "" {
 		details.checks, _ = service.CommitChecks(cmd.Context(), pull.HeadSHA)

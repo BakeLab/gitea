@@ -6,6 +6,7 @@ package services
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -78,4 +79,64 @@ func TestRepositoryAssigneesTagsAndMissingPermissions(t *testing.T) {
 	permissions, err := service.viewPermissions(context.Background(), "alice/project")
 	require.NoError(t, err)
 	require.Equal(t, RepositoryPermissions{}, permissions)
+}
+
+func TestRepositoryCreateReportsMissingOrganization(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"GetOrgByName"}`))
+	}))
+	_, err := (Repositories{Client: client}).Create(context.Background(), "acme-typo", RepositoryOptions{Name: "tool"})
+	require.EqualError(t, err, `organization "acme-typo" not found`)
+}
+
+func TestRepositoryReadme(t *testing.T) {
+	dirEntry := func(name string) string { return `{"name":"` + name + `","path":"` + name + `","type":"dir"}` }
+	fileEntry := func(dir, name string) string {
+		return `{"name":"` + name + `","path":"` + dir + name + `","type":"file"}`
+	}
+	listings := map[string]string{
+		"/api/v1/repos/alice/project/contents/":        "[" + fileEntry("", "README.rst") + "," + fileEntry("", "readme.txt") + "," + dirEntry(".github") + "]",
+		"/api/v1/repos/alice/project/contents/.github": "[" + fileEntry(".github/", "README.md") + "]",
+	}
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("ref") == "develp" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if body, ok := listings[r.URL.Path]; ok {
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		assert.Equal(t, "/api/v1/repos/alice/project/raw/.github/README.md", r.URL.Path)
+		_, _ = w.Write([]byte("hello"))
+	}))
+	path, content, err := (Repositories{Client: client}).Readme(context.Background(), "alice/project", "")
+	require.NoError(t, err)
+	assert.Equal(t, ".github/README.md", path)
+	assert.Equal(t, "hello", content)
+
+	_, _, err = (Repositories{Client: client}).Readme(context.Background(), "alice/project", "develp")
+	require.EqualError(t, err, `branch "develp" not found in alice/project`)
+}
+
+func TestRepositoryCreateSetsADescriptionBeyondTheSDKByteLimitByEdit(t *testing.T) {
+	description := strings.Repeat("日", 800) // 2400 bytes, 800 characters: Gitea accepts it, the SDK would not
+	var methods []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		body := requestJSON(t, r)
+		switch r.Method {
+		case http.MethodPost:
+			require.Empty(t, body["description"])
+			_, _ = w.Write([]byte(`{"id":1,"name":"project","full_name":"alice/project"}`))
+		case http.MethodPatch:
+			require.Equal(t, description, body["description"])
+			_, _ = w.Write([]byte(`{"id":1,"name":"project","full_name":"alice/project","description":"` + description + `"}`))
+		}
+	}))
+	created, err := (Repositories{Client: client}).Create(context.Background(), "", RepositoryOptions{Name: "project", Description: description})
+	require.NoError(t, err)
+	require.Equal(t, []string{http.MethodPost, http.MethodPatch}, methods)
+	require.Equal(t, description, created.Description)
 }

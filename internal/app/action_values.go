@@ -320,12 +320,12 @@ func parseEnvFile(data []byte) ([]envEntry, error) {
 		}
 		if quote := value[:min(len(value), 1)]; quote == `"` || quote == "'" {
 			// The value ends at the closing quote; only a # comment may follow it.
-			closing := strings.Index(value[1:], quote) + 1
+			closing := closingQuote(value, quote)
 			rest := strings.TrimSpace(value[min(closing+1, len(value)):])
 			if closing > 0 && (rest == "" || strings.HasPrefix(rest, "#")) {
 				value = value[1:closing]
 				if quote == `"` {
-					value = strings.ReplaceAll(value, `\n`, "\n")
+					value = strings.NewReplacer(`\n`, "\n", `\"`, `"`, `\\`, `\`).Replace(value)
 				}
 				entries = append(entries, envEntry{name, value})
 				continue
@@ -338,6 +338,20 @@ func parseEnvFile(data []byte) ([]envEntry, error) {
 		return nil, errors.New("no NAME=value lines")
 	}
 	return entries, scanner.Err()
+}
+
+// closingQuote returns the index of the quote that closes the quoted value, or 0 when it is not
+// closed. Inside double quotes a backslash escapes the next character.
+func closingQuote(value, quote string) int {
+	for i := 1; i < len(value); i++ {
+		switch {
+		case quote == `"` && value[i] == '\\':
+			i++
+		case string(value[i]) == quote:
+			return i
+		}
+	}
+	return 0
 }
 
 func (a *application) actionValueDeleteCommand(secret bool, kind string) *cobra.Command {

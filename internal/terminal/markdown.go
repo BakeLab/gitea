@@ -4,10 +4,11 @@
 package terminal
 
 import (
-	"html"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 	"unicode/utf8"
 
 	"charm.land/glamour/v2"
@@ -21,6 +22,29 @@ func MarkdownEnabled(preference string, outTTY bool) bool {
 
 // glamourLinks matches the OSC 8 hyperlinks that glamour writes for markdown links.
 var glamourLinks = regexp.MustCompile("\x1b\\]8;[^\x07\x1b]*(?:\x07|\x1b\\\\)")
+
+// numericReference matches a decimal or hexadecimal character reference, with or without the semicolon.
+var numericReference = regexp.MustCompile(`&#([0-9]{1,8}|[xX][0-9a-fA-F]{1,8});?`)
+
+// dropControlReference returns "" for a character reference that names a control or format character
+// other than a tab or line break, and the reference itself otherwise.
+func dropControlReference(reference string) string {
+	digits := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(reference, "&#"), "x"), ";")
+	digits = strings.TrimPrefix(digits, "X")
+	base := 10
+	if strings.HasPrefix(reference, "&#x") || strings.HasPrefix(reference, "&#X") {
+		base = 16
+	}
+	n, err := strconv.ParseInt(digits, base, 32)
+	if err != nil {
+		return reference
+	}
+	r := rune(n)
+	if r != '\t' && r != '\n' && (r == 0 || unicode.IsControl(r) || unicode.Is(unicode.Cf, r)) {
+		return ""
+	}
+	return reference
+}
 
 // glamourSequences matches the escape sequences glamour writes itself: colors and OSC 8 hyperlinks.
 var glamourSequences = regexp.MustCompile("\x1b\\[[0-9;]*m|\x1b\\]8;[^\x07\x1b]*(?:\x07|\x1b\\\\)")
@@ -76,15 +100,10 @@ func markdownRenderer(width int, color bool) (*glamour.TermRenderer, error) {
 // with links only when d allows them. It keeps line breaks like Gitea does, and returns the sanitized
 // text unrendered if rendering fails.
 func Markdown(text string, d Display) string {
-	// Markdown decodes character references such as &#27; into the characters they name, so decode
-	// them (to a fixed point, for &amp;#27;) before sanitizing instead of after.
-	for range 4 {
-		decoded := html.UnescapeString(text)
-		if decoded == text {
-			break
-		}
-		text = decoded
-	}
+	// Markdown decodes numeric character references such as &#27; into the characters they name,
+	// which SafeText cannot see, so drop the ones that name a control character before rendering.
+	// Other entities (&amp;, &section=...) are left to the renderer so ordinary text is unchanged.
+	text = numericReference.ReplaceAllStringFunc(text, dropControlReference)
 	text = SafeText(text)
 	width := d.Width
 	if width <= 0 {

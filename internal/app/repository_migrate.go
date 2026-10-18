@@ -11,6 +11,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
@@ -133,7 +134,10 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 				return err
 			}
 			detail := ""
+			interval, _ := time.ParseDuration(opts.MirrorInterval)
 			switch {
+			case item.Mirror && opts.MirrorInterval != "" && interval == 0:
+				detail = " (pull mirror, synced manually)"
 			case item.Mirror && opts.MirrorInterval != "":
 				detail = " (pull mirror, every " + opts.MirrorInterval + ")"
 			case item.Mirror:
@@ -161,7 +165,7 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 	flags.BoolVar(&opts.PullRequests, "pull-requests", false, "Copy pull requests")
 	flags.BoolVar(&opts.Releases, "releases", false, "Copy releases")
 	flags.BoolVar(&opts.Milestones, "milestones", false, "Copy milestones")
-	flags.StringVar(&opts.MirrorInterval, "mirror-interval", "", "Mirror interval, for example 8h")
+	flags.StringVar(&opts.MirrorInterval, "mirror-interval", "", "Mirror interval, for example 8h (0 turns off periodic sync)")
 	flags.BoolVar(&opts.LFS, "lfs", false, "Copy LFS objects")
 	flags.StringVar(&opts.LFSEndpoint, "lfs-endpoint", "", "Source LFS endpoint")
 	flags.StringVar(&opts.AuthUser, "auth-user", "", "Source authentication username")
@@ -183,8 +187,8 @@ func validateMigrationFlags(cmd *cobra.Command, opts services.RepositoryMigratio
 		return clierr.Wrap(clierr.Usage, errors.New("server path imports use --service git without remote credentials"))
 	case opts.Timeout <= 0:
 		return clierr.Wrap(clierr.Usage, errors.New("--timeout must be positive"))
-	case len(opts.Description) > 2048:
-		return clierr.Wrap(clierr.Usage, errors.New("description cannot exceed 2048 bytes"))
+	case utf8.RuneCountInString(opts.Description) > 2048:
+		return clierr.Wrap(clierr.Usage, errors.New("description cannot exceed 2048 characters"))
 	case opts.LFSEndpoint != "" && !opts.LFS:
 		return clierr.Wrap(clierr.Usage, errors.New("--lfs-endpoint requires --lfs"))
 	case opts.Mirror && metadata:
@@ -201,8 +205,8 @@ func validateMigrationFlags(cmd *cobra.Command, opts services.RepositoryMigratio
 	}
 	if opts.MirrorInterval != "" {
 		interval, err := time.ParseDuration(opts.MirrorInterval)
-		if err != nil || interval <= 0 || !opts.Mirror {
-			return clierr.Wrap(clierr.Usage, errors.New("--mirror-interval requires --mirror and a positive duration"))
+		if err != nil || interval < 0 || !opts.Mirror {
+			return clierr.Wrap(clierr.Usage, errors.New("--mirror-interval requires --mirror and a duration of 0 or more"))
 		}
 	}
 	return nil

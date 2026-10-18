@@ -41,12 +41,21 @@ type IssueCreateSelectables struct {
 	Templates []IssueTemplate
 }
 
-// CreateSelectables loads templates and, when the user can push, assignees/milestones/labels.
+// CreateSelectables concurrently loads templates and, when the user can push, assignees/milestones/labels.
 func (s Issues) CreateSelectables(ctx context.Context) (IssueCreateSelectables, error) {
-	choices, err := loadCreateSelectables(ctx, s.Client, s.Repository)
+	var result IssueCreateSelectables
+	err := loadTogether(
+		func() (err error) {
+			result.CreateSelectables, err = loadCreateSelectables(ctx, s.Client, s.Repository)
+			return err
+		},
+		func() (err error) {
+			result.Templates, err = s.IssueTemplates(ctx)
+			return err
+		},
+	)
 	if err != nil {
 		return IssueCreateSelectables{}, err
 	}
-	templates, err := s.IssueTemplates(ctx)
-	return IssueCreateSelectables{CreateSelectables: choices, Templates: templates}, err
+	return result, nil
 }

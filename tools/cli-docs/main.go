@@ -70,6 +70,24 @@ func generate(output string) error {
 	if err := doc.GenManTree(root, header, filepath.Join(output, "man")); err != nil {
 		return err
 	}
+	// Cobra skips the hidden help topics (environment, exit-codes, formatting); give them pages too.
+	for _, topic := range app.ManualCommands(root) {
+		if topic.Runnable() || topic.Annotations["gt.topic"] == "" {
+			continue
+		}
+		var page strings.Builder
+		if err := doc.GenMarkdownCustom(topic, &page, func(string) string { return "" }); err != nil {
+			return err
+		}
+		name := "gt_" + topic.Name() + ".md"
+		if err := os.WriteFile(filepath.Join(output, "reference", name), []byte(strings.TrimRight(page.String(), "\n")+"\n"), 0o644); err != nil {
+			return err
+		}
+		topicHeader := &doc.GenManHeader{Title: "GT-" + strings.ToUpper(topic.Name()), Section: "1", Date: &date, Source: "gitea-cli", Manual: "gitea-cli Manual"}
+		if err := writeFile(filepath.Join(output, "man", "gt-"+topic.Name()+".1"), func(w io.Writer) error { return doc.GenMan(topic, topicHeader, w) }); err != nil {
+			return err
+		}
+	}
 	completions := []struct {
 		name  string
 		write func(io.Writer) error

@@ -118,6 +118,22 @@ func TestRepositorySearchSendsExplicitFalseFilters(t *testing.T) {
 	require.Empty(t, page.Items)
 }
 
+func TestRepositorySearchSortDropsOwnerPriority(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/user" {
+			_, _ = w.Write([]byte(`{"id":7}`))
+			return
+		}
+		query := r.URL.Query()
+		assert.False(t, query.Has("priority_owner_id"))
+		assert.Equal(t, "updated", query.Get("sort"))
+		assert.Equal(t, "desc", query.Get("order"))
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	_, err := (Repositories{Client: client}).Search(context.Background(), RepositorySearchOptions{Query: "go", Sort: "updated", Order: "desc", Limit: 30, Page: 1})
+	require.NoError(t, err)
+}
+
 func TestRepositorySearchScopesOwner(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

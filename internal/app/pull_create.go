@@ -326,24 +326,17 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 	if err != nil {
 		return err
 	}
-	repo, err := (services.Repositories{Client: target.client}).View(cmd.Context(), target.Repo)
-	if err != nil {
-		return err
-	}
 	service := services.Pulls{Client: target.client, Repository: target.Repo}
-	selectables, err := service.CreateSelectables(cmd.Context())
+	loaded, err := service.CreateChoices(cmd.Context())
 	if err != nil {
 		return err
 	}
+	repo, selectables := loaded.Repository, loaded.CreateSelectables
 	baseOwner, _, _ := strings.Cut(target.Repo, "/")
 	headOwner, headBranch := a.defaultPullHead(cmd.Context())
-	template, err := service.Template(cmd.Context(), repo.DefaultBranch)
-	if err != nil {
-		return err
-	}
 	title, body, _ := a.singleCommitMessage(cmd.Context(), repo.DefaultBranch, headBranch)
-	if template != "" {
-		body = template
+	if loaded.Template != "" {
+		body = loaded.Template
 	}
 	choices := terminal.PullFormChoices{
 		Repo: target.Repo, BaseOwner: baseOwner, Base: repo.DefaultBranch, HeadOwner: headOwner, HeadBranch: headBranch, Title: title, Body: body,

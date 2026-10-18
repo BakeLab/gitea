@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
@@ -147,7 +148,14 @@ $ gt repo create project --source . --push`,
 			target.Repo = item.FullName
 			switch {
 			case clone:
-				_, err = a.cloneRepository(cmd, target, item, cloneOptions{upstream: "upstream"})
+				// Record the new repository first so a failed clone does not hide that it exists.
+				if err := a.created(cmd, item, item.URL); err != nil {
+					return err
+				}
+				if _, err := a.cloneRepository(cmd, target, item, cloneOptions{upstream: "upstream"}); err != nil {
+					return fmt.Errorf("created %s, but could not clone it: %w", item.FullName, err)
+				}
+				return nil
 			case localSource != "":
 				err = a.publishRepository(cmd, target, item, localSource, remote, push)
 			}
@@ -202,8 +210,8 @@ func validateCreateFlags(cmd *cobra.Command, opts services.RepositoryOptions, or
 		return clierr.Wrap(clierr.Usage, errors.New("--team requires --org and a team name"))
 	case changed("template") && template == "":
 		return clierr.Wrap(clierr.Usage, errors.New("--template requires owner/repo or a repository URL"))
-	case len(opts.Description) > 2048:
-		return clierr.Wrap(clierr.Usage, errors.New("description cannot exceed 2048 bytes"))
+	case utf8.RuneCountInString(opts.Description) > 2048:
+		return clierr.Wrap(clierr.Usage, errors.New("description cannot exceed 2048 characters"))
 	case template == "" && (opts.Gitignores != "" || opts.License != "" || opts.Readme != "" || opts.DefaultBranch != "") && !opts.AutoInit:
 		return clierr.Wrap(clierr.Usage, errors.New("initial content and default branch options require --auto-init"))
 	case template != "" && changed("auto-init", "label-template", "gitignores", "license", "readme", "as-template", "trust-model", "object-format"):

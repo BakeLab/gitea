@@ -203,7 +203,11 @@ func (a *application) issueCreateCommand() *cobra.Command {
 	var useEditor, web bool
 	var assignees, labelNames, attachmentPaths []string
 	cmd := &cobra.Command{Use: "create", Aliases: []string{"new"}, Short: "Create an issue", Long: `Create an issue in a repository. Without flags on a terminal, a form asks for the title and
-body, then optionally for assignees, a milestone, labels and a due date.`, Example: `$ gt issue create
+body, then optionally for assignees, a milestone, labels and a due date.
+
+--template starts from the body of a repository issue template; on a terminal the form opens with
+that body and an empty title. Without a terminal, --title is required, and --body or --body-file
+replace the template body.`, Example: `$ gt issue create
 $ gt issue create --title "Crash on start" --body "Steps to reproduce…" --label bug --milestone v1.0
 $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
 		var draft terminal.Draft
@@ -243,8 +247,8 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 				}
 			}
 		}
-		if !localFlagsChanged(cmd) && a.canPrompt() && a.deps.IssueForm != nil {
-			return a.createIssueInteractively(cmd)
+		if !localFlagsChanged(cmd, "template") && a.canPrompt() && a.deps.IssueForm != nil {
+			return a.createIssueInteractively(cmd, strings.TrimSpace(templateName))
 		}
 		var target target
 		var templateBody string
@@ -258,9 +262,7 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 			if err != nil {
 				return err
 			}
-			if !cmd.Flags().Changed("title") {
-				title = template.Title
-			}
+			// Like gh, the template only seeds the body; its title is a placeholder, so --title is required.
 			templateBody = issueTemplateBody(template)
 		}
 		if web {
@@ -344,7 +346,8 @@ func (a *application) issueCreated(cmd *cobra.Command, t target, item services.I
 	return a.created(cmd, item, item.URL)
 }
 
-func (a *application) createIssueInteractively(cmd *cobra.Command) (runErr error) {
+// createIssueInteractively runs the create form; a non-empty templateName pre-fills its body.
+func (a *application) createIssueInteractively(cmd *cobra.Command, templateName string) (runErr error) {
 	target, err := a.resolve(cmd.Context(), true)
 	if err != nil {
 		return err
@@ -363,6 +366,13 @@ func (a *application) createIssueInteractively(cmd *cobra.Command) (runErr error
 		choices.Templates = append(choices.Templates, terminal.IssueTemplateChoice{Name: template.Name, About: template.About, Title: template.Title, Body: issueTemplateBody(template)})
 	}
 	choices.Milestones, choices.Labels = milestoneChoices(selectables.Milestones), labelChoices(selectables.Labels)
+	if templateName != "" {
+		template, err := issueTemplate(cmd.Context(), service, templateName)
+		if err != nil {
+			return err
+		}
+		choices.Template = &terminal.IssueTemplateChoice{Name: template.Name, About: template.About, Body: issueTemplateBody(template)}
+	}
 	values, err := a.deps.IssueForm.CreateIssue(cmd.Context(), choices)
 	defer finishDraft(&values.Draft, &runErr)
 	if err != nil {

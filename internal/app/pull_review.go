@@ -19,18 +19,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const pullArguments = `A pull request can be supplied as argument in any of the following formats:
+const pullArgumentFormats = `A pull request can be supplied as argument in any of the following formats:
 - by number, such as "13" or "#13"
 - by URL, such as "https://gitea.com/OWNER/REPO/pulls/13"
-- by the name of its head branch, such as "feature/login" or "bob:feature/login"
+- by the name of its head branch, such as "feature/login" or "bob:feature/login"`
+
+const pullArguments = pullArgumentFormats + `
 
 Without an argument, the pull request of the current branch is selected.`
 
+// pullArgumentsAnnotation documents a pull request argument that may be left out.
 func pullArgumentsAnnotation(annotations map[string]string) map[string]string {
+	return argumentsAnnotation(annotations, pullArguments)
+}
+
+// pullArgumentRequiredAnnotation documents a pull request argument that has no default.
+func pullArgumentRequiredAnnotation(annotations map[string]string) map[string]string {
+	return argumentsAnnotation(annotations, pullArgumentFormats)
+}
+
+func argumentsAnnotation(annotations map[string]string, text string) map[string]string {
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	annotations["gt.arguments"] = pullArguments
+	annotations["gt.arguments"] = text
 	return annotations
 }
 
@@ -242,7 +254,7 @@ func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
 	cmd.Flags().BoolVarP(&useEditor, "editor", "e", false, "Write the body in your editor")
 	cmd.Flags().StringVar(&commentsFile, "comments-file", "", "Read inline comments from a JSON `file`: an array of path, body, and new_position or old_position")
 	cmd.Flags().StringVar(&commit, "commit", "", "Commit `sha` to review (default: the head of the pull request)")
-	cmd.ValidArgsFunction = a.completePulls("open")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("open"))
 	return cmd
 }
 
@@ -442,7 +454,7 @@ func reviewPossessive(item services.Review) string {
 	case "REQUEST_CHANGES":
 		noun = "change request"
 	}
-	return item.Author + "'s " + noun
+	return item.Reviewer() + "'s " + noun
 }
 
 // pullAndID resolves the pull request and the ID that review subcommands take as their two arguments.
@@ -462,17 +474,17 @@ func (a *application) pullReviewListCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		items, err := (services.Reviews{Client: t.client, Repository: t.Repo}).List(cmd.Context(), n, limit, page)
+		window, err := (services.Reviews{Client: t.client, Repository: t.Repo}).ListPage(cmd.Context(), n, limit, page)
 		if err != nil {
 			return err
 		}
 		ref := fmt.Sprintf("%s#%d", t.Repo, n)
-		return writeTable(a, cmd, items, listSpec[services.Review]{
+		return writeTable(a, cmd, window.Items, listSpec[services.Review]{
 			Columns: []terminal.Column{{Header: "ID"}, {Header: "Reviewer"}, {Header: "State"}, {Header: "Submitted"}, {Header: "Comments"}, {Header: "Body", Flex: true}},
 			Row: func(item services.Review) []terminal.Cell {
 				return []terminal.Cell{
 					{Text: strconv.FormatInt(item.ID, 10), Link: item.URL},
-					{Text: item.Author},
+					{Text: item.Reviewer()},
 					reviewStateCell(item),
 					{Time: terminal.ParseTime(item.SubmittedAt)},
 					{Text: strconv.Itoa(item.CommentsCount)},
@@ -480,17 +492,17 @@ func (a *application) pullReviewListCommand() *cobra.Command {
 				}
 			},
 			Empty: "no reviews on " + ref, Context: "reviews on " + ref,
-		}, listPage{Number: page, More: len(items) == limit})
+		}, servicePage(window, page))
 	}}
 	pageFlags(cmd, &limit, &page)
 	cmd.Example = `$ gt pr review list 13
 $ gt pr review list --json id,author,state`
-	cmd.ValidArgsFunction = a.completePulls("all")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("all"))
 	return cmd
 }
 
 func (a *application) pullReviewViewCommand() *cobra.Command {
-	cmd := &cobra.Command{Use: "view <number> <review-id>", Short: "View a review", Annotations: pullArgumentsAnnotation(nil), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "view <number> <review-id>", Short: "View a review", Annotations: pullArgumentRequiredAnnotation(nil), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) error {
 		t, n, id, err := a.pullAndID(cmd, args)
 		if err != nil {
 			return err
@@ -501,14 +513,14 @@ func (a *application) pullReviewViewCommand() *cobra.Command {
 		}
 		now := a.deps.Now()
 		return writeView(a, cmd, item, func(item services.Review) terminal.View {
-			meta := item.Author
+			meta := item.Reviewer()
 			if submitted := terminal.ParseTime(item.SubmittedAt); !submitted.IsZero() {
 				meta += " • " + terminal.RelativeTime(now, submitted)
 			}
 			return terminal.View{
 				Title: fmt.Sprintf("Review on %s#%d", t.Repo, n), ID: strconv.FormatInt(item.ID, 10), Badges: []terminal.Cell{reviewStateCell(item)}, Meta: meta,
 				Fields: []terminal.Field{
-					{Label: "Reviewer", Value: item.Author, PipedOnly: true},
+					{Label: "Reviewer", Value: item.Reviewer(), PipedOnly: true},
 					{Label: "State", Value: item.State, PipedOnly: true},
 					{Label: "Inline comments", Value: strconv.Itoa(item.CommentsCount)},
 					{Label: "Commit", Value: item.Commit},
@@ -541,11 +553,7 @@ func (a *application) pullReviewCommentsCommand() *cobra.Command {
 		return writeTable(a, cmd, items, listSpec[services.ReviewComment]{
 			Columns: []terminal.Column{{Header: "ID"}, {Header: "File"}, {Header: "Author"}, {Header: "Resolved"}, {Header: "Body", Flex: true}},
 			Row: func(item services.ReviewComment) []terminal.Cell {
-				location := item.Path
-				if item.Line > 0 {
-					location = fmt.Sprintf("%s:%d", item.Path, item.Line)
-				}
-				return []terminal.Cell{{Text: strconv.FormatInt(item.ID, 10), Link: item.URL}, {Text: location}, {Text: item.Author}, {Text: item.Resolver}, {Text: item.Body}}
+				return []terminal.Cell{{Text: strconv.FormatInt(item.ID, 10), Link: item.URL}, {Text: item.Location()}, {Text: item.Author}, {Text: item.Resolver}, {Text: item.Body}}
 			},
 			Empty: "no inline review comments on " + ref, Context: "inline review comments on " + ref,
 		}, listPage{Number: page, More: len(items) == limit})
@@ -554,7 +562,7 @@ func (a *application) pullReviewCommentsCommand() *cobra.Command {
 	cmd.Flags().Int64Var(&reviewID, "review", 0, "Limit comments to one review `ID`")
 	cmd.Example = `$ gt pr review comments 13
 $ gt pr review comments 13 --review 6`
-	cmd.ValidArgsFunction = a.completePulls("all")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("all"))
 	return cmd
 }
 
@@ -585,7 +593,7 @@ func (a *application) pullReviewResolveCommand(resolve bool) *cobra.Command {
 func (a *application) pullReviewReplyCommand() *cobra.Command {
 	var body, file string
 	var useEditor bool
-	cmd := &cobra.Command{Use: "reply <number> <comment-id>", Short: "Reply to an inline review comment", Annotations: pullArgumentsAnnotation(nil), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+	cmd := &cobra.Command{Use: "reply <number> <comment-id>", Short: "Reply to an inline review comment", Annotations: pullArgumentRequiredAnnotation(nil), Args: argsExact(2), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var draft terminal.Draft
 		defer finishDraft(&draft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
@@ -639,6 +647,9 @@ func (a *application) completeReviewArgs(inline bool) cobra.CompletionFunc {
 		if len(args) == 0 {
 			return pulls(cmd, args, toComplete)
 		}
+		if len(args) > 1 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
 		n, err := number(args[0])
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
@@ -653,7 +664,7 @@ func (a *application) completeReviewArgs(inline bool) cobra.CompletionFunc {
 			}
 			items, err := service.List(ctx, n, completionLimit, 1)
 			return describe(items, func(item services.Review) (string, string) {
-				return strconv.FormatInt(item.ID, 10), reviewStateCell(item).Text + " by " + item.Author
+				return strconv.FormatInt(item.ID, 10), reviewStateCell(item).Text + " by " + item.Reviewer()
 			}), err
 		})(cmd, args, toComplete)
 	}

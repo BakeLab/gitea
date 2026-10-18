@@ -54,6 +54,30 @@ func TestReviewRequestPartialFailureStopsFurtherEdits(t *testing.T) {
 	require.Equal(t, 2, mutations)
 }
 
+func TestReviewerTeamCheckSkippedWhenTeamListingIsForbidden(t *testing.T) {
+	var posted bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/orgs/owner":
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case r.URL.Path == "/api/v1/orgs/owner/teams":
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"Must be an organization member"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/pulls/1/requested_reviewers":
+			posted = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			_, _ = w.Write([]byte(`{"number":1}`))
+		}
+	}))
+	defer server.Close()
+	changes := ReviewRequestChanges{Add: ReviewRequestInput{Teams: []string{"devs"}}}
+	_, err := (Reviews{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}).ChangeRequests(context.Background(), 1, changes)
+	require.NoError(t, err)
+	require.True(t, posted, "the server decides whether the team exists")
+}
+
 func TestUnknownReviewerTeamRejectsBeforeUserRemoval(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method)
@@ -70,4 +94,26 @@ func TestUnknownReviewerTeamRejectsBeforeUserRemoval(t *testing.T) {
 	changes := ReviewRequestChanges{Remove: ReviewRequestInput{Users: []string{"alice"}}, Add: ReviewRequestInput{Teams: []string{"missing"}}}
 	_, err := (Reviews{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}).ChangeRequests(context.Background(), 1, changes)
 	require.ErrorContains(t, err, `team "missing" is unavailable`)
+}
+
+func TestReviewerTeamCheckSkippedForAHiddenPrivateOrganization(t *testing.T) {
+	var posted bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/orgs/owner" || r.URL.Path == "/api/v1/users/owner":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"GetUserByName"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/pulls/1/requested_reviewers":
+			posted = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			_, _ = w.Write([]byte(`{"number":1}`))
+		}
+	}))
+	defer server.Close()
+	changes := ReviewRequestChanges{Add: ReviewRequestInput{Teams: []string{"devs"}}}
+	_, err := (Reviews{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}).ChangeRequests(context.Background(), 1, changes)
+	require.NoError(t, err)
+	require.True(t, posted, "a non-member cannot see the organization, so the server decides")
 }

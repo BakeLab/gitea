@@ -76,14 +76,14 @@ func (a *application) pullCheckoutCommand() *cobra.Command {
 	var branch string
 	var detached, update bool
 	cmd := &cobra.Command{Use: "checkout {<number> | <url> | <branch>}", Aliases: []string{"co"}, Short: "Check out a pull request", Long: `Check out the head of a pull request in a local branch that tracks the head branch, so
-that git push updates it and pr commands without an argument select the pull request.`, Annotations: pullArgumentsAnnotation(nil), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+that git push updates it and pr commands without an argument select the pull request.`, Annotations: pullArgumentRequiredAnnotation(nil), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if detached && (cmd.Flags().Changed("branch") || update) {
 			return clierr.Wrap(clierr.Usage, errors.New("--detach and --branch/--update are mutually exclusive"))
 		}
 		if cmd.Flags().Changed("branch") && strings.TrimSpace(branch) == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--branch cannot be empty"))
 		}
-		target, n, err := a.pullSelector(cmd, args)
+		target, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -149,7 +149,7 @@ that git push updates it and pr commands without an argument select the pull req
 	cmd.Flags().BoolVar(&update, "update", false, "Fast-forward an existing branch to the PR head; reject divergence")
 	cmd.Flags().BoolVar(&detached, "detach", false, "Check out the PR commit without creating or changing a branch")
 	cmd.Flags().StringVarP(&branch, "branch", "b", "", "Local branch name (default: the head branch name when free, else OWNER/BRANCH or pr/NUMBER)")
-	cmd.ValidArgsFunction = a.completePulls("open")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("open"))
 	cmd.Example = `$ gt pr checkout 13
 $ gt pr co feature/login
 $ gt pr checkout 13 --update`

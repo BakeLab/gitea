@@ -102,7 +102,7 @@ func TestTeamAccessRequests(t *testing.T) {
 	service := Teams{Client: client}
 	members, err := service.Members(context.Background(), 3, 5, 2)
 	require.NoError(t, err)
-	require.Equal(t, []OrganizationMember{{ID: 2, Username: "bob"}}, members.Items)
+	require.Equal(t, []TeamMember{{ID: 2, Username: "bob"}}, members.Items)
 	repos, err := service.Repositories(context.Background(), 3, 5, 1)
 	require.NoError(t, err)
 	require.Equal(t, "https://gitea.test/acme/project", repos.Items[0].URL)
@@ -119,6 +119,15 @@ func TestTeamFromKeepsAbsentValuesEmpty(t *testing.T) {
 	require.Equal(t, Team{ID: 1, Name: "Owners", Permission: "owner", Units: map[string]string{}}, item)
 }
 
+func TestTeamUnitLevelAppliesThePermissionToEveryUnit(t *testing.T) {
+	team := Team{Permission: "write", Units: map[string]string{"repo.wiki": "none"}}
+	require.Equal(t, "write", team.UnitLevel("repo.code"))
+	require.Equal(t, "write", team.UnitLevel("repo.wiki"))
+	require.Equal(t, "read", team.UnitLevel("repo.ext_wiki"))
+	require.Equal(t, "write", Team{Permission: "none", Units: map[string]string{"repo.code": "write"}}.UnitLevel("repo.code"))
+	require.Equal(t, "none", Team{Permission: "none"}.UnitLevel("repo.code"))
+}
+
 func TestTeamAccessSummarizesUnits(t *testing.T) {
 	for _, tc := range []struct {
 		permission string
@@ -132,6 +141,11 @@ func TestTeamAccessSummarizesUnits(t *testing.T) {
 		{"none", map[string]string{"repo.code": "write", "repo.issues": "write", "repo.pulls": "write", "repo.wiki": "none", "repo.ext_wiki": "read"}, "write (code, issues, pulls)"},
 		{"none", map[string]string{"repo.code": "write", "repo.wiki": "read"}, "custom"},
 		{"none", map[string]string{"repo.ext_issues": "read"}, "none"},
+		// Gitea grants the team permission on every unit when the team has no unit rows.
+		{"write", nil, "write"},
+		{"read", map[string]string{}, "read"},
+		{"write", map[string]string{"repo.wiki": "read"}, "write"},
+		{"read", map[string]string{"repo.code": "write"}, "custom"},
 	} {
 		require.Equal(t, tc.want, Team{Permission: tc.permission, Units: tc.units}.Access(), "%v", tc.units)
 	}
@@ -164,4 +178,23 @@ func TestTeamFindSearchesTheOrganization(t *testing.T) {
 	_, err = service.Find(context.Background(), "nope", "dev")
 	require.EqualError(t, err, `organization "nope" not found`)
 	require.Equal(t, []string{"devops", "devops", "", "", "DEV", "DEV"}, queries)
+}
+
+func TestTeamEditSendsThePermissionBeforeTheUnits(t *testing.T) {
+	var bodies []map[string]any
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/teams/5", r.URL.Path)
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"id":5,"name":"devs","permission":"admin"}`))
+			return
+		}
+		bodies = append(bodies, requestJSON(t, r))
+		_, _ = w.Write([]byte(`{"id":5,"name":"devs","permission":"write"}`))
+	}))
+	permission := "write"
+	_, err := (Teams{Client: client}).Edit(context.Background(), 5, TeamOptions{Permission: &permission, Units: map[string]string{"repo.wiki": "read"}, ReplaceUnits: true})
+	require.NoError(t, err)
+	require.Len(t, bodies, 2)
+	require.Equal(t, map[string]any{"name": "devs", "permission": "write"}, bodies[0], "Gitea 28 keeps an admin team admin when one request sets both")
+	require.Equal(t, map[string]any{"repo.wiki": "read"}, bodies[1]["units_map"])
 }

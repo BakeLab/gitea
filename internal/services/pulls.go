@@ -254,7 +254,7 @@ func (s Pulls) DecideAll(ctx context.Context, items []Pull) ([]Pull, error) {
 		if err != nil {
 			return err
 		}
-		item.ReviewDecision = ReviewDecision(LatestReviews(all), len(item.Reviewers)+len(item.ReviewerTeams) > 0)
+		item.ReviewDecision = ReviewDecision(all, len(item.Reviewers)+len(item.ReviewerTeams) > 0)
 		viewed[i] = item
 		return nil
 	})
@@ -274,6 +274,26 @@ func (s Pulls) ListOpen(ctx context.Context) ([]Pull, error) {
 		items, _, err := s.List(ctx, PullListOptions{State: "open", Limit: 50, Page: page})
 		return items, err
 	})
+}
+
+// NewestClosed returns the most recently updated closed or merged pull request that keep
+// accepts, and whether there is one. It reads pages newest first and stops at the first match.
+func (s Pulls) NewestClosed(ctx context.Context, keep func(Pull) bool) (Pull, bool, error) {
+	for page := 1; page <= maxListPages; page++ {
+		items, _, err := s.List(ctx, PullListOptions{State: "closed", Sort: "recentupdate", Limit: 50, Page: page})
+		if err != nil {
+			return Pull{}, false, err
+		}
+		if len(items) == 0 {
+			return Pull{}, false, nil
+		}
+		for _, item := range items {
+			if keep(item) {
+				return item, true, nil
+			}
+		}
+	}
+	return Pull{}, false, nil
 }
 
 // Create opens a pull request.

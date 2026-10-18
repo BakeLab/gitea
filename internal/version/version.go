@@ -36,13 +36,29 @@ func Format() string {
 	return format(Version, Tags, runtime.Version(), info)
 }
 
+// Current returns the version of this build: the ldflags stamp, else the module version recorded
+// by go install, else "development".
+func Current() string {
+	info, _ := debug.ReadBuildInfo()
+	return resolve(Version, info)
+}
+
+func resolve(version string, info *debug.BuildInfo) string {
+	// A build without a checkout (a source archive) stamps an empty version.
+	if version != "" && version != "development" {
+		return version
+	}
+	// go install gitea.dev/cli@v1.0.0 stamps the module version instead of the ldflags.
+	if info != nil && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return strings.TrimPrefix(info.Main.Version, "v")
+	}
+	return "development"
+}
+
 func format(version, tags, goVersion string, info *debug.BuildInfo) string {
+	version = resolve(version, info)
 	date := ""
 	if info != nil {
-		// go install gitea.dev/cli@v1.0.0 stamps the module version instead of the ldflags.
-		if version == "development" && info.Main.Version != "" && info.Main.Version != "(devel)" {
-			version = strings.TrimPrefix(info.Main.Version, "v")
-		}
 		for _, setting := range info.Settings {
 			if setting.Key != "vcs.time" {
 				continue

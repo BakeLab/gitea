@@ -66,3 +66,12 @@ func TestCanceledManDoesNotPublishOutputFile(t *testing.T) {
 	require.True(t, os.IsNotExist(err))
 	require.Empty(t, out.String())
 }
+
+func TestManIncludesHelpTopicsButNotHelpCommands(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	require.NoError(t, Execute(context.Background(), deps, []string{"man"}))
+	manual := out.String()
+	require.Contains(t, manual, `.TH "GT-ENVIRONMENT"`)
+	require.Contains(t, manual, `.TH "GT-EXIT-CODES"`)
+	require.NotContains(t, manual, `.TH "GT-PR-HELP"`)
+}

@@ -28,3 +28,12 @@ func TestFormatDescribesTheBuild(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveFallsBackWhenUnstamped(t *testing.T) {
+	installed := &debug.BuildInfo{Main: debug.Module{Version: "v1.0.1"}}
+	require.Equal(t, "1.0.1", resolve("development", installed))
+	require.Equal(t, "1.0.1", resolve("", installed))
+	require.Equal(t, "development", resolve("", nil))
+	require.Equal(t, "development", resolve("", &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}))
+	require.Equal(t, "1.0.0", resolve("1.0.0", installed))
+}

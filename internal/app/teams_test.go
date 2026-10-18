@@ -81,6 +81,24 @@ func TestTeamEditMergesUnitsIntoTheCurrentPolicy(t *testing.T) {
 	require.Len(t, sent, 2)
 }
 
+func TestTeamEditRefusesToRenameTheOwnerTeam(t *testing.T) {
+	var patched int
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch {
+			patched++
+		}
+		_, _ = w.Write([]byte(`{"id":3,"name":"Owners","permission":"owner","organization":{"username":"acme"}}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"team", "edit", "3", "--name", "Admins"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.ErrorContains(t, err, "owner team and cannot be renamed")
+	require.Zero(t, patched)
+	require.NoError(t, Execute(context.Background(), deps, []string{"team", "edit", "3", "--description", "Owners", "--json"}))
+	require.Equal(t, 1, patched)
+}
+
 func TestTeamRepoAddTakesRepositoriesAsArguments(t *testing.T) {
 	var granted []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -181,7 +199,11 @@ func TestTeamPermissionSetsEveryUnit(t *testing.T) {
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			sent = append(sent, body)
 		}
-		_, _ = w.Write([]byte(`{"id":5,"name":"devs","permission":"none","organization":{"username":"acme"}}`))
+		permission := "none"
+		if len(sent) > 0 {
+			permission, _ = sent[len(sent)-1]["permission"].(string)
+		}
+		_, _ = w.Write([]byte(`{"id":5,"name":"devs","permission":"` + permission + `","organization":{"username":"acme"}}`))
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
@@ -194,12 +216,14 @@ func TestTeamPermissionSetsEveryUnit(t *testing.T) {
 	}
 	require.NoError(t, Execute(context.Background(), deps, []string{"team", "create", "acme/devs", "--permission", "write"}))
 	require.NoError(t, Execute(context.Background(), deps, []string{"team", "edit", "5", "--permission", "read", "--unit", "repo.wiki=write"}))
-	require.Len(t, sent, 2)
+	require.Len(t, sent, 3)
 	require.Equal(t, "devs", sent[0]["name"])
 	require.Equal(t, every("write"), sent[0]["units_map"])
+	// The permission goes first on its own, because Gitea 28 keeps an admin team admin otherwise.
+	require.Equal(t, map[string]any{"name": "devs", "permission": "read"}, sent[1])
 	wikiWrite := every("read")
 	wikiWrite["repo.wiki"] = "write"
-	require.Equal(t, map[string]any{"permission": "read", "units_map": wikiWrite}, sent[1])
+	require.Equal(t, map[string]any{"permission": "read", "units_map": wikiWrite}, sent[2])
 }
 
 func TestTeamMemberRemoveConfirmsOnce(t *testing.T) {

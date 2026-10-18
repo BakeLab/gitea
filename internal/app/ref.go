@@ -176,7 +176,10 @@ func (a *application) resolveRefs(cmd *cobra.Command, raws []string, kind refKin
 		if selected.Repo != "" && !a.sameRepository(selected.Repo, parsed.Repo) {
 			return target{}, nil, clierr.Wrap(clierr.Usage, fmt.Errorf("%s and %s are in different repositories; run one command per repository", source, raw))
 		}
-		selected, source = parsed, raw
+		// A reference without an instance must not replace one that names it, whatever the order.
+		if selected.Repo == "" || a.namesInstance(parsed.Repo) {
+			selected, source = parsed, raw
+		}
 	}
 	t, err := a.resolveRequest(cmd.Context(), targetRequest{requireRepo: true, authenticate: true, repo: selected.Repo, repoSource: source})
 	return t, numbers, err
@@ -193,16 +196,40 @@ func (a *application) sameRepository(first, second string) bool {
 	return oneErr == nil && twoErr == nil && strings.EqualFold(one.Slug(), two.Slug()) && (one.Host == "" || two.Host == "" || one.Host == two.Host)
 }
 
+// namesInstance reports whether a repository argument names its instance, as a URL or
+// HOST/OWNER/REPO does.
+func (a *application) namesInstance(raw string) bool {
+	s, err := a.settings()
+	if err != nil {
+		return false
+	}
+	parsed, err := settings.ParseRepository(raw, s.Hosts.Hosts)
+	return err == nil && parsed.Host != ""
+}
+
 // pullSelector resolves the pull request a pr command addresses: N, #N, OWNER/REPO#N, a pull
 // request URL, a head branch, OWNER:BRANCH, or, without an argument, the pull request of the
 // checked-out branch.
+//
+// A branch names an open pull request only; commands that mutate open pull requests use it
+// as is, and the others use pullSelectorAny.
 func (a *application) pullSelector(cmd *cobra.Command, args []string) (target, int64, error) {
+	return a.selectPull(cmd, args, false)
+}
+
+// pullSelectorAny is pullSelector that, when no open pull request has the branch, falls back
+// to the most recently updated closed or merged one, like gh.
+func (a *application) pullSelectorAny(cmd *cobra.Command, args []string) (target, int64, error) {
+	return a.selectPull(cmd, args, true)
+}
+
+func (a *application) selectPull(cmd *cobra.Command, args []string, closed bool) (target, int64, error) {
 	if len(args) == 0 || args[0] == "" {
 		// The checked-out branch says nothing about a repository chosen with --repo.
 		if a.options.repo != "" {
 			return target{}, 0, clierr.Wrap(clierr.Usage, errors.New("pass a pull request number, URL or branch with --repo"))
 		}
-		return a.currentPull(cmd.Context())
+		return a.currentPull(cmd.Context(), closed)
 	}
 	raw := args[0]
 	if _, err := parseRef(raw, pullRef); !errors.Is(err, errNotRef) {
@@ -216,13 +243,22 @@ func (a *application) pullSelector(cmd *cobra.Command, args []string) (target, i
 	if !qualified {
 		owner, branch = "", raw
 	}
-	pulls, err := (services.Pulls{Client: t.client, Repository: t.Repo}).ListOpen(cmd.Context())
+	service := services.Pulls{Client: t.client, Repository: t.Repo}
+	pulls, err := service.ListOpen(cmd.Context())
 	if err != nil {
 		return t, 0, err
 	}
 	n, err := pullForBranch(pulls, owner, branch, t.Repo)
 	if err != nil {
 		return t, 0, err
+	}
+	if n == 0 && closed {
+		if n, err = newestClosedForBranch(cmd.Context(), service, owner, branch, false, t.Repo); err != nil {
+			return t, 0, err
+		}
+		if n > 0 {
+			return t, n, nil
+		}
 	}
 	if n == 0 {
 		return t, 0, fmt.Errorf("no open pull request for branch %q in %s; pass a number, URL or branch", raw, t.Repo)
@@ -233,8 +269,9 @@ func (a *application) pullSelector(cmd *cobra.Command, args []string) (target, i
 // currentPull finds the pull request of the checked-out branch: the one pr checkout recorded
 // while it is open, else the open pull request whose head is the branch's upstream (and the
 // upstream remote's owner), else one of this repository whose head has the local branch's name, else N from a pr/N
-// branch, else the recorded pull request even though it is no longer open.
-func (a *application) currentPull(ctx context.Context) (target, int64, error) {
+// branch, else the recorded pull request even though it is no longer open. With closed, the
+// newest closed or merged pull request for the branch comes last.
+func (a *application) currentPull(ctx context.Context, closed bool) (target, int64, error) {
 	branch, err := git.CurrentBranchConfig(ctx, a.gitProbe(), a.options.cwd)
 	if err != nil {
 		return target{}, 0, clierr.Wrap(clierr.Usage, errors.New("not on a branch; pass a pull request number, URL or branch"))
@@ -256,6 +293,7 @@ func (a *application) currentPull(ctx context.Context) (target, int64, error) {
 	if err != nil {
 		return t, 0, err
 	}
+	upstreamOwner := ""
 	if branch.Merge != "" {
 		owner := ""
 		if remoteURL, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", branch.Remote); err == nil {
@@ -266,6 +304,7 @@ func (a *application) currentPull(ctx context.Context) (target, int64, error) {
 		if n, err := pullForBranch(pulls, owner, branch.Merge, t.Repo); owner != "" && (n > 0 || err != nil) {
 			return t, n, err
 		}
+		upstreamOwner = owner
 	}
 	// A bare branch name only identifies the repository's own pull requests: a contributor's
 	// fork may use main or fix as its head branch too.
@@ -281,7 +320,32 @@ func (a *application) currentPull(ctx context.Context) (target, int64, error) {
 	if recorded > 0 {
 		return t, recorded, nil
 	}
+	if closed {
+		// Same matching as above: the upstream's owner first, then the repository's own branches.
+		if upstreamOwner != "" {
+			if n, err := newestClosedForBranch(ctx, service, upstreamOwner, branch.Merge, false, t.Repo); n > 0 || err != nil {
+				return t, n, err
+			}
+		}
+		if n, err := newestClosedForBranch(ctx, service, "", branch.Name, true, t.Repo); n > 0 || err != nil {
+			return t, n, err
+		}
+	}
 	return t, 0, fmt.Errorf("no open pull request for branch %q in %s; pass a number, URL or branch", branch.Name, t.Repo)
+}
+
+// newestClosedForBranch returns the number of the most recently updated closed or merged pull
+// request whose head is branch in a repository of owner (any owner when empty), or 0. With own,
+// only pull requests from the repository itself count, as a fork may reuse the branch name.
+func newestClosedForBranch(ctx context.Context, service services.Pulls, owner, branch string, own bool, repo string) (int64, error) {
+	pull, found, err := service.NewestClosed(ctx, func(pull services.Pull) bool {
+		headOwner, _, _ := strings.Cut(pull.HeadRepo, "/")
+		return pull.Head == branch && (owner == "" || strings.EqualFold(headOwner, owner)) && (!own || strings.EqualFold(pull.HeadRepo, repo))
+	})
+	if err != nil || !found {
+		return 0, err
+	}
+	return pull.Number, nil
 }
 
 // remoteOwns reports whether the Git remote named remote points at the target's repository.

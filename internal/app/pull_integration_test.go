@@ -326,7 +326,7 @@ func testTeamReviewRequests(t *testing.T, deps *Dependencies, execute func(...st
 			t.Errorf("team review repository cleanup: %v", err)
 		}
 	})
-	execute("team", "repo", "add", teamID, "-R", repo.FullName)
+	execute("team", "repo", "add", teamID, repo.FullName)
 	execute("branch", "create", "feature", "-R", repo.FullName)
 	deps.Streams.In = strings.NewReader(`{"branch":"feature","content":"dGVzdAo=","message":"Disposable team review change"}`)
 	execute("api", "repos/"+repo.FullName+"/contents/change.txt", "--input", "-")

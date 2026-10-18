@@ -5,6 +5,7 @@ package app
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -220,12 +221,16 @@ func (f *releaseFields) options(a *application, cmd *cobra.Command) (services.Re
 func (a *application) releaseCreateCommand() *cobra.Command {
 	var fields releaseFields
 	var assets []string
+	var verifyTag bool
 	command := &cobra.Command{
 		Use:     "create [<tag>] [<file>...]",
 		Aliases: []string{"new"},
 		Short:   "Create a release",
 		Long: `Create a release for a tag, and upload the files that follow the tag as its assets. Gitea creates
-the tag at --target (the default branch) when it does not exist yet. The title defaults to the tag.`,
+the tag at --target (the default branch) when it does not exist yet. The title defaults to the tag.
+
+gt never pushes: commits and tags that only exist in your clone are not on the server, so push them
+first (git push <remote> <tag>), or pass --verify-tag to fail when the tag is not on the server yet.`,
 		Example: `# Create a release with notes from a file and two assets
 $ gt release create v1.0.0 dist/gt-linux dist/gt-darwin --notes-file CHANGELOG.md
 
@@ -267,6 +272,9 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 				return err
 			}
 			service := services.Releases{Client: target.client, Repository: target.Repo}
+			if err := a.checkReleaseTag(cmd, target, service, fields.tag, opts.Target != nil, verifyTag); err != nil {
+				return err
+			}
 			if fields.editor {
 				if editorDraft, err = a.editDraft(cmd, ""); err != nil {
 					return err
@@ -279,6 +287,11 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 				}
 			}
 			item, err := service.Create(cmd.Context(), opts)
+			if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Kind == "target" {
+				if hint := a.pushHint(cmd.Context(), target, *opts.Target); hint != "" {
+					err = explain(err, "%s; %s", err, hint)
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -305,8 +318,61 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 	command.Flags().StringVar(&fields.tag, "tag", "", "Release tag")
 	_ = command.Flags().MarkHidden("tag")
 	command.Flags().StringSliceVar(&assets, "asset", nil, "File to upload as an asset (repeatable)")
+	command.Flags().BoolVar(&verifyTag, "verify-tag", false, "Fail if the tag does not exist on the server yet")
 	command.ValidArgsFunction = pathArgs(1, true, completeFiles, a.completeTags())
 	return command
+}
+
+// checkReleaseTag guards against a release whose tag Gitea would create from the default branch
+// instead of from the local commit the tag names: --verify-tag refuses a tag the server lacks, and
+// without it a tag that only exists locally is warned about.
+func (a *application) checkReleaseTag(cmd *cobra.Command, t target, service services.Releases, tag string, hasTarget, verify bool) error {
+	local := a.localRefExists(cmd.Context(), "refs/tags/"+tag)
+	if !verify && (!local || hasTarget) {
+		return nil
+	}
+	exists, err := service.TagExists(cmd.Context(), tag)
+	if err != nil || exists {
+		return err
+	}
+	hint := ""
+	if local {
+		hint = "push it first: git push " + a.releaseRemote(t) + " " + tag
+	}
+	if verify {
+		missing := services.NotFound("tag", tag, t.Repo)
+		return explain(missing, "%s; %s", missing, cmp.Or(hint, "create it first or drop --verify-tag"))
+	}
+	a.warn(cmd, "Tag %s exists in your clone but not in %s; the release creates it at the default branch, not at your local commit; %s", tag, t.Repo, hint)
+	return nil
+}
+
+// pushHint tells how to publish a ref that only the local clone has, or returns "".
+func (a *application) pushHint(ctx context.Context, t target, ref string) string {
+	remote := a.releaseRemote(t)
+	for _, prefix := range []string{"refs/tags/", "refs/heads/"} {
+		if a.localRefExists(ctx, prefix+ref) {
+			return "push it first: git push " + remote + " " + ref
+		}
+	}
+	if ref != "" && a.localRefExists(ctx, ref+"^{commit}") {
+		return "push the branch that has this commit first: git push " + remote
+	}
+	return ""
+}
+
+// localRefExists reports whether the working directory's checkout resolves ref.
+func (a *application) localRefExists(ctx context.Context, ref string) bool {
+	_, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "--quiet", ref)
+	return err == nil
+}
+
+// releaseRemote is the remote of the target repository, else origin.
+func (a *application) releaseRemote(t target) string {
+	if remote, ok := strings.CutPrefix(t.RepoSource, "remote "); ok {
+		return remote
+	}
+	return cmp.Or(a.options.remote, "origin")
 }
 
 // rejectSwitchValue refuses the old gt syntax "--draft false": a switch reads no value, so the
@@ -349,6 +415,9 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 			if err != nil {
 				return err
 			}
+			if opts.Body != nil && *opts.Body == "" {
+				return clierr.Wrap(clierr.Usage, errors.New("release notes cannot be cleared because Gitea ignores empty notes; edit them to a placeholder, or delete and recreate the release"))
+			}
 			if cmd.Flags().Changed("tag") {
 				if len(args) != 1 || strings.TrimSpace(fields.tag) == "" {
 					return clierr.Wrap(clierr.Usage, errors.New("--tag requires one release and a nonempty new tag"))
@@ -372,6 +441,9 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 					return err
 				}
 				opts.Body = &editorDraft.Body
+			}
+			if editorDraft.Body == "" && fields.editor {
+				return clierr.Wrap(clierr.Usage, errors.New("release notes cannot be cleared because Gitea ignores empty notes; edit them to a placeholder, or delete and recreate the release"))
 			}
 			return batchDone(a, cmd, args, func(tag string) string { return "release " + tag }, func(tag string) (services.Release, error) {
 				item, err := service.View(cmd.Context(), tag)

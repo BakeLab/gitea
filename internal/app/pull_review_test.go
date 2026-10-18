@@ -270,6 +270,39 @@ func TestReviewCommentsFileValidatedBeforeRequests(t *testing.T) {
 	}
 }
 
+func TestReviewDismissChecksTheReviewStateFirst(t *testing.T) {
+	mutations := 0
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			mutations++
+		}
+		_, _ = w.Write([]byte(`{"id":2,"state":"COMMENT","user":{"login":"bob"}}`))
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"pr", "review", "dismiss", "1", "2", "-R", "owner/repo", "--body", "Reason", "--yes"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.ErrorContains(t, err, "only approvals and change requests can be dismissed")
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "undismiss", "1", "2", "-R", "owner/repo"}))
+	require.Contains(t, diagnostics.String(), "is not dismissed")
+	require.Zero(t, mutations)
+}
+
+func TestReviewDismissOpensNoEditorForAnUndismissableReview(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		_, _ = w.Write([]byte(`{"id":2,"state":"COMMENT","user":{"login":"bob"}}`))
+	}))
+	defer server.Close()
+	deps, _, _ := testDeps(t)
+	editor, _ := newDraftEditor(t, "Reason")
+	deps.Editor = editor
+	deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "editor"})
+	err := Execute(context.Background(), deps, []string{"pr", "review", "dismiss", "1", "2", "-R", "alice/project", "--editor", "--no-input", "--yes"})
+	require.ErrorContains(t, err, "only approvals and change requests can be dismissed")
+	require.Empty(t, editor.command, "the editor must not open")
+}
+
 func TestReviewDeleteAndDismissRequireYesWithoutInput(t *testing.T) {
 	mutations := 0
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

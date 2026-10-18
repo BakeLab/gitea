@@ -192,3 +192,33 @@ func TestViewCommentsCannotBeCombinedWithJSON(t *testing.T) {
 	require.ErrorContains(t, err, "gt pr review list <number> --json")
 	require.Empty(t, out.String())
 }
+
+func TestCommentEditAndDeleteReachInlineReviewComments(t *testing.T) {
+	var calls []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/issues/comments/40":
+			w.WriteHeader(http.StatusNoContent) // Gitea's answer for inline review comments
+		case "PATCH /api/v1/repos/alice/project/issues/comments/40":
+			require.Equal(t, "Fixed", payloadField(t, r, "body"))
+			_, _ = w.Write([]byte(`{"id":40,"body":"Fixed"}`))
+		case "DELETE /api/v1/repos/alice/project/issues/comments/40":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	run := func(args ...string) error {
+		return Execute(context.Background(), deps, append([]string{"pr", "comment"}, append(args, "-R", "alice/project", "--no-input")...))
+	}
+	require.NoError(t, run("edit", "40", "--body", "Fixed"))
+	require.NoError(t, run("delete", "40", "--yes"))
+	require.Contains(t, calls, "PATCH /api/v1/repos/alice/project/issues/comments/40")
+	require.Contains(t, calls, "DELETE /api/v1/repos/alice/project/issues/comments/40")
+	// Viewing still explains why an inline review comment cannot be shown.
+	require.ErrorContains(t, run("view", "40"), "not a plain comment")
+}

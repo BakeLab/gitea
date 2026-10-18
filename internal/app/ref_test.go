@@ -82,19 +82,25 @@ func refApplication(t *testing.T, gitResults map[string]string) (*application, s
 		]`)
 	}))
 	t.Cleanup(server.Close)
+	return refApplicationWith(t, server.URL, gitResults)
+}
+
+// refApplicationWith is refApplication for an existing server.
+func refApplicationWith(t *testing.T, serverURL string, gitResults map[string]string) (*application, string) {
+	t.Helper()
 	deps, _, _ := testDeps(t)
-	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
+	deps.Getenv = serverEnv(serverURL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
 	results := map[string]string{
-		"remote get-url origin":              server.URL + "/alice/project.git",
-		"remote get-url pulls/bob/project":   server.URL + "/bob/project.git",
-		"remote get-url fork":                server.URL + "/bob/project.git",
-		"remote get-url pulls/carol/project": server.URL + "/carol/project.git",
+		"remote get-url origin":              serverURL + "/alice/project.git",
+		"remote get-url pulls/bob/project":   serverURL + "/bob/project.git",
+		"remote get-url fork":                serverURL + "/bob/project.git",
+		"remote get-url pulls/carol/project": serverURL + "/carol/project.git",
 	}
 	for key, value := range gitResults {
 		results[key] = value
 	}
 	deps.Git = &fakeGit{results: results}
-	return &application{deps: deps}, server.URL
+	return &application{deps: deps}, serverURL
 }
 
 func commandContext() *cobra.Command {
@@ -228,4 +234,21 @@ func TestExpandMeUsesTheLoginTeaActsAs(t *testing.T) {
 	resolved, err := a.resolve(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, "bob", resolved.expandMe("@me"))
+}
+
+func TestResolveRefsKeepsTheReferenceThatNamesAnInstance(t *testing.T) {
+	a, serverURL := refApplication(t, nil)
+	// GITEA_TOKEN belongs to serverURL, so selecting the other instance is what fails here.
+	other := strings.Replace(serverURL, "127.0.0.1", "localhost", 1)
+	const mismatch = "matching the selected instance"
+	for _, raws := range [][]string{
+		{other + "/bob/tool/issues/1", "bob/tool#2"},
+		{"bob/tool#2", other + "/bob/tool/issues/1"},
+	} {
+		_, _, err := a.resolveRefs(commandContext(), raws, issueRef)
+		require.ErrorContains(t, err, mismatch, raws)
+	}
+	a.options.repo = other + "/bob/tool"
+	_, _, err := a.resolveRef(commandContext(), "bob/tool#2", issueRef)
+	require.ErrorContains(t, err, mismatch, "an argument without an instance keeps the --repo one")
 }

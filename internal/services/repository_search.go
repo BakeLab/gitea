@@ -121,7 +121,10 @@ func (s Repositories) Search(ctx context.Context, opts RepositorySearchOptions) 
 	if err != nil {
 		return Page[Repository]{}, err
 	}
-	options.PrioritizedByOwnerID = account.ID
+	// Gitea groups results by owner ahead of the requested sort, so an explicit sort cannot keep it.
+	if opts.Sort == "" {
+		options.PrioritizedByOwnerID = account.ID
+	}
 	window, err := callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Repository, *gitea.Response, error) {
 		options.ListOptions = list
 		return c.Repositories.SearchRepos(ctx, options)

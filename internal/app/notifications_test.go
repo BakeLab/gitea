@@ -155,3 +155,23 @@ func TestNotificationMarkAllNamesTheBeforeCutoff(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "mark-read", "--all", "--before=1h"}))
 	require.Contains(t, withoutANSI(diagnostics.String()), "No unread notifications updated before 2028-02-01 11:00 in your inbox")
 }
+
+func TestNotificationViewSurvivesARefusedMark(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPatch:
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"token does not have write:notification scope"}`))
+		default:
+			_, _ = w.Write([]byte(`{"id":12,"unread":true,"repository":{"full_name":"alice/project"},"subject":{"title":"Improve greeting","type":"Pull","state":"open","url":"https://gitea.test/api/v1/repos/alice/project/issues/17"}}`))
+		}
+	}))
+	defer server.Close()
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "view", "12"}))
+	require.Contains(t, out.String(), "title:\tImprove greeting\n")
+	require.Contains(t, out.String(), "state:\topen\n")
+	require.Contains(t, out.String(), "status:\tunread\n")
+	require.NotContains(t, out.String(), "_No comments yet._")
+	require.Contains(t, diagnostics.String(), "Could not mark notification 12 as read")
+}

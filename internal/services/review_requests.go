@@ -97,17 +97,37 @@ func (s Reviews) changeRequests(ctx context.Context, n int64, changes ReviewRequ
 	return nil
 }
 
-// CheckRequestTeams verifies that every named team exists in the repository's organization.
+// CheckRequestTeams verifies that every named team exists in the repository's organization. Gitea
+// lets only organization members list teams, though outside collaborators and the pull request
+// author may request reviews; when the lookup is forbidden, or the organization is hidden from the
+// caller (a private organization answers 404 to non-members), the server checks the names, as for gh.
 func (s Reviews) CheckRequestTeams(ctx context.Context, names []string) error {
 	owner, _, _ := strings.Cut(s.Repository, "/")
 	_, isOrg, err := organization(ctx, s.Client, owner)
+	if IsForbidden(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
 	if !isOrg {
+		// A private organization answers 404 to non-members, like a name nobody owns; a user that
+		// exists is certainly not an organization.
+		_, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
+			return c.Users.GetUserInfo(ctx, owner)
+		})
+		if IsNotFound(err) || IsForbidden(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		return errors.New("team reviews require an organization repository")
 	}
 	teams, err := (Teams{Client: s.Client}).ByName(ctx, owner)
+	if IsForbidden(err) || IsNotFound(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

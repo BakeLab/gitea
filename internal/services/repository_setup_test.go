@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,4 +89,26 @@ func TestRepositoryMigrationKeepsMessageWithoutCredentials(t *testing.T) {
 	}))
 	_, err := (Repositories{Client: client}).Migrate(context.Background(), RepositoryMigrationOptions{Name: "imported", CloneURL: "https://source.test/repo", Service: "git"})
 	require.ErrorContains(t, err, "repository already exists")
+}
+
+func TestRepositoryMigrateSetsADescriptionBeyondTheSDKByteLimitByEdit(t *testing.T) {
+	description := strings.Repeat("日", 800) // 2400 bytes, 800 characters
+	var methods []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		body := requestJSON(t, r)
+		switch r.Method {
+		case http.MethodPost:
+			require.Empty(t, body["description"])
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":2,"name":"imported","full_name":"alice/imported"}`))
+		case http.MethodPatch:
+			require.Equal(t, description, body["description"])
+			_, _ = w.Write([]byte(`{"id":2,"name":"imported","full_name":"alice/imported","description":"` + description + `"}`))
+		}
+	}))
+	migrated, err := (Repositories{Client: client}).Migrate(context.Background(), RepositoryMigrationOptions{Name: "imported", CloneURL: "https://source.test/repo", Service: "git", Description: description})
+	require.NoError(t, err)
+	require.Equal(t, []string{http.MethodPost, http.MethodPatch}, methods)
+	require.Equal(t, description, migrated.Description)
 }

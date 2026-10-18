@@ -61,6 +61,10 @@ func issueCommandPath(cmd *cobra.Command) string {
 
 // commentName names a comment in messages: "comment 81 on alice/x#1".
 func commentName(t target, comment services.Comment) string {
+	if comment.IssueNumber == 0 {
+		// Inline review comments cannot be fetched, so their discussion is unknown.
+		return fmt.Sprintf("comment %d on %s", comment.ID, t.Repo)
+	}
 	return fmt.Sprintf("comment %d on %s#%d", comment.ID, t.Repo, comment.IssueNumber)
 }
 
@@ -159,8 +163,10 @@ func lastComment(cmd *cobra.Command, t target, n int64) (services.Comment, error
 }
 
 // comment returns the comment that the ID argument names, which a command of kind may change: pr
-// commands refuse comments on issues.
-func (a *application) comment(cmd *cobra.Command, arg string, kind refKind) (target, services.Comment, error) {
+// commands refuse comments on issues. With changing set, as for edit and delete, a comment that
+// cannot be fetched, such as an inline review comment, is returned by its ID alone: the edit and
+// delete endpoints accept it.
+func (a *application) comment(cmd *cobra.Command, arg string, kind refKind, changing bool) (target, services.Comment, error) {
 	id, err := number(arg)
 	if err != nil {
 		return target{}, services.Comment{}, err
@@ -170,6 +176,9 @@ func (a *application) comment(cmd *cobra.Command, arg string, kind refKind) (tar
 		return t, services.Comment{}, err
 	}
 	current, err := (services.Comments{Client: t.client, Repository: t.Repo}).View(cmd.Context(), id)
+	if notPlain := (services.NotPlainCommentError{}); changing && errors.As(err, &notPlain) {
+		return t, services.Comment{ID: id}, nil
+	}
 	if err == nil && kind == pullRef && !current.Pull {
 		err = fmt.Errorf("comment %d in %s is on an issue, not a pull request; use %s %d", id, t.Repo, issueCommandPath(cmd), id)
 	}
@@ -178,6 +187,10 @@ func (a *application) comment(cmd *cobra.Command, arg string, kind refKind) (tar
 
 // editComment replaces the text of comment, prefilling the prompt or editor with it.
 func (a *application) editComment(cmd *cobra.Command, t target, comment services.Comment, f commentFlags) (runErr error) {
+	// An inline review comment is not fetched, so there is no text to start from.
+	if comment.Author == "" && !cmd.Flags().Changed("body") && !cmd.Flags().Changed("body-file") {
+		return clierr.Wrap(clierr.Usage, errors.New("an inline review comment cannot be prefilled; supply --body or --body-file"))
+	}
 	body, draft, err := a.readComment(cmd, f, comment.Body)
 	defer finishDraft(&draft, &runErr)
 	if err != nil {
@@ -328,17 +341,20 @@ $ gt %[1]s comment list %[2]s --json id,author,body`, words.group, words.example
 				return err
 			}
 		}
-		items, err := (services.Comments{Client: t.client, Repository: t.Repo}).Page(cmd.Context(), n, limit, page)
+		result, err := (services.Comments{Client: t.client, Repository: t.Repo}).Page(cmd.Context(), n, limit, page)
 		if err != nil {
 			return err
 		}
-		return a.writeComments(cmd, t, n, items)
+		if err := a.writeComments(cmd, t, n, result.Items); err != nil {
+			return err
+		}
+		return a.morePagesHint(cmd, result.More, page)
 	}}
 	pageFlags(list, &limit, &page)
 	list.ValidArgsFunction = a.completeDiscussions(kind)
 
 	view := &cobra.Command{Use: "view <comment-id>", Short: "View a comment", Example: fmt.Sprintf("$ gt %s comment view 81", words.group), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		t, comment, err := a.comment(cmd, args[0], kind)
+		t, comment, err := a.comment(cmd, args[0], kind, false)
 		if err != nil {
 			return err
 		}
@@ -366,7 +382,7 @@ $ gt %[1]s comment edit 81`, words.group), Args: argsExact(1), RunE: func(cmd *c
 		if err := editFlags.validate(cmd); err != nil {
 			return err
 		}
-		t, comment, err := a.comment(cmd, args[0], kind)
+		t, comment, err := a.comment(cmd, args[0], kind, true)
 		if err != nil {
 			return err
 		}
@@ -375,7 +391,7 @@ $ gt %[1]s comment edit 81`, words.group), Args: argsExact(1), RunE: func(cmd *c
 	editFlags.register(edit)
 
 	remove := &cobra.Command{Use: "delete <comment-id>", Short: "Delete a comment", Example: fmt.Sprintf("$ gt %s comment delete 81 --yes", words.group), Annotations: map[string]string{"gt.text": "comment deletion does not return a resource", "gt.confirm": "true"}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		t, comment, err := a.comment(cmd, args[0], kind)
+		t, comment, err := a.comment(cmd, args[0], kind, true)
 		if err != nil {
 			return err
 		}

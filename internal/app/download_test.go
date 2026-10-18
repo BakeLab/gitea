@@ -184,3 +184,32 @@ func TestDownloadFlagsRegisterGhNames(t *testing.T) {
 	require.Equal(t, "dir", flags.dir)
 	require.True(t, cmd.Flags().Lookup("output-file").Hidden)
 }
+
+func TestDownloadCreatesTheMissingDirectory(t *testing.T) {
+	t.Chdir(t.TempDir())
+	deps, _, _ := testDeps(t)
+	a := &application{deps: deps}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	flags := downloadFlags{dir: filepath.Join("dist", "assets")}
+	path, _, err := flags.destination("asset.bin")
+	require.NoError(t, err)
+	require.NoError(t, a.download(cmd, flags, path, strings.NewReader("new")))
+	data, err := os.ReadFile(filepath.Join("dist", "assets", "asset.bin"))
+	require.NoError(t, err)
+	require.Equal(t, "new", string(data))
+}
+
+func TestCopyExclusiveStandsInForFilesystemsWithoutHardLinks(t *testing.T) {
+	directory := t.TempDir()
+	temporary := filepath.Join(directory, ".gt-download-1")
+	require.NoError(t, os.WriteFile(temporary, []byte("body"), 0o600))
+	output := filepath.Join(directory, "asset.bin")
+	linkErr := errors.New("operation not supported")
+	require.NoError(t, copyExclusive(temporary, output, true, linkErr))
+	data, err := os.ReadFile(output)
+	require.NoError(t, err)
+	require.Equal(t, "body", string(data))
+	require.ErrorContains(t, copyExclusive(temporary, output, true, linkErr), "already exists")
+	require.ErrorIs(t, copyExclusive(temporary, filepath.Join(directory, "missing", "asset.bin"), true, linkErr), linkErr)
+}

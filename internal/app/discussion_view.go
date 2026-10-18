@@ -238,10 +238,7 @@ func pullReviewComments(cmd *cobra.Command, t target, n int64, reviews []service
 		return nil, err
 	}
 	for _, comment := range inline {
-		location := comment.Path
-		if comment.Line > 0 {
-			location = fmt.Sprintf("%s:%d", comment.Path, comment.Line)
-		}
+		location := comment.Location()
 		result = append(result, discussionComment{
 			author: comment.Author, createdAt: comment.CreatedAt, body: comment.Body, id: comment.ID,
 			heading: "commented on " + location, meta: [2]string{"path", location},

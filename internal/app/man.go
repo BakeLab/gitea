@@ -40,10 +40,7 @@ func (a *application) manCommand() *cobra.Command {
 						return err
 					}
 					if len(args) == 0 {
-						for _, child := range page.Commands() {
-							if child.Hidden {
-								continue
-							}
+						for _, child := range ManualCommands(page) {
 							if err := render(child); err != nil {
 								return err
 							}
@@ -66,4 +63,16 @@ func ManualDate(getenv func(string) string) time.Time {
 		return time.Unix(seconds, 0).UTC()
 	}
 	return time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+}
+
+// ManualCommands lists the subcommands that get a page in the manual: the available commands,
+// without the generated help command, and the help topics such as environment and exit-codes.
+func ManualCommands(page *cobra.Command) []*cobra.Command {
+	var children []*cobra.Command
+	for _, child := range page.Commands() {
+		if child.Annotations[topicAnnotation] != "" || (child.IsAvailableCommand() && !child.IsAdditionalHelpTopicCommand()) {
+			children = append(children, child)
+		}
+	}
+	return children
 }

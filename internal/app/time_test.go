@@ -24,9 +24,9 @@ func TestTimeListShowsRepositoryAndDurations(t *testing.T) {
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"time", "list", "--mine", "--total"}))
-	require.Equal(t, "1\talice/project#3\talice\t1h 25m\t2026-10-01T10:00:00Z\n"+
-		"2\tbob/tools#3\talice\t15m\t2026-10-02T10:00:00Z\n"+
-		"Total: 1h 40m\n", out.String())
+	require.Equal(t, "1\talice/project#3\talice\t1h25m0s\t2026-10-01T10:00:00Z\n"+
+		"2\tbob/tools#3\talice\t15m0s\t2026-10-02T10:00:00Z\n"+
+		"Total: 1h40m0s\n", out.String())
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"time", "list", "--mine", "--json=repository,issue_number"}))
 	require.JSONEq(t, `[{"repository":"alice/project","issue_number":3},{"repository":"bob/tools","issue_number":3}]`, out.String())
@@ -125,6 +125,27 @@ func TestTimeListTotalPipedCoversEmptyAndPagedListings(t *testing.T) {
 	out.Reset()
 	empty = false
 	require.NoError(t, Execute(context.Background(), deps, []string{"time", "list", "--mine", "--total", "--limit", "1"}))
-	require.Equal(t, "1\talice/project#3\talice\t1m\t2026-10-01T10:00:00Z\nTotal: 1m\n", out.String())
+	require.Equal(t, "1\talice/project#3\talice\t1m0s\t2026-10-01T10:00:00Z\nTotal: 1m0s\n", out.String())
 	require.Equal(t, "more results available; use --page 2\n", diagnostics.String())
+}
+
+func TestCommentListHintsAtTheNextClientSidePage(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":1,"body":"a","user":{"login":"alice"}},{"id":2,"body":"b","user":{"login":"alice"}}]`))
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "comment", "list", "3", "-R", "alice/project", "--limit", "1"}))
+	require.Equal(t, "more results available; use --page 2\n", diagnostics.String())
+}
+
+func TestPipedTimeKeepsExactSeconds(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":1,"time":3723,"created":"2026-10-01T10:00:00Z","user_name":"alice","issue":{"number":3,"repository":{"full_name":"alice/project"}}}]`))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"time", "list", "--mine", "--total"}))
+	require.Equal(t, "1\talice/project#3\talice\t1h2m3s\t2026-10-01T10:00:00Z\nTotal: 1h2m3s\n", out.String())
+	require.Equal(t, "1h 2m", spent(3723))
 }

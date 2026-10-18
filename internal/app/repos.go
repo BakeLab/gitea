@@ -273,7 +273,7 @@ $ gt repo view alice/project --web`,
 	}
 	view.Flags().BoolVarP(&web, "web", "w", false, "Open the repository in the browser")
 	view.Flags().StringVarP(&branch, "branch", "b", "", "Show the README of this branch (default: the default branch)")
-	_ = view.RegisterFlagCompletionFunc("branch", a.completeBranches())
+	_ = view.RegisterFlagCompletionFunc("branch", a.completeArgumentBranches())
 	view.ValidArgsFunction = a.completeRepos()
 	return view
 }

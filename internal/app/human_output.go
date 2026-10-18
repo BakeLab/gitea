@@ -83,6 +83,10 @@ func writeTable[T any](a *application, cmd *cobra.Command, items []T, spec listS
 	}
 	d := a.display()
 	if len(items) == 0 {
+		// A filtered page can be empty while later pages are not.
+		if page.More {
+			return a.morePagesHint(cmd, true, page.Number)
+		}
 		if !d.TTY || spec.Empty == "" {
 			return nil
 		}

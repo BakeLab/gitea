@@ -217,10 +217,15 @@ $ gt release download v1.0.0 --archive zip`,
 			}
 			paths := make([]string, len(assets))
 			skipped := make([]bool, len(assets))
+			seen := map[string]services.ReleaseAsset{}
 			for i, asset := range assets {
 				if paths[i], skipped[i], err = flags.destination(asset.Name); err != nil {
 					return err
 				}
+				if first, dup := seen[paths[i]]; dup && paths[i] != "-" {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("assets %d and %d are both named %s; download one at a time with --output", first.ID, asset.ID, asset.Name))
+				}
+				seen[paths[i]] = asset
 			}
 			for i, asset := range assets {
 				if skipped[i] {

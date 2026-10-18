@@ -109,6 +109,14 @@ func TestWorkflowRunChecksInputsBeforeDispatching(t *testing.T) {
 		"workflow nightly.yaml is disabled; enable it with: gt workflow enable nightly.yaml -R alice/project")
 }
 
+func TestWorkflowRunExplainsWorkflowsComeFromTheDefaultBranch(t *testing.T) {
+	server, requests := actionsAPI(t, map[string]string{"GET actions/workflows": workflowsFixture})
+	deps, _, _ := actionsDeps(t, server.URL, false)
+	err := Execute(context.Background(), deps, []string{"workflow", "run", "branch-only", "-R", "alice/project", "--ref", "feature"})
+	require.EqualError(t, err, `workflow "branch-only" not found in alice/project; workflows are listed from the default branch and must exist there, even with --ref; see gt workflow list -R alice/project`)
+	require.Equal(t, []string{"GET actions/workflows"}, *requests)
+}
+
 // dispatchingPrompter answers workflow inputs: selections with their first choice, confirmations
 // with yes, and text by title.
 type dispatchingPrompter struct {

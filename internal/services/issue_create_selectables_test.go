@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -57,9 +58,12 @@ func TestCreateSelectablesLoadWriteFieldsOnlyWithPush(t *testing.T) {
 	}
 	for _, push := range []bool{false, true} {
 		t.Run(fmt.Sprintf("push=%t", push), func(t *testing.T) {
+			var mu sync.Mutex
 			calls := map[string]int{}
 			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
 				calls[r.URL.Path]++
+				mu.Unlock()
 				switch r.URL.Path {
 				case "/api/v1/repos/alice/project":
 					_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","permissions":{"push":%t,"pull":true}}`, push)
