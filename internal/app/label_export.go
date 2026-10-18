@@ -43,6 +43,10 @@ $ gt label export -R alice/old | gt label import - -R alice/new`, Args: argsExac
 				}
 				text.WriteString(row)
 			}
+			if output == "" || output == "-" {
+				// Label names and descriptions are server text.
+				destination = terminal.SafeWriter(destination, a.deps.Streams.OutTTY, false)
+			}
 			_, err = io.WriteString(destination, text.String())
 			return err
 		})

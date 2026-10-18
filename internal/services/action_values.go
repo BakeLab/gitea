@@ -36,11 +36,20 @@ func (s ActionScope) String() string {
 type ActionSecret struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	CreatedAt   string `json:"created_at,omitempty"`
+	CreatedAt   string `json:"created_at"`
 }
 
 // ActionValueName is the name Gitea stores a secret or variable under: names are upper-cased.
 func ActionValueName(name string) string { return strings.ToUpper(name) }
+
+// classifyValue classifies err as a missing secret or variable only when the 404 says so: Gitea
+// answers a plain "not found" when the repository or organization itself does not exist.
+func classifyValue(err error, kind, name string, scope ActionScope) error {
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusNotFound && !strings.Contains(apiErr.Message, kind) {
+		return err
+	}
+	return Classify(err, kind, ActionValueName(name), scope.String())
+}
 
 func secretFrom(secret *gitea.Secret) ActionSecret {
 	return ActionSecret{Name: secret.Name, Description: secret.Description, CreatedAt: timestamp(secret.Created)}
@@ -117,7 +126,7 @@ func (s ActionSecrets) Delete(ctx context.Context, name string) error {
 		// TODO(sdk): DeleteRepoSecret does not escape the secret name.
 		return c.Actions.DeleteRepoSecret(ctx, owner, repo, url.PathEscape(name))
 	})
-	return Classify(err, "secret", ActionValueName(name), s.Scope.String())
+	return classifyValue(err, "secret", name, s.Scope)
 }
 
 // ActionVariables manages scoped non-secret Actions variables.
@@ -171,23 +180,28 @@ func (s ActionVariables) View(ctx context.Context, name string) (ActionVariable,
 		err = getJSON(ctx, s.Client, s.repoVariables(name), variable)
 	}
 	if err != nil {
-		return ActionVariable{}, Classify(err, "variable", ActionValueName(name), s.Scope.String())
+		return ActionVariable{}, classifyValue(err, "variable", name, s.Scope)
 	}
 	return variableFrom(variable), nil
 }
 
-// Set chooses create or update from an authoritative read.
-func (s ActionVariables) Set(ctx context.Context, name, value, description string) (ActionVariable, error) {
+// Set chooses create or update from an authoritative read. A nil description keeps the one of an
+// existing variable, as Gitea replaces it on every update.
+func (s ActionVariables) Set(ctx context.Context, name, value string, newDescription *string) (ActionVariable, error) {
 	exists := true
-	if _, err := s.View(ctx, name); err != nil {
+	current, err := s.View(ctx, name)
+	if err != nil {
 		if !errors.As(err, new(*NotFoundError)) {
 			return ActionVariable{}, err
 		}
 		exists = false
 	}
+	description := current.Description
+	if newDescription != nil {
+		description = *newDescription
+	}
 	create := gitea.CreateActionsVariableOption{Value: value, Description: description}
 	update := gitea.UpdateActionsVariableOption{Name: name, Value: value, Description: description}
-	var err error
 	switch {
 	case s.Scope.Account:
 		err = do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
@@ -228,5 +242,5 @@ func (s ActionVariables) Delete(ctx context.Context, name string) error {
 	default:
 		err = sendJSON(ctx, s.Client, http.MethodDelete, s.repoVariables(name), nil, nil)
 	}
-	return Classify(err, "variable", ActionValueName(name), s.Scope.String())
+	return classifyValue(err, "variable", name, s.Scope)
 }

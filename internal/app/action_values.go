@@ -11,6 +11,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
@@ -176,6 +177,10 @@ $ echo -n "$TOKEN" | gt secret set NPM_TOKEN --org acme
 # set the secrets of a dotenv file
 $ gt secret set --env-file .env`
 	}
+	descriptionNote := ""
+	if secret {
+		descriptionNote = "\n\nSetting an existing secret without --description clears its description."
+	}
 	cmd := &cobra.Command{
 		Use:   "set [<name>]",
 		Short: "Create or update a " + kind,
@@ -183,7 +188,7 @@ $ gt secret set --env-file .env`
 
 The value comes from --body, --body-file or standard input when it is not a terminal (one
 trailing line break is removed), or else from a prompt. --env-file sets every NAME=value of a
-dotenv file instead.`, kind),
+dotenv file instead.%[2]s`, kind, descriptionNote),
 		Example: example,
 		Args:    usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -192,6 +197,11 @@ dotenv file instead.`, kind),
 			}
 			if envFile != "" && (cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file")) {
 				return clierr.Wrap(clierr.Usage, errors.New("--env-file cannot be combined with --body or --body-file"))
+			}
+			if envFile == "" {
+				if err := checkActionValueName(args[0]); err != nil {
+					return err
+				}
 			}
 			var entries []envEntry
 			if envFile != "" {
@@ -216,8 +226,8 @@ dotenv file instead.`, kind),
 				if entry.value == "" {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("the value of %s is empty", entry.name))
 				}
-				if !secret && len(entry.value) > 65536 {
-					return clierr.Wrap(clierr.Usage, fmt.Errorf("the value of %s exceeds 64 KiB", entry.name))
+				if !secret && utf8.RuneCountInString(entry.value) > 65536 {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("the value of %s exceeds 65536 characters", entry.name))
 				}
 			}
 			selected, t, err := scope.resolve(a, cmd)
@@ -244,8 +254,12 @@ dotenv file instead.`, kind),
 				}, func(item services.ActionSecret) string { return report(item.Name) })
 			}
 			service := services.ActionVariables{Client: t.client, Scope: selected}
+			var newDescription *string
+			if cmd.Flags().Changed("description") {
+				newDescription = &description
+			}
 			return batchDone(a, cmd, entries, label, func(entry envEntry) (services.ActionVariable, error) {
-				return service.Set(cmd.Context(), entry.name, entry.value, description)
+				return service.Set(cmd.Context(), entry.name, entry.value, newDescription)
 			}, func(item services.ActionVariable) string { return report(item.Name) })
 		},
 	}
@@ -304,14 +318,20 @@ func parseEnvFile(data []byte) ([]envEntry, error) {
 		if !ok || name == "" {
 			return nil, fmt.Errorf("line %d: use NAME=value", number)
 		}
-		switch {
-		case len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"':
-			value = strings.ReplaceAll(value[1:len(value)-1], `\n`, "\n")
-		case len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'':
-			value = value[1 : len(value)-1]
-		default:
-			value, _, _ = strings.Cut(value, " #")
+		if quote := value[:min(len(value), 1)]; quote == `"` || quote == "'" {
+			// The value ends at the closing quote; only a # comment may follow it.
+			closing := strings.Index(value[1:], quote) + 1
+			rest := strings.TrimSpace(value[min(closing+1, len(value)):])
+			if closing > 0 && (rest == "" || strings.HasPrefix(rest, "#")) {
+				value = value[1:closing]
+				if quote == `"` {
+					value = strings.ReplaceAll(value, `\n`, "\n")
+				}
+				entries = append(entries, envEntry{name, value})
+				continue
+			}
 		}
+		value, _, _ = strings.Cut(value, " #")
 		entries = append(entries, envEntry{name, value})
 	}
 	if len(entries) == 0 {

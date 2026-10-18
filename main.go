@@ -14,6 +14,7 @@ import (
 
 	"gitea.dev/cli/internal/app"
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/terminal"
 )
 
 func main() {
@@ -46,7 +47,8 @@ func run(ctx context.Context, deps app.Dependencies, args []string) int {
 		fmt.Fprintln(deps.Streams.ErrOut, "Canceled.")
 		reportDraft(deps, err)
 	default:
-		fmt.Fprintf(deps.Streams.ErrOut, "Error: %v\n", app.Explain(ctx, deps, err))
+		// Errors quote names the server supplied, which may carry terminal escapes.
+		fmt.Fprintf(deps.Streams.ErrOut, "Error: %s\n", terminal.SafeText(app.Explain(ctx, deps, err).Error()))
 	}
 	return code
 }

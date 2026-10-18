@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -53,4 +54,61 @@ func TestPullDiffNameOnly(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "diff", "2", "-R", "alice/project", "--name-only"}))
 	require.Equal(t, "one.txt\ndocs/two.md\n", out.String())
+}
+
+func TestPullCloseCommentsFirstAndDeletesTheBranchOnlyWhenAsked(t *testing.T) {
+	for _, tc := range []struct {
+		flags   []string
+		deleted bool
+	}{
+		{nil, false},
+		{[]string{"--delete-branch"}, true},
+	} {
+		var requests []string
+		server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests = append(requests, r.Method+" "+r.URL.Path)
+			switch {
+			case r.Method == http.MethodGet:
+				_, _ = w.Write([]byte(`{"number":3,"title":"Add login","state":"open","base":{"ref":"main"},"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"alice/project","permissions":{"push":true}}}}`))
+			case r.Method == http.MethodPatch:
+				_, _ = w.Write([]byte(`{"number":3,"title":"Add login","state":"closed","base":{"ref":"main"},"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"alice/project","permissions":{"push":true}}}}`))
+			case r.Method == http.MethodPost:
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"id":1}`))
+			default:
+				w.WriteHeader(http.StatusNoContent)
+			}
+		}))
+		deps, _, _ := serverDeps(t, server.URL)
+		deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --short HEAD": "main"}}
+		require.NoError(t, Execute(context.Background(), deps, append([]string{"pr", "close", "3", "-R", "alice/project", "-c", "Superseded"}, tc.flags...)))
+		server.Close()
+		comment := slices.Index(requests, "POST /api/v1/repos/alice/project/issues/3/comments")
+		edit := slices.Index(requests, "PATCH /api/v1/repos/alice/project/pulls/3")
+		require.True(t, comment >= 0 && comment < edit, requests)
+		require.Equal(t, tc.deleted, slices.Contains(requests, "DELETE /api/v1/repos/alice/project/branches/feature"), requests)
+	}
+}
+
+func TestPullCloseAndReopenRefuseMergedPullRequests(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		_, _ = w.Write([]byte(`{"number":3,"title":"Add login","state":"closed","merged":true}`))
+	}))
+	defer server.Close()
+	for verb, want := range map[string]string{"close": "cannot be closed", "reopen": "cannot be reopened"} {
+		deps, _, _ := serverDeps(t, server.URL)
+		require.ErrorContains(t, Execute(context.Background(), deps, []string{"pr", verb, "3", "-R", "alice/project"}), want)
+	}
+}
+
+func TestPullReopenWarnsWhenAlreadyOpen(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		_, _ = w.Write([]byte(`{"number":3,"title":"Add login","state":"open"}`))
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "reopen", "3", "-R", "alice/project"}))
+	require.Contains(t, diagnostics.String(), "is already open")
 }

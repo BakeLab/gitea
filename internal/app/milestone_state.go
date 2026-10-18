@@ -54,6 +54,7 @@ $ gt milestone %[1]s v1.0 v1.1`, verb), Annotations: map[string]string{"gt.argum
 		return errors.Join(append(failures, writeBatchJSON(a, cmd, len(selected), results))...)
 	}}
 	cmd.Flags().BoolVar(&byName, "by-name", false, "Match numeric arguments as milestone titles rather than IDs")
-	cmd.ValidArgsFunction = a.completeMilestones()
+	// Only milestones that are not in the target state are worth completing.
+	cmd.ValidArgsFunction = a.completeMilestonesIn(map[string]string{"open": "closed", "closed": "open"}[state])
 	return cmd
 }

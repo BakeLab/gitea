@@ -106,3 +106,31 @@ func assertIssueEdit(t *testing.T, want gitea.EditIssueOption, body []byte) {
 		assert.Equal(t, want, got)
 	}
 }
+
+func TestEditAddLabelReplacesTheExclusiveLabelOfTheSameScope(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/issues/7":
+			_, _ = w.Write([]byte(`{"number":7,"labels":[{"id":1,"name":"bug"},{"id":2,"name":"Priority/Low","exclusive":true}]}`))
+		case "GET /api/v1/repos/alice/project/labels":
+			if r.URL.Query().Get("page") != "1" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"id":1,"name":"bug"},{"id":2,"name":"Priority/Low","exclusive":true},{"id":3,"name":"Priority/High","exclusive":true},{"id":4,"name":"Kind/x","exclusive":true}]`))
+		case "GET /api/v1/orgs/alice":
+			w.WriteHeader(http.StatusNotFound)
+		case "PUT /api/v1/repos/alice/project/issues/7/labels":
+			assert.JSONEq(t, `{"labels":[1,3]}`, string(body))
+			_, _ = w.Write([]byte(`[]`))
+		case "GET /api/v1/repos/alice/project/pulls/7":
+			_, _ = w.Write([]byte(`{"number":7}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusTeapot)
+		}
+	}))
+	_, err := (Issues{Client: client, Repository: "alice/project"}).Edit(context.Background(), 7, IssueEdit{Changes: &MetadataChanges{AddLabels: []int64{3}}})
+	require.NoError(t, err)
+}

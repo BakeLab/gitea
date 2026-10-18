@@ -178,12 +178,21 @@ func ParseRepository(raw string, hosts map[string]Host) (RepositoryRef, error) {
 	}
 	// The longest configured instance prefix wins, so example.org/gitea/owner/name selects the
 	// instance installed below /gitea rather than example.org.
-	best := ""
+	best, tied := "", false
 	for instance := range hosts {
 		prefix := bareInstance(instance)
-		if len(prefix) > len(bareInstance(best)) && strings.HasPrefix(strings.ToLower(trimmed), strings.ToLower(prefix)+"/") && ValidSlug(trimmed[len(prefix)+1:]) {
-			best = instance
+		if !strings.HasPrefix(strings.ToLower(trimmed), strings.ToLower(prefix)+"/") || !ValidSlug(trimmed[len(prefix)+1:]) {
+			continue
 		}
+		switch longest := len(bareInstance(best)); {
+		case len(prefix) > longest:
+			best, tied = instance, false
+		case len(prefix) == longest && best != "":
+			tied = true // http and https of one host: the scheme decides, not map order.
+		}
+	}
+	if tied {
+		return RepositoryRef{}, fmt.Errorf("instance %q is configured for both http and https; include the scheme", bareInstance(best))
 	}
 	if best != "" {
 		owner, name, _ := strings.Cut(trimmed[len(bareInstance(best))+1:], "/")

@@ -314,9 +314,13 @@ func (a *application) reviewInteractively(cmd *cobra.Command, args []string) err
 		Author: t.login() != "" && strings.EqualFold(pull.Author, t.login()),
 		Editor: preferences.Editor,
 	}
+	// The annotated diff stays until the review is created, so declining or a failure loses no comment.
+	var diffPath string
 	if preferences.Editor != "" {
 		choices.ReviewDiff = func(context.Context) ([]terminal.ReviewCommentDraft, error) {
-			return a.collectDiffReviewComments(cmd, t, n)
+			comments, path, err := a.collectDiffReviewComments(cmd, t, n)
+			diffPath = path
+			return comments, err
 		}
 	}
 	values, err := a.deps.ReviewForm.CreateReview(cmd.Context(), choices)
@@ -334,7 +338,13 @@ func (a *application) reviewInteractively(cmd *cobra.Command, args []string) err
 	if err != nil {
 		draft := keepDraft(values.Body)
 		finishDraft(&draft, &err)
+		if diffPath != "" {
+			err = fmt.Errorf("%w; the annotated diff is kept at %s", err, diffPath)
+		}
 		return err
+	}
+	if diffPath != "" {
+		_ = os.Remove(diffPath)
 	}
 	return a.reportReview(cmd, t, pull, item)
 }
@@ -365,22 +375,23 @@ func pullHead(item services.Pull, repo string) string {
 	return item.Head
 }
 
-func (a *application) collectDiffReviewComments(cmd *cobra.Command, t target, n int64) ([]terminal.ReviewCommentDraft, error) {
+// collectDiffReviewComments returns the comments annotated into the diff of pull request n and the
+// file holding it, which the caller removes once the review is created.
+func (a *application) collectDiffReviewComments(cmd *cobra.Command, t target, n int64) ([]terminal.ReviewCommentDraft, string, error) {
 	diff, err := (services.Pulls{Client: t.client, Repository: t.Repo}).Diff(cmd.Context(), n)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer diff.Close()
 	path, err := saveDiffReview("", n, t.Repo, diff)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	comments, err := a.reviewDiffFile(cmd, path)
 	if err != nil {
-		return nil, fmt.Errorf("%w; the annotated diff is kept at %s", err, path)
+		return nil, "", fmt.Errorf("%w; the annotated diff is kept at %s", err, path)
 	}
-	_ = os.Remove(path)
-	return comments, nil
+	return comments, path, nil
 }
 
 // reviewDiffFile lets the user annotate the diff at path and returns the validated comments.

@@ -116,6 +116,9 @@ func TestCompletionOffersPathsOnlyWherePathsAreExpected(t *testing.T) {
 		"issue list --state ":            cobra.ShellCompDirectiveNoFileComp,
 		"issue create --body-file ":      cobra.ShellCompDirectiveDefault,
 		"issue create --attachment ":     cobra.ShellCompDirectiveDefault,
+		"label export --output ":         cobra.ShellCompDirectiveDefault,
+		"run download 5 --output ":       cobra.ShellCompDirectiveDefault,
+		"config set ssh_key ":            cobra.ShellCompDirectiveDefault,
 		"api --input ":                   cobra.ShellCompDirectiveDefault,
 		"auth login --ssh-key ":          cobra.ShellCompDirectiveDefault,
 		"ssh-key create ":                cobra.ShellCompDirectiveDefault,
@@ -157,14 +160,14 @@ func TestCompletionOffersPathsOnlyWherePathsAreExpected(t *testing.T) {
 func TestOfflineCompletions(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	deps.Git = &fakeGit{results: map[string]string{
-		`config --get-regexp ^remote\..*\.url$`:             "remote.origin.url https://gitea.example.com/alice/project.git\nremote.my.fork.url git@gitea.example.com:bob/project.git\n",
+		`config --get-regexp ^remote\..*\.url$`:             "remote.origin.url https://gitea.example.com/alice/project.git\nremote.my.fork.url git@gitea.example.com:bob/project.git\nremote.ci.url https://bot:s3cret@gitea.example.com/alice/project.git?token=x\n",
 		"for-each-ref --format=%(refname:short) refs/heads": "main\nfeature/login\n",
 	}}
 	configureAccounts(t, deps, "https://gitea.example.com", "alice", "alice", "bob")
 	for args, want := range map[string][]string{
 		"--host ":   {"https://gitea.example.com\talice, bob"},
 		"--user ":   {"alice\thttps://gitea.example.com (active)", "bob\thttps://gitea.example.com"},
-		"--remote ": {"origin\thttps://gitea.example.com/alice/project.git", "my.fork\tgit@gitea.example.com:bob/project.git"},
+		"--remote ": {"origin\thttps://gitea.example.com/alice/project.git", "my.fork\tgit@gitea.example.com:bob/project.git", "ci\thttps://gitea.example.com/alice/project.git"},
 	} {
 		values, directive := complete(t, deps, out, strings.Split(args, " ")...)
 		require.Equal(t, want, values, args)
@@ -217,6 +220,68 @@ func TestRepositoryCompletionUsesRemotesAndInstance(t *testing.T) {
 	require.Contains(t, tokens, "token alice-token")
 }
 
+func TestLabelCompletionDiscoversTheRepository(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/labels":
+			_, _ = w.Write([]byte(`[{"name":"bug","description":"Broken"},{"name":"docs"}]`))
+		case "/api/v1/users/alice":
+			_, _ = w.Write([]byte(`{"id":1,"login":"alice"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	deps.Git = &fakeGit{results: map[string]string{
+		"remote": "origin", "remote get-url origin": server.URL + "/alice/project.git",
+	}}
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	values, _ := complete(t, deps, out, "label", "delete", "")
+	require.Equal(t, []string{"bug\tBroken", "docs"}, values)
+}
+
+func TestJobCompletionUsesTheRepositoryOfTheRunURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/bob/tool/actions/runs/44/jobs":
+			if r.URL.Query().Get("page") == "1" {
+				_, _ = w.Write([]byte(`{"jobs":[{"id":9,"name":"Build","status":"success"}]}`))
+			} else {
+				_, _ = w.Write([]byte(`{"jobs":[]}`))
+			}
+		case "/api/v1/users/alice":
+			_, _ = w.Write([]byte(`{"id":1,"login":"alice"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": server.URL + "/alice/project.git"}}
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	values, _ := complete(t, deps, out, "run", "logs", server.URL+"/bob/tool/actions/runs/44", "--job", "")
+	require.Equal(t, []string{"9\tBuild · success"}, values)
+}
+
+func TestActionValueCompletionNeedsNoRepositoryForAnOrganization(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/orgs/acme/actions/variables":
+			_, _ = w.Write([]byte(`[{"name":"MODE","description":"Build mode"}]`))
+		case "/api/v1/users/alice":
+			_, _ = w.Write([]byte(`{"id":1,"login":"alice"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	values, _ := complete(t, deps, out, "variable", "delete", "--org", "acme", "")
+	require.Equal(t, []string{"MODE\tBuild mode"}, values)
+}
+
 func TestAPICompletionNeverRefreshesOrFails(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -262,7 +327,7 @@ func TestInstanceCompletions(t *testing.T) {
 			require.Equal(t, "issues", r.URL.Query().Get("type"))
 			_, _ = w.Write([]byte(`[{"number":4,"title":"Crash when config is missing"}]`))
 		case "/api/v1/repos/alice/project/milestones":
-			_, _ = w.Write([]byte(`[{"id":1,"title":"v1.0","description":"First release"}]`))
+			_, _ = w.Write([]byte(`[{"id":1,"title":"v1.0","description":"First release"},{"id":25,"title":"23"}]`))
 		case "/api/v1/repos/alice/project/branches":
 			_, _ = w.Write([]byte(`[{"name":"main","protected":true},{"name":"docs/guide"}]`))
 		case "/api/v1/repos/alice/project/tags":
@@ -297,14 +362,15 @@ func TestInstanceCompletions(t *testing.T) {
 		directive cobra.ShellCompDirective
 	}{
 		{"pulls by prefix", a.completePulls("open"), nil, "1", []string{"13\tAdd login support", "17\tImprove greeting"}, cobra.ShellCompDirectiveNoFileComp},
-		{"pulls skip given arguments and sanitize titles", a.completePulls("open"), []string{"13", "17"}, "", []string{"2\tFix]0;pwned docs"}, cobra.ShellCompDirectiveNoFileComp},
+		{"pulls skip given arguments and sanitize titles", withoutGiven(a.completePulls("open")), []string{"13", "17"}, "", []string{"2\tFix]0;pwned docs"}, cobra.ShellCompDirectiveNoFileComp},
+		{"flag values may equal a positional argument", a.completePulls("open"), []string{"13"}, "13", []string{"13\tAdd login support"}, cobra.ShellCompDirectiveNoFileComp},
 		{"labels are comma-separated", a.completeLabels(), nil, "bug,", []string{"bug,docs"}, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp},
 		{"labels with descriptions", a.completeLabels(), nil, "b", []string{"bug\tSomething is broken"}, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp},
 		{"users", a.completeUsers(), nil, "", []string{"alice\tAlice", "bob"}, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp},
 		{"teams start with organizations", a.completeTeams(), nil, "", []string{"acme/\tAcme Inc"}, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp},
 		{"teams of an organization", a.completeTeams(), nil, "acme/d", []string{"acme/developers\tDevelopers (ID 2)"}, cobra.ShellCompDirectiveNoFileComp},
 		{"issues", a.completeIssues("open"), nil, "", []string{"4\tCrash when config is missing"}, cobra.ShellCompDirectiveNoFileComp},
-		{"milestones", a.completeMilestones(), nil, "", []string{"v1.0\tFirst release"}, cobra.ShellCompDirectiveNoFileComp},
+		{"milestones", a.completeMilestones(), nil, "", []string{"v1.0\tFirst release", "25\t23"}, cobra.ShellCompDirectiveNoFileComp},
 		{"branches", a.completeBranches(), nil, "", []string{"main\tprotected", "docs/guide"}, cobra.ShellCompDirectiveNoFileComp},
 		{"tags", a.completeTags(), nil, "v", []string{"v0.1.0"}, cobra.ShellCompDirectiveNoFileComp},
 		{"releases", a.completeReleases(), nil, "", []string{"v0.1.0\tFirst release"}, cobra.ShellCompDirectiveNoFileComp},
@@ -331,7 +397,7 @@ func TestCompletionTargetAcceptsABareTokenHost(t *testing.T) {
 	require.NoError(t, testManager(t, deps).Register(instance, "alice", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "stored-token"}))
 	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": "127.0.0.1:3999", "GITEA_TOKEN": "environment-token"})
 	a := &application{deps: deps}
-	resolved, err := a.completionTarget(context.Background(), false)
+	resolved, err := a.completionTarget(context.Background(), "", false)
 	require.NoError(t, err)
 	require.Equal(t, instance, resolved.Host)
 }
@@ -346,4 +412,56 @@ func TestAccountCompletionUsesInstanceOfRepository(t *testing.T) {
 		values, _ := complete(t, deps, out, "auth", command, "")
 		require.Equal(t, []string{"adam\thttps://a.example.org", "alice\thttps://a.example.org (active)"}, values, command)
 	}
+}
+
+func TestActionValueCompletionOutsideARepository(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/orgs/acme/actions/variables":
+			_, _ = w.Write([]byte(`[{"name":"REGION","data":"eu"}]`))
+		case "/api/v1/user/actions/variables":
+			_, _ = w.Write([]byte(`[{"name":"HOME_REGION","data":"eu"}]`))
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+			w.WriteHeader(http.StatusTeapot)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	a := &application{deps: deps}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	for name, tc := range map[string]struct {
+		scope services.ActionScope
+		want  []string
+	}{
+		"organization": {services.ActionScope{Organization: "acme"}, []string{"REGION"}},
+		"account":      {services.ActionScope{Account: true}, []string{"HOME_REGION"}},
+		"repository":   {services.ActionScope{}, nil},
+	} {
+		values, _ := a.completeVariables(func() services.ActionScope { return tc.scope })(cmd, nil, "")
+		require.ElementsMatch(t, tc.want, values, name)
+	}
+}
+
+func TestMilestoneCompletionOffersTheMilestonesTheCommandAccepts(t *testing.T) {
+	var states []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project/milestones" {
+			states = append(states, r.URL.Query().Get("state"))
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	a := &application{deps: deps}
+	a.options.repo = "alice/project"
+	root := a.milestoneCommand()
+	for _, path := range [][]string{{"reopen"}, {"close"}, {"view"}, {"issue", "list"}} {
+		cmd, _, err := root.Find(path)
+		require.NoError(t, err)
+		cmd.SetContext(context.Background())
+		cmd.ValidArgsFunction(cmd, nil, "")
+	}
+	require.Equal(t, []string{"closed", "open", "all", "all"}, states)
 }

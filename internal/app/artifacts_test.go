@@ -7,10 +7,12 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -63,7 +65,6 @@ func TestRunDownloadExtractsArtifactsByName(t *testing.T) {
 		"GET actions/runs/29/artifacts": `{"total_count":3,"artifacts":[{"id":1,"name":"build","size_in_bytes":3},{"id":2,"name":"coverage"},{"id":3,"name":"old","expired":true}]}`,
 		"GET actions/artifacts/1/zip":   zipOf(t, map[string]string{"bin/gt": "gt", "README": "read me"}),
 		"GET actions/artifacts/2/zip":   zipOf(t, map[string]string{"cover.out": "100%"}),
-		"GET actions/artifacts/4/zip":   zipOf(t, map[string]string{"../escape": "x"}),
 	})
 	for _, tc := range []struct {
 		name  string
@@ -108,6 +109,39 @@ func TestRunDownloadExtractsArtifactsByName(t *testing.T) {
 			}
 		})
 	}
+	t.Run("newest artifact of a rerun name", func(t *testing.T) {
+		server, _ := actionsAPI(t, map[string]string{
+			"GET actions/runs/29/artifacts": `{"total_count":3,"artifacts":[{"id":1,"name":"dist"},{"id":2,"name":"docs"},{"id":3,"name":"dist"}]}`,
+			"GET actions/artifacts/2/zip":   zipOf(t, map[string]string{"index": "docs"}),
+			"GET actions/artifacts/3/zip":   zipOf(t, map[string]string{"app": "new"}),
+		})
+		dir := t.TempDir()
+		deps, _, _ := actionsDeps(t, server.URL, false)
+		require.NoError(t, Execute(context.Background(), deps, []string{"run", "download", "29", "-R", "alice/project", "-D", dir}))
+		data, err := os.ReadFile(filepath.Join(dir, "dist", "app"))
+		require.NoError(t, err)
+		require.Equal(t, "new", string(data))
+		require.NoError(t, Execute(context.Background(), deps, []string{"run", "download", "29", "-R", "alice/project", "-D", dir, "-n", "dist", "--clobber"}))
+	})
+	t.Run("unknown name lists artifacts without control characters", func(t *testing.T) {
+		server, _ := actionsAPI(t, map[string]string{"GET actions/runs/29/artifacts": `{"total_count":1,"artifacts":[{"id":4,"name":"build\u001b]0;pwned\u0007"}]}`})
+		deps, _, _ := actionsDeps(t, server.URL, false)
+		err := Execute(context.Background(), deps, []string{"run", "download", "29", "-R", "alice/project", "-D", t.TempDir(), "-n", "docs"})
+		require.EqualError(t, err, `artifact "docs" not found in run 29 (artifacts: build]0;pwned)`)
+	})
+	t.Run("unsafe artifact names", func(t *testing.T) {
+		for _, name := range []string{"../evil", "..", "a/b", `a\b`, "/abs"} {
+			server, requests := actionsAPI(t, map[string]string{"GET actions/runs/29/artifacts": `{"total_count":1,"artifacts":[{"id":4,"name":` + strconv.Quote(name) + `}]}`})
+			dir := t.TempDir()
+			deps, _, _ := actionsDeps(t, server.URL, false)
+			err := Execute(context.Background(), deps, []string{"run", "download", "29", "-R", "alice/project", "-D", filepath.Join(dir, "out")})
+			require.ErrorContains(t, err, fmt.Sprintf("cannot use %q as a directory name", name))
+			require.Equal(t, []string{"GET actions/runs/29/artifacts"}, *requests)
+			entries, err := os.ReadDir(dir)
+			require.NoError(t, err)
+			require.Empty(t, entries)
+		}
+	})
 	t.Run("existing files and unsafe paths", func(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "cover.out"), []byte("mine"), 0o600))
@@ -156,7 +190,7 @@ func TestExtractZipKeepsPermissionBits(t *testing.T) {
 
 func TestArtifactListShowsSizesAndExpiry(t *testing.T) {
 	server, _ := actionsAPI(t, map[string]string{
-		"GET actions/runs/29/artifacts": `{"total_count":2,"artifacts":[{"id":1,"name":"build","size_in_bytes":3145728,"expires_at":"2028-03-01T12:00:00Z"},{"id":3,"name":"old","size_in_bytes":13,"expired":true,"expires_at":"2027-12-01T12:00:00Z"}]}`,
+		"GET actions/runs/29/artifacts": `{"total_count":2,"artifacts":[{"id":1,"name":"build","size_in_bytes":3145728,"expires_at":"2028-03-01T14:00:00+02:00"},{"id":3,"name":"old","size_in_bytes":13,"expired":true,"expires_at":"2027-12-01T12:00:00Z"}]}`,
 	})
 	for tty, want := range map[bool]string{
 		true:  "Showing 2 of 2 artifacts of run 29\n\nID  NAME   SIZE     EXPIRES\n1   build  3.0 MiB  in about 2 months\n3   old    13 B     expired\n",

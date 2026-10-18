@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -166,10 +167,6 @@ $ gt label create bug -c ee0701 --force`, Args: usageArgs(cobra.MaximumNArgs(1))
 				return err
 			}
 		}
-		if opts.Color == nil {
-			color := labelColors[rand.IntN(len(labelColors))]
-			opts.Color = &color
-		}
 		s, err := scope(cmd)
 		if err != nil {
 			return err
@@ -177,6 +174,11 @@ $ gt label create bug -c ee0701 --force`, Args: usageArgs(cobra.MaximumNArgs(1))
 		existing, err := s.All(cmd.Context())
 		if err != nil {
 			return err
+		}
+		// A random color is for new labels; --force keeps the color of an existing one.
+		if opts.Color == nil && !slices.ContainsFunc(existing, func(l services.Label) bool { return strings.EqualFold(l.Name, fields.name) }) {
+			color := labelColors[rand.IntN(len(labelColors))]
+			opts.Color = &color
 		}
 		item, updated, err := s.CreateUnique(cmd.Context(), existing, opts, force)
 		if err != nil {
@@ -242,7 +244,7 @@ $ gt label edit old-stuff --archived`, Annotations: map[string]string{"gt.argume
 			return err
 		}
 		if opts == (services.LabelOptions{}) {
-			return errNothingToEdit
+			return clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --name or --color (see --help)"))
 		}
 		s, err := scope(cmd)
 		if err != nil {
@@ -252,7 +254,7 @@ $ gt label edit old-stuff --archived`, Annotations: map[string]string{"gt.argume
 		if err != nil {
 			return err
 		}
-		item, err := s.Edit(cmd.Context(), found[0].ID, opts)
+		item, err := s.Edit(cmd.Context(), found[0].ID, opts.KeepArchived(found[0]))
 		if err != nil {
 			return err
 		}
@@ -345,17 +347,20 @@ func (a *application) importLabels(cmd *cobra.Command, scope labelScope, file st
 	}, func(item services.Label) {
 		a.done(cmd, "%s %s", outcome[item.Name], labelName(s, item))
 	})
-	return errors.Join(append(failures, writeBatchJSON(a, cmd, len(rows), results))...)
+	// The shape of the output must not depend on how many rows the file has.
+	if a.options.json != "" {
+		failures = append(failures, a.writeJSON(cmd, results))
+	}
+	return errors.Join(failures...)
 }
 
 // completeScopedLabels completes the label names of the repository or, with --org, of the
 // organization that *org names.
 func (a *application) completeScopedLabels(org *string) cobra.CompletionFunc {
-	return a.apiCompletion(false, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
-		if *org == "" && t.Repo == "" {
-			return nil, errRepositoryRequired
-		}
-		items, err := (services.Labels{Client: t.client, Repository: t.Repo, Organization: *org}).List(ctx, completionLimit, 1)
-		return describe(items, func(item services.Label) (string, string) { return item.Name, item.Description }), err
-	})
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		return a.apiCompletion(*org == "", func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+			items, err := (services.Labels{Client: t.client, Repository: t.Repo, Organization: *org}).List(ctx, completionLimit, 1)
+			return describe(items, func(item services.Label) (string, string) { return item.Name, item.Description }), err
+		})(cmd, args, toComplete)
+	}
 }

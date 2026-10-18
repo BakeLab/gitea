@@ -77,11 +77,11 @@ func (p *FormPrompter) CreateIssue(ctx context.Context, choices IssueFormChoices
 			if label == "" {
 				label = "template " + strconv.Itoa(i+1)
 			}
-			options = append(options, huh.NewOption(label, i))
+			options = append(options, huh.NewOption(SafeLine(label), i))
 		}
 		selected := -1
 		if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(
-			huh.NewSelect[int]().Title("Issue template:").Options(options...).Value(&selected),
+			huh.NewSelect[int]().Title("Issue template:").Options(options...).Height(min(len(options), 10)+2).Value(&selected),
 		))); err != nil {
 			return IssueFormValues{}, err
 		}
@@ -113,7 +113,7 @@ func (f *issueFields) content(heading string, editBody BodyEditor) *huh.Group {
 	if editBody == nil {
 		fields = append(fields, bodyField(BodyTitle, &f.body))
 	}
-	return huh.NewGroup(fields...).Title(heading)
+	return huh.NewGroup(fields...).Title(SafeLine(heading))
 }
 
 // metadata asks for assignees, a milestone, labels and a due date, which only people who can push
@@ -129,14 +129,14 @@ func (f *issueFields) metadata(canPush bool, assignees []string, milestones []Is
 	if len(milestones) > 0 {
 		options := []huh.Option[int64]{huh.NewOption("[none]", int64(0))}
 		for _, milestone := range milestones {
-			options = append(options, huh.NewOption(milestone.Title, milestone.ID))
+			options = append(options, huh.NewOption(SafeLine(milestone.Title), milestone.ID))
 		}
-		groups = append(groups, huh.NewGroup(huh.NewSelect[int64]().Title("Milestone:").Options(options...).Value(&f.milestone)))
+		groups = append(groups, huh.NewGroup(huh.NewSelect[int64]().Title("Milestone:").Options(options...).Height(min(len(options), 10)+2).Value(&f.milestone)))
 	}
 	if len(labels) > 0 {
 		options := make([]huh.Option[int64], 0, len(labels))
 		for _, label := range labels {
-			options = append(options, huh.NewOption(label.Name, label.ID))
+			options = append(options, huh.NewOption(SafeLine(label.Name), label.ID))
 		}
 		groups = append(groups, huh.NewGroup(multiSelect("Labels:", options, &f.labels)))
 	}
@@ -188,34 +188,46 @@ const (
 func (p *FormPrompter) collectIssueProperties(ctx context.Context, title, body string, choices IssueFormChoices) (IssueFormValues, error) {
 	fields := issueFields{title: title, body: body}
 	metadata := fields.metadata(choices.CanPush, choices.Assignees, choices.Milestones, choices.Labels)
-	groups := []*huh.Group{fields.content("", choices.EditBody)}
-	next := nextMetadata
-	if choices.AskNext {
+	content := fields.content("", choices.EditBody)
+	values := IssueFormValues{}
+	var err error
+	if !choices.AskNext {
+		if err := p.runForm(ctx, huh.NewForm(append([]*huh.Group{content}, metadata...)...)); err != nil {
+			return IssueFormValues{}, err
+		}
+	} else {
+		if err := p.runForm(ctx, huh.NewForm(content)); err != nil {
+			return IssueFormValues{}, err
+		}
+		// The body comes before "What's next?", so canceling still reports the draft.
+		if values.Body, values.Draft, err = editBody(ctx, choices.EditBody, fields.body); err != nil {
+			return values, err
+		}
 		options := []huh.Option[int]{huh.NewOption("Submit", nextSubmit)}
 		if len(metadata) > 0 {
 			options = append(options, huh.NewOption("Add metadata", nextMetadata))
 		}
-		next = nextSubmit
 		options = append(options, huh.NewOption("Cancel", nextCancel))
-		groups = append(groups, huh.NewGroup(huh.NewSelect[int]().Title("What's next?").Options(options...).Value(&next)))
-	} else {
-		groups, metadata = append(groups, metadata...), nil
-	}
-	if err := p.runForm(ctx, huh.NewForm(groups...)); err != nil {
-		return IssueFormValues{}, err
-	}
-	switch {
-	case next == nextCancel:
-		return IssueFormValues{}, ErrCanceled
-	case next == nextMetadata && len(metadata) > 0:
-		if err := p.runForm(ctx, huh.NewForm(metadata...)); err != nil {
-			return IssueFormValues{}, err
+		for next := nextMetadata; next == nextMetadata; {
+			next = nextSubmit
+			if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(huh.NewSelect[int]().Title("What's next?").Options(options...).Value(&next)))); err != nil {
+				return values, err
+			}
+			switch next {
+			case nextCancel:
+				return values, ErrCanceled
+			case nextMetadata:
+				if err := p.runForm(ctx, huh.NewForm(metadata...)); err != nil {
+					return values, err
+				}
+			}
 		}
 	}
-	values := IssueFormValues{Title: strings.TrimSpace(fields.title), Assignees: fields.assignees, Milestone: fields.milestone, Labels: fields.labels}
-	var err error
-	if values.Body, values.Draft, err = editBody(ctx, choices.EditBody, fields.body); err != nil {
-		return values, err
+	values.Title, values.Assignees, values.Milestone, values.Labels = strings.TrimSpace(fields.title), fields.assignees, fields.milestone, fields.labels
+	if !choices.AskNext {
+		if values.Body, values.Draft, err = editBody(ctx, choices.EditBody, fields.body); err != nil {
+			return values, err
+		}
 	}
 	values.Deadline, err = parseDueDate(fields.deadline)
 	return values, err

@@ -195,3 +195,10 @@ func TestDueTextKeepsTheDayInTheServerOffset(t *testing.T) {
 	require.Equal(t, "Dec 24, 2026 (in about 2 months)", dueText(now, "2026-12-24T23:59:59-05:00"))
 	require.Equal(t, "Dec 24, 2026 (in about 2 months)", dueText(now, "2026-12-24T23:59:59Z"))
 }
+
+func TestDueTextKeepsTheServerCalendarDate(t *testing.T) {
+	now := time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC)
+	require.Contains(t, dueText(now, "2026-12-24T23:59:59Z"), "Dec 24, 2026 (")
+	require.Contains(t, dueText(now, "2026-12-24T23:59:59-05:00"), "Dec 24, 2026 (")
+	require.Equal(t, "garbage", dueText(now, "garbage"))
+}

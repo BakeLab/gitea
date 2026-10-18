@@ -35,6 +35,15 @@ type LabelOptions struct {
 	Archived    *bool   `json:"is_archived,omitempty"`
 }
 
+// KeepArchived returns opts with the archived state of current unless opts sets one: Gitea
+// unarchives a label whose edit leaves is_archived out.
+func (opts LabelOptions) KeepArchived(current Label) LabelOptions {
+	if opts.Archived == nil {
+		opts.Archived = &current.Archived
+	}
+	return opts
+}
+
 // Labels implements explicitly scoped label operations.
 type Labels struct {
 	Client                   *transport.Client
@@ -84,8 +93,14 @@ func (s Labels) Create(ctx context.Context, opts LabelOptions) (Label, error) {
 	if s.Organization != "" && opts.Archived != nil && *opts.Archived {
 		// TODO(sdk): CreateOrgLabelOption.IsArchived
 		var result Label
-		err := sendJSON(ctx, s.Client, http.MethodPost, s.orgEndpoint(), opts, &result)
-		return result, err
+		if err := sendJSON(ctx, s.Client, http.MethodPost, s.orgEndpoint(), opts, &result); err != nil {
+			return result, err
+		}
+		if !result.Archived {
+			// Gitea ignores is_archived when it creates an organization label.
+			return s.Edit(ctx, result.ID, LabelOptions{Archived: opts.Archived})
+		}
+		return result, nil
 	}
 	name, color, description := deref(opts.Name), deref(opts.Color), deref(opts.Description)
 	exclusive, archived := deref(opts.Exclusive), deref(opts.Archived)
@@ -373,8 +388,12 @@ func (s Issues) applyChanges(ctx context.Context, n int64, opts IssueEdit) (Issu
 		return opts, err
 	}
 	if len(changes.AddLabels)+len(changes.RemoveLabels) > 0 {
-		ids := make([]int64, len(current.Labels))
-		for i, label := range current.Labels {
+		kept, err := s.withoutReplacedExclusive(ctx, current.Labels, changes.AddLabels)
+		if err != nil {
+			return opts, err
+		}
+		ids := make([]int64, len(kept))
+		for i, label := range kept {
 			ids[i] = label.ID
 		}
 		ids = mergeUnique(ids, changes.AddLabels, changes.RemoveLabels, func(a, b int64) bool { return a == b })
@@ -385,6 +404,44 @@ func (s Issues) applyChanges(ctx context.Context, n int64, opts IssueEdit) (Issu
 		opts.Assignees = &names
 	}
 	return opts, nil
+}
+
+// withoutReplacedExclusive drops the current labels that an added label of the same exclusive
+// scope replaces. Gitea keeps one label per scope but picks it by name, not by recency, so
+// sending both would keep whichever sorts last.
+func (s Issues) withoutReplacedExclusive(ctx context.Context, current []Label, add []int64) ([]Label, error) {
+	if len(add) == 0 || !slices.ContainsFunc(current, func(l Label) bool { return l.Exclusive }) {
+		return current, nil
+	}
+	all, err := (Labels{Client: s.Client, Repository: s.Repository}).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	owner, _, _ := strings.Cut(s.Repository, "/")
+	if _, isOrg, err := organization(ctx, s.Client, owner); err != nil {
+		return nil, err
+	} else if isOrg {
+		shared, err := (Labels{Client: s.Client, Organization: owner}).All(ctx)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, shared...)
+	}
+	replaced := map[string]bool{}
+	for _, label := range all {
+		if scope := exclusiveScope(label); scope != "" && slices.Contains(add, label.ID) {
+			replaced[scope] = true
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(current), func(l Label) bool { return replaced[exclusiveScope(l)] }), nil
+}
+
+// exclusiveScope is the name of an exclusive label up to its last slash, or "" for any other label.
+func exclusiveScope(label Label) string {
+	if i := strings.LastIndex(label.Name, "/"); label.Exclusive && i > 0 {
+		return label.Name[:i]
+	}
+	return ""
 }
 
 // mergeUnique applies additions and removals to current values, preserving order.

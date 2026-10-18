@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -66,7 +67,7 @@ func TestActionValueSetReadsValuesAndReportsStoredNames(t *testing.T) {
 			[]string{"secret", "set", "token", "--body", "x", "--json"},
 			"",
 			[]string{`PUT actions/secrets/token {"data":"x","description":""}`},
-			`{"name":"TOKEN","description":""}`, "",
+			`{"name":"TOKEN","description":"","created_at":""}`, "",
 		},
 		{
 			"organization",
@@ -99,9 +100,9 @@ func TestActionValueSetReadsValuesAndReportsStoredNames(t *testing.T) {
 			server, requests := actionsAPI(t, map[string]string{
 				"PUT actions/secrets/lower_name": "204 ", "PUT actions/secrets/TOKEN": "204 ", "PUT actions/secrets/token": "204 ",
 				"PUT api/v1/orgs/acme/actions/secrets/TOKEN": "204 ", "PUT api/v1/user/actions/secrets/TOKEN": "204 ",
-				"GET api/v1/orgs/acme/actions/variables/API_KEY": `404 {}`, "POST api/v1/orgs/acme/actions/variables/API_KEY": "201 ",
-				"GET api/v1/orgs/acme/actions/variables/region": `404 {}`, "POST api/v1/orgs/acme/actions/variables/region": "201 ",
-				"GET api/v1/orgs/acme/actions/variables/MODE": `404 {}`, "POST api/v1/orgs/acme/actions/variables/MODE": "201 ",
+				"GET api/v1/orgs/acme/actions/variables/API_KEY": `404 {"message":"variable not found"}`, "POST api/v1/orgs/acme/actions/variables/API_KEY": "201 ",
+				"GET api/v1/orgs/acme/actions/variables/region": `404 {"message":"variable not found"}`, "POST api/v1/orgs/acme/actions/variables/region": "201 ",
+				"GET api/v1/orgs/acme/actions/variables/MODE": `404 {"message":"variable not found"}`, "POST api/v1/orgs/acme/actions/variables/MODE": "201 ",
 			})
 			deps, out, diagnostics := actionsDeps(t, server.URL, true)
 			deps.Streams.In = strings.NewReader(tc.stdin)
@@ -175,4 +176,36 @@ func TestActionValueDeleteConfirmsWithTheScope(t *testing.T) {
 		require.Equal(t, []string{"DELETE actions/secrets/deploy_token"}, *requests)
 		require.Equal(t, "✓ Deleted Actions secret DEPLOY_TOKEN from alice/project\n", diagnostics.String())
 	}
+}
+
+func TestParseEnvFileStripsQuotesBeforeAComment(t *testing.T) {
+	entries, err := parseEnvFile([]byte("A=\"s3cr3t\" # prod\nB='v' # c\nC=\"a # b\"\nD=plain # note\nE=\"x\\ny\"\nF=\"half\n"))
+	require.NoError(t, err)
+	require.Equal(t, []envEntry{{"A", "s3cr3t"}, {"B", "v"}, {"C", "a # b"}, {"D", "plain"}, {"E", "x\ny"}, {"F", "\"half"}}, entries)
+}
+
+func TestSecretSetChecksTheNameBeforeReadingTheValue(t *testing.T) {
+	deps, _, _ := actionsDeps(t, "http://127.0.0.1:1", true)
+	read := &stdinReads{}
+	deps.Streams.In = read
+	err := Execute(context.Background(), deps, []string{"secret", "set", "GITHUB_PAT", "-R", "alice/project"})
+	require.ErrorContains(t, err, "reserved")
+	require.Zero(t, read.reads, "the value must not be read for a refused name")
+}
+
+type stdinReads struct{ reads int }
+
+func (r *stdinReads) Read([]byte) (int, error) { r.reads++; return 0, io.EOF }
+
+func TestVariableSetCountsCharactersNotBytes(t *testing.T) {
+	server, requests := actionsAPI(t, map[string]string{
+		"GET api/v1/orgs/acme/actions/variables/WIDE": `404 {"message":"variable not found"}`, "POST api/v1/orgs/acme/actions/variables/WIDE": "201 ",
+	})
+	deps, _, _ := actionsDeps(t, server.URL, true)
+	deps.Streams.In = strings.NewReader(strings.Repeat("é", 40000))
+	require.NoError(t, Execute(context.Background(), deps, []string{"variable", "set", "WIDE", "-o", "acme"}))
+	require.Len(t, *requests, 2)
+	deps, _, _ = actionsDeps(t, server.URL, true)
+	deps.Streams.In = strings.NewReader(strings.Repeat("é", 65537))
+	require.ErrorContains(t, Execute(context.Background(), deps, []string{"variable", "set", "WIDE", "-o", "acme"}), "65536 characters")
 }

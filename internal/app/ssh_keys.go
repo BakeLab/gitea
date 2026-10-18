@@ -6,6 +6,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -120,9 +121,40 @@ func publicKey(data []byte, source string) (ssh.PublicKey, string, error) {
 	}
 	key, comment, _, rest, err := ssh.ParseAuthorizedKey(data)
 	if err != nil || len(bytes.TrimSpace(rest)) != 0 {
+		if key, comment, ok := parseSSH2PublicKey(data); ok {
+			return key, comment, nil
+		}
 		return nil, "", clierr.Wrap(clierr.Usage, fmt.Errorf("%s must hold exactly one valid SSH public key", sshKeySource(source)))
 	}
 	return key, comment, nil
+}
+
+// parseSSH2PublicKey reads the RFC 4716 format of PuTTYgen and ssh-keygen -e, which Gitea accepts
+// as well. It returns the key and the Comment header without its quotes.
+func parseSSH2PublicKey(data []byte) (ssh.PublicKey, string, bool) {
+	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(data), "\r", "")), "\n")
+	if len(lines) < 3 || lines[0] != "---- BEGIN SSH2 PUBLIC KEY ----" || lines[len(lines)-1] != "---- END SSH2 PUBLIC KEY ----" {
+		return nil, "", false
+	}
+	var body strings.Builder
+	var comment string
+	continued := false
+	for _, line := range lines[1 : len(lines)-1] {
+		header := continued || strings.Contains(line, ":")
+		continued = header && strings.HasSuffix(line, "\\")
+		switch {
+		case !header:
+			body.WriteString(strings.TrimSpace(line))
+		case strings.HasPrefix(line, "Comment:"):
+			comment = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "Comment:")), `"`)
+		}
+	}
+	blob, err := base64.StdEncoding.DecodeString(body.String())
+	if err != nil {
+		return nil, "", false
+	}
+	key, err := ssh.ParsePublicKey(blob)
+	return key, comment, err == nil
 }
 
 func sshKeySource(source string) string {
@@ -147,7 +179,7 @@ $ cat key.pub | gt ssh-key add`,
 			if len(args) > 0 {
 				source = args[0]
 			}
-			if source == "-" && a.deps.Streams.InTTY {
+			if len(args) == 0 && a.deps.Streams.InTTY {
 				return clierr.Wrap(clierr.Usage, errors.New("supply a public key file, such as ~/.ssh/id_ed25519.pub, or pipe a key to stdin"))
 			}
 			data, err := readFileOrStdin(a.deps.Streams.In, source)
@@ -174,6 +206,10 @@ $ cat key.pub | gt ssh-key add`,
 			service := services.SSHKeys{Client: target.client}
 			created, err := service.Create(cmd.Context(), title, strings.TrimSpace(string(data)))
 			if err != nil {
+				if conflict, ok := errors.AsType[*services.ConflictError](err); ok && conflict.Reason == services.ReasonExists {
+					conflict.Hint = fmt.Sprintf("another SSH key is titled %q; pass a different --title", title)
+					return conflict
+				}
 				return a.registeredKey(cmd.Context(), service, key, err)
 			}
 			a.done(cmd, "Added %s", sshKeyLabel(created))

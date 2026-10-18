@@ -57,3 +57,28 @@ func TestFormsRefuseTerminalsWithoutSize(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Title", values.Title)
 }
+
+func TestIssueFormSanitizesServerTextInHeadingAndOptions(t *testing.T) {
+	fields := issueFields{}
+	groups := fields.groups("Editing R#1 (\x1b]8;;https://evil.example\x07login docs\x1b]8;;\x07)", noEdit, true, nil,
+		[]IssueMilestoneChoice{{ID: 1, Title: "v1\x1b[8mhidden"}}, []IssueLabelChoice{{ID: 2, Name: "bug\x1b[8m"}})
+	rendered := view(huh.NewForm(groups...), 100, 40)
+	require.NotContains(t, rendered, "\x1b]8")
+	require.NotContains(t, rendered, "\x1b[8m")
+	require.Contains(t, rendered, "login docs")
+}
+
+func TestMilestoneSelectKeepsItsTitleOnShortTerminals(t *testing.T) {
+	var milestones []IssueMilestoneChoice
+	for i := range 40 {
+		milestones = append(milestones, IssueMilestoneChoice{ID: int64(i + 1), Title: fmt.Sprintf("v%d", i)})
+	}
+	fields := issueFields{}
+	groups := fields.groups("Editing R#1 (heading)", noEdit, true, nil, milestones, nil)
+	rendered := view(huh.NewForm(groups...), 80, 24)
+	require.LessOrEqual(t, strings.Count(rendered, "\n")+1, 24, "a taller frame scrolls its heading off the screen")
+	require.Contains(t, rendered, "Editing R#1")
+	rendered = view(huh.NewForm(groups[1]), 80, 24)
+	require.LessOrEqual(t, strings.Count(rendered, "\n")+1, 24)
+	require.Contains(t, rendered, "Milestone:")
+}

@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"strings"
 
 	"gitea.dev/cli/internal/transport"
 )
@@ -37,6 +38,15 @@ func loadCreateSelectables(ctx context.Context, client *transport.Client, reposi
 	}); err != nil {
 		return result, err
 	}
-	result.Labels, err = (Labels{Client: client, Repository: repository}).All(ctx)
+	if result.Labels, err = (Labels{Client: client, Repository: repository}).All(ctx); err != nil {
+		return result, err
+	}
+	// Like --label, offer the labels shared by the organization that owns the repository.
+	owner, _, _ := strings.Cut(repository, "/")
+	if _, isOrg, err := organization(ctx, client, owner); err != nil || !isOrg {
+		return result, err
+	}
+	orgLabels, err := (Labels{Client: client, Organization: owner}).All(ctx)
+	result.Labels = append(result.Labels, orgLabels...)
 	return result, err
 }

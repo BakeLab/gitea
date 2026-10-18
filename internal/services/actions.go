@@ -121,6 +121,12 @@ func (s Actions) Dispatch(ctx context.Context, id, ref string, inputs map[string
 		return c.Actions.DispatchRepoWorkflow(ctx, owner, repo, id, gitea.CreateActionsWorkflowDispatchOption{Ref: ref, Inputs: inputs}, true)
 	})
 	if api, ok := errors.AsType[*transport.APIError](err); ok && api.Status == http.StatusNotFound && strings.Contains(api.Message, "ref") {
+		// Gitea resolves a bare ref as a branch only; a tag needs its full name.
+		if !strings.HasPrefix(ref, "refs/") {
+			if retried, retryErr := s.Dispatch(ctx, id, "refs/tags/"+ref, inputs); retryErr == nil {
+				return retried, nil
+			}
+		}
 		return DispatchResult{}, &NotFoundError{Kind: "ref", Key: strconv.Quote(ref), Scope: s.Repository, Err: err}
 	}
 	if err != nil {

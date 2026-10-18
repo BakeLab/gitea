@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -228,7 +229,21 @@ func (a *application) gitRemotes(ctx context.Context) [][2]string {
 func (a *application) completeRemotes(cmd *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 	ctx, cancel := completionContext(cmd)
 	defer cancel()
-	return matching(describe(a.gitRemotes(ctx), func(remote [2]string) (string, string) { return remote[0], remote[1] }), toComplete), cobra.ShellCompDirectiveNoFileComp
+	return matching(describe(a.gitRemotes(ctx), func(remote [2]string) (string, string) { return remote[0], withoutCredentials(remote[1]) }), toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+// withoutCredentials drops the user info and query of a remote URL, which can embed a password or
+// token that the shell would print in its menu. An unparsable URL shows nothing.
+func withoutCredentials(raw string) string {
+	if !strings.Contains(raw, "://") {
+		return raw // scp-like addresses carry no password.
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	u.User, u.RawQuery, u.Fragment = nil, "", ""
+	return u.String()
 }
 
 // completeLocalBranches completes the branches of the local checkout.
@@ -264,18 +279,25 @@ func (a *application) completeConfig(cmd *cobra.Command, args []string, toComple
 		return a.completeHosts(cmd, args, toComplete)
 	case args[0] == "remote":
 		return a.completeRemotes(cmd, args, toComplete)
+	case args[0] == "ssh_key":
+		return completeFiles(cmd, args, toComplete)
 	}
 	return matching(configValues[args[0]], toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
-// apiCompletion completes the values that list fetches from the selected instance, except those
-// already given. It never prompts, refreshes or retries, and failures complete nothing rather than
-// file names.
+// apiCompletion completes the values that list fetches from the selected instance. It never
+// prompts, refreshes or retries, and failures complete nothing rather than file names.
 func (a *application) apiCompletion(requireRepo bool, list func(ctx context.Context, t target, toComplete string) ([]cobra.Completion, error)) cobra.CompletionFunc {
+	return a.apiCompletionIn("", requireRepo, list)
+}
+
+// apiCompletionIn is apiCompletion for the repository that a command argument names, such as the
+// one of a run URL; an empty repo selects the repository like any other command.
+func (a *application) apiCompletionIn(repo string, requireRepo bool, list func(ctx context.Context, t target, toComplete string) ([]cobra.Completion, error)) cobra.CompletionFunc {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 		ctx, cancel := completionContext(cmd)
 		defer cancel()
-		t, err := a.completionTarget(ctx, requireRepo)
+		t, err := a.completionTarget(ctx, repo, requireRepo)
 		var values []cobra.Completion
 		if err == nil {
 			values, err = list(ctx, t, toComplete)
@@ -284,18 +306,14 @@ func (a *application) apiCompletion(requireRepo bool, list func(ctx context.Cont
 			cobra.CompDebugln("gt: "+err.Error(), false)
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		values = slices.DeleteFunc(values, func(value cobra.Completion) bool {
-			name, _, _ := strings.Cut(value, "\t")
-			return slices.Contains(args, name)
-		})
 		return matching(values, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
 }
 
 // completionTarget resolves an API completion's target like resolve, but never prompts or rotates
 // credentials: an expired OAuth token or an encrypted SSH key completes nothing.
-func (a *application) completionTarget(ctx context.Context, requireRepo bool) (target, error) {
-	t, err := a.resolveTarget(ctx, requireRepo, false)
+func (a *application) completionTarget(ctx context.Context, repo string, requireRepo bool) (target, error) {
+	t, err := a.resolveRequest(ctx, targetRequest{requireRepo: requireRepo, repo: repo, repoSource: "argument"})
 	if err != nil {
 		return t, err
 	}
@@ -365,11 +383,23 @@ func (a *application) completeLabels() cobra.CompletionFunc {
 	}))
 }
 
-// completeMilestones completes the titles of open milestones.
+// completeMilestones completes the titles of open milestones. A numeric title would be read as
+// another milestone's ID, so such a milestone is completed by its own ID instead.
 func (a *application) completeMilestones() cobra.CompletionFunc {
+	return a.completeMilestonesIn("open")
+}
+
+// completeMilestonesIn completes the titles of the milestones in state: open, closed or all.
+func (a *application) completeMilestonesIn(state string) cobra.CompletionFunc {
 	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
-		items, err := services.Milestones{Client: t.client, Repository: t.Repo}.List(ctx, "open", completionLimit, 1)
-		return describe(items, func(item services.Milestone) (string, string) { return item.Title, item.Description }), err
+		items, err := services.Milestones{Client: t.client, Repository: t.Repo}.List(ctx, state, completionLimit, 1)
+		return describe(items, func(item services.Milestone) (string, string) {
+			// A title that reads as a number would be taken as an ID, so offer the ID instead.
+			if _, parse := strconv.ParseInt(strings.TrimSpace(item.Title), 10, 64); parse == nil {
+				return strconv.FormatInt(item.ID, 10), strings.TrimSpace(item.Title + " " + item.Description)
+			}
+			return item.Title, item.Description
+		}), err
 	})
 }
 
@@ -490,16 +520,24 @@ func (a *application) completeRuns() cobra.CompletionFunc {
 
 // completeSecrets completes Actions secret names in the selected scope.
 func (a *application) completeSecrets(scope func() services.ActionScope) cobra.CompletionFunc {
-	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
-		items, err := services.ActionSecrets{Client: t.client, Scope: actionScope(scope, t)}.ListPage(ctx, completionLimit, 1)
+	return a.apiCompletion(false, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		selected := actionScope(scope, t)
+		if selected.Repository == "" && selected.Organization == "" && !selected.Account {
+			return nil, nil
+		}
+		items, err := services.ActionSecrets{Client: t.client, Scope: selected}.ListPage(ctx, completionLimit, 1)
 		return describe(items.Items, func(item services.ActionSecret) (string, string) { return item.Name, item.Description }), err
 	})
 }
 
 // completeVariables completes Actions variable names in the selected scope.
 func (a *application) completeVariables(scope func() services.ActionScope) cobra.CompletionFunc {
-	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
-		items, err := services.ActionVariables{Client: t.client, Scope: actionScope(scope, t)}.ListPage(ctx, completionLimit, 1)
+	return a.apiCompletion(false, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		selected := actionScope(scope, t)
+		if selected.Repository == "" && selected.Organization == "" && !selected.Account {
+			return nil, nil
+		}
+		items, err := services.ActionVariables{Client: t.client, Scope: selected}.ListPage(ctx, completionLimit, 1)
 		return describe(items.Items, func(item services.ActionVariable) (string, string) { return item.Name, item.Description }), err
 	})
 }
@@ -507,19 +545,27 @@ func (a *application) completeVariables(scope func() services.ActionScope) cobra
 // actionScope applies the target's repository to a scope without organization or account.
 func actionScope(scope func() services.ActionScope, t target) services.ActionScope {
 	selected := scope()
-	if selected.Organization == "" && !selected.Account {
+	if inRepository(selected) {
 		selected.Repository = t.Repo
 	}
 	return selected
 }
 
+// inRepository reports whether the scope is the repository's, which discovery must then select.
+func inRepository(scope services.ActionScope) bool {
+	return scope.Organization == "" && !scope.Account
+}
+
 // pathFlags take local file paths, like every flag whose name ends in -file.
-var pathFlags = []string{"asset", "attachment", "file", "input", "ssh-key"}
+var pathFlags = []string{"asset", "attachment", "file", "input", "output", "ssh-key"}
 
 // completeDefaults completes paths only where a command takes them: path flags and flags marked
 // with MarkFlagFilename. Everything else without a completer completes nothing, by the root's
 // default directive, rather than file names.
 func completeDefaults(cmd *cobra.Command) {
+	if cmd.ValidArgsFunction != nil {
+		cmd.ValidArgsFunction = withoutGiven(cmd.ValidArgsFunction)
+	}
 	for _, flags := range []*pflag.FlagSet{cmd.Flags(), cmd.PersistentFlags()} {
 		flags.VisitAll(func(flag *pflag.Flag) {
 			if _, registered := cmd.GetFlagCompletionFunc(flag.Name); registered {
@@ -535,6 +581,19 @@ func completeDefaults(cmd *cobra.Command) {
 	}
 	for _, child := range cmd.Commands() {
 		completeDefaults(child)
+	}
+}
+
+// withoutGiven drops the positional completions that the arguments already name. Flag values are not
+// filtered: Cobra passes the positional arguments to their completers as well, and a job ID may equal
+// its run ID.
+func withoutGiven(complete cobra.CompletionFunc) cobra.CompletionFunc {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		values, directive := complete(cmd, args, toComplete)
+		return slices.DeleteFunc(values, func(value cobra.Completion) bool {
+			name, _, _ := strings.Cut(value, "\t")
+			return slices.Contains(args, name)
+		}), directive
 	}
 }
 

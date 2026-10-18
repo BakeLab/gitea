@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,4 +133,54 @@ func TestAttachmentTablesDownloadsAndDoneLines(t *testing.T) {
 	require.EqualError(t, run(true, "issue", "attachment", "delete", "1", "9"), "confirmation required to delete attachment 9 (crash.log) on alice/project#1; rerun with --yes")
 	require.NoError(t, run(true, "issue", "attachment", "delete", "1", "9", "--yes"))
 	require.Equal(t, "✓ Deleted attachment 9 (crash.log) on alice/project#1\n", diagnostics.String())
+}
+
+func TestAttachmentListViewAndDownloadOrdering(t *testing.T) {
+	var fetched int
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/issues/1/assets":
+			_, _ = w.Write([]byte(`[{"id":9,"name":"crash.log","size":2048,"browser_download_url":"https://example.org/a/9"},{"id":10,"name":"b.log","size":1}]`))
+		case "GET /api/v1/repos/alice/project/issues/1/assets/9":
+			_, _ = w.Write([]byte(`{"id":9,"name":"crash.log","size":5,"uuid":"abc","browser_download_url":"https://example.org/a/9"}`))
+		case "GET /attachments/abc":
+			fetched++
+			_, _ = w.Write([]byte("hello"))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	deps.Now = func() time.Time { return testNow }
+	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
+	plainOutput(t, deps)
+	run := func(tty bool, args ...string) error {
+		out.Reset()
+		deps.Streams.OutTTY = tty
+		return Execute(context.Background(), deps, append(args, "-R", "alice/project", "--no-input"))
+	}
+	// A limit that cuts the list says so.
+	require.NoError(t, run(true, "issue", "attachment", "list", "1", "--limit", "1"))
+	require.Equal(t, "Showing 1 of 2 attachments on alice/project#1 · next: --page 2\n", firstLine(out.String()))
+	// Piped output keeps exact sizes and the download URL.
+	require.NoError(t, run(false, "issue", "attachment", "list", "1", "--limit", "1"))
+	require.Equal(t, "9\tcrash.log\t2048\t0\t\thttps://example.org/a/9\n", out.String())
+	// An attachment has no description.
+	require.NoError(t, run(true, "issue", "attachment", "view", "1", "9"))
+	require.NotContains(t, out.String(), "No description provided")
+	// Usage errors and skipped downloads never request the file.
+	t.Chdir(t.TempDir())
+	require.ErrorContains(t, run(true, "issue", "attachment", "download", "1", "9", "--clobber", "--skip-existing"), "cannot be combined")
+	require.NoError(t, os.WriteFile("crash.log", []byte("old"), 0o600))
+	require.NoError(t, run(true, "issue", "attachment", "download", "1", "9", "--skip-existing"))
+	require.ErrorContains(t, run(true, "issue", "attachment", "download", "1", "9"), "already exists")
+	require.Zero(t, fetched)
+	require.NoError(t, run(true, "issue", "attachment", "download", "1", "9", "--clobber"))
+	require.Equal(t, 1, fetched)
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line + "\n"
 }

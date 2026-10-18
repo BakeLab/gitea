@@ -261,7 +261,8 @@ Events: ` + strings.Join(services.WebhookEvents, ", ") + `; issues and pull_requ
 include every issue or pull request event.
 
 Types: ` + strings.Join(services.WebhookTypes, ", ") + `. Slack webhooks need
---config channel=#name; other types take their settings through --config too.`
+--config channel=#name (username, icon_url and color are optional). Gitea reads no other
+settings from --config, so set up discord, matrix and packagist webhooks in the web UI.`
 		command.Example = `$ gt webhook create https://ci.example.com/hooks/gitea --events push,pull_request
 # sign deliveries with a secret read from a file
 $ gt webhook create https://ci.example.com/hooks/gitea --secret-file secret.txt

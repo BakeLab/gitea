@@ -185,16 +185,16 @@ $ gt admin user create ci-bot --email ci@example.com --password-file pw.txt --mu
 	if verb == "edit" {
 		stringsToBind = append(stringsToBind, stringBinding{"description", "Profile description", &description, &opts.Description}, stringBinding{"website", "Website URL", &website, &opts.Website}, stringBinding{"location", "Location", &location, &opts.Location})
 		boolsToBind = append(boolsToBind, boolBinding{"active", "Activate account", &active, &opts.Active}, boolBinding{"allow-git-hook", "Allow Git hooks", &allowGitHook, &opts.AllowGitHook}, boolBinding{"allow-import-local", "Allow local repository imports", &allowImportLocal, &opts.AllowImportLocal}, boolBinding{"allow-create-organization", "Allow creating organizations", &allowCreateOrganization, &opts.AllowCreateOrganization})
-		command.Flags().IntVar(&maxRepos, "max-repo-creation", 0, "Repository creation limit (-1 for unlimited)")
+		command.Flags().IntVar(&maxRepos, "max-repo-creation", 0, "Repository creation limit (-1 uses the instance default)")
 	}
 	for _, binding := range stringsToBind {
 		command.Flags().StringVar(binding.value, binding.name, "", binding.description)
 	}
-	initialVisibility := ""
+	visibilityUsage := "Profile visibility"
 	if verb == "create" {
-		initialVisibility = "public"
+		visibilityUsage += ", by default the instance's default"
 	}
-	enumFlag(command, &visibility, "visibility", "", initialVisibility, "Profile visibility", visibilities...)
+	enumFlag(command, &visibility, "visibility", "", "", visibilityUsage, visibilities...)
 	for _, binding := range boolsToBind {
 		command.Flags().BoolVar(binding.value, binding.name, false, binding.description+" (use =false to revoke)")
 	}
@@ -215,7 +215,7 @@ $ gt admin user create ci-bot --email ci@example.com --password-file pw.txt --mu
 			if _, err := a.requireInput(cmd, &email, "email", "Email address", validEmail); err != nil {
 				return err
 			}
-			opts.Email, opts.FullName, opts.Visibility = &email, &fullName, &visibility
+			opts.Email, opts.FullName = &email, &fullName
 		} else {
 			username = args[0]
 		}
@@ -329,7 +329,7 @@ func (a *application) adminUserDeleteCommand() *cobra.Command {
 		Long: `Delete an account. Gitea refuses while the user owns repositories or organizations, unless
 --purge deletes the account with everything it owns.`,
 		Example: `$ gt admin user delete spammer
-# also delete the user's repositories, packages and organization memberships
+# also delete the user's repositories, packages and organization memberships (and organizations they solely own)
 $ gt admin user delete spammer --purge`,
 		Annotations: map[string]string{"gt.text": "account deletion does not return a resource", "gt.confirm": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -348,7 +348,7 @@ $ gt admin user delete spammer --purge`,
 			confirmation := terminal.Confirmation{Prompt: "Delete user " + user.Username + "?"}
 			if purge {
 				confirmation = terminal.Confirmation{
-					Prompt: fmt.Sprintf("Delete user %s with their repositories, packages and organization memberships? This cannot be undone.", user.Username),
+					Prompt: fmt.Sprintf("Delete user %s with their repositories, packages and organization memberships, and the organizations they are the last owner of with those organizations' repositories? This cannot be undone.", user.Username),
 					Typed:  user.Username, NonTTY: "purge user " + user.Username,
 				}
 			}
@@ -356,7 +356,7 @@ $ gt admin user delete spammer --purge`,
 				return err
 			}
 			err = service.Delete(cmd.Context(), user.Username, purge)
-			if conflict, ok := errors.AsType[*services.ConflictError](err); ok && conflict.Reason == services.ReasonOwnsRepos {
+			if conflict, ok := errors.AsType[*services.ConflictError](err); ok && (conflict.Reason == services.ReasonOwnsRepos || conflict.Reason == services.ReasonOwnsOther) {
 				conflict.Hint = "transfer or delete them, or pass --purge to delete them with the user"
 			}
 			if err != nil {
@@ -370,6 +370,6 @@ $ gt admin user delete spammer --purge`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&purge, "purge", false, "Also delete the user's repositories, packages and organization memberships")
+	cmd.Flags().BoolVar(&purge, "purge", false, "Also delete the user's repositories, packages, organization memberships and the organizations they solely own")
 	return cmd
 }

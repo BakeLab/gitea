@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
@@ -130,6 +131,22 @@ X       29  Nightly   Refactor the deployment pipeline  feature/x  push         
 			require.Empty(t, diagnostics.String())
 		})
 	}
+}
+
+func TestRunListAcceptsWorkflowFilesMissingFromTheDefaultBranch(t *testing.T) {
+	server, requests := actionsAPI(t, map[string]string{
+		"GET actions/workflows":               workflowsFixture,
+		"GET actions/workflows/old.yml/runs":  `{"total_count":1,"workflow_runs":[` + failedRunFixture + `]}`,
+		"GET actions/workflows/gone.yml/runs": `404 {"message":"workflow \"gone.yml\" not found"}`,
+	})
+	deps, out, _ := actionsDeps(t, server.URL, false)
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "list", "-R", "alice/project", "--workflow", "old.yml", "--json", "id"}))
+	require.JSONEq(t, `[{"id":29}]`, out.String())
+	err := Execute(context.Background(), deps, []string{"run", "list", "-R", "alice/project", "--workflow", "gone.yml"})
+	require.EqualError(t, err, `workflow "gone.yml" not found in alice/project`)
+	err = Execute(context.Background(), deps, []string{"run", "list", "-R", "alice/project", "--workflow", "Missing name"})
+	require.EqualError(t, err, `workflow "Missing name" not found in alice/project`)
+	require.NotContains(t, *requests, "GET actions/workflows/Missing name/runs")
 }
 
 func TestRunListResolvesWorkflowNamesAndReportsEmptyFilters(t *testing.T) {
@@ -290,6 +307,34 @@ func TestRunWatchExitStatusAndTimeout(t *testing.T) {
 	}
 }
 
+func TestRunWatchSummaryBypassesThePager(t *testing.T) {
+	server, _ := actionsAPI(t, map[string]string{
+		"GET actions/workflows":   workflowsFixture,
+		"GET actions/runs/7":      strings.Replace(failedRunFixture, `"id":29`, `"id":7`, 1),
+		"GET actions/runs/7/jobs": failedJobsFixture,
+	})
+	deps, out, _ := actionsDeps(t, server.URL, true)
+	pager := &recordingPager{}
+	deps.Pager = pager
+	deps.Getenv = serverEnv(server.URL, map[string]string{"TERM": "dumb", "PAGER": "fake-pager"})
+	err := Execute(context.Background(), deps, []string{"run", "watch", "7", "-R", "alice/project", "--interval=1ms"})
+	require.EqualError(t, err, "run 7 (Nightly) completed with failure")
+	require.Zero(t, pager.calls, "the pager would hold the command back after the run completed")
+	require.Contains(t, out.String(), "Run tests")
+}
+
+func TestRunWatchErrorsDoNotCarryServerControlCharacters(t *testing.T) {
+	server, _ := actionsAPI(t, map[string]string{
+		"GET actions/workflows": `{"workflows":[]}`,
+		"GET actions/runs/7": `{"id":7,"path":"\u001b]0;pwned\u0007ci.yml@refs/heads/main","status":"completed","conclusion":"failure",
+			"created_at":"2028-01-01T11:59:00Z","started_at":"2028-01-01T11:59:00Z","completed_at":"2028-01-01T11:59:30Z"}`,
+		"GET actions/runs/7/jobs": `{"jobs":[]}`,
+	})
+	deps, _, _ := actionsDeps(t, server.URL, false)
+	err := Execute(context.Background(), deps, []string{"run", "watch", "7", "-R", "alice/project", "--interval=1ms"})
+	require.EqualError(t, err, "run 7 (]0;pwnedci) completed with failure")
+}
+
 func TestRunWatchRedrawsOnATerminalAndSummarizes(t *testing.T) {
 	server, _ := actionsAPI(t, map[string]string{
 		"GET actions/workflows": workflowsFixture,
@@ -323,10 +368,17 @@ func TestRunMutationsReportWhatHappened(t *testing.T) {
 		},
 		{
 			"cancel returns the run",
-			[]string{"run", "cancel", "47", "--json", "id,status"},
-			map[string]string{"POST actions/runs/47/cancel": queuedRunFixture},
-			[]string{"POST actions/runs/47/cancel"},
-			`{"id":47,"status":"queued"}`, "", nil,
+			[]string{"run", "cancel", "47", "--json", "id,status,workflow"},
+			map[string]string{"POST actions/runs/47/cancel": queuedRunFixture, "GET actions/workflows": workflowsFixture},
+			[]string{"POST actions/runs/47/cancel", "GET actions/workflows"},
+			`{"id":47,"status":"queued","workflow":"CI"}`, "", nil,
+		},
+		{
+			"cancel with fields the server may leave empty",
+			[]string{"run", "cancel", "47", "--json", "id,jobs,attempt,event"},
+			map[string]string{"POST actions/runs/47/cancel": `{"id":47}`, "GET actions/workflows": workflowsFixture},
+			[]string{"POST actions/runs/47/cancel", "GET actions/workflows"},
+			`{"id":47,"jobs":null,"attempt":0,"event":""}`, "", nil,
 		},
 		{
 			"rerun",
@@ -334,6 +386,13 @@ func TestRunMutationsReportWhatHappened(t *testing.T) {
 			map[string]string{"GET actions/runs/29": completedRun, "POST actions/runs/29/rerun": completedRun},
 			[]string{"GET actions/runs/29", "POST actions/runs/29/rerun", "GET actions/runs/29"},
 			"", "✓ Requested rerun of run 29 (attempt 2); watch it with: gt run watch 29 -R alice/project\n", nil,
+		},
+		{
+			"rerun returns the run",
+			[]string{"run", "rerun", "29", "--json", "id,workflow"},
+			map[string]string{"GET actions/runs/29": completedRun, "POST actions/runs/29/rerun": completedRun, "GET actions/workflows": workflowsFixture},
+			[]string{"GET actions/runs/29", "POST actions/runs/29/rerun", "GET actions/runs/29", "GET actions/workflows"},
+			`{"id":29,"workflow":"Nightly"}`, "", nil,
 		},
 		{
 			"rerun a job by name",
@@ -394,4 +453,32 @@ func TestRunJobsListsStatusAndElapsedTime(t *testing.T) {
 	deps, out, _ := actionsDeps(t, server.URL, true)
 	require.NoError(t, Execute(context.Background(), deps, []string{"run", "jobs", "#29", "-R", "alice/project"}))
 	require.Equal(t, "Showing 2 of 2 jobs in run 29\n\nSTATUS  ID  NAME   ELAPSED\n✓       30  build  45s\nX       31  test   27s\n", out.String())
+}
+
+func TestRunsAwaitingApprovalAreNotReportedAsWaitingForARunner(t *testing.T) {
+	jobs := []services.Job{{ID: 1, Name: "build", Status: "waiting", Labels: []string{"ubuntu-latest"}}}
+	approval := services.Run{ID: 7, Status: "waiting", Jobs: jobs}
+	require.Equal(t, "Waiting for approval; approve the run in the web interface", waitingForRunner(approval))
+	require.Equal(t, "still waiting for approval in the web interface", stillRunning(approval))
+	queued := services.Run{ID: 7, Status: "queued", Jobs: jobs}
+	require.Equal(t, `Waiting for a runner for "ubuntu-latest"`, waitingForRunner(queued))
+	require.Equal(t, `still queued; is a runner registered for "ubuntu-latest"?`, stillRunning(queued))
+}
+
+func TestRunSuggestionsNameTheInstanceThatWasSelectedExplicitly(t *testing.T) {
+	server, _ := actionsAPI(t, map[string]string{"GET actions/runs/47": queuedRunFixture})
+	host := strings.TrimPrefix(server.URL, "https://")
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-R", "alice/project", "--host", server.URL}, " -R " + host + "/alice/project"},
+		{[]string{"-R", host + "/alice/project", "--host", server.URL}, " -R " + host + "/alice/project"},
+	} {
+		deps, _, _ := actionsDeps(t, server.URL, false)
+		// The instance that commands use by default is another one than the server.
+		deps.Getenv = serverEnv(server.URL, map[string]string{"TERM": "dumb", "GITEA_INSTANCE_URL": server.URL, "GITEA_CLI_HOST": "https://default.test"})
+		err := Execute(context.Background(), deps, append([]string{"run", "rerun", "47"}, tc.args...))
+		require.EqualError(t, err, "run 47 is still queued; cancel it first: gt run cancel 47"+tc.want, tc.args)
+	}
 }

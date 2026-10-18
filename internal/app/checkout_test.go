@@ -134,11 +134,14 @@ func TestCheckoutNamesTheBranchAfterTheHead(t *testing.T) {
 		{"deleted head", services.Pull{Number: 7, Head: "feature", HeadRemoteDeleted: true}, nil, "pr/7"},
 		{"fork branch at the head without upstream", fork, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "abc123"}, "feature"},
 		{"fork default branch tracking origin", services.Pull{Number: 7, Head: "main", HeadSHA: "abc123", HeadRepo: "bob/project"}, map[string]string{
-			"rev-parse --verify refs/heads/main^{commit}": "abc123", "config --get branch.main.remote": "origin"}, "bob/main"},
+			"rev-parse --verify refs/heads/main^{commit}": "abc123", "config --get branch.main.remote": "origin",
+		}, "bob/main"},
 		{"branch above the head name", services.Pull{Number: 7, Head: "feature/login", HeadSHA: "abc123", HeadRepo: "alice/project"}, map[string]string{
-			"rev-parse --verify refs/heads/feature^{commit}": "other"}, "pr/7"},
+			"rev-parse --verify refs/heads/feature^{commit}": "other",
+		}, "pr/7"},
 		{"branches below the head name", same, map[string]string{
-			"for-each-ref --count=1 --format=%(refname) refs/heads/feature/": "refs/heads/feature/login"}, "pr/7"},
+			"for-each-ref --count=1 --format=%(refname) refs/heads/feature/": "refs/heads/feature/login",
+		}, "pr/7"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, _, _ := testDeps(t)

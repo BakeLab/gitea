@@ -184,3 +184,33 @@ func (pathAnnotatingEditor) EditPath(_ context.Context, _, path string) error {
 	annotated := strings.Replace(string(data), "+func added() {}\n", "+func added() {}\n# annotate added line\n", 1)
 	return os.WriteFile(path, []byte(annotated), 0o600)
 }
+
+func TestPullReviewKeepsAnnotatedDiffWhenSubmissionIsDeclined(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method, "nothing may be submitted")
+		if r.URL.Path == "/api/v1/repos/alice/project/pulls/4" {
+			_, _ = w.Write([]byte(`{"number":4,"title":"Add","user":{"login":"bob"}}`))
+			return
+		}
+		_, _ = w.Write([]byte("diff --git a/sample.go b/sample.go\n--- a/sample.go\n+++ b/sample.go\n@@ -1,2 +1,3 @@\n package sample\n+func added() {}\n"))
+	}))
+	defer server.Close()
+	deps, _, _ := testDeps(t)
+	deps.ReviewForm = reviewFormFunc(func(ctx context.Context, choices terminal.ReviewFormChoices) (terminal.ReviewFormValues, error) {
+		comments, err := choices.ReviewDiff(ctx)
+		require.NoError(t, err)
+		return terminal.ReviewFormValues{Event: "COMMENT", Comments: comments}, nil
+	})
+	deps.Prompter = &scriptedPrompter{}
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	deps.Editor = pathAnnotatingEditor{}
+	deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "true"})
+	err := Execute(context.Background(), deps, []string{"pr", "review", "4", "-R", "alice/project", "--interactive"})
+	require.ErrorIs(t, err, terminal.ErrCanceled)
+	path := regexp.MustCompile(`the annotated diff is kept at (\S+)`).FindStringSubmatch(err.Error())
+	require.Len(t, path, 2, err.Error())
+	data, readErr := os.ReadFile(path[1])
+	require.NoError(t, readErr)
+	require.Contains(t, string(data), "# annotate added line")
+	require.NoError(t, os.Remove(path[1]))
+}

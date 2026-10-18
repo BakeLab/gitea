@@ -118,7 +118,12 @@ func (a *application) promptComment(cmd *cobra.Command, initial string) (string,
 		return draft.Body, draft, err
 	}
 	body, err := a.deps.Prompter.AskText(cmd.Context(), commentTitle, initial)
-	return body, terminal.Draft{}, err
+	if err != nil {
+		return body, terminal.Draft{}, err
+	}
+	draft := keepDraft(body)
+	draft.Body = body
+	return body, draft, nil
 }
 
 // commentOn creates a comment on n, reporting it like gh: its URL on stdout, or JSON.

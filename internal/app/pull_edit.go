@@ -194,6 +194,9 @@ removes or adds that marker.`, Annotations: pullArgumentsAnnotation(nil), Args: 
 			if item, err = service.Edit(cmd.Context(), n, services.PullEdit{Title: &title}); err != nil {
 				return err
 			}
+			if item.Draft != undo {
+				return errors.New("the title was changed, but Gitea still " + map[bool]string{true: "does not treat", false: "treats"}[undo] + " the pull request as a draft; this instance may use a different draft prefix, so edit the title with: gt pr edit " + strconv.FormatInt(n, 10) + " --title")
+			}
 			if undo {
 				a.done(cmd, "Converted pull request %s to a draft", refLabel(t.Repo, n, item.Title))
 			} else {

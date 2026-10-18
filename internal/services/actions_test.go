@@ -336,3 +336,29 @@ func TestWorkflowFileTellsAMissingRefFromAMissingFile(t *testing.T) {
 	_, err = service.WorkflowFile(context.Background(), workflow, "main")
 	require.EqualError(t, err, "workflow file .gitea/workflows/ci.yml not found in owner/repo")
 }
+
+func TestDispatchFallsBackToATagRef(t *testing.T) {
+	var refs []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Ref string `json:"ref"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		refs = append(refs, payload.Ref)
+		if payload.Ref == "v1.0" || strings.HasSuffix(payload.Ref, "nope") {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"ref \"` + payload.Ref + `\" not found"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"workflow_run_id":12}`))
+	}))
+	service := Actions{Client: client, Repository: "owner/repo"}
+	result, err := service.Dispatch(context.Background(), "ci.yml", "v1.0", nil)
+	require.NoError(t, err)
+	require.Equal(t, int64(12), result.ID)
+	_, err = service.Dispatch(context.Background(), "ci.yml", "nope", nil)
+	var missing *NotFoundError
+	require.ErrorAs(t, err, &missing)
+	require.Equal(t, "ref", missing.Kind)
+	require.Equal(t, []string{"v1.0", "refs/tags/v1.0", "nope", "refs/tags/nope"}, refs)
+}

@@ -61,6 +61,7 @@ const (
 	ReasonNotDone   = "not done"          // the run has not finished yet
 	ReasonKeyInUse  = "key in use"        // the SSH key is registered already
 	ReasonOwnsRepos = "owns repositories" // the user still owns repositories
+	ReasonOwnsOther = "owns other"        // the user is still in organizations or owns packages
 )
 
 // ConflictError reports a request the current state of a resource refuses, such as closing a
@@ -105,6 +106,8 @@ func (e *ConflictError) Error() string {
 		text = "this SSH key is already registered"
 	case ReasonOwnsRepos:
 		text = cmp.Or(subject, "the user") + " still owns repositories"
+	case ReasonOwnsOther:
+		text = cmp.Or(subject, "the user") + " is still a member of organizations or owns packages"
 	default:
 		text = e.Err.Error()
 	}
@@ -120,6 +123,8 @@ func (e *ConflictError) Unwrap() error { return e.Err }
 type AmbiguousError struct {
 	Kind, Key, Scope string
 	IDs              []int64
+	// Hint replaces the advice to pass an ID where IDs do not select the resource.
+	Hint string
 }
 
 func (e *AmbiguousError) Error() string {
@@ -131,7 +136,7 @@ func (e *AmbiguousError) Error() string {
 	if e.Scope != "" {
 		text += " in " + e.Scope
 	}
-	return text + " (IDs " + strings.Join(ids, ", ") + "); pass an ID"
+	return text + " (IDs " + strings.Join(ids, ", ") + "); " + cmp.Or(e.Hint, "pass an ID")
 }
 
 // refusals maps the messages Gitea gives for refused requests onto conflict reasons. Each entry
@@ -151,7 +156,8 @@ var refusals = []struct {
 	{ReasonNotDone, []int{http.StatusBadRequest}, []string{"not done"}},
 	{ReasonKeyInUse, nil, []string{"key content has been used"}},
 	{ReasonOwnsRepos, nil, []string{"ownership of repositories"}},
-	{ReasonExists, []int{http.StatusBadRequest, http.StatusConflict, http.StatusUnprocessableEntity}, []string{"already exist", "release is has no tag"}},
+	{ReasonOwnsOther, nil, []string{"membership of organizations", "ownership of packages"}},
+	{ReasonExists, []int{http.StatusBadRequest, http.StatusConflict, http.StatusUnprocessableEntity}, []string{"already exist", "release is has no tag", "key title has been used"}},
 }
 
 var (
@@ -159,6 +165,9 @@ var (
 	unknownUser = regexp.MustCompile(`user does not exist \[uid: \d+, name: ([^\]]+)\]`)
 	// pullTargets finds the branches in "pull request already exists for these targets [... head_branch: x, base_branch: y]".
 	pullTargets = regexp.MustCompile(`head_branch: ([^,\]]+), base_branch: ([^,\]]+)`)
+	// missingBranch finds the branch in the 404 messages `ref "x" does not exist` (create pull
+	// request) and `new base 'x' not exist` (edit pull request).
+	missingBranch = regexp.MustCompile(`^(?:ref "([^"]+)" does not exist|new base '([^']+)' not exist)$`)
 	// wikiTitle finds the page in "wiki page already exists [title: Home.md]".
 	wikiTitle = regexp.MustCompile(`\[title: (.+?)(?:\.md)?\]`)
 )
@@ -185,6 +194,9 @@ func Classify(err error, kind, key, scope string) error {
 			conflict.Kind, conflict.Key = "wiki page", strconv.Quote(match[1])
 		}
 		return conflict
+	}
+	if match := missingBranch.FindStringSubmatch(apiErr.Message); apiErr.Status == http.StatusNotFound && match != nil {
+		return &NotFoundError{Kind: "branch", Key: strconv.Quote(cmp.Or(match[1], match[2])), Scope: scope, Err: err}
 	}
 	if apiErr.Status == http.StatusNotFound && kind != "" {
 		return &NotFoundError{Kind: kind, Key: key, Scope: scope, Err: err}

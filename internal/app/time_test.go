@@ -95,7 +95,7 @@ func TestTimeTablesAndDoneLines(t *testing.T) {
 	require.NoError(t, run("time", "delete", "1", "8", "--yes"))
 	require.Equal(t, "✓ Deleted 1h 30m logged by alice on alice/project#1\n", diagnostics.String())
 	require.NoError(t, run("time", "reset", "1", "--yes"))
-	require.Equal(t, "✓ Deleted all time logged on alice/project#1\n", diagnostics.String())
+	require.Equal(t, "✓ Deleted your time logged on alice/project#1\n", diagnostics.String())
 	require.ErrorContains(t, run("time", "delete", "1", "77", "--yes"), "tracked time 77 not found in alice/project#1")
 	require.EqualError(t, run("time", "delete", "1", "8"), "confirmation required to delete 1h 30m logged by alice on alice/project#1; rerun with --yes")
 	require.Equal(t, []string{
@@ -103,7 +103,28 @@ func TestTimeTablesAndDoneLines(t *testing.T) {
 		"DELETE /api/v1/repos/alice/project/issues/1/times/8",
 		"DELETE /api/v1/repos/alice/project/issues/1/times",
 	}, changed)
-	for seconds, want := range map[int64]string{0: "0s", 45: "45s", 90: "1m 30s", 900: "15m", 3600: "1h", 5400: "1h 30m", 5410: "1h 30m"} {
+	for seconds, want := range map[int64]string{0: "0s", 45: "45s", 90: "1m 30s", 900: "15m", 3600: "1h", 5400: "1h 30m", 5410: "1h 30m", -90: "-1m 30s"} {
 		require.Equal(t, want, spent(seconds))
 	}
+}
+
+func TestTimeListTotalPipedCoversEmptyAndPagedListings(t *testing.T) {
+	empty := true
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if empty {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		w.Header().Set("X-Total-Count", "2")
+		_, _ = w.Write([]byte(`[{"id":1,"time":60,"created":"2026-10-01T10:00:00Z","user_name":"alice","issue":{"number":3,"repository":{"full_name":"alice/project"}}}]`))
+	}))
+	defer server.Close()
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"time", "list", "--mine", "--total"}))
+	require.Equal(t, "Total: 0s\n", out.String())
+	out.Reset()
+	empty = false
+	require.NoError(t, Execute(context.Background(), deps, []string{"time", "list", "--mine", "--total", "--limit", "1"}))
+	require.Equal(t, "1\talice/project#3\talice\t1m\t2026-10-01T10:00:00Z\nTotal: 1m\n", out.String())
+	require.Equal(t, "more results available; use --page 2\n", diagnostics.String())
 }

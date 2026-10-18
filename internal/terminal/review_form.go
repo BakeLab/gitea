@@ -78,7 +78,7 @@ func (p *FormPrompter) CreateReview(ctx context.Context, choices ReviewFormChoic
 		body = body.ExternalEditor(true).Editor(args...).EditorExtension("md")
 	}
 	if required {
-		body = body.Validate(huh.ValidateNotEmpty())
+		body = body.Validate(notBlank)
 	}
 	if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(body))); err != nil {
 		return values, err

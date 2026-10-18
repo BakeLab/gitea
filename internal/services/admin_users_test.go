@@ -17,12 +17,13 @@ func TestAdminEditPreservesAuthenticationAndExplicitFalse(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			reads++
-			require.Equal(t, "/api/v1/users/account", r.URL.Path)
+			require.Equal(t, "/api/v1/admin/users", r.URL.Path)
+			require.Equal(t, "account", r.URL.Query().Get("q"))
 			if mutations == 0 {
-				_, _ = w.Write([]byte(`{"id":1,"login":"account","login_name":"external-identity","source_id":7,"is_admin":true}`))
+				_, _ = w.Write([]byte(`[{"id":2,"login":"account-2"},{"id":1,"login":"account","login_name":"external-identity","source_id":7,"is_admin":true}]`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"id":1,"login":"account","is_admin":false,"created":"2026-01-02T03:04:05Z"}`))
+			_, _ = w.Write([]byte(`[{"id":1,"login":"account","is_admin":false,"created":"2026-01-02T03:04:05Z"}]`))
 			return
 		}
 		mutations++
@@ -65,7 +66,7 @@ func TestAdminCreateAppliesRestrictionsAndReloads(t *testing.T) {
 			require.Equal(t, true, payload["restricted"])
 			w.WriteHeader(http.StatusNoContent)
 		default:
-			_, _ = w.Write([]byte(`{"id":4,"login":"new-account","restricted":true}`))
+			_, _ = w.Write([]byte(`[{"id":4,"login":"new-account","restricted":true}]`))
 		}
 	}))
 	restricted := true
@@ -73,7 +74,7 @@ func TestAdminCreateAppliesRestrictionsAndReloads(t *testing.T) {
 	item, err := (AdminUsers{Client: client}).Create(context.Background(), "new-account", AdminUserOptions{Email: &email, Password: "local-password", Visibility: &visibility, Restricted: &restricted})
 	require.NoError(t, err)
 	require.True(t, item.Restricted)
-	require.Equal(t, []string{"POST /api/v1/admin/users", "PATCH /api/v1/admin/users/new-account", "GET /api/v1/users/new-account"}, requests)
+	require.Equal(t, []string{"POST /api/v1/admin/users", "PATCH /api/v1/admin/users/new-account", "GET /api/v1/admin/users"}, requests)
 }
 
 func TestAdminCreateReportsFollowupFailureWithoutRetrying(t *testing.T) {
@@ -107,4 +108,13 @@ func TestAdminUserFromMapsServerFields(t *testing.T) {
 		Location: "Earth", URL: "https://gitea.test/alice", Admin: true, Active: true, Restricted: true, ProhibitLogin: true,
 		Visibility: "limited", CreatedAt: "2026-10-01T12:00:00+02:00",
 	}, adminUserFrom(user))
+}
+
+func TestAdminViewFindsOnlyIndividualAccountsByExactName(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/admin/users", r.URL.Path, "the public /users/{name} endpoint also answers for organizations and hides roles from other accounts")
+		_, _ = w.Write([]byte(`[{"id":2,"login":"acme-bot"}]`))
+	}))
+	_, err := (AdminUsers{Client: client}).View(context.Background(), "acme")
+	require.EqualError(t, err, `user "acme" not found`)
 }

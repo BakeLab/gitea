@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -69,7 +70,7 @@ func TestLabelCreateRefusesDuplicateNames(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`[]`))
 		case "PATCH /api/v1/repos/alice/project/labels/11":
-			requirePayload(t, `{"color":"000000"}`, r.Body)
+			requirePayload(t, `{"color":"000000","is_archived":false}`, r.Body)
 			changed = append(changed, r.Method+" "+r.URL.Path)
 			_, _ = w.Write([]byte(`{"id":11,"name":"bug","color":"000000","description":"Broken"}`))
 		default:
@@ -181,4 +182,29 @@ func TestLabelCreatePicksAColorAndPrompts(t *testing.T) {
 	require.Equal(t, "00AA00", created[1]["color"])
 	require.Equal(t, "From a prompt", created[1]["description"])
 	require.Equal(t, []string{"Label name", "Color (hex, e.g. d73a4a; empty = random):", "Description (optional):"}, prompt.asked)
+}
+
+func TestLabelEditAndForceKeepArchivedStateAndColor(t *testing.T) {
+	var patches []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeFirstPage(w, r, `[{"id":11,"name":"old","color":"ee0701","is_archived":true}]`)
+		case http.MethodPatch:
+			body, _ := io.ReadAll(r.Body)
+			patches = append(patches, string(body))
+			_, _ = w.Write([]byte(`{"id":11,"name":"old","is_archived":true}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"label", "edit", "old", "-R", "alice/project", "-d", "retired"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"label", "create", "old", "-R", "alice/project", "-d", "kept", "--force", "--no-input"}))
+	require.Len(t, patches, 2)
+	for _, patch := range patches {
+		require.Contains(t, patch, `"is_archived":true`)
+		require.Contains(t, patch, `"color":null`)
+	}
 }

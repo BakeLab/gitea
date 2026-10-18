@@ -47,7 +47,7 @@ func TestAdminUserEditSetsMustChangePasswordOnlyWhenPassed(t *testing.T) {
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
 			edits = append(edits, payload)
 		}
-		_, _ = w.Write([]byte(`{"id":2,"login":"bob"}`))
+		_, _ = w.Write([]byte(`[{"id":2,"login":"bob"}]`))
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
@@ -85,8 +85,8 @@ func TestAdminUserDeleteOffersPurgeForOwners(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			require.Equal(t, "/api/v1/users/bob", r.URL.Path)
-			_, _ = w.Write([]byte(`{"id":2,"login":"bob"}`))
+			require.Equal(t, "/api/v1/admin/users", r.URL.Path)
+			_, _ = w.Write([]byte(`[{"id":2,"login":"bob"}]`))
 		case http.MethodDelete:
 			deletes = append(deletes, r.URL.RequestURI())
 			if r.URL.Query().Get("purge") != "true" {
@@ -103,10 +103,47 @@ func TestAdminUserDeleteOffersPurgeForOwners(t *testing.T) {
 	require.EqualError(t, err, `user "bob" still owns repositories; transfer or delete them, or pass --purge to delete them with the user`)
 
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
-	const typed = "Delete user bob with their repositories, packages and organization memberships? This cannot be undone. Type bob to confirm:"
+	const typed = "Delete user bob with their repositories, packages and organization memberships, and the organizations they are the last owner of with those organizations' repositories? This cannot be undone. Type bob to confirm:"
 	prompt := &scriptedPrompter{inputs: map[string]string{typed: "bob"}}
 	deps.Prompter = prompt
 	require.NoError(t, Execute(context.Background(), deps, []string{"admin", "user", "delete", "bob", "--purge"}))
 	require.Equal(t, []string{typed}, prompt.asked)
 	require.Equal(t, []string{"/api/v1/admin/users/bob", "/api/v1/admin/users/bob?purge=true"}, deletes)
+}
+
+func TestAdminUserDeleteOffersPurgeForMembersAndPackageOwners(t *testing.T) {
+	message := "user still has membership of organizations [uid: 2]"
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`[{"id":2,"login":"bob"}]`))
+			return
+		}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"message":"` + message + `"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"admin", "user", "delete", "bob", "--yes"})
+	require.EqualError(t, err, `user "bob" is still a member of organizations or owns packages; transfer or delete them, or pass --purge to delete them with the user`)
+	message = "user still has ownership of packages [uid: 2]"
+	err = Execute(context.Background(), deps, []string{"admin", "user", "delete", "bob", "--yes"})
+	require.ErrorContains(t, err, "pass --purge")
+}
+
+func TestAdminUserCreateLeavesVisibilityToTheInstanceUnlessPassed(t *testing.T) {
+	var payloads []map[string]any
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		payloads = append(payloads, payload)
+		_, _ = w.Write([]byte(`{"id":1,"login":"account"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	args := []string{"admin", "user", "create", "account", "--email", "account@example.test", "--password", "secret", "--no-input"}
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.NoError(t, Execute(context.Background(), deps, append(args, "--visibility", "limited")))
+	require.Len(t, payloads, 2)
+	require.Nil(t, payloads[0]["visibility"], "an omitted visibility lets DEFAULT_USER_VISIBILITY apply")
+	require.Equal(t, "limited", payloads[1]["visibility"])
 }

@@ -34,7 +34,7 @@ func TestWebhookEditPreservesSettingsAndRedactsCredentials(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		assert.Equal(t, []any{"issues", "release"}, payload["events"])
+		assert.Equal(t, []any{"issues_only", "release"}, payload["events"])
 		assert.Equal(t, "main", payload["branch_filter"])
 		assert.Equal(t, "", payload["authorization_header"])
 		assert.Equal(t, false, payload["active"])
@@ -168,6 +168,35 @@ func TestWebhookFromRedactsDeliveryURLs(t *testing.T) {
 			hook := &gitea.Hook{ID: 1, Type: tc.adapter, Config: map[string]string{"url": tc.raw}}
 			require.Equal(t, tc.want, webhookFrom(hook, false).URL)
 			require.Equal(t, tc.raw, webhookFrom(hook, true).URL)
+		})
+	}
+}
+
+func TestWebhookEditKeepsEventGroupsNarrow(t *testing.T) {
+	issues := []string{"issue_assign", "issue_comment", "issue_label", "issue_milestone", "issues"}
+	pulls := []string{"pull_request", "pull_request_assign", "pull_request_comment", "pull_request_label", "pull_request_milestone", "pull_request_review", "pull_request_review_request", "pull_request_sync"}
+	require.Equal(t, []string{"push", "issues_only", "pull_request_only", "pull_request_review"}, narrowedEvents([]string{"push", "issues", "pull_request", "pull_request_review"}))
+	require.Equal(t, []string{"issues_only", "issue_label"}, narrowedEvents([]string{"issues", "issue_label"}))
+	require.Equal(t, issues, narrowedEvents(issues))
+	require.Equal(t, pulls, narrowedEvents(pulls))
+}
+
+func TestWebhookNotFoundNamesTheSelectedScope(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	for name, tc := range map[string]struct {
+		scope WebhookScope
+		want  string
+	}{
+		"organization": {WebhookScope{Repository: "owner/repo", Organization: "acme"}, "webhook 9 not found in acme"},
+		"account":      {WebhookScope{Repository: "owner/repo", Account: true}, "webhook 9 not found"},
+		"global":       {WebhookScope{Repository: "owner/repo", Global: true}, "webhook 9 not found"},
+		"repository":   {WebhookScope{Repository: "owner/repo"}, "webhook 9 not found in owner/repo"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := (Webhooks{Client: client, Scope: tc.scope}).View(context.Background(), 9)
+			require.EqualError(t, err, tc.want)
 		})
 	}
 }

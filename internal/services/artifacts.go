@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 
 	gitea "gitea.dev/sdk"
@@ -33,14 +34,29 @@ func artifactFrom(artifact *gitea.ActionsArtifact) Artifact {
 
 // Artifacts lists one page of artifacts belonging to a run, with their total number.
 func (s Actions) Artifacts(ctx context.Context, run int64, limit, page int) (Page[Artifact], error) {
-	response, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.ActionsArtifactsResponse, *gitea.Response, error) {
-		return c.Actions.ListRepoRunArtifacts(ctx, owner, repo, run, gitea.ListActionsArtifactsOptions{ListOptions: listOptions(limit, page)})
+	owner, repo, err := splitRepository(s.Repository)
+	if err != nil {
+		return Page[Artifact]{}, err
+	}
+	result, err := listPage(limit, page, func(limit, page int) ([]Artifact, http.Header, error) {
+		response, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.ActionsArtifactsResponse, *gitea.Response, error) {
+			return c.Actions.ListRepoRunArtifacts(ctx, owner, repo, run, gitea.ListActionsArtifactsOptions{ListOptions: listOptions(limit, page)})
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		// The server sends its count in the body only, and caps the page size below what AllArtifacts asks for;
+		// a count smaller than the page means the response lacks it.
+		headers := headerOf(resp).Clone()
+		if total := int(response.TotalCount); total >= len(response.Artifacts) {
+			headers.Set("X-Total-Count", strconv.Itoa(total))
+		}
+		return convertAll(response.Artifacts, artifactFrom), headers, nil
 	})
 	if err != nil {
 		return Page[Artifact]{}, Classify(err, "run", strconv.FormatInt(run, 10), s.Repository)
 	}
-	total := int(response.TotalCount)
-	return Page[Artifact]{Items: convertAll(response.Artifacts, artifactFrom), More: total > page*limit, Total: total, Counted: true}, nil
+	return result, nil
 }
 
 // AllArtifacts lists every artifact belonging to a run.

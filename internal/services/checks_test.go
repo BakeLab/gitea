@@ -58,6 +58,35 @@ func TestCheckWatchRevalidatesHeadBeforeReturning(t *testing.T) {
 	require.Equal(t, 5, heads)
 }
 
+func TestCheckWatchReportsTheEmptyStateOnce(t *testing.T) {
+	polls := 0
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			_, _ = w.Write([]byte(`{"head":{"sha":"abc"}}`))
+			return
+		}
+		if r.URL.Query().Get("page") != "1" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		polls++
+		if polls < 3 {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"id":1,"context":"build","status":"success"}]`))
+	}))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var reported []int
+	_, err := (Pulls{Client: client, Repository: "owner/repo"}).WatchChecks(ctx, 7, time.Millisecond, func(items []Check) error {
+		reported = append(reported, len(items))
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, []int{0, 1}, reported)
+}
+
 func TestCheckWatchTreatsSkippedAsPassing(t *testing.T) {
 	snapshots := 0
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -21,13 +21,19 @@ func attachmentName(t target, n int64, item services.IssueAttachment) string {
 	return fmt.Sprintf("attachment %d (%s) on %s#%d", item.ID, item.Name, t.Repo, n)
 }
 
-func attachmentRow(item services.IssueAttachment) []terminal.Cell {
+// attachmentRow is one row of the attachment list; piped output carries exact byte counts and the URL.
+func (a *application) attachmentRow(item services.IssueAttachment) []terminal.Cell {
+	size := terminal.Bytes(item.Size)
+	if !a.deps.Streams.OutTTY {
+		size = strconv.FormatInt(item.Size, 10)
+	}
 	return []terminal.Cell{
 		{Text: strconv.FormatInt(item.ID, 10), Link: item.URL},
 		{Text: item.Name},
-		{Text: terminal.Bytes(item.Size)},
+		{Text: size},
 		{Text: strconv.FormatInt(item.DownloadCount, 10)},
 		{Time: terminal.ParseTime(item.CreatedAt)},
+		{Text: item.URL},
 	}
 }
 
@@ -39,7 +45,7 @@ func attachmentView(item services.IssueAttachment, d terminal.Display) terminal.
 			{Label: "Downloads", Value: strconv.FormatInt(item.DownloadCount, 10)},
 			timeField("Created", item.CreatedAt, d),
 		},
-		Kind: "attachment", URL: item.URL,
+		Bodyless: true, Kind: "attachment", URL: item.URL,
 	}
 }
 
@@ -77,10 +83,10 @@ are addressed by the %s number and the attachment ID that attachment list shows.
 			return err
 		}
 		where := fmt.Sprintf("on %s#%d", t.Repo, n)
-		return writeTable(a, cmd, items, listSpec[services.IssueAttachment]{
-			Columns: []terminal.Column{{Header: "ID"}, {Header: "Name", Flex: true}, {Header: "Size"}, {Header: "Downloads"}, {Header: "Created"}},
-			Row:     attachmentRow, Empty: "no attachments " + where, Context: "attachments " + where,
-		}, listPage{Number: page})
+		return writeTable(a, cmd, items.Items, listSpec[services.IssueAttachment]{
+			Columns: []terminal.Column{{Header: "ID"}, {Header: "Name", Flex: true}, {Header: "Size"}, {Header: "Downloads"}, {Header: "Created"}, {Header: "URL", PipedOnly: true}},
+			Row:     a.attachmentRow, Empty: "no attachments " + where, Context: "attachments " + where,
+		}, servicePage(items, page))
 	}}
 	pageFlags(list, &limit, &page)
 
@@ -167,11 +173,10 @@ $ gt %[1]s attachment download %[2]s 9 -O - | less`, words.group, words.example)
 		if err != nil {
 			return err
 		}
-		item, body, err := (services.Issues{Client: t.client, Repository: t.Repo}).DownloadAttachment(cmd.Context(), n, id)
+		item, open, err := (services.Issues{Client: t.client, Repository: t.Repo}).DownloadAttachment(cmd.Context(), n, id)
 		if err != nil {
 			return err
 		}
-		defer body.Close()
 		path, skip, err := destination.destination(item.Name)
 		switch {
 		case err != nil:
@@ -180,6 +185,11 @@ $ gt %[1]s attachment download %[2]s 9 -O - | less`, words.group, words.example)
 			a.warn(cmd, "Skipped %s: %s exists", attachmentName(t, n, item), path)
 			return nil
 		}
+		body, err := open()
+		if err != nil {
+			return err
+		}
+		defer body.Close()
 		if err := a.download(cmd, destination, path, body); err != nil {
 			return err
 		}

@@ -102,6 +102,17 @@ func TestParseRepositoryAcceptsShorthands(t *testing.T) {
 	require.Equal(t, "alice/project", RepositoryRef{Owner: "alice", Name: "project"}.Slug())
 }
 
+func TestParseRepositoryRejectsAnInstanceConfiguredForBothSchemes(t *testing.T) {
+	hosts := map[string]Host{"http://localhost:3001": {}, "https://localhost:3001": {}}
+	for range 20 { // Map iteration order is random.
+		_, err := ParseRepository("localhost:3001/alice/project", hosts)
+		require.ErrorContains(t, err, "include the scheme")
+	}
+	got, err := ParseRepository("https://localhost:3001/alice/project", hosts)
+	require.NoError(t, err)
+	require.Equal(t, "https://localhost:3001", got.Host)
+}
+
 func TestResolveHostAcceptsBareHosts(t *testing.T) {
 	hosts := map[string]Host{"http://localhost:3001": {}, "https://example.org/gitea": {}}
 	for raw, want := range map[string]string{

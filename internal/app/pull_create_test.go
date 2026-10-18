@@ -49,7 +49,7 @@ func TestPullCreateAgitPushesToMatchingRemoteWithoutRemoteFlag(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/v1/repos/alice/project":
 			_, _ = w.Write([]byte(`{"full_name":"alice/project","default_branch":"main","permissions":{"push":true}}`))
-		case strings.HasPrefix(r.URL.Path, "/api/v1/repos/alice/project/raw/"):
+		case r.URL.Path == "/api/v1/orgs/alice", strings.HasPrefix(r.URL.Path, "/api/v1/repos/alice/project/raw/"):
 			w.WriteHeader(http.StatusNotFound)
 		case r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`[]`))
@@ -306,4 +306,22 @@ func TestPullCreateHelpListsDefaultsOnce(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "--help"}))
 	require.Contains(t, out.String(), "(default true)")
 	require.NotContains(t, out.String(), "(default true) (default true)")
+}
+
+func TestCompareRefEscapesBranchNames(t *testing.T) {
+	require.Equal(t, "feature/login", compareRef("feature/login"))
+	require.Equal(t, "fix%2312", compareRef("fix#12"))
+	require.Equal(t, "bob:fix%25x", compareRef("bob:fix%x"))
+}
+
+func TestPullCreateRefusesHeadEqualToBaseBeforePushing(t *testing.T) {
+	creates := 0
+	deps, runner, _ := publishCreateEnv(t, &creates)
+	err := Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--head", "main", "--base", "main", "--no-input", "--yes"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.ErrorContains(t, err, `must be on a branch named differently than "main"`)
+	require.Zero(t, creates)
+	for _, call := range runner.calls {
+		require.NotContains(t, call, "push")
+	}
 }

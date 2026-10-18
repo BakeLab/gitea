@@ -59,7 +59,7 @@ func (p *FormPrompter) SelectPull(ctx context.Context, choices []MergePullChoice
 	}
 	selected := choices[0].Number
 	err := p.runForm(ctx, huh.NewForm(huh.NewGroup(
-		huh.NewSelect[int64]().Title("Pull request to merge:").Options(options...).Value(&selected),
+		huh.NewSelect[int64]().Title("Pull request to merge:").Options(options...).Height(min(len(options), 10)+2).Value(&selected),
 	)))
 	return selected, err
 }

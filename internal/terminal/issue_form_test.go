@@ -60,3 +60,26 @@ func TestIssueFormMarksTitleRequired(t *testing.T) {
 	require.Contains(t, rendered.String(), "Title (required):")
 	require.NotContains(t, rendered.String(), "What's next?")
 }
+
+func TestIssueFormWritesBodyBeforeWhatsNext(t *testing.T) {
+	edited := false
+	choices := IssueFormChoices{AskNext: true, EditBody: func(context.Context, string) (Draft, error) {
+		edited = true
+		return Draft{Path: "draft.md", Body: "body"}, nil
+	}}
+	p, _ := linePrompter(t, "Title\n2\n")
+	values, err := p.collectIssueProperties(context.Background(), "", "", choices)
+	require.ErrorIs(t, err, ErrCanceled)
+	require.True(t, edited, "the editor runs before the user can cancel")
+	require.Equal(t, "draft.md", values.Draft.Path)
+}
+
+func TestRequiredFieldsRejectBlankAnswers(t *testing.T) {
+	require.Error(t, notBlank("   \t"))
+	require.Error(t, notBlank(""))
+	require.NoError(t, notBlank(" x "))
+	p, rendered := linePrompter(t, "   \nTitle\n")
+	_, err := p.collectIssueProperties(context.Background(), "", "", IssueFormChoices{EditBody: noEdit})
+	require.NoError(t, err)
+	require.Contains(t, rendered.String(), "input cannot be empty")
+}

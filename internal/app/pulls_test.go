@@ -90,3 +90,24 @@ func TestPullListFillsReviewersWhenSelected(t *testing.T) {
 	require.JSONEq(t, `[{"number":13,"reviewers":["bob"]}]`, out.String())
 	require.Equal(t, 1, views)
 }
+
+func TestPullListFillsReviewDecisionWhenSelected(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/pulls/13/reviews":
+			if r.URL.Query().Get("page") > "1" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"id":1,"state":"APPROVED","user":{"login":"bob"}}]`))
+		case "/api/v1/repos/alice/project/pulls/13":
+			_, _ = w.Write([]byte(`{"number":13}`))
+		default:
+			_, _ = w.Write([]byte(`[{"number":13}]`))
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--json", "number,review_decision"}))
+	require.JSONEq(t, `[{"number":13,"review_decision":"approved"}]`, out.String())
+}

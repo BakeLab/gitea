@@ -4,7 +4,6 @@
 package services
 
 import (
-	"cmp"
 	"context"
 	"maps"
 	"net/url"
@@ -78,6 +77,27 @@ func webhookFrom(hook *gitea.Hook, reveal bool) Webhook {
 	}
 }
 
+// eventGroupMembers are the events that sending issues or pull_request enables besides that event.
+var eventGroupMembers = map[string][]string{
+	"issues":       {"issue_assign", "issue_comment", "issue_label", "issue_milestone"},
+	"pull_request": {"pull_request_assign", "pull_request_comment", "pull_request_label", "pull_request_milestone", "pull_request_review", "pull_request_review_request", "pull_request_sync"},
+}
+
+// narrowedEvents turns the events Gitea reports into events that select the same set when sent
+// back. Gitea reports a hook of the issue or pull request events alone as issues or pull_request,
+// but taking those names back enables their whole group, so they become issues_only and
+// pull_request_only unless every member of the group is there too.
+func narrowedEvents(events []string) []string {
+	narrowed := slices.Clone(events)
+	for head, members := range eventGroupMembers {
+		index := slices.Index(narrowed, head)
+		if index >= 0 && slices.ContainsFunc(members, func(member string) bool { return !slices.Contains(events, member) }) {
+			narrowed[index] = head + "_only"
+		}
+	}
+	return narrowed
+}
+
 // WebhookScope selects one repository, organization, account or system scope.
 type WebhookScope struct {
 	Repository, Organization string
@@ -143,7 +163,18 @@ func (s Webhooks) get(ctx context.Context, id int64) (*gitea.Hook, error) {
 		}
 		return c.Hooks.GetRepoHook(ctx, owner, name, id)
 	})
-	return hook, Classify(err, "webhook", strconv.FormatInt(id, 10), cmp.Or(s.Scope.Repository, s.Scope.Organization))
+	return hook, Classify(err, "webhook", strconv.FormatInt(id, 10), s.errorScope())
+}
+
+// errorScope names the repository or organization the selected scope looks in, for error messages.
+func (s Webhooks) errorScope() string {
+	switch {
+	case s.Scope.Global, s.Scope.Account:
+		return ""
+	case s.Scope.Organization != "":
+		return s.Scope.Organization
+	}
+	return s.Scope.Repository
 }
 
 // View retrieves hook metadata without exposing its delivery configuration.
@@ -199,7 +230,7 @@ func (s Webhooks) Edit(ctx context.Context, id int64, opts WebhookOptions) (Webh
 	if err != nil {
 		return Webhook{}, err
 	}
-	edit := gitea.EditHookOption{Events: current.Events, BranchFilter: current.BranchFilter, Active: opts.Active, AuthorizationHeader: *opts.Authorization}
+	edit := gitea.EditHookOption{Events: narrowedEvents(current.Events), BranchFilter: current.BranchFilter, Active: opts.Active, AuthorizationHeader: *opts.Authorization}
 	if opts.Events != nil {
 		edit.Events = *opts.Events
 	}

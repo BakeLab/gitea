@@ -107,3 +107,12 @@ func TestIssueTemplatesAcceptCheckboxOptionObjects(t *testing.T) {
 	var sdkTemplates []*gitea.IssueTemplate
 	require.Error(t, json.Unmarshal([]byte(body), &sdkTemplates), "remove the raw request once the SDK decodes checkbox options")
 }
+
+func TestIssueCreateInMissingRepositoryReportsTheRepository(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"not found"}`))
+	}))
+	_, err := (Issues{Client: client, Repository: "alice/projetc"}).Create(context.Background(), IssueOptions{Title: "x"})
+	require.EqualError(t, err, "repository alice/projetc not found")
+}

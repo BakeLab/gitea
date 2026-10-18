@@ -95,6 +95,7 @@ func dueText(now time.Time, raw string) string {
 	if due.IsZero() {
 		return raw
 	}
+	// Keep the offset the server sent: Gitea stamps 23:59:59 in its own zone, and UTC would roll the date over.
 	return due.Format("Jan 2, 2006") + " (" + terminal.RelativeTime(now, due) + ")"
 }
 

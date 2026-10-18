@@ -58,6 +58,15 @@ func (a *application) editor() (terminal.Editor, string, error) {
 	return a.deps.Editor, preferences.Editor, nil
 }
 
+// editorCommand is the configured editor, or "" when there is none.
+func (a *application) editorCommand() string {
+	preferences, err := a.preferences()
+	if err != nil {
+		return ""
+	}
+	return preferences.Editor
+}
+
 func (a *application) editDraft(cmd *cobra.Command, body string) (terminal.Draft, error) {
 	editor, command, err := a.editor()
 	if err != nil {
@@ -74,7 +83,13 @@ func (a *application) bodyEditor(cmd *cobra.Command) terminal.BodyEditor {
 	if err == nil && preferences.Editor == "" {
 		return func(ctx context.Context, initial string) (terminal.Draft, error) {
 			body, err := a.deps.Prompter.AskText(ctx, terminal.BodyTitle, initial)
-			return terminal.Draft{Body: body}, err
+			if err != nil {
+				return terminal.Draft{Body: body}, err
+			}
+			// Saved like an editor draft: removed on success, reported when the command is canceled or fails.
+			draft := keepDraft(body)
+			draft.Body = body
+			return draft, nil
 		}
 	}
 	return func(_ context.Context, initial string) (terminal.Draft, error) { return a.editDraft(cmd, initial) }

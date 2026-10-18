@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -116,7 +117,12 @@ is not on the remote yet is pushed first, with its upstream set.`, Args: argsExa
 			}
 		}
 		if web {
-			return a.openBrowser(cmd, repositoryURL(t)+"/compare/"+options.Base+"..."+options.Head)
+			return a.openBrowser(cmd, repositoryURL(t)+"/compare/"+compareRef(options.Base)+"..."+compareRef(options.Head))
+		}
+		if !agit {
+			if err := refuseSameBranch(options.Head, options.Base); err != nil {
+				return err
+			}
 		}
 		var commitBody string
 		if options.Title == "" {
@@ -306,6 +312,15 @@ func (a *application) singleCommitMessage(ctx context.Context, base, head string
 	return subject, body, subject != ""
 }
 
+// refuseSameBranch rejects a head that is the base branch of the same repository, before anything
+// is pushed: such a pull request has no commits, and pushing would publish the base branch itself.
+func refuseSameBranch(head, base string) error {
+	if head != "" && head == base {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("must be on a branch named differently than %q; create a branch or pass --head", base))
+	}
+	return nil
+}
+
 func (a *application) createPullInteractively(cmd *cobra.Command, snapshot settings.Snapshot) (runErr error) {
 	target, err := a.resolve(cmd.Context(), true)
 	if err != nil {
@@ -358,6 +373,9 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 		Labels: values.Labels, Deadline: values.Deadline, Base: values.Base, Head: values.Head,
 		AllowMaintainerEdit: &values.AllowMaintainerEdits,
 	}
+	if err := refuseSameBranch(options.Head, options.Base); err != nil {
+		return err
+	}
 	if err := a.ensureHeadPublished(cmd, target, snapshot, options.Head); err != nil {
 		return err
 	}
@@ -372,4 +390,10 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 func (a *application) reportCreatedPull(cmd *cobra.Command, t target, item services.Pull) error {
 	a.done(cmd, "Created pull request %s", refLabel(t.Repo, item.Number, item.Title))
 	return a.created(cmd, item, item.URL)
+}
+
+// compareRef escapes a branch name, or OWNER:BRANCH, for a compare URL, where a '#' or '%' in the
+// name would otherwise start a fragment or an invalid escape.
+func compareRef(ref string) string {
+	return strings.ReplaceAll(url.PathEscape(ref), "%2F", "/")
 }

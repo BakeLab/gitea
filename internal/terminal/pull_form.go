@@ -61,7 +61,9 @@ const (
 func (p *FormPrompter) CreatePull(ctx context.Context, choices PullFormChoices) (PullFormValues, error) {
 	branches := pullBranchFields{base: choices.Base, headOwner: choices.HeadOwner, headBranch: choices.HeadBranch, allowEdits: choices.AllowMaintainerEdits}
 	branches.topic = branches.headBranch
-	if strings.TrimSpace(branches.base) == "" || strings.TrimSpace(branches.headBranch) == "" {
+	// A head equal to the base is the usual slip of committing on the default branch: ask instead.
+	sameBranch := strings.TrimSpace(branches.base) == strings.TrimSpace(branches.headBranch) && (branches.headOwner == "" || branches.headOwner == choices.BaseOwner)
+	if strings.TrimSpace(branches.base) == "" || strings.TrimSpace(branches.headBranch) == "" || sameBranch {
 		if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(branches.fields(!choices.CanPush)...))); err != nil {
 			return PullFormValues{}, err
 		}
@@ -133,13 +135,13 @@ type pullBranchFields struct {
 // fields asks for the branches; offerAgit adds the choice of an AGit push for users who cannot
 // push to the base repository.
 func (b *pullBranchFields) fields(offerAgit bool) []huh.Field {
-	fields := []huh.Field{huh.NewInput().Title("Base branch (required):").Value(&b.base).Validate(huh.ValidateNotEmpty())}
+	fields := []huh.Field{huh.NewInput().Title("Base branch (required):").Value(&b.base).Validate(notBlank)}
 	if offerAgit {
 		fields = append(fields, huh.NewConfirm().Title("Push through AGit (refs/for) instead of a branch of your own?").Value(&b.agit))
 	}
 	return append(fields,
 		huh.NewInput().Title("Head repository owner:").Value(&b.headOwner),
-		huh.NewInput().Title("Head branch (required):").Value(&b.headBranch).Validate(huh.ValidateNotEmpty()),
+		huh.NewInput().Title("Head branch (required):").Value(&b.headBranch).Validate(notBlank),
 		huh.NewInput().Title("AGit topic (when pushing through AGit):").Value(&b.topic),
 		huh.NewConfirm().Title("Allow maintainers to push to the head branch?").Value(&b.allowEdits),
 	)

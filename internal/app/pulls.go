@@ -40,7 +40,7 @@ func (a *application) pullListCommand() *cobra.Command {
 	var web bool
 	cmd := &cobra.Command{Use: "list", Short: "List pull requests", Long: `List the pull requests of a repository, newest first.
 
-The reviewers, reviewer_teams and merged_by JSON fields come from separate requests for
+The reviewers, reviewer_teams, review_decision and merged_by JSON fields come from separate requests for
 each pull request, which gt only makes when --json names them.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 1 {
 			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
@@ -78,10 +78,14 @@ each pull request, which gt only makes when --json names them.`, Args: argsExact
 			return err
 		}
 		items := window.Items
-		if a.jsonSelects("reviewers", "reviewer_teams", "merged_by") {
-			if items, err = service.ViewAll(cmd.Context(), items); err != nil {
-				return err
-			}
+		switch {
+		case a.jsonSelects("review_decision"):
+			items, err = service.DecideAll(cmd.Context(), items)
+		case a.jsonSelects("reviewers", "reviewer_teams", "merged_by"):
+			items, err = service.ViewAll(cmd.Context(), items)
+		}
+		if err != nil {
+			return err
 		}
 		noun := map[string]string{"open": "open pull requests", "closed": "closed pull requests", "merged": "merged pull requests", "all": "pull requests"}[state]
 		what := noun + " in " + t.Repo

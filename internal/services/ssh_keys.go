@@ -5,7 +5,9 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"strings"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -36,13 +38,23 @@ func (s SSHKeys) List(ctx context.Context, limit, page int) (Page[SSHKey], error
 	return convertPage(keys, sshKeyFrom), err
 }
 
-// View retrieves a public key by ID.
+// View retrieves a public key of the account by ID. Gitea also answers for other accounts' keys
+// and lets administrators delete them, so a key that belongs to someone else is refused.
 func (s SSHKeys) View(ctx context.Context, id int64) (SSHKey, error) {
 	key, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.PublicKey, *gitea.Response, error) {
 		return c.Users.GetPublicKey(ctx, id)
 	})
 	if err != nil {
 		return SSHKey{}, Classify(err, "SSH key", strconv.FormatInt(id, 10), "")
+	}
+	if key.Owner != nil {
+		account, err := CurrentAccount(ctx, s.Client)
+		if err != nil {
+			return SSHKey{}, err
+		}
+		if owner := login(key.Owner); !strings.EqualFold(owner, account) {
+			return SSHKey{}, fmt.Errorf("SSH key %d belongs to %s, not to %s", id, owner, account)
+		}
 	}
 	return sshKeyFrom(key), nil
 }

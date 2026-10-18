@@ -48,6 +48,10 @@ func TestSSHKeyViewCreateAndDelete(t *testing.T) {
 		case http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		default:
+			if r.URL.Path == "/api/v1/user" {
+				_, _ = w.Write([]byte(`{"login":"alice"}`))
+				return
+			}
 			_, _ = w.Write([]byte(sshKeyJSON))
 		}
 	}))
@@ -59,5 +63,17 @@ func TestSSHKeyViewCreateAndDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 3, created.ID)
 	require.NoError(t, service.Delete(context.Background(), 3))
-	require.Equal(t, []string{"GET /api/v1/user/keys/3", "POST /api/v1/user/keys", "DELETE /api/v1/user/keys/3"}, requests)
+	require.Equal(t, []string{"GET /api/v1/user/keys/3", "GET /api/v1/user", "POST /api/v1/user/keys", "DELETE /api/v1/user/keys/3"}, requests)
+}
+
+func TestSSHKeyViewRefusesKeysOfOtherAccounts(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/user" {
+			_, _ = w.Write([]byte(`{"login":"admin"}`))
+			return
+		}
+		_, _ = w.Write([]byte(sshKeyJSON))
+	}))
+	_, err := (SSHKeys{Client: client}).View(context.Background(), 3)
+	require.EqualError(t, err, "SSH key 3 belongs to alice, not to admin")
 }

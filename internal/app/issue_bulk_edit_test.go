@@ -139,3 +139,18 @@ func TestMissingItemsAreNamed(t *testing.T) {
 		require.EqualError(t, Explain(context.Background(), deps, err), test.want, test.args)
 	}
 }
+
+func TestReopeningAMergedPullRequestLeavesNoComment(t *testing.T) {
+	var writes []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writes = append(writes, r.Method+" "+r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"number":14,"title":"Merged one","state":"closed","pull_request":{"merged":true}}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"issue", "reopen", "14", "-R", "alice/project", "--no-input", "--comment", "again"})
+	require.ErrorContains(t, err, "pull request alice/project#14 (Merged one) is already merged; it cannot be reopened")
+	require.Empty(t, writes)
+}

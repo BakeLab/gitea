@@ -50,7 +50,10 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"issue", "create", "--no-input"}, "missing required input: supply --title"},
 		{[]string{"issue", "create", "--title", "safe", "--json=unknown"}, "unknown JSON field \"unknown\""},
 		{[]string{"issue", "create", "--title", "safe", "--json", "--jq", "["}, "invalid --jq expression"},
-		{[]string{"issue", "create", "--milestone="}, "--milestone needs a title or ID; use --remove-milestone to clear it"},
+		{[]string{"issue", "create", "--milestone="}, "--milestone needs a title or ID; omit --milestone for none"},
+		{[]string{"issue", "edit", "1", "--milestone="}, "--milestone needs a title or ID; use --remove-milestone to clear it"},
+		{[]string{"issue", "create", "--web", "--label", "bug"}, "--label cannot be combined with --web"},
+		{[]string{"issue", "create", "--web", "--deadline", "2026-12-24"}, "--deadline cannot be combined with --web"},
 		{[]string{"issue", "create", "--assignee", "alice, "}, "assignee names cannot be empty"},
 		{[]string{"issue", "create", "--template="}, "--template cannot be empty"},
 		{[]string{"issue", "create", "--title", "x", "--attachment", "."}, ". is not a regular file"},
@@ -70,7 +73,7 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"issue", "list", "--page", "0"}, `"--page" flag: must be a positive integer`},
 		{[]string{"issue", "list", "--label", "bug, "}, "label names cannot be empty"},
 		{[]string{"label", "create", "--name", "bug", "--color", "wrong"}, "--color requires six hexadecimal digits"},
-		{[]string{"label", "edit", "1"}, "nothing to edit; pass a flag such as --title (see --help)"},
+		{[]string{"label", "edit", "1"}, "nothing to edit; pass a flag such as --name or --color (see --help)"},
 		{[]string{"label", "list", "--org", "team", "-R", "a/b"}, "--org and --repo are mutually exclusive"},
 		{[]string{"milestone", "close", " ", "--by-name"}, "milestone title or ID cannot be empty"},
 		{[]string{"milestone", "create", "--title", "v1", "--deadline", "invalid"}, "invalid --deadline"},
@@ -294,6 +297,7 @@ func TestPromptedCreateSubmitsWithoutConfirmation(t *testing.T) {
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					w.WriteHeader(http.StatusNotFound)
+					_, _ = w.Write([]byte(`{"message":"variable not found"}`))
 					return
 				}
 				writes = append(writes, r.Method+" "+r.URL.Path)

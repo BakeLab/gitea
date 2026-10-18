@@ -75,3 +75,22 @@ func TestMilestoneRejectsInvalidDeadlineBeforeRequests(t *testing.T) {
 	_, err = service.Edit(context.Background(), 1, MilestoneOptions{Deadline: &invalid})
 	require.ErrorContains(t, err, "invalid milestone deadline")
 }
+
+func TestOrganizationArchivedLabelCreateFollowsUpWithPatch(t *testing.T) {
+	var requests []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests = append(requests, r.Method+" "+r.URL.Path+" "+string(body))
+		// Gitea ignores is_archived on create and honors it on edit.
+		archived := "false"
+		if r.Method == http.MethodPatch {
+			archived = "true"
+		}
+		_, _ = w.Write([]byte(`{"id":5,"name":"bug","is_archived":` + archived + `}`))
+	}))
+	name, archived := "bug", true
+	label, err := (Labels{Client: client, Organization: "company"}).Create(context.Background(), LabelOptions{Name: &name, Archived: &archived})
+	require.NoError(t, err)
+	require.True(t, label.Archived)
+	require.Equal(t, []string{`POST /api/v1/orgs/company/labels {"name":"bug","is_archived":true}`, `PATCH /api/v1/orgs/company/labels/5 {"is_archived":true}`}, requests)
+}

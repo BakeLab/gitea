@@ -70,11 +70,10 @@ var artifactColumns = []terminal.Column{
 
 func artifactRow(item services.Artifact) []terminal.Cell {
 	expires := terminal.Cell{}
-	expiresAt := ""
 	if item.ExpiresAt != nil {
-		expiresAt = *item.ExpiresAt
-		expires.Time = terminal.ParseTime(expiresAt)
+		expires.Time = terminal.ParseTime(*item.ExpiresAt)
 	}
+	piped := terminal.Cell{Time: expires.Time}
 	if item.Expired {
 		expires = terminal.Cell{Text: "expired", Color: "red"}
 	}
@@ -84,7 +83,7 @@ func artifactRow(item services.Artifact) []terminal.Cell {
 		{Text: terminal.Bytes(item.Size)},
 		{Text: strconv.FormatInt(item.Size, 10)},
 		expires,
-		{Text: expiresAt},
+		piped,
 		{Text: strconv.FormatBool(item.Expired)},
 	}
 }
@@ -122,7 +121,7 @@ $ gt run download 34 --zip`,
 			if err != nil {
 				return err
 			}
-			selected, err := selectArtifacts(artifacts, names, run)
+			selected, err := selectArtifacts(latestArtifacts(artifacts), names, run)
 			if err != nil {
 				return err
 			}
@@ -153,6 +152,24 @@ $ gt run download 34 --zip`,
 	return cmd
 }
 
+// latestArtifacts keeps the newest artifact of each name: after a rerun, the run lists the artifacts
+// of every attempt, which may share names.
+func latestArtifacts(artifacts []services.Artifact) []services.Artifact {
+	index := map[string]int{}
+	latest := make([]services.Artifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if i, seen := index[artifact.Name]; seen {
+			if artifact.ID > latest[i].ID {
+				latest[i] = artifact
+			}
+			continue
+		}
+		index[artifact.Name] = len(latest)
+		latest = append(latest, artifact)
+	}
+	return latest
+}
+
 // selectArtifacts returns the artifacts of a run with the given names, or all of them.
 func selectArtifacts(artifacts []services.Artifact, names []string, run int64) ([]services.Artifact, error) {
 	if len(artifacts) == 0 {
@@ -167,7 +184,7 @@ func selectArtifacts(artifacts []services.Artifact, names []string, run int64) (
 		if index < 0 {
 			available := make([]string, len(artifacts))
 			for i, artifact := range artifacts {
-				available[i] = artifact.Name
+				available[i] = terminal.SafeLine(artifact.Name)
 			}
 			return nil, fmt.Errorf("artifact %q not found in run %d (artifacts: %s)", name, run, strings.Join(available, ", "))
 		}
@@ -295,7 +312,7 @@ func (a *application) completeArtifactNames() cobra.CompletionFunc {
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		return a.apiCompletionIn(run.Repo, true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
 			artifacts, err := services.Actions{Client: t.client, Repository: t.Repo}.AllArtifacts(ctx, run.Number)
 			return describe(artifacts, func(artifact services.Artifact) (string, string) { return artifact.Name, terminal.Bytes(artifact.Size) }), err
 		})(cmd, args, toComplete)

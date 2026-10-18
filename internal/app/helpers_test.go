@@ -298,6 +298,9 @@ func selectablesHandler(t *testing.T, push bool, next http.HandlerFunc) http.Han
 				return
 			}
 			_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","default_branch":"main","permissions":{"push":%t,"pull":true}}`, push)
+		case "/api/v1/orgs/alice":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
 		case "/api/v1/repos/alice/project/issue_templates":
 			_, _ = w.Write([]byte(`[{"name":"Bug","about":"Report","title":"bug: ","content":"## Steps"}]`))
 		case "/api/v1/repos/alice/project/assignees":

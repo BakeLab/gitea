@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -69,10 +71,15 @@ $ gt run list --since 24h --json id,status,conclusion,workflow`,
 			opts.Actor = t.expandMe(opts.Actor)
 			if opts.Workflow != "" {
 				workflow, err := service.FindWorkflow(cmd.Context(), opts.Workflow)
+				// The server also lists the runs of a workflow file that only exists on another branch or was removed.
+				if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Kind == "workflow" && isWorkflowFile(opts.Workflow) {
+					err = nil
+				} else if err == nil {
+					opts.Workflow = workflow.ID
+				}
 				if err != nil {
 					return err
 				}
-				opts.Workflow = workflow.ID
 			}
 			page, err := service.RunsPage(cmd.Context(), opts)
 			if errors.Is(err, services.ErrRunScanExhausted) {
@@ -230,6 +237,12 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 	return cmd
 }
 
+// isWorkflowFile tells a workflow file name, which the server resolves itself, from a workflow name.
+func isWorkflowFile(raw string) bool {
+	ext := path.Ext(raw)
+	return !strings.ContainsAny(raw, " /") && (ext == ".yml" || ext == ".yaml")
+}
+
 // runHints are the next steps shown under a run: watching it while it runs, and reading the logs
 // of its jobs once one started.
 func (a *application) runHints(t target, run services.Run) []string {
@@ -250,7 +263,21 @@ func (a *application) suggestedRepo(t target) string {
 	if strings.HasPrefix(t.RepoSource, "remote ") || strings.HasPrefix(t.RepoSource, "git config") {
 		return ""
 	}
+	// An instance that --host or the repository itself selected is not the one a copied command finds.
+	if (t.HostSource == "--host" || (t.RepoSource != "" && t.HostSource == t.RepoSource)) && !a.isDefaultHost(t.Host) {
+		return " -R " + t.Host + "/" + t.Repo
+	}
 	return " -R " + t.Repo
+}
+
+// isDefaultHost reports whether host is the instance that commands use without --host or a repository URL.
+func (a *application) isDefaultHost(host string) bool {
+	s, err := a.settings()
+	if err != nil {
+		return false
+	}
+	var fallback target
+	return a.defaultHost(&fallback, s) == nil && fallback.Host == host
 }
 
 // renderRun shows a run with its jobs: on a terminal its state, trigger and jobs with their
@@ -338,10 +365,14 @@ func jobLines(jobs []services.Job, now time.Time) [][]terminal.Cell {
 	return rows
 }
 
-// waitingForRunner explains a run that waits for a runner: none of its jobs started yet.
+// waitingForRunner explains a run that waits for a runner: none of its jobs started yet. A run
+// that needs approval, such as one from a first-time contributor's fork, has the status "waiting".
 func waitingForRunner(run services.Run) string {
 	if run.Completed() || len(run.Jobs) == 0 || slices.ContainsFunc(run.Jobs, services.Job.Started) {
 		return ""
+	}
+	if run.Status == "waiting" {
+		return "Waiting for approval; approve the run in the web interface"
 	}
 	return "Waiting for a runner" + runnerLabels(run)
 }
@@ -515,7 +546,8 @@ func (a *application) watchRun(cmd *cobra.Command, t target, id int64, interval,
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) && run.ID != 0 {
 			if a.options.json == "" {
-				_ = a.writeHuman(cmd, renderRun(run, a.display(), nil))
+				// Not through the pager, which would stop the command at its end.
+				_, _ = io.WriteString(out, renderRun(run, a.display(), nil))
 			}
 			return timeoutError(err, timeout, "waiting for run %d (%s)", id, stillRunning(run))
 		}
@@ -525,12 +557,12 @@ func (a *application) watchRun(cmd *cobra.Command, t target, id int64, interval,
 		if err := a.writeJSON(cmd, run); err != nil {
 			return err
 		}
-	} else if err := a.writeHuman(cmd, renderRun(run, a.display(), nil)); err != nil {
+	} else if _, err := io.WriteString(out, renderRun(run, a.display(), nil)); err != nil {
 		return err
 	}
-	conclusion := cmp.Or(run.Conclusion, run.Status)
+	conclusion := terminal.SafeLine(cmp.Or(run.Conclusion, run.Status))
 	if !services.SuccessfulRun(run) {
-		return fmt.Errorf("run %d (%s) completed with %s", run.ID, run.Workflow, conclusion)
+		return fmt.Errorf("run %d (%s) completed with %s", run.ID, terminal.SafeLine(run.Workflow), conclusion)
 	}
 	took := ""
 	if d, ok := runElapsed(run.StartedAt, run.CompletedAt, a.deps.Now()); ok {
@@ -557,10 +589,13 @@ func runProgress(run services.Run) string {
 // stillRunning says how far a run got when a wait for it expired, suspecting a missing runner
 // when no job started.
 func stillRunning(run services.Run) string {
-	if waitingForRunner(run) != "" {
-		return "still " + run.Status + "; is a runner registered" + runnerLabels(run) + "?"
+	if run.Status == "waiting" && waitingForRunner(run) != "" {
+		return "still waiting for approval in the web interface"
 	}
-	return "still " + run.Status
+	if waitingForRunner(run) != "" {
+		return "still " + terminal.SafeLine(run.Status) + "; is a runner registered" + runnerLabels(run) + "?"
+	}
+	return "still " + terminal.SafeLine(run.Status)
 }
 
 func (a *application) runCancelCommand() *cobra.Command {
@@ -580,11 +615,15 @@ $ gt run cancel 34 --force`,
 			if err != nil {
 				return err
 			}
-			run, err := services.Actions{Client: t.client, Repository: t.Repo}.CancelRun(cmd.Context(), id, force)
+			service := services.Actions{Client: t.client, Repository: t.Repo}
+			run, err := service.CancelRun(cmd.Context(), id, force)
 			if err != nil {
 				return err
 			}
 			a.done(cmd, "Requested cancellation of run %d", id)
+			if a.options.json != "" {
+				run = service.NameRun(cmd.Context(), run)
+			}
 			return a.jsonResult(cmd, run)
 		},
 	}
@@ -643,6 +682,9 @@ $ gt run rerun 34 --job build`,
 				return err
 			}
 			a.done(cmd, "Requested rerun of run %d (attempt %d); watch it with: gt run watch %d%s", id, run.Attempt, id, a.suggestedRepo(t))
+			if a.options.json != "" {
+				run = service.NameRun(cmd.Context(), run)
+			}
 			return a.jsonResult(cmd, run)
 		},
 	}
@@ -716,7 +758,7 @@ func (a *application) completeJobs() cobra.CompletionFunc {
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		return a.apiCompletionIn(run.Repo, true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
 			jobs, err := services.Actions{Client: t.client, Repository: t.Repo}.Jobs(ctx, run.Number)
 			return describe(jobs, func(job services.Job) (string, string) {
 				return strconv.FormatInt(job.ID, 10), job.Name + " · " + cmp.Or(job.Conclusion, job.Status)

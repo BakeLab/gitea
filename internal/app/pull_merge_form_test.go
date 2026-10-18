@@ -245,3 +245,19 @@ func TestPullMergeRequiresNumberWithoutInteractive(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "pull request number")
 }
+
+func TestPullMergeReportsNoBranchDeletionForAGitPullRequests(t *testing.T) {
+	agit := `{"number":3,"title":"Add login","state":"open","base":{"ref":"main"},"head":{"ref":"refs/pull/3/head","label":"","sha":"abc123"}}`
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(mergeRepository))
+		case r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(agit))
+		}
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "--yes", "--delete-branch"}))
+	require.NotContains(t, diagnostics.String(), "emote branch")
+}

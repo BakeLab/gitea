@@ -34,6 +34,9 @@ func parseSpent(raw string) (int64, error) {
 
 // spent formats tracked seconds for people: "1h 30m", "15m", "45s".
 func spent(seconds int64) string {
+	if seconds < 0 {
+		return "-" + spent(-seconds)
+	}
 	d := trackedDuration(seconds)
 	var parts []string
 	for _, unit := range []struct {
@@ -123,7 +126,7 @@ $ gt time list --mine --since 168h`, Args: argsExact(0), RunE: func(cmd *cobra.C
 // of the listed time.
 func (a *application) writeTimes(cmd *cobra.Command, page services.Page[services.TrackedTime], number int, spec listSpec[services.TrackedTime], total bool) error {
 	d := a.display()
-	if a.options.json != "" || len(page.Items) == 0 || (!d.TTY && !total) {
+	if a.options.json != "" || (len(page.Items) == 0 && (d.TTY || !total)) || (!d.TTY && !total) {
 		return writeTable(a, cmd, page.Items, spec, servicePage(page, number))
 	}
 	var sum int64
@@ -136,7 +139,14 @@ func (a *application) writeTimes(cmd *cobra.Command, page services.Page[services
 	if d.TTY {
 		text = showing(len(page.Items), servicePage(page, number), spec.Context) + "\n\n" + text
 	}
-	return a.writeHuman(cmd, text)
+	if err := a.writeHuman(cmd, text); err != nil {
+		return err
+	}
+	if d.TTY {
+		return nil
+	}
+	// A piped total covers the listed page only.
+	return a.morePagesHint(cmd, page.More, number)
 }
 
 // trackedTimeRow shows a record in repo; records of other repositories name theirs.
@@ -200,12 +210,12 @@ $ gt time delete 12 8`, Annotations: map[string]string{"gt.text": "time delete d
 }
 
 func (a *application) timeResetCommand() *cobra.Command {
-	return &cobra.Command{Use: "reset {<number> | <url>}", Short: "Delete all time logged on an issue", Example: "$ gt time reset 12 --yes", Annotations: map[string]string{"gt.text": "time reset does not return a resource", "gt.confirm": "true", "gt.arguments": issueArguments}, Args: argsExact(1), ValidArgsFunction: firstArg(a.completeIssues("all")), RunE: func(cmd *cobra.Command, args []string) error {
+	return &cobra.Command{Use: "reset {<number> | <url>}", Short: "Delete your time logged on an issue", Long: "Delete the time you logged on an issue or pull request. Gitea keeps the time other users logged.", Example: "$ gt time reset 12 --yes", Annotations: map[string]string{"gt.text": "time reset does not return a resource", "gt.confirm": "true", "gt.arguments": issueArguments}, Args: argsExact(1), ValidArgsFunction: firstArg(a.completeIssues("all")), RunE: func(cmd *cobra.Command, args []string) error {
 		target, n, err := a.resolveRef(cmd, args[0], issueRef)
 		if err != nil {
 			return err
 		}
-		subject := fmt.Sprintf("all time logged on %s#%d", target.Repo, n)
+		subject := fmt.Sprintf("your time logged on %s#%d", target.Repo, n)
 		return a.deleteConfirmed(cmd, subject, func() error {
 			return (services.Times{Client: target.client, Repository: target.Repo}).Reset(cmd.Context(), n)
 		})

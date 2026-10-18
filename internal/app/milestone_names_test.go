@@ -97,7 +97,8 @@ func TestMilestoneIssueCommandsSelectByName(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`[]`))
 		case r.URL.Path == "/api/v1/repos/alice/project/issues" && r.Method == http.MethodGet:
-			require.Equal(t, "9", r.URL.Query().Get("milestones"))
+			// Gitea matches a filter value by title first, so the unique title is sent.
+			require.Equal(t, "Release one", r.URL.Query().Get("milestones"))
 			_, _ = w.Write([]byte(`[]`))
 		case r.URL.Path == "/api/v1/repos/alice/project/issues/3" && r.Method == http.MethodPatch:
 			var payload map[string]any
@@ -179,4 +180,23 @@ func TestMilestonesAcceptTitlesOrIDs(t *testing.T) {
 		require.ErrorContains(t, run(test.args...), test.want)
 	}
 	require.Len(t, calls, 5)
+}
+
+func TestMilestoneListSortsBeforePaging(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Gitea orders by due date alone, so undated milestones come first.
+		if r.URL.Query().Get("page") == "1" {
+			_, _ = w.Write([]byte(`[{"id":1,"title":"undated","state":"open"},{"id":2,"title":"dated","state":"open","due_on":"2028-01-15T00:00:00Z"}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	args := []string{"milestone", "list", "-R", "alice/project", "--limit", "1", "--json=title"}
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.JSONEq(t, `[{"title":"dated"}]`, out.String())
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, append(args, "--page", "2")))
+	require.JSONEq(t, `[{"title":"undated"}]`, out.String())
 }

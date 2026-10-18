@@ -322,14 +322,25 @@ func TestReviewLifecycleEditorRejectsEmptyRequiredText(t *testing.T) {
 }
 
 func TestBodyEditorTypesInlineWithoutAnEditor(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	deps, _, _ := testDeps(t)
 	prompt := &scriptedPrompter{}
 	deps.Prompter = prompt
 	a, cmd := outputApplication(deps, "")
 	draft, err := a.bodyEditor(cmd)(context.Background(), "## Steps")
 	require.NoError(t, err)
-	require.Equal(t, terminal.Draft{Body: "typed body"}, draft)
+	require.Equal(t, "typed body", draft.Body)
 	require.Equal(t, []string{terminal.BodyTitle + " ## Steps"}, prompt.texts)
+	// The typed body is kept like an editor draft: reported when the command fails, removed when it succeeds.
+	requireDraft(t, draft.Path, true)
+	failed := errors.New("create failed")
+	finishDraft(&draft, &failed)
+	require.ErrorContains(t, failed, "draft saved at "+draft.Path)
+	requireDraft(t, draft.Path, true)
+	var succeeded error
+	finishDraft(&draft, &succeeded)
+	require.NoError(t, succeeded)
+	requireDraft(t, draft.Path, false)
 
 	editor, path := newDraftEditor(t, "edited body")
 	deps.Editor = editor

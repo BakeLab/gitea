@@ -28,3 +28,32 @@ func TestMilestoneFormStartsFromCurrentValues(t *testing.T) {
 	require.Equal(t, "First", values.Description)
 	require.Equal(t, due, *values.Deadline)
 }
+
+func TestMilestoneFormKeepsSeededDescriptionOnEnter(t *testing.T) {
+	due := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+	seed := "a\r\nb\tc"
+	p, _ := testPrompter(strings.NewReader("\r\r\r"))
+	values, err := p.EditMilestone(context.Background(), "", MilestoneFormValues{Title: "v1.0", Description: seed, Deadline: &due})
+	require.NoError(t, err)
+	require.Equal(t, seed, values.Description)
+}
+
+func TestAskTextKeepsSeedOnEnter(t *testing.T) {
+	seed := "a\r\nb\tc\nd"
+	p, _ := testPrompter(strings.NewReader("\r\r"))
+	text, err := p.AskText(context.Background(), "Body", seed)
+	require.NoError(t, err)
+	require.Equal(t, seed, text)
+}
+
+func TestMilestoneFormOffersEditorWhenConfigured(t *testing.T) {
+	p, rendered := accessiblePrompter(t, "v1\n\n\n")
+	_, err := p.EditMilestone(context.Background(), "", MilestoneFormValues{Editor: "vi"})
+	require.NoError(t, err)
+	require.Contains(t, rendered.String(), "ctrl+e opens your editor")
+
+	p, rendered = accessiblePrompter(t, "v1\n\n\n")
+	_, err = p.EditMilestone(context.Background(), "", MilestoneFormValues{})
+	require.NoError(t, err)
+	require.NotContains(t, rendered.String(), "ctrl+e")
+}

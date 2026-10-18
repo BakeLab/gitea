@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -194,4 +195,36 @@ func TestSecondInterruptStopsACommandBlockedOnStdin(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("gt ignored the second interrupt while waiting on stdin")
 	}
+}
+
+func TestRunDropsTerminalControlsFromErrors(t *testing.T) {
+	definition := base64.StdEncoding.EncodeToString([]byte("on:\n  workflow_dispatch:\n    inputs:\n      target:\n        required: true\n"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/user":
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		case "/api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_issues":true}`))
+		case "/api/v1/repos/alice/project/actions/workflows":
+			_, _ = w.Write([]byte(`{"workflows":[{"id":"ci.yml","name":"CI\u001b]0;PWNED\u0007","path":".gitea/workflows/ci.yml","state":"active"}]}`))
+		case "/api/v1/repos/alice/project/contents/.gitea/workflows/ci.yml":
+			_, _ = w.Write([]byte(`{"type":"file","encoding":"base64","content":"` + definition + `"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	var stderr bytes.Buffer
+	deps := app.Dependencies{
+		Settings: settings.New(t.TempDir()), Credentials: &auth.Store{Dir: t.TempDir()}, Client: transport.New, Prompter: decliningPrompter{},
+		Streams: terminal.Streams{In: &bytes.Buffer{}, Out: &bytes.Buffer{}, ErrOut: &stderr},
+		Getenv: func(key string) string {
+			return map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL}[key]
+		},
+	}
+	require.Equal(t, 2, run(context.Background(), deps, []string{"workflow", "run", "ci.yml", "--ref", "main", "-R", "alice/project", "--no-input"}))
+	require.Contains(t, stderr.String(), "missing required input target for CI")
+	require.NotContains(t, stderr.String(), "\x1b")
+	require.NotContains(t, stderr.String(), "\x07")
 }

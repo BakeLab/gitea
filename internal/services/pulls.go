@@ -241,6 +241,26 @@ func (s Pulls) ViewAll(ctx context.Context, items []Pull) ([]Pull, error) {
 	return viewed, err
 }
 
+// DecideAll is ViewAll that also fills each pull request's ReviewDecision from its reviews.
+func (s Pulls) DecideAll(ctx context.Context, items []Pull) ([]Pull, error) {
+	viewed := make([]Pull, len(items))
+	reviews := Reviews{Client: s.Client, Repository: s.Repository}
+	err := concurrently(len(items), func(i int) error {
+		item, err := s.View(ctx, items[i].Number)
+		if err != nil {
+			return err
+		}
+		all, err := reviews.All(ctx, item.Number)
+		if err != nil {
+			return err
+		}
+		item.ReviewDecision = ReviewDecision(LatestReviews(all), len(item.Reviewers)+len(item.ReviewerTeams) > 0)
+		viewed[i] = item
+		return nil
+	})
+	return viewed, err
+}
+
 func (s Pulls) get(ctx context.Context, n int64) (*gitea.PullRequest, error) {
 	item, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
 		return c.PullRequests.GetPullRequest(ctx, owner, name, n)

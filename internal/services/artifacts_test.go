@@ -6,7 +6,10 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"testing"
 
 	gitea "gitea.dev/sdk"
@@ -45,4 +48,22 @@ func TestArtifactFromMapsServerFields(t *testing.T) {
 		ID: 9, Name: "build", Size: 128, URL: "https://example.test/artifact", Expired: true,
 		CreatedAt: "2028-01-02T03:04:05Z", UpdatedAt: "2028-01-02T03:04:05Z", ExpiresAt: &expires,
 	}, artifactFrom(artifact))
+}
+
+func TestAllArtifactsReadsPastTheServersPageCap(t *testing.T) {
+	const total, serverCap = 130, 50
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		size := min(limit, serverCap)
+		items := []string{}
+		for id := (page-1)*size + 1; id <= min(page*size, total); id++ {
+			items = append(items, fmt.Sprintf(`{"id":%d,"name":"a%d"}`, id, id))
+		}
+		_, _ = fmt.Fprintf(w, `{"total_count":%d,"artifacts":[%s]}`, total, strings.Join(items, ","))
+	}))
+	artifacts, err := Actions{Client: client, Repository: "owner/repo"}.AllArtifacts(context.Background(), 7)
+	require.NoError(t, err)
+	require.Len(t, artifacts, total)
+	require.EqualValues(t, total, artifacts[total-1].ID)
 }

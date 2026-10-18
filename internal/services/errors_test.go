@@ -64,3 +64,10 @@ func TestConflictHintsFollowTheReason(t *testing.T) {
 	err := &ConflictError{Reason: ReasonArchived, Scope: "alice/old", Hint: "unarchive it with: gt repo edit alice/old --archived=false"}
 	require.EqualError(t, err, "alice/old is archived (read-only); unarchive it with: gt repo edit alice/old --archived=false")
 }
+
+func TestClassifyNamesAMissingBranchNotThePullRequest(t *testing.T) {
+	for _, message := range []string{`ref "develp" does not exist`, `new base 'develp' not exist`} {
+		err := Classify(&transport.APIError{Status: http.StatusNotFound, Message: message}, "pull request", "#3", "alice/x")
+		require.EqualError(t, err, `branch "develp" not found in alice/x`)
+	}
+}

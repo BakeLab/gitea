@@ -63,6 +63,8 @@ func TestCreateSelectablesLoadWriteFieldsOnlyWithPush(t *testing.T) {
 				switch r.URL.Path {
 				case "/api/v1/repos/alice/project":
 					_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","permissions":{"push":%t,"pull":true}}`, push)
+				case "/api/v1/orgs/alice":
+					w.WriteHeader(http.StatusNotFound)
 				case "/api/v1/repos/alice/project/issue_templates":
 					_, _ = w.Write([]byte(`[{"name":"Bug","title":"t","content":"c"}]`))
 				case "/api/v1/repos/alice/project/assignees":
@@ -123,4 +125,31 @@ func TestViewPermissionsKeepsRepositorySchemaSeparate(t *testing.T) {
 	permissions, err := (Repositories{Client: client}).viewPermissions(context.Background(), "alice/project")
 	require.NoError(t, err)
 	require.Equal(t, RepositoryPermissions{Admin: true, Push: true, Pull: true}, permissions)
+}
+
+func TestCreateSelectablesIncludeOrganizationLabels(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/acme/service":
+			_, _ = w.Write([]byte(`{"full_name":"acme/service","permissions":{"push":true,"pull":true}}`))
+		case "/api/v1/orgs/acme":
+			_, _ = w.Write([]byte(`{"id":5,"name":"acme"}`))
+		case "/api/v1/repos/acme/service/assignees", "/api/v1/repos/acme/service/milestones":
+			_, _ = w.Write([]byte(`[]`))
+		case "/api/v1/repos/acme/service/labels":
+			_, _ = w.Write([]byte(`[]`))
+		case "/api/v1/orgs/acme/labels":
+			if r.URL.Query().Get("page") == "2" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"id":9,"name":"needs-triage"}]`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	result, err := (Pulls{Client: client, Repository: "acme/service"}).CreateSelectables(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []Label{{ID: 9, Name: "needs-triage"}}, result.Labels)
 }

@@ -45,11 +45,17 @@ $ gt milestone list --state all --json title,due_on,open_issues,closed_issues`, 
 		if err != nil {
 			return err
 		}
-		items, err := s.ListPage(cmd.Context(), state, limit, page)
+		// Gitea pages milestones by due date alone, so the order is applied to all of them first.
+		all, err := s.AllIn(cmd.Context(), state)
 		if err != nil {
 			return err
 		}
-		slices.SortStableFunc(items.Items, compareMilestones)
+		slices.SortStableFunc(all, compareMilestones)
+		start := len(all)
+		if page-1 <= len(all)/limit {
+			start = min((page-1)*limit, len(all))
+		}
+		items := services.Page[services.Milestone]{Items: all[start:min(start+limit, len(all))], More: start+limit < len(all), Total: len(all), Counted: true}
 		what := "milestones in " + t.Repo
 		if state != "all" {
 			what = state + " " + what
@@ -159,7 +165,7 @@ $ gt milestone view 3 --web`, Annotations: map[string]string{"gt.arguments": mil
 	}}
 	cmd.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the milestone in the browser")
-	cmd.ValidArgsFunction = firstArg(a.completeMilestones())
+	cmd.ValidArgsFunction = firstArg(a.completeMilestonesIn("all"))
 	return cmd
 }
 
@@ -240,7 +246,7 @@ $ gt milestone create --title v2.0 --editor`, Args: usageArgs(cobra.MaximumNArgs
 		var err error
 		defer finishDraft(&draft, &runErr)
 		if !localFlagsChanged(cmd) && a.canPrompt() && a.deps.MilestoneForm != nil {
-			values, err := a.deps.MilestoneForm.EditMilestone(cmd.Context(), "", terminal.MilestoneFormValues{})
+			values, err := a.deps.MilestoneForm.EditMilestone(cmd.Context(), "", terminal.MilestoneFormValues{Editor: a.editorCommand()})
 			if err != nil {
 				return err
 			}
@@ -310,7 +316,7 @@ $ gt milestone edit 3 --editor`, Annotations: map[string]string{"gt.arguments": 
 		}
 		switch {
 		case form:
-			values := terminal.MilestoneFormValues{Title: current.Title, Description: current.Description}
+			values := terminal.MilestoneFormValues{Title: current.Title, Description: current.Description, Editor: a.editorCommand()}
 			if current.Deadline != nil {
 				deadline := terminal.ParseTime(*current.Deadline)
 				values.Deadline = &deadline
@@ -334,7 +340,7 @@ $ gt milestone edit 3 --editor`, Annotations: map[string]string{"gt.arguments": 
 	}}
 	fields.register(cmd)
 	cmd.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
-	cmd.ValidArgsFunction = firstArg(a.completeMilestones())
+	cmd.ValidArgsFunction = firstArg(a.completeMilestonesIn("all"))
 	return cmd
 }
 
@@ -361,7 +367,7 @@ $ gt milestone delete 7 --yes`, Annotations: map[string]string{"gt.confirm": "tr
 		return a.jsonResult(cmd, item)
 	}}
 	cmd.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
-	cmd.ValidArgsFunction = firstArg(a.completeMilestones())
+	cmd.ValidArgsFunction = firstArg(a.completeMilestonesIn("all"))
 	return cmd
 }
 

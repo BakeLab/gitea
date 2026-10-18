@@ -11,8 +11,11 @@ import (
 )
 
 // All returns the open and closed milestones of the repository.
-func (s Milestones) All(ctx context.Context) ([]Milestone, error) {
-	return listAll(func(page int) ([]Milestone, error) { return s.List(ctx, "all", 100, page) })
+func (s Milestones) All(ctx context.Context) ([]Milestone, error) { return s.AllIn(ctx, "all") }
+
+// AllIn returns every milestone in state: open, closed or all.
+func (s Milestones) AllIn(ctx context.Context, state string) ([]Milestone, error) {
+	return listAll(func(page int) ([]Milestone, error) { return s.List(ctx, state, 100, page) })
 }
 
 // Find returns the milestones that raws address among the open and closed milestones, each by ID
@@ -51,10 +54,6 @@ func (s Milestones) FilterIDs(ctx context.Context, values []string) ([]string, e
 	if err != nil {
 		return nil, err
 	}
-	titles := make(map[string]int, len(items))
-	for _, item := range items {
-		titles[item.Title]++
-	}
 	finder := NameOrID[Milestone]{Kind: "milestone", Scope: s.Repository, ID: func(m Milestone) int64 { return m.ID }, Name: func(m Milestone) string { return m.Title }}
 	result := make([]string, len(values))
 	for i, raw := range values {
@@ -62,15 +61,33 @@ func (s Milestones) FilterIDs(ctx context.Context, values []string) ([]string, e
 		if err != nil {
 			return nil, err
 		}
-		id := strconv.FormatInt(item.ID, 10)
-		switch {
-		case titles[item.Title] == 1 && !strings.Contains(item.Title, ","):
-			result[i] = item.Title
-		case titles[id] == 0:
-			result[i] = id
-		default:
-			return nil, fmt.Errorf("milestone %q (ID %s) cannot filter issues: another milestone of %s is titled %q", item.Title, id, s.Repository, id)
+		if result[i], err = s.filterValue(items, item); err != nil {
+			return nil, err
 		}
 	}
 	return result, nil
+}
+
+// FilterValue is the value that filters an issue listing by item, as FilterIDs resolves it.
+func (s Milestones) FilterValue(ctx context.Context, item Milestone) (string, error) {
+	items, err := s.All(ctx)
+	if err != nil {
+		return "", err
+	}
+	return s.filterValue(items, item)
+}
+
+func (s Milestones) filterValue(items []Milestone, item Milestone) (string, error) {
+	titles := make(map[string]int, len(items))
+	for _, other := range items {
+		titles[other.Title]++
+	}
+	id := strconv.FormatInt(item.ID, 10)
+	switch {
+	case titles[item.Title] == 1 && !strings.Contains(item.Title, ","):
+		return item.Title, nil
+	case titles[id] == 0:
+		return id, nil
+	}
+	return "", fmt.Errorf("milestone %q (ID %s) cannot filter issues: another milestone of %s is titled %q", item.Title, id, s.Repository, id)
 }

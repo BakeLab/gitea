@@ -57,7 +57,7 @@ func (s Labels) CreateUnique(ctx context.Context, existing []Label, opts LabelOp
 		return Label{}, false, &ConflictError{Reason: ReasonExists, Kind: "label", Key: strconv.Quote(current.Name), Scope: s.Scope()}
 	}
 	opts.Name = nil
-	label, err := s.Edit(ctx, current.ID, opts)
+	label, err := s.Edit(ctx, current.ID, opts.KeepArchived(current))
 	return label, true, err
 }
 
@@ -70,7 +70,7 @@ func selectLabelNames(scope string, names []string, matches map[string][]int64) 
 			return nil, NotFound("label", strconv.Quote(name), scope)
 		}
 		if len(candidates) > 1 {
-			return nil, &AmbiguousError{Kind: "label", Key: strconv.Quote(name), Scope: scope, IDs: candidates}
+			return nil, &AmbiguousError{Kind: "label", Key: strconv.Quote(name), Scope: scope, IDs: candidates, Hint: "prefix the name with repo: or org: to choose one"}
 		}
 		if !seen[candidates[0]] {
 			ids = append(ids, candidates[0])

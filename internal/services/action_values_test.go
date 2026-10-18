@@ -6,8 +6,10 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/transport"
@@ -37,7 +39,7 @@ func TestVariableSetSelectsCreateOrUpdate(t *testing.T) {
 					assert.Equal(t, scope.path+"/variables/BUILD_MODE", r.URL.Path)
 					if r.Method == http.MethodGet {
 						w.WriteHeader(test.read)
-						_, _ = w.Write([]byte(`{"name":"BUILD_MODE","data":"old"}`))
+						_, _ = w.Write([]byte(`{"name":"BUILD_MODE","data":"old","message":"variable not found"}`))
 						return
 					}
 					mutations = append(mutations, r.Method)
@@ -47,7 +49,7 @@ func TestVariableSetSelectsCreateOrUpdate(t *testing.T) {
 					assert.Equal(t, "build flavor", payload["description"])
 					w.WriteHeader(http.StatusNoContent)
 				}))
-				item, err := (ActionVariables{Client: client, Scope: scope.scope}).Set(context.Background(), "BUILD_MODE", "new\nvalue", "build flavor")
+				item, err := (ActionVariables{Client: client, Scope: scope.scope}).Set(context.Background(), "BUILD_MODE", "new\nvalue", new("build flavor"))
 				if test.wantMethod == "" {
 					var apiErr *transport.APIError
 					require.ErrorAs(t, err, &apiErr)
@@ -138,4 +140,63 @@ func TestSecretListReturnsMetadataOnly(t *testing.T) {
 			require.Equal(t, []ActionSecret{{Name: "TOKEN", Description: "deploy", CreatedAt: "2028-01-02T03:04:05Z"}, {Name: "OTHER"}}, items.Items)
 		})
 	}
+}
+
+func TestVariableSetKeepsTheDescriptionUnlessGiven(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		description *string
+		want        string
+	}{{"omitted", nil, "build flavor"}, {"given", new("other"), "other"}, {"cleared", new(""), ""}} {
+		t.Run(test.name, func(t *testing.T) {
+			var sent string
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					_, _ = w.Write([]byte(`{"name":"MODE","data":"old","description":"build flavor"}`))
+					return
+				}
+				var payload map[string]string
+				assert.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+				sent = payload["description"]
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			item, err := (ActionVariables{Client: client, Scope: ActionScope{Organization: "team"}}).Set(context.Background(), "MODE", "new", test.description)
+			require.NoError(t, err)
+			require.Equal(t, test.want, sent)
+			require.Equal(t, test.want, item.Description)
+		})
+	}
+}
+
+func TestMissingScopeIsNotReportedAsAMissingValue(t *testing.T) {
+	for _, test := range []struct {
+		message string
+		missing bool
+	}{{"not found", false}, {"secret was not found [name: ]", true}, {"variable not found", true}} {
+		t.Run(test.message, func(t *testing.T) {
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"` + test.message + `"}`))
+			}))
+			scope := ActionScope{Organization: "acme"}
+			for name, err := range map[string]error{
+				"secret":   (ActionSecrets{Client: client, Scope: scope}).Delete(context.Background(), "TOKEN"),
+				"variable": (ActionVariables{Client: client, Scope: scope}).Delete(context.Background(), "MODE"),
+			} {
+				var missing *NotFoundError
+				require.Error(t, err)
+				if strings.Contains(test.message, name) {
+					require.ErrorAs(t, err, &missing, name)
+				} else {
+					require.False(t, errors.As(err, &missing), name)
+				}
+			}
+		})
+	}
+}
+
+func TestSecretSetResultHasEveryJSONField(t *testing.T) {
+	data, err := json.Marshal(ActionSecret{Name: "TOKEN"})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"name":"TOKEN","description":"","created_at":""}`, string(data))
 }

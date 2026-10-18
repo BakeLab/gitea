@@ -13,18 +13,21 @@ import (
 )
 
 // Attachments paginates the server's unpaginated attachment collection locally.
-func (s Issues) Attachments(ctx context.Context, number int64, limit, page int) ([]IssueAttachment, error) {
+func (s Issues) Attachments(ctx context.Context, number int64, limit, page int) (Page[IssueAttachment], error) {
 	attachments, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.Attachment, *gitea.Response, error) {
 		return c.Issues.ListIssueAttachments(ctx, owner, repo, number)
 	})
 	if err != nil {
-		return nil, err
+		return Page[IssueAttachment]{}, err
 	}
 	items, err := pageOf(attachments, limit, page)
 	if err != nil {
-		return nil, err
+		return Page[IssueAttachment]{}, err
 	}
-	return convertAll(items, func(item *gitea.Attachment) IssueAttachment { return IssueAttachment(assetFrom(item)) }), nil
+	return Page[IssueAttachment]{
+		Items: convertAll(items, func(item *gitea.Attachment) IssueAttachment { return IssueAttachment(assetFrom(item)) }),
+		More:  len(attachments) > page*limit, Total: len(attachments), Counted: true,
+	}, nil
 }
 
 // Attachment retrieves metadata for one attachment in its owning issue.
@@ -73,13 +76,15 @@ func (s Issues) UploadAttachment(ctx context.Context, number int64, name string,
 	return IssueAttachment(asset), err
 }
 
-// DownloadAttachment opens an attachment stream scoped to its instance and issue, and returns the
-// attachment's metadata.
-func (s Issues) DownloadAttachment(ctx context.Context, number, id int64) (IssueAttachment, io.ReadCloser, error) {
+// DownloadAttachment retrieves an attachment's metadata and returns a function that opens its
+// content, scoped to its instance and issue. Nothing is downloaded until that function is called,
+// so callers can refuse or skip the download first.
+func (s Issues) DownloadAttachment(ctx context.Context, number, id int64) (IssueAttachment, func() (io.ReadCloser, error), error) {
 	attachment, err := s.attachment(ctx, number, id)
 	if err != nil {
 		return IssueAttachment{}, nil, err
 	}
-	body, err := downloadAttachment(ctx, s.Client, attachment)
-	return IssueAttachment(assetFrom(attachment)), body, err
+	return IssueAttachment(assetFrom(attachment)), func() (io.ReadCloser, error) {
+		return downloadAttachment(ctx, s.Client, attachment)
+	}, nil
 }

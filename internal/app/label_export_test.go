@@ -86,3 +86,22 @@ func TestEmptyLabelJSONExportIsAnArray(t *testing.T) {
 	require.JSONEq(t, `[]`, out.String())
 	require.Empty(t, diagnostics.String())
 }
+
+func TestLabelExportStripsEscapesOnATerminalOnly(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "1" {
+			_, _ = w.Write([]byte(`[{"name":"bug\u001b[8m","color":"ff0000","description":""}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	args := []string{"label", "export", "-R", "alice/project"}
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.Contains(t, out.String(), "\x1b[8m")
+	out.Reset()
+	deps.Streams.OutTTY = true
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.NotContains(t, out.String(), "\x1b")
+}

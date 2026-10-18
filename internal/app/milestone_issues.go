@@ -24,11 +24,14 @@ $ gt milestone issue list v1.0 --state all --kind issues`, Annotations: map[stri
 		if err != nil {
 			return err
 		}
-		milestone, err := findMilestone(cmd, services.Milestones{Client: target.client, Repository: target.Repo}, args[0], byName)
+		milestones := services.Milestones{Client: target.client, Repository: target.Repo}
+		milestone, err := findMilestone(cmd, milestones, args[0], byName)
 		if err != nil {
 			return err
 		}
-		opts.Milestones = strconv.FormatInt(milestone.ID, 10)
+		if opts.Milestones, err = milestones.FilterValue(cmd.Context(), milestone); err != nil {
+			return err
+		}
 		page, err := (services.Issues{Client: target.client, Repository: target.Repo}).ListPage(cmd.Context(), opts)
 		if err != nil {
 			return err
@@ -40,7 +43,7 @@ $ gt milestone issue list v1.0 --state all --kind issues`, Annotations: map[stri
 	enumFlag(list, &opts.State, "state", "s", "open", "Filter by state", "open", "closed", "all")
 	enumFlag(list, &opts.Kind, "kind", "", "all", "List issues, pull requests or both", "issues", "pulls", "all")
 	list.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
-	list.ValidArgsFunction = firstArg(a.completeMilestones())
+	list.ValidArgsFunction = firstArg(a.completeMilestonesIn("all"))
 	group.AddCommand(list)
 	for _, verb := range []string{"add", "remove"} {
 		var byName bool
@@ -77,7 +80,7 @@ $ gt milestone issue %[1]s v1.0 12 13 '#14'`, verb), Annotations: map[string]str
 			return errors.Join(append(failures, writeBatchJSON(a, cmd, len(numbers), results))...)
 		}}
 		command.Flags().BoolVar(&byName, "by-name", false, "Match a numeric milestone argument as a title rather than an ID")
-		milestones, issues := a.completeMilestones(), a.completeIssues("open")
+		milestones, issues := a.completeMilestonesIn("all"), a.completeIssues("open")
 		command.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 			if len(args) == 0 {
 				return milestones(cmd, args, toComplete)

@@ -88,3 +88,19 @@ func TestLabelImportAcceptsColorPrefixedRows(t *testing.T) {
 	requirePayload(t, `{"name":"enhancement","color":"84b6eb"}`, strings.NewReader(created[1]))
 	require.Empty(t, out.String())
 }
+
+func TestLabelImportJSONIsAnArrayForOneRow(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":1,"name":"bug"}`))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	file := filepath.Join(t.TempDir(), "labels.txt")
+	require.NoError(t, os.WriteFile(file, []byte("#ee0701 bug\n"), 0o600))
+	require.NoError(t, Execute(context.Background(), deps, []string{"label", "import", file, "-R", "alice/project", "--json=id,name"}))
+	require.JSONEq(t, `[{"id":1,"name":"bug"}]`, out.String())
+}

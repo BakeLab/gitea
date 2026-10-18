@@ -67,3 +67,14 @@ func TestPullEditAddsAssigneesWithoutExtraReads(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "edit", "7", "-R", "alice/project", "--add-assignees", "bob,Alice", "--json=number"}))
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/issues/7", "PATCH /api/v1/repos/alice/project/pulls/7"}, calls)
 }
+
+func TestPullReadyFailsWhenGiteaStillSeesADraft(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"number":7,"title":"Draft: x","draft":true}`))
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"pr", "ready", "7", "-R", "alice/project"})
+	require.ErrorContains(t, err, "still treats the pull request as a draft")
+	require.NotContains(t, diagnostics.String(), "Marked")
+}

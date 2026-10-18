@@ -128,6 +128,8 @@ $ gt pr close 13 -c "Superseded by #15" --delete-branch`
 // head branch of another open pull request, which deleting it would close.
 func (a *application) deleteHead(cmd *cobra.Command, service services.Pulls, item services.Pull, merging, local bool) {
 	switch {
+	case item.Head == "":
+		// An AGit pull request has no head branch to delete.
 	case item.HeadRemoteDeleted && merging:
 		a.done(cmd, "Deleted remote branch %s", item.Head)
 	case item.HeadRemoteDeleted:
@@ -358,7 +360,7 @@ the base branch.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.co
 		} else {
 			a.done(cmd, "%s pull request %s", mergeVerbs[method], ref)
 			if deleteBranch {
-				a.deleteHead(cmd, service, merged, true, deleteLocal)
+				a.deleteHead(cmd, service, merged, !item.HeadRemoteDeleted, deleteLocal)
 			}
 		}
 		return a.jsonResult(cmd, merged)

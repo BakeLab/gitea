@@ -35,11 +35,11 @@ type Run struct {
 	Conclusion   string  `json:"conclusion"`
 	URL          string  `json:"url"`
 	Branch       string  `json:"branch"`
-	Event        string  `json:"event,omitempty"`
-	Actor        string  `json:"actor,omitempty"`
-	Commit       string  `json:"commit,omitempty"`
-	Attempt      int64   `json:"attempt,omitempty"`
-	Jobs         []Job   `json:"jobs,omitempty"`
+	Event        string  `json:"event"`
+	Actor        string  `json:"actor"`
+	Commit       string  `json:"commit"`
+	Attempt      int64   `json:"attempt"`
+	Jobs         []Job   `json:"jobs"`
 }
 
 // Completed reports whether the run finished, whatever its conclusion.
@@ -193,7 +193,7 @@ func (s Actions) runsPage(ctx context.Context, opts RunListOptions) (Page[Run], 
 	if opts.Workflow != "" {
 		endpoint = s.endpoint() + "workflows/" + url.PathEscape(opts.Workflow) + "/runs"
 	}
-	return listPage(opts.Limit, opts.Page, func(limit, page int) ([]Run, http.Header, error) {
+	runs, err := listPage(opts.Limit, opts.Page, func(limit, page int) ([]Run, http.Header, error) {
 		query.Set("limit", strconv.Itoa(limit))
 		query.Set("page", strconv.Itoa(page))
 		var response struct {
@@ -207,6 +207,10 @@ func (s Actions) runsPage(ctx context.Context, opts RunListOptions) (Page[Run], 
 		}
 		return runs, headers, err
 	})
+	if opts.Workflow != "" && IsNotFound(err) {
+		return Page[Run]{}, NotFound("workflow", strconv.Quote(opts.Workflow), s.Repository)
+	}
+	return runs, err
 }
 
 // nameRuns names runs after their workflows.
@@ -238,6 +242,14 @@ func (s Actions) Run(ctx context.Context, id int64) (Run, error) {
 	// TODO(sdk): ActionsWorkflowRun lacks created_at/updated_at.
 	err := getJSON(ctx, s.Client, fmt.Sprintf("%sruns/%d", s.endpoint(), id), &response)
 	return response.result(), err
+}
+
+// NameRun names a run that a mutation returned after its workflow; it stays as is when the
+// workflows cannot be listed.
+func (s Actions) NameRun(ctx context.Context, run Run) Run {
+	runs := []Run{run}
+	_ = s.nameRuns(ctx, runs)
+	return runs[0]
 }
 
 // RunDetails retrieves one run with its jobs, named after its workflow.

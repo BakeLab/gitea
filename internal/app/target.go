@@ -302,8 +302,11 @@ func (a *application) agreesWithRepoFlag(req targetRequest, hosts map[string]set
 	}
 	selected, selectedErr := settings.ParseRepository(req.repo, hosts)
 	explicit, explicitErr := settings.ParseRepository(a.options.repo, hosts)
-	if selectedErr != nil || explicitErr != nil {
-		return nil // Resolution reports the invalid one.
+	if explicitErr != nil {
+		return clierr.Wrap(clierr.Usage, explicitErr) // The argument's repository replaces --repo, so nothing else parses it.
+	}
+	if selectedErr != nil {
+		return nil // Resolution reports the invalid argument.
 	}
 	sameHost := selected.Host == "" || explicit.Host == "" || selected.Host == explicit.Host
 	sameRepo := strings.EqualFold(selected.Name, explicit.Name) && (explicit.Owner == "" || strings.EqualFold(selected.Owner, explicit.Owner))
@@ -353,6 +356,11 @@ func (a *application) selectHost(t *target, s settings.Snapshot) error {
 		}
 		t.Host, t.HostSource = explicit, "--host"
 	}
+	return a.defaultHost(t, s)
+}
+
+// defaultHost picks the instance of a target that neither the repository nor --host named.
+func (a *application) defaultHost(t *target, s settings.Snapshot) error {
 	if t.Host == "" {
 		for _, key := range []string{"GITEA_CLI_HOST", "GITEA_INSTANCE_URL"} {
 			if value := a.deps.Getenv(key); value != "" {

@@ -164,7 +164,8 @@ func (s Issues) Create(ctx context.Context, options IssueOptions) (Issue, error)
 			Deadline: options.Deadline, Milestone: options.Milestone, Labels: options.Labels,
 		})
 	})
-	return item, Classify(err, "issue", "", s.Repository)
+	// A 404 here can only mean the repository is missing or invisible.
+	return item, Classify(err, "repository", s.Repository, "")
 }
 
 // SetState updates only the selected issue state.

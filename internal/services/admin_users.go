@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -88,11 +89,26 @@ func (s AdminUsers) Search(ctx context.Context, query string, limit int) ([]Admi
 	return convertAll(users, adminUserFrom), err
 }
 
+// get finds an account by its exact username through the administrator listing. Unlike
+// /users/{name}, that answers only administrators, only with complete role and status fields,
+// and only for individual accounts, never for organizations.
 func (s AdminUsers) get(ctx context.Context, username string) (*gitea.User, error) {
-	user, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
-		return c.Users.GetUserInfo(ctx, username)
-	})
-	return user, err
+	for page := 1; ; page++ {
+		users, err := callPage(ctx, s.Client, 50, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.User, *gitea.Response, error) {
+			return c.Admin.ListUsers(ctx, gitea.AdminListUsersOptions{ListOptions: list, Query: username})
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, user := range users.Items {
+			if strings.EqualFold(user.UserName, username) {
+				return user, nil
+			}
+		}
+		if !users.More {
+			return nil, NotFound("user", strconv.Quote(username), "")
+		}
+	}
 }
 
 // View retrieves one account.

@@ -235,6 +235,14 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 				return err
 			}
 		}
+		if web {
+			// The new-issue page is prefilled with the title and body only.
+			for _, name := range []string{"label", "assignee", "milestone", "deadline", "ref", "attachment", "editor"} {
+				if cmd.Flags().Changed(name) {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --web; the browser only receives the title and body", name))
+				}
+			}
+		}
 		if !localFlagsChanged(cmd) && a.canPrompt() && a.deps.IssueForm != nil {
 			return a.createIssueInteractively(cmd)
 		}
@@ -421,6 +429,10 @@ $ gt issue %[1]s 12 13 --comment "Done in #14"`, verb), Annotations: map[string]
 				a.warn(cmd, "%s %s is already %s", titleCase(discussionNoun(current.Kind)), refLabel(target.Repo, n, current.Title), current.State)
 				return current, nil
 			}
+			if state == "open" && current.State == "merged" {
+				// Gitea refuses the state change, so fail before the comment is left behind.
+				return current, fmt.Errorf("pull request %s is already merged; it cannot be reopened", refLabel(target.Repo, n, current.Title))
+			}
 			if comment != "" {
 				if _, err := comments.Create(cmd.Context(), n, comment); err != nil {
 					return current, itemError(err, target.Repo)
@@ -458,7 +470,11 @@ func milestoneFlag(cmd *cobra.Command, value string) (selected string, remove bo
 	case remove:
 		return "", false, clierr.Wrap(clierr.Usage, errors.New("--milestone and --remove-milestone cannot be combined"))
 	case strings.TrimSpace(value) == "":
-		return "", false, clierr.Wrap(clierr.Usage, errors.New("--milestone needs a title or ID; use --remove-milestone to clear it"))
+		hint := "omit --milestone for none"
+		if cmd.Flags().Lookup("remove-milestone") != nil {
+			hint = "use --remove-milestone to clear it"
+		}
+		return "", false, clierr.Wrap(clierr.Usage, errors.New("--milestone needs a title or ID; "+hint))
 	case strings.TrimSpace(value) == "0":
 		return "", true, nil
 	}

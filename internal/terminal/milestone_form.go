@@ -15,6 +15,8 @@ import (
 type MilestoneFormValues struct {
 	Title, Description string
 	Deadline           *time.Time
+	// Editor is the configured editor command, input only: with one, ctrl+e opens it in the description.
+	Editor string
 }
 
 // MilestoneForm collects interactive milestone input.
@@ -30,13 +32,18 @@ func (p *FormPrompter) EditMilestone(ctx context.Context, heading string, curren
 	if current.Deadline != nil {
 		deadline = current.Deadline.Format(time.DateOnly)
 	}
+	descriptionTitle := "Milestone description (markdown):"
+	descriptionField := bodyField(descriptionTitle, &description)
+	if args, ok := commandArgs(current.Editor); ok {
+		descriptionField = bodyField(strings.TrimSuffix(descriptionTitle, "):")+", ctrl+e opens your editor):", &description).ExternalEditor(true).Editor(args...).EditorExtension("md")
+	}
 	if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Milestone title (required):").Value(&title).Validate(huh.ValidateNotEmpty()),
-		bodyField("Milestone description (markdown):", &description),
+		huh.NewInput().Title("Milestone title (required):").Value(&title).Validate(notBlank),
+		descriptionField,
 		dueDateInput("Milestone deadline:", &deadline),
-	).Title(heading))); err != nil {
+	).Title(SafeLine(heading)))); err != nil {
 		return MilestoneFormValues{}, err
 	}
 	parsed, err := parseDueDate(deadline)
-	return MilestoneFormValues{Title: strings.TrimSpace(title), Description: description, Deadline: parsed}, err
+	return MilestoneFormValues{Title: strings.TrimSpace(title), Description: fieldResult(current.Description, description), Deadline: parsed}, err
 }

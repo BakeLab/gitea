@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -95,4 +96,42 @@ func TestSSHKeyDeleteNamesTheKey(t *testing.T) {
 	require.Error(t, Execute(context.Background(), deps, []string{"ssh-key", "delete", "2"}))
 	require.Equal(t, []string{`Delete SSH key "uxkey" (SHA256:aR5L)?`}, prompt.confirmations)
 	require.False(t, deleted)
+}
+
+func TestSSHKeyAddAcceptsRFC4716KeysAndExplicitStdinOnATerminal(t *testing.T) {
+	line, fingerprint := testPublicKey(t, "")
+	key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
+	require.NoError(t, err)
+	blob := base64.StdEncoding.EncodeToString(key.Marshal())
+	rfc4716 := "---- BEGIN SSH2 PUBLIC KEY ----\nComment: \"putty key\"\n" + blob[:30] + "\n" + blob[30:] + "\n---- END SSH2 PUBLIC KEY ----\n"
+	var titles []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		titles = append(titles, body["title"].(string))
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprintf(w, `{"id":3,"title":%q,"fingerprint":%q}`, body["title"], fingerprint)
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Streams.InTTY = true
+	deps.Streams.In = bytes.NewBufferString(rfc4716)
+	require.NoError(t, Execute(context.Background(), deps, []string{"ssh-key", "create", "-"}))
+	require.Equal(t, []string{"putty key"}, titles)
+
+	err = Execute(context.Background(), deps, []string{"ssh-key", "create"})
+	require.ErrorContains(t, err, "supply a public key file")
+}
+
+func TestSSHKeyAddExplainsATakenTitle(t *testing.T) {
+	key, _ := testPublicKey(t, "alice@laptop")
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"message":"Key title has been used"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Streams.In = bytes.NewBufferString(key)
+	err := Execute(context.Background(), deps, []string{"ssh-key", "add"})
+	require.EqualError(t, err, `SSH key already exists; another SSH key is titled "alice@laptop"; pass a different --title`)
 }

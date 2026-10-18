@@ -124,6 +124,7 @@ func (s Pulls) WatchChecks(ctx context.Context, n int64, interval time.Duration,
 		return nil, errors.New("check polling interval must be positive")
 	}
 	var previous []Check
+	reported := false
 	for {
 		sha, err := s.checkHead(ctx, n)
 		if err != nil {
@@ -133,7 +134,9 @@ func (s Pulls) WatchChecks(ctx context.Context, n int64, interval time.Duration,
 		if err != nil {
 			return nil, err
 		}
-		if !slices.Equal(items, previous) {
+		// The first poll is reported even when empty, so a watcher can say it is waiting.
+		if !reported || !slices.Equal(items, previous) {
+			reported = true
 			if changed != nil {
 				if err := changed(items); err != nil {
 					return nil, err

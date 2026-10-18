@@ -130,7 +130,7 @@ func (p *FormPrompter) Ask(ctx context.Context, title string, validate func(stri
 func (p *FormPrompter) AskText(ctx context.Context, title, initial string) (string, error) {
 	value := initial
 	err := p.runForm(ctx, huh.NewForm(huh.NewGroup(bodyField(title, &value))))
-	return value, err
+	return fieldResult(initial, value), err
 }
 
 // SecretInput collects a value without displaying it on the terminal.

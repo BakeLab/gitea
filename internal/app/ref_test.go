@@ -210,6 +210,10 @@ func TestResolveRefSelectsTheReferencedRepository(t *testing.T) {
 	_, _, err = a.resolveRef(commandContext(), serverURL+"/bob/tool/issues/1", issueRef)
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.EqualError(t, err, serverURL+"/bob/tool/issues/1 points to bob/tool but --repo is bob/other")
+	a.options.repo = "not a repo"
+	_, _, err = a.resolveRef(commandContext(), serverURL+"/bob/tool/issues/1", issueRef)
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.ErrorContains(t, err, `invalid repository "not a repo"`)
 }
 
 func TestExpandMeUsesTheLoginTeaActsAs(t *testing.T) {
