@@ -12,7 +12,8 @@ before:
     - make docs-archive DOCS_ARCHIVE=gitea-cli-{{ .Version }}-docs.tar.xz
 
 builds:
-- env:
+- main: ./cmd/gt
+  env:
   - CGO_ENABLED=0
   goos:
   - darwin

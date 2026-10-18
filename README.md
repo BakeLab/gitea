@@ -109,7 +109,7 @@ Make sure you have a current Go version installed (1.27 or newer).
 
 - For a quick installation without `git` & `make`, set $version and exec:
   ```sh
-  go install gitea.dev/cli@${version}
+  go install gitea.dev/cli/cmd/gt@${version}
   ```
 
 ## Contributing

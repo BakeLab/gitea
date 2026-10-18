@@ -147,13 +147,13 @@ check: test
 .PHONY: install
 install: $(SOURCES)
 	@echo "installing to $(shell $(GO) env GOPATH)/bin/$(EXECUTABLE)"
-	$(GO) install -v $(BUILDMODE) $(GOFLAGS)
+	$(GO) install -v $(BUILDMODE) $(GOFLAGS) ./cmd/gt
 
 .PHONY: build
 build: $(EXECUTABLE)
 
 $(EXECUTABLE): $(SOURCES)
-	$(GO) build $(BUILDMODE) $(GOFLAGS) -o $@
+	$(GO) build $(BUILDMODE) $(GOFLAGS) -o $@ ./cmd/gt
 
 .PHONY: build-image
 build-image:
