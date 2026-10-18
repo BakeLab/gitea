@@ -45,7 +45,7 @@ func StatusIcon(status, conclusion string) Cell {
 	switch status {
 	case "success":
 		return Cell{Text: "✓", Color: "green"}
-	case "failure", "error":
+	case "failure", "error", "warning":
 		return Cell{Text: "X", Color: "red"}
 	case "cancelled", "canceled", "skipped": //nolint:misspell // Gitea API spelling.
 		return Cell{Text: "-", Muted: true}

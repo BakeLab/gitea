@@ -54,6 +54,8 @@ const doctorTimeout = 10 * time.Second
 func (a *application) doctorCommand() *cobra.Command {
 	return &cobra.Command{
 		Use: "doctor", Short: "Check gt's setup for this directory", Args: argsExact(0),
+		// doctor loads the settings itself, to report a broken file instead of failing on it.
+		Annotations: map[string]string{"gt.offline": "true"},
 		Long: `Check the setup that commands in this directory use: the settings files, the instance
 and whether it answers, the account and its credential, the repository, and Git. Each
 problem comes with the command that fixes it. gt doctor fails when a check fails.`,

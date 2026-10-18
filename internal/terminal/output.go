@@ -19,10 +19,16 @@ import (
 type JSONOutput struct {
 	// Fields holds the comma-separated fields to keep; "" and "*" keep every field.
 	Fields string
+	// Allowed lists the fields the command documents. A listed field that an item omits (an empty
+	// omitempty value) is selected as null instead of being reported unknown; nil allows none.
+	Allowed []string
 	// Query is a jq expression applied after field selection.
 	Query string
 	// Pretty indents the JSON for a terminal and strips control characters from raw jq strings.
 	Pretty bool
+	// Safe strips control characters from raw jq strings and encoded text like Pretty, for terminal
+	// output that must stay one line per value.
+	Safe bool
 	// Color highlights pretty JSON keys and values.
 	Color bool
 }
@@ -51,6 +57,9 @@ func (o JSONOutput) Write(w io.Writer, value any) error {
 			selected := map[string]any{}
 			for _, name := range names {
 				v, exists := object[name]
+				if !exists && slices.Contains(o.Allowed, name) {
+					v, exists = nil, true
+				}
 				if !exists {
 					return nil, fmt.Errorf("unknown JSON field %q", name)
 				}
@@ -90,7 +99,7 @@ func (o JSONOutput) Write(w io.Writer, value any) error {
 			return fmt.Errorf("evaluate --jq: %w", err)
 		}
 		if str, ok := value.(string); ok {
-			if o.Pretty {
+			if o.Pretty || o.Safe {
 				str = SafeText(str)
 			}
 			if _, err := fmt.Fprintln(w, str); err != nil {
@@ -114,7 +123,7 @@ func (o JSONOutput) encode(w io.Writer, value any) error {
 		return err
 	}
 	text := buf.String()
-	if o.Pretty {
+	if o.Pretty || o.Safe {
 		// The encoder escapes control characters but not format characters such as bidirectional overrides.
 		text = SafeText(text)
 	}

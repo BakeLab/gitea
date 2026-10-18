@@ -46,16 +46,16 @@ pull requests you created, those assigned to you, and those that request your re
 			}
 			return a.writeHuman(cmd, strings.TrimSuffix(currentBranchSection(d, branch, current, details)+pullStatusText(d, result, t.Repo), "\n"))
 		}
-		runsRepo, runsSource := t.Repo, t.RepoSource
+		runsRepo, runsSource, discovered := t.Repo, t.RepoSource, false
 		if runs && runsRepo == "" {
-			if discovered, err := a.resolveTarget(cmd.Context(), true, false); err == nil && discovered.Host == t.Host {
-				runsRepo, runsSource = discovered.Repo, discovered.RepoSource
+			if found, err := a.resolveTarget(cmd.Context(), true, false); err == nil && found.Host == t.Host {
+				runsRepo, runsSource, discovered = found.Repo, found.RepoSource, true
 			}
 		}
 		if !runs {
 			runsRepo = ""
 		}
-		result, err := service.Summary(cmd.Context(), limit, runsRepo)
+		result, err := service.Summary(cmd.Context(), limit, runsRepo, discovered)
 		if err != nil {
 			return err
 		}
@@ -68,7 +68,7 @@ pull requests you created, those assigned to you, and those that request your re
 			statusSection(d, "Review requests", result.PullRequests.ReviewRequested, t.Repo) +
 			statusSection(d, "Mentions", result.Mentions, t.Repo)
 		if result.RunsIncluded {
-			heading := "Failing runs in " + result.Repository
+			heading := "Failing runs in " + result.RunsRepository
 			if runsSource != "" && t.Repo == "" {
 				heading += " (from " + strings.Replace(runsSource, "remote ", "git remote ", 1) + ")"
 			}

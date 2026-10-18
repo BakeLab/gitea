@@ -57,6 +57,7 @@ func TestStatusIcon(t *testing.T) {
 		{"success", "", Cell{Text: "✓", Color: "green"}},
 		{"completed", "failure", Cell{Text: "X", Color: "red"}},
 		{"error", "", Cell{Text: "X", Color: "red"}},
+		{"warning", "", Cell{Text: "X", Color: "red"}},
 		{"completed", "cancelled", Cell{Text: "-", Muted: true}}, //nolint:misspell // Gitea API spelling.
 		{"skipped", "", Cell{Text: "-", Muted: true}},
 		{"queued", "", Cell{Text: "*", Color: "yellow"}},

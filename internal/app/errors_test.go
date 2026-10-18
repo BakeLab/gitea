@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,4 +129,15 @@ func TestTimeoutErrorsNameTheWaitAndKeepTheExitCode(t *testing.T) {
 	other := errors.New("boom")
 	require.Equal(t, other, timeoutError(other, time.Second, "waiting"))
 	require.EqualError(t, Explain(context.Background(), Dependencies{}, err), "timed out before the operation finished")
+}
+
+func TestRejectedLoginTokenIsNotBlamedOnTheEnvironment(t *testing.T) {
+	rejecting := fakeGitea(t, map[string][2]string{"GET /api/v1/user": {"401", `{"message":"token is invalid"}`}})
+	deps, _, _ := testDeps(t)
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "valid-environment-token"})
+	deps.Streams.In = strings.NewReader("mistyped-token\n")
+	err := Execute(context.Background(), deps, []string{"auth", "login", "--host", rejecting.URL, "--with-token", "--credential-store", "file", "--no-input"})
+	explained := Explain(context.Background(), deps, err)
+	require.EqualError(t, explained, "the token was rejected by "+rejecting.URL+"; check it or create a new one under Settings > Applications")
+	require.Equal(t, clierr.Authentication, clierr.ExitCode(explained))
 }

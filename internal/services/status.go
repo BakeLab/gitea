@@ -23,15 +23,18 @@ type PullStatus struct {
 
 // AccountStatus is an account summary with optional repository Actions results.
 type AccountStatus struct {
-	Host           string       `json:"host"`
-	User           string       `json:"user"`
+	Host string `json:"host"`
+	User string `json:"user"`
+	// Repository is the repository the summary is scoped to, empty for all repositories.
 	Repository     string       `json:"repository"`
 	AssignedIssues []SearchItem `json:"assigned_issues"`
 	PullRequests   PullStatus   `json:"pull_requests"`
 	// Mentions are the open issues and pull requests that mention the account.
-	Mentions     []SearchItem `json:"mentions"`
-	FailingRuns  []Run        `json:"failing_runs"`
-	RunsIncluded bool         `json:"runs_included"`
+	Mentions []SearchItem `json:"mentions"`
+	// RunsRepository is the repository whose failing runs are listed, when RunsIncluded.
+	RunsRepository string `json:"runs_repository"`
+	FailingRuns    []Run  `json:"failing_runs"`
+	RunsIncluded   bool   `json:"runs_included"`
 }
 
 // Status reuses search and Actions workflows.
@@ -88,9 +91,10 @@ func (s Status) Pulls(ctx context.Context, limit int) (PullStatus, error) {
 }
 
 // Summary reports open assigned issues and pull requests and mentions. Failing Actions runs of
-// runsRepository are included when it is set and has Actions enabled.
-func (s Status) Summary(ctx context.Context, limit int, runsRepository string) (AccountStatus, error) {
-	result := AccountStatus{Host: s.Client.BaseURL, Repository: runsRepository, AssignedIssues: []SearchItem{}, Mentions: []SearchItem{}, FailingRuns: []Run{}}
+// runsRepository are included when it is set and has Actions enabled. A runsRepository that was
+// only discovered from a clone is left out when the account cannot read it, instead of failing.
+func (s Status) Summary(ctx context.Context, limit int, runsRepository string, discovered bool) (AccountStatus, error) {
+	result := AccountStatus{Host: s.Client.BaseURL, Repository: s.Repository, AssignedIssues: []SearchItem{}, Mentions: []SearchItem{}, FailingRuns: []Run{}}
 	if limit < 1 || limit > 100 {
 		return result, fmt.Errorf("status limit must be 1..100")
 	}
@@ -120,6 +124,9 @@ func (s Status) Summary(ctx context.Context, limit int, runsRepository string) (
 	if runsRepository != "" {
 		repository, err := (Repositories{Client: s.Client}).View(ctx, runsRepository)
 		if err != nil {
+			if discovered && (IsNotFound(err) || IsForbidden(err)) {
+				return result, nil
+			}
 			return result, err
 		}
 		if !repository.ActionsEnabled {
@@ -127,9 +134,12 @@ func (s Status) Summary(ctx context.Context, limit int, runsRepository string) (
 		}
 		failing, err := (Actions{Client: s.Client, Repository: runsRepository}).Runs(ctx, RunListOptions{Limit: limit, Page: 1, Statuses: []string{"failure", "timed_out"}})
 		if err != nil {
+			if discovered && (IsNotFound(err) || IsForbidden(err)) {
+				return result, nil
+			}
 			return result, err
 		}
-		result.FailingRuns, result.RunsIncluded = failing, true
+		result.RunsRepository, result.FailingRuns, result.RunsIncluded = runsRepository, failing, true
 	}
 	return result, nil
 }

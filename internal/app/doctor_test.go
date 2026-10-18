@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -113,6 +115,16 @@ func TestDoctorReportsEveryCheckInsteadOfFailingFirst(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDoctorReportsBrokenSettingsFile(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	deps.Git = &fakeGit{results: map[string]string{"--version": "git version 2.50.1"}}
+	require.NoError(t, os.WriteFile(filepath.Join(deps.Settings.Dir, "hosts.yml"), []byte("hosts: [unclosed"), 0o600))
+	err := Execute(context.Background(), deps, []string{"doctor", "--json"})
+	require.Error(t, err)
+	require.Contains(t, out.String(), `"name":"Config","status":"failed"`)
+	require.Contains(t, out.String(), `"name":"Git"`)
 }
 
 func TestDoctorShowsChecksOnATerminal(t *testing.T) {

@@ -97,7 +97,7 @@ func TestPullStatusShowsTheCurrentBranch(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	plainTTY(t, &deps, server.URL)
 	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1", "GITEA_CLI_REPO": "alice/project"})
-	deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --short HEAD": "feat/one", "config --get branch.feat/one.gitea-cli-pr": "1"}}
+	deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --quiet HEAD": "feat/one", "config --get branch.feat/one.gitea-cli-pr": "1"}}
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "status"}))
 	require.Equal(t, `Current branch
   #1  Add one.txt  [feat/one]
@@ -112,4 +112,31 @@ Assigned to you
 Requesting a code review from you
   Nothing here
 `, stripLinks(out.String()))
+}
+
+func TestStatusInACloneListsItsRunsWithoutFailingOnAnUnreadableRepository(t *testing.T) {
+	readable := true
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/alice/project" && readable:
+			_, _ = w.Write([]byte(`{"has_actions":true}`))
+		case r.URL.Path == "/api/v1/repos/alice/project":
+			w.WriteHeader(http.StatusNotFound)
+		case strings.HasSuffix(r.URL.Path, "/actions/runs"):
+			_, _ = w.Write([]byte(`{"workflow_runs":[{"id":7,"display_title":"Broken build","status":"completed","conclusion":"failure"}]}`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	deps.Git = &fakeGit{results: map[string]string{"config --get gt.repository": server.URL + "/alice/project"}}
+	require.NoError(t, Execute(context.Background(), deps, []string{"status", "--json=repository,runs_repository,runs_included"}))
+	require.JSONEq(t, `{"repository":"","runs_repository":"alice/project","runs_included":true}`, out.String())
+	out.Reset()
+	readable = false
+	require.NoError(t, Execute(context.Background(), deps, []string{"status", "--json=repository,runs_repository,runs_included"}))
+	require.JSONEq(t, `{"repository":"","runs_repository":"","runs_included":false}`, out.String())
+	out.Reset()
+	require.EqualError(t, Execute(context.Background(), deps, []string{"status", "-R", "alice/project", "--json=runs_included"}), "repository alice/project not found")
 }

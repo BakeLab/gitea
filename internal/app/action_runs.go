@@ -382,9 +382,9 @@ func runRecord(run services.Run, d terminal.Display, now time.Time) string {
 		{Label: "Event", Value: run.Event},
 		{Label: "Actor", Value: run.Actor},
 		{Label: "Attempt", Value: strconv.FormatInt(run.Attempt, 10)},
-		{Label: "Created_at", Value: run.CreatedAt},
-		{Label: "Started_at", Value: optional(run.StartedAt)},
-		{Label: "Completed_at", Value: optional(run.CompletedAt)},
+		{Label: "Created_at", Value: pipedTime(run.CreatedAt)},
+		{Label: "Started_at", Value: pipedTime(optional(run.StartedAt))},
+		{Label: "Completed_at", Value: pipedTime(optional(run.CompletedAt))},
 		{Label: "Elapsed", Value: runElapsedText(run.StartedAt, run.CompletedAt, now)},
 	}
 	rows := make([][]terminal.Cell, len(run.Jobs))

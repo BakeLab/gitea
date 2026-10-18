@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type debugTransport struct {
@@ -25,7 +26,7 @@ func (t debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		outcome = "error: " + err.Error()
 	} else {
-		outcome = resp.Status
+		outcome = plainText(resp.Status)
 		message = failureMessage(req, resp)
 	}
 	line := fmt.Sprintf("[debug] %s %s -> %s (%s)", req.Method, redactURL(req.URL), outcome, time.Since(start).Round(time.Millisecond))
@@ -34,6 +35,12 @@ func (t debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	_, _ = fmt.Fprintln(t.out, line)
 	return resp, err
+}
+
+// plainText drops control and format characters, which a server can put in the reason phrase
+// to drive the terminal the log is printed to.
+func plainText(s string) string {
+	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) || unicode.Is(unicode.Cf, r) }), " ")
 }
 
 // failureMessage returns the sanitized server message of a failed response and keeps its body

@@ -59,7 +59,7 @@ func TestPullCreateImplicitInteractiveForm(t *testing.T) {
 	deps.Prompter = prompt
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	deps.Git = &fakeGit{results: map[string]string{
-		"symbolic-ref --short HEAD":                                       "feature",
+		"symbolic-ref --quiet HEAD":                                       "feature",
 		"rev-parse --is-inside-work-tree":                                 "true",
 		"rev-parse --verify refs/heads/feature^{commit}":                  "localsha",
 		"for-each-ref --format=%(objectname) refs/remotes/origin/feature": "localsha",
@@ -120,7 +120,7 @@ func testPullCreateDefaultsFromForkBranch(t *testing.T, remote string) {
 	deps, _, _ := serverDeps(t, server.URL)
 	deps.PullForm = form
 	deps.Git = &fakeGit{results: map[string]string{
-		"symbolic-ref --short HEAD":           "über-fix",
+		"symbolic-ref --quiet HEAD":           "über-fix",
 		"config --get branch.über-fix.remote": remote,
 		"remote get-url " + remote:            server.URL + "/bob/project.git",
 	}}

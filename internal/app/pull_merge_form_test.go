@@ -74,7 +74,7 @@ func TestPullMergeUsesTheRepositoryDefaultsAndKeepsTheLocalBranch(t *testing.T) 
 			server := newAuthenticatedServer(mergeServer(t, openPull, &payload))
 			defer server.Close()
 			deps, out, diagnostics := serverDeps(t, server.URL)
-			fake := &fakeGit{results: map[string]string{"symbolic-ref --short HEAD": "feature"}}
+			fake := &fakeGit{results: map[string]string{"symbolic-ref --quiet HEAD": "feature"}}
 			deps.Git = fake
 			require.NoError(t, Execute(context.Background(), deps, append([]string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, tc.flags...)))
 			require.Equal(t, "squash", payload["Do"])
@@ -143,7 +143,7 @@ func TestPullMergeKeepsAHeadBranchThatGiteaKept(t *testing.T) {
 			}))
 			defer server.Close()
 			deps, _, diagnostics := serverDeps(t, server.URL)
-			deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --short HEAD": "main"}}
+			deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --quiet HEAD": "main"}}
 			require.NoError(t, Execute(context.Background(), deps, append([]string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, tc.flags...)))
 			require.Equal(t, true, payload["delete_branch_after_merge"])
 			require.Equal(t, "! Kept remote branch feature: Gitea did not delete it (it is protected, the default branch, or used by another open pull request)\n", diagnostics.String())
@@ -234,7 +234,7 @@ func TestPullMergePicksAPullRequestForTheBranch(t *testing.T) {
 	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
 	deps.MergeForm, deps.Prompter = form, &scriptedPrompter{}
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
-	deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --short HEAD": "main"}}
+	deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --quiet HEAD": "main"}}
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge"}))
 	require.Equal(t, "squash", payload["Do"])
 }

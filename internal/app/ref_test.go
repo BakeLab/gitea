@@ -77,7 +77,8 @@ func refApplication(t *testing.T, gitResults map[string]string) (*application, s
 			{"number":4,"head":{"ref":"feat/two","repo":{"full_name":"alice/project"}}},
 			{"number":17,"head":{"ref":"fix","repo":{"full_name":"bob/project"}}},
 			{"number":20,"head":{"ref":"dup","repo":{"full_name":"alice/project"}}},
-			{"number":21,"head":{"ref":"dup","repo":{"full_name":"carol/project"}}}
+			{"number":21,"head":{"ref":"dup","repo":{"full_name":"carol/project"}}},
+			{"number":22,"head":{"ref":"main","repo":{"full_name":"bob/project"}}}
 		]`)
 	}))
 	t.Cleanup(server.Close)
@@ -103,7 +104,7 @@ func commandContext() *cobra.Command {
 }
 
 func TestPullSelectorDefaultsToTheCheckedOutBranch(t *testing.T) {
-	const head = "symbolic-ref --short HEAD"
+	const head = "symbolic-ref --quiet HEAD"
 	branch := func(name string, keys map[string]string) map[string]string {
 		results := map[string]string{head: name}
 		for key, value := range keys {
@@ -119,15 +120,16 @@ func TestPullSelectorDefaultsToTheCheckedOutBranch(t *testing.T) {
 	}{
 		{"recorded by pr checkout", branch("pr/17", map[string]string{"gitea-cli-pr": "17", "gitea-cli-base-remote": "origin", "remote": "pulls/bob/project", "merge": "refs/heads/fix"}), 17, ""},
 		{"head branch name kept by pr checkout", branch("fix", map[string]string{"gitea-cli-pr": "17", "gitea-cli-base-remote": "origin"}), 17, ""},
-		{"recorded but merged, the head branch has a newer one", branch("fix", map[string]string{"gitea-cli-pr": "30", "gitea-cli-base-remote": "origin"}), 17, ""},
+		{"recorded but merged, the head branch has a newer one", branch("fix", map[string]string{"gitea-cli-pr": "30", "gitea-cli-base-remote": "origin", "remote": "pulls/bob/project", "merge": "refs/heads/fix"}), 17, ""},
 		{"recorded but merged, no open one", branch("gone", map[string]string{"gitea-cli-pr": "30", "gitea-cli-base-remote": "origin"}), 30, ""},
 		{"recorded for another repository", branch("pr/9", map[string]string{"gitea-cli-pr": "9", "gitea-cli-base-remote": "fork", "remote": "fork", "merge": "refs/heads/fix"}), 17, ""},
 		{"upstream branch and owner", branch("local", map[string]string{"remote": "origin", "merge": "refs/heads/feat/one"}), 3, ""},
 		{"upstream owner tells forks apart", branch("dup", map[string]string{"remote": "pulls/carol/project", "merge": "refs/heads/dup"}), 21, ""},
 		{"local branch name", branch("feat/two", nil), 4, ""},
 		{"pr/N branch", branch("pr/99", nil), 99, ""},
+		{"fork pull request from a branch named like the local one", branch("main", map[string]string{"remote": "origin", "merge": "refs/heads/main"}), 0, `no open pull request for branch "main" in alice/project; pass a number, URL or branch`},
 		{"no pull request", branch("main", nil), 0, `no open pull request for branch "main" in alice/project; pass a number, URL or branch`},
-		{"ambiguous branch", branch("dup", nil), 0, `branch "dup" has several open pull requests in alice/project (#20, #21); pass a number`},
+		{"same-named fork branch is ignored", branch("dup", nil), 20, ""},
 		{"detached", map[string]string{}, 0, "not on a branch; pass a pull request number, URL or branch"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

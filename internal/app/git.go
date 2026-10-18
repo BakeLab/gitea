@@ -25,7 +25,7 @@ func (a *application) gitIn(ctx context.Context, dir string, args ...string) (st
 
 // currentBranch names the checked-out branch without writing Git diagnostics.
 func (a *application) currentBranch(ctx context.Context) (string, error) {
-	return a.gitProbe().Output(ctx, a.options.cwd, false, "symbolic-ref", "--short", "HEAD")
+	return git.CurrentBranch(ctx, a.gitProbe(), a.options.cwd)
 }
 
 // gitProbe runs exploratory Git commands whose failures are expected, without Git's diagnostics.

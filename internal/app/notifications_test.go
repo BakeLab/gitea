@@ -143,3 +143,15 @@ func TestNotificationMutationsReportWhatChanged(t *testing.T) {
 	require.Contains(t, withoutANSI(out.String()), "Latest comment: bob\n\n  Looks good to me\n\nView this pull request on Gitea: https://gitea.test/alice/project/pulls/17\n")
 	require.Equal(t, []string{"read"}, marks, "viewing marks an unread notification as read")
 }
+
+func TestNotificationMarkAllNamesTheBeforeCutoff(t *testing.T) {
+	now := time.Date(2028, 2, 1, 12, 0, 0, 0, time.UTC)
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	deps.Now = func() time.Time { return now }
+	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "mark-read", "--all", "--before=1h"}))
+	require.Contains(t, withoutANSI(diagnostics.String()), "No unread notifications updated before 2028-02-01 11:00 in your inbox")
+}

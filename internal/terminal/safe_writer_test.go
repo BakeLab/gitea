@@ -5,13 +5,30 @@ package terminal
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
+func TestSafeWriterKeepsLongSGRSequences(t *testing.T) {
+	const colored = "\x1b[38;2;255;255;255;48;2;255;255;255mwhite\x1b[0m\n"
+	for _, chunk := range []int{len(colored), 1, 3} {
+		var out bytes.Buffer
+		w := SafeWriter(&out, true, true)
+		for data := []byte(colored); len(data) > 0; {
+			n := min(chunk, len(data))
+			_, err := w.Write(data[:n])
+			require.NoError(t, err)
+			data = data[n:]
+		}
+		require.Equal(t, colored, out.String(), "chunk size %d", chunk)
+	}
+}
+
 func TestSafeWriter(t *testing.T) {
-	const hostile = "+hello \x1b]0;PWNED\x07 \x1b[1;31mred\x1b[0m\x1b[2J\r\n\u009b2J\u202eend\t\xff\x1b[1111111111111111111111111111111111m\n"
+	long := strings.Repeat("1", 300)
+	hostile := "+hello \x1b]0;PWNED\x07 \x1b[1;31mred\x1b[0m\x1b[2J\r\n\u009b2J\u202eend\t\xff\x1b[" + long + "m\n"
 	var piped bytes.Buffer
 	_, err := SafeWriter(&piped, false, false).Write([]byte(hostile))
 	require.NoError(t, err)
@@ -21,8 +38,8 @@ func TestSafeWriter(t *testing.T) {
 		allowSGR bool
 		want     string
 	}{
-		{"drops every escape", false, "+hello ]0;PWNED [1;31mred[0m[2J\n2Jend\t\uFFFD[1111111111111111111111111111111111m\n"},
-		{"keeps colors", true, "+hello ]0;PWNED \x1b[1;31mred\x1b[0m[2J\n2Jend\t\uFFFD[1111111111111111111111111111111111m\n"},
+		{"drops every escape", false, "+hello ]0;PWNED [1;31mred[0m[2J\n2Jend\t\uFFFD[" + long + "m\n"},
+		{"keeps colors", true, "+hello ]0;PWNED \x1b[1;31mred\x1b[0m[2J\n2Jend\t\uFFFD[" + long + "m\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if !tc.allowSGR {

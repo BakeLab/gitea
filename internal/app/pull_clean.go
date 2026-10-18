@@ -52,9 +52,14 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		// pr checkout names a fork's branch after its head, or OWNER/BRANCH when the head name is taken.
+		preferred := []string{fmt.Sprintf("pr/%d", n)}
+		if owner, _, _ := strings.Cut(pull.HeadRepo, "/"); owner != "" && !strings.EqualFold(pull.HeadRepo, target.Repo) {
+			preferred = append(preferred, owner+"/"+pull.Head)
+		}
 		localBranch, remote, err := git.FindCleanBranch(cmd.Context(), a.deps.Git, git.FindCleanBranchOptions{
 			Directory: a.options.cwd, HeadSHA: pull.HeadSHA, HeadBranch: pull.Head, IgnoreSHA: ignoreSHA, DefaultBranch: repository.DefaultBranch,
-			PreferredNames: []string{fmt.Sprintf("pr/%d", n)}, MatchingRemotes: matchingRemotes,
+			PreferredNames: preferred, MatchingRemotes: matchingRemotes, PullNumber: n,
 		})
 		if err != nil {
 			return clierr.Wrap(clierr.Usage, err)

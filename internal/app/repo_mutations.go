@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -95,6 +96,9 @@ var repositorySwitches = []struct {
 	{"archived", "Archive the repository (=false unarchives it)", func(e *services.RepositoryEdit) **bool { return &e.Archived }},
 }
 
+// validTopic is the form Gitea accepts for a lowercased topic name.
+var validTopic = regexp.MustCompile(`^[a-z0-9][-.a-z0-9]{0,34}$`)
+
 func (a *application) repoEditCommand() *cobra.Command {
 	var name, website, defaultBranch, description, visibility, mergeStyle string
 	var addTopics, removeTopics []string
@@ -153,6 +157,11 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 			if err := requireNames("topic", "", addTopics, removeTopics); err != nil {
 				return err
 			}
+			for _, topic := range addTopics {
+				if !validTopic.MatchString(strings.ToLower(topic)) {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid topic %q: use up to 35 letters, digits, - or ., starting with a letter or digit", topic))
+				}
+			}
 			if options == (services.RepositoryEdit{}) && len(addTopics)+len(removeTopics) == 0 {
 				return clierr.Wrap(clierr.Usage, errors.New("supply a setting to change; see gt repo edit --help"))
 			}
@@ -163,13 +172,23 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 			service := services.Repositories{Client: t.client}
 			if options.DefaultBranch != nil {
 				if _, err := (services.Branches{Client: t.client}).View(cmd.Context(), t.Repo, defaultBranch); err != nil {
-					return services.Classify(err, "branch", strconv.Quote(defaultBranch), t.Repo)
+					// An empty repository has no branches, and Gitea accepts any default branch for it.
+					if !services.IsNotFound(err) {
+						return services.Classify(err, "branch", strconv.Quote(defaultBranch), t.Repo)
+					}
+					if item, viewErr := service.View(cmd.Context(), t.Repo); viewErr != nil || !item.Empty {
+						return services.Classify(err, "branch", strconv.Quote(defaultBranch), t.Repo)
+					}
 				}
 			}
 			// Gitea refuses topic changes on an archived repository, so archiving comes last.
 			repo, archive := t.Repo, options.Archived != nil && *options.Archived
 			if archive {
-				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Archive " + t.Repo + "? It becomes read-only."}); err != nil {
+				inferred, err := a.inferredRepository(t, "archive", true)
+				if err != nil {
+					return err
+				}
+				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Archive " + t.Repo + inferred + "? It becomes read-only."}); err != nil {
 					return err
 				}
 				options.Archived = nil
@@ -187,7 +206,8 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 				}
 			}
 			for _, topic := range removeTopics {
-				if err := service.RemoveTopic(cmd.Context(), repo, topic); err != nil {
+				// A topic the repository does not have is already removed.
+				if err := service.RemoveTopic(cmd.Context(), repo, topic); err != nil && !services.IsNotFound(err) {
 					return fmt.Errorf("remove topic %q: %w", topic, err)
 				}
 			}
@@ -233,6 +253,9 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 	return command
 }
 
+// cloneArguments documents the <repository> argument of repo clone, which is required.
+const cloneArguments = "A repository can be supplied as NAME (one of yours), OWNER/NAME, HOST/OWNER/NAME or a URL."
+
 func (a *application) repoCloneCommand() *cobra.Command {
 	var opts cloneOptions
 	var noUpstream bool
@@ -251,7 +274,7 @@ $ gt repo clone alice/project src --depth 1
 
 # Pass flags to git clone
 $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
-		Annotations: map[string]string{"gt.arguments": repositoryArguments},
+		Annotations: map[string]string{"gt.arguments": cloneArguments},
 		Args:        argsBeforeGitFlags(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			at := argsBeforeDash(cmd, args)
@@ -337,6 +360,12 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 			if strings.EqualFold(owner, cmp.Or(opts.Organization, t.User)) {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("cannot fork %s into %s: it already owns it; pass --org to fork it into an organization", t.Repo, owner))
 			}
+			rename := false
+			if addRemote {
+				if rename, err = a.checkForkRemote(cmd, t, remoteName); err != nil {
+					return err
+				}
+			}
 			fork, existed, err := (services.Repositories{Client: t.client}).Fork(cmd.Context(), t.Repo, opts)
 			if err != nil {
 				return err
@@ -352,7 +381,7 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 				}
 			}
 			if addRemote {
-				if err := a.addForkRemote(cmd, t, fork, remoteName); err != nil {
+				if err := a.addForkRemote(cmd, t, fork, remoteName, rename); err != nil {
 					return err
 				}
 			}
@@ -369,17 +398,28 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 	return command
 }
 
-// addForkRemote adds fork as the remote name of the clone in the working directory. A remote of
-// that name that points to the forked repository is renamed to upstream first.
-func (a *application) addForkRemote(cmd *cobra.Command, t target, fork services.Repository, name string) error {
+// checkForkRemote reports, before anything is forked, whether the clone in the working directory
+// can take the fork as the remote name, and whether a remote of that name already points to the
+// forked repository and must be renamed to upstream first.
+func (a *application) checkForkRemote(cmd *cobra.Command, t target, name string) (rename bool, err error) {
 	ctx := cmd.Context()
 	if inside, _ := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--is-inside-work-tree"); inside != "true" {
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("forked to %s, but --remote must run inside a Git clone of %s", fork.FullName, t.Repo))
+		return false, clierr.Wrap(clierr.Usage, fmt.Errorf("--remote must run inside a Git clone of %s", t.Repo))
 	}
 	if existing, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", name); err == nil {
 		if !t.ownsRemote(existing) {
-			return clierr.Wrap(clierr.Usage, fmt.Errorf("forked to %s, but Git remote %s points elsewhere; pass --remote-name", fork.FullName, name))
+			return false, clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %s points elsewhere; pass --remote-name", name))
 		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// addForkRemote adds fork as the remote name of the clone in the working directory, after renaming
+// the remote of that name to upstream when rename is set.
+func (a *application) addForkRemote(cmd *cobra.Command, t target, fork services.Repository, name string, rename bool) error {
+	ctx := cmd.Context()
+	if rename {
 		if _, err := a.git(ctx, "remote", "rename", name, "upstream"); err != nil {
 			return fmt.Errorf("forked to %s, but could not rename Git remote %s to upstream: %w", fork.FullName, name, err)
 		}
@@ -475,12 +515,18 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 		if err != nil || upstreamHost != t.Host || !strings.EqualFold(upstreamRepo, item.Parent.FullName) || (protocol == "ssh") != upstreamSSH {
 			return clone, errors.New("cloned the fork, but its parent clone URL does not match the selected instance")
 		}
+		// Git flags or clone.defaultRemoteName may have renamed origin.
+		origin, err := a.gitIn(cmd.Context(), clone, "remote")
+		if err != nil {
+			return clone, fmt.Errorf("cloned the fork, but could not list its remotes: %w", err)
+		}
+		origin, _, _ = strings.Cut(origin, "\n")
 		if _, err := a.gitIn(cmd.Context(), clone, "remote", "add", "--", opts.upstream, upstream); err != nil {
 			return clone, fmt.Errorf("cloned the fork, but could not add the %s remote: %w", opts.upstream, err)
 		}
 		// The default branch pulls from upstream, but pushes stay on the fork.
 		if branch := item.Parent.DefaultBranch; branch != "" {
-			for _, setting := range [][2]string{{"remote", opts.upstream}, {"merge", "refs/heads/" + branch}, {"pushRemote", "origin"}} {
+			for _, setting := range [][2]string{{"remote", opts.upstream}, {"merge", "refs/heads/" + branch}, {"pushRemote", origin}} {
 				if _, err := a.gitIn(cmd.Context(), clone, "config", "branch."+branch+"."+setting[0], setting[1]); err != nil {
 					return clone, fmt.Errorf("cloned the fork and added %s, but could not configure branch tracking: %w", opts.upstream, err)
 				}
@@ -581,7 +627,7 @@ func (a *application) repoRenameCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "rename <new-name>",
 		Short: "Rename a repository",
-		Long:  "Rename a repository; its owner stays the same. Gitea redirects the old name to the new one.",
+		Long:  "Rename a repository; its owner stays the same. Git remotes keep working through Gitea's redirect from the old name, but gt commands do not;\na default repository saved with gt repo set-default is updated.",
 		Example: `# Rename the repository of the current clone
 $ gt repo rename new-name
 
@@ -618,6 +664,14 @@ $ gt repo rename new-name -R alice/old-name`,
 			a.done(cmd, "Renamed repository %s to %s", t.Repo, item.FullName)
 			if remote, ok := strings.CutPrefix(t.RepoSource, "remote "); ok {
 				a.warn(cmd, "Git remote %s still points to %s; update it with git remote set-url", remote, t.Repo)
+			}
+			if t.RepoSource == "git config gt.repository" {
+				// gt's own setting; the old name would fail with HTTP 301 from now on.
+				if _, err := a.git(cmd.Context(), "config", "--local", "gt.repository", t.Host+"/"+item.FullName); err != nil {
+					a.warn(cmd, "gt.repository still points to %s; update it with gt repo set-default %s", t.Repo, item.FullName)
+				} else {
+					a.done(cmd, "Updated the default repository of this clone to %s", item.FullName)
+				}
 			}
 			return a.jsonResult(cmd, item)
 		},

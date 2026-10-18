@@ -37,6 +37,15 @@ func timeField(label, raw string, d terminal.Display) terminal.Field {
 	return terminal.Field{Label: label, Value: terminal.RelativeTime(now, t)}
 }
 
+// pipedTime normalizes a server timestamp to RFC 3339 UTC like the times of piped tables, and keeps
+// a value that is not a timestamp as it is.
+func pipedTime(raw string) string {
+	if t := terminal.ParseTime(raw); !t.IsZero() {
+		return terminal.Timestamp(t)
+	}
+	return raw
+}
+
 func (a *application) organizationCommand() *cobra.Command {
 	group := &cobra.Command{Use: "org", Short: "Manage organizations", Long: `Work with Gitea organizations: list the ones you belong to, view, create, edit and delete
 them, and manage their members.

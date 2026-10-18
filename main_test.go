@@ -131,3 +131,67 @@ func TestRunReportsDeclinedConfirmationsAndExplainedFailures(t *testing.T) {
 	require.Equal(t, 1, run(context.Background(), deps, []string{"issue", "view", "9", "-R", "alice/project", "--no-input"}))
 	require.Equal(t, "Error: issue #9 not found in alice/project\n", stderr.String())
 }
+
+type reviewFormStub struct{}
+
+func (reviewFormStub) CreateReview(context.Context, terminal.ReviewFormChoices) (terminal.ReviewFormValues, error) {
+	return terminal.ReviewFormValues{Event: "COMMENT", Body: "Self note"}, nil
+}
+
+func TestRunReportsWhereADeclinedReviewWasSaved(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/user" {
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"number":3,"title":"Add one","user":{"login":"alice"},"head":{"ref":"feat/one"},"base":{"ref":"main"}}`))
+	}))
+	defer server.Close()
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	var stderr bytes.Buffer
+	store := settings.New(t.TempDir())
+	deps := app.Dependencies{
+		Settings: store, Credentials: &auth.Store{Dir: store.Dir}, Client: transport.New, Prompter: decliningPrompter{}, ReviewForm: reviewFormStub{},
+		Streams: terminal.Streams{In: &bytes.Buffer{}, Out: &bytes.Buffer{}, ErrOut: &stderr, InTTY: true, ErrTTY: true},
+		Getenv: func(key string) string {
+			return map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL}[key]
+		},
+	}
+	require.Equal(t, 3, run(context.Background(), deps, []string{"pr", "review", "3", "-R", "alice/project"}))
+	files, err := filepath.Glob(filepath.Join(tmp, "gt-draft-*.md"))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.Equal(t, "Canceled.\nDraft saved at "+files[0]+"\n", stderr.String())
+}
+
+func TestSecondInterruptStopsACommandBlockedOnStdin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Interrupt delivery is not supported by Windows processes")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	binary := filepath.Join(t.TempDir(), "gt")
+	build := exec.CommandContext(ctx, "go", "build", "-o", binary, ".")
+	output, err := build.CombinedOutput()
+	require.NoError(t, err, "build: %s", output)
+	command := exec.CommandContext(ctx, binary, "auth", "login", "--host", "http://127.0.0.1:1", "--with-token", "--no-input")
+	command.Env = append(os.Environ(), "GITEA_CLI_CONFIG_DIR="+t.TempDir(), "GITEA_TOKEN=")
+	stdin, err := command.StdinPipe()
+	require.NoError(t, err)
+	defer stdin.Close()
+	require.NoError(t, command.Start())
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	// Reading the token from stdin ignores the canceled context, so only a second signal ends gt.
+	time.Sleep(time.Second)
+	require.NoError(t, command.Process.Signal(os.Interrupt))
+	time.Sleep(500 * time.Millisecond)
+	require.NoError(t, command.Process.Signal(os.Interrupt))
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("gt ignored the second interrupt while waiting on stdin")
+	}
+}

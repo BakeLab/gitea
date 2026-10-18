@@ -23,7 +23,7 @@ func (r discoverRunner) Output(_ context.Context, dir string, prompt bool, args 
 }
 
 func TestDiscoverRemote(t *testing.T) {
-	const head, tracking, base = "symbolic-ref --short HEAD", "config --get branch.main.remote", "config --get branch.main.gitea-cli-base-remote"
+	const head, tracking, base = "symbolic-ref --quiet HEAD", "config --get branch.main.remote", "config --get branch.main.gitea-cli-base-remote"
 	for _, test := range []struct {
 		name      string
 		runner    discoverRunner
@@ -55,7 +55,7 @@ func TestDiscoverRemote(t *testing.T) {
 }
 
 func TestDiscoverRemoteSkipsUnusableRemotes(t *testing.T) {
-	const head, tracking, base = "symbolic-ref --short HEAD", "config --get branch.main.remote", "config --get branch.main.gitea-cli-base-remote"
+	const head, tracking, base = "symbolic-ref --quiet HEAD", "config --get branch.main.remote", "config --get branch.main.gitea-cli-base-remote"
 	// gitea makes each named remote usable; a name=repository pair names its repository.
 	gitea := func(names ...string) func(string) string {
 		return func(remote string) string {

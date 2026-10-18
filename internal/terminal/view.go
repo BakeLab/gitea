@@ -46,6 +46,8 @@ type View struct {
 	Meta   string
 	Fields []Field
 	Body   string
+	// Plain marks the body as plain text, such as a commit message, which is never rendered as markdown.
+	Plain bool
 	// Bodyless resources, such as webhooks, have no body: the view ends with the fields and URL.
 	Bodyless bool
 	// Kind names the resource in the footer, such as "issue".
@@ -113,7 +115,7 @@ func (v View) Render(d Display) string {
 		switch {
 		case body == "":
 			body = muted("No description provided")
-		case d.Markdown:
+		case d.Markdown && !v.Plain:
 			body = Markdown(body, d)
 		default:
 			body = SafeText(body)

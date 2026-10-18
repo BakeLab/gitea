@@ -15,7 +15,7 @@ type cleanRunner struct {
 	calls                                          []string
 	dirty, missingLocal, missingDefault, onFeature bool
 	branches                                       string
-	remoteTracking                                 map[string]string
+	remoteTracking, config                         map[string]string
 }
 
 func (r *cleanRunner) Output(_ context.Context, dir string, prompt bool, args ...string) (string, error) {
@@ -44,6 +44,11 @@ func (r *cleanRunner) Output(_ context.Context, dir string, prompt bool, args ..
 			}
 			return "", &CommandError{ExitCode: 1}
 		}
+	case "config":
+		if value, ok := r.config[args[2]]; ok {
+			return value, nil
+		}
+		return "", &CommandError{ExitCode: 1}
 	case "status":
 		if r.dirty {
 			return " M file", nil
@@ -79,6 +84,24 @@ func TestFindCleanBranchIgnoreSHAUsesName(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "feature", branch)
 	require.Equal(t, "origin", remote)
+}
+
+func TestFindCleanBranchIgnoreSHAPrefersTheBranchRecordedForThePull(t *testing.T) {
+	runner := &cleanRunner{
+		branches: "aaa111\tfeature\t\nbbb222\tbob/feature\t\n",
+		config:   map[string]string{"branch.bob/feature.gitea-cli-pr": "1"},
+	}
+	options := FindCleanBranchOptions{
+		Directory: "/work", HeadSHA: "abc123", HeadBranch: "feature", IgnoreSHA: true, PullNumber: 1, MatchingRemotes: []string{"origin"},
+	}
+	branch, _, err := FindCleanBranch(context.Background(), runner, options)
+	require.NoError(t, err)
+	require.Equal(t, "bob/feature", branch)
+	// Without the record, OWNER/BRANCH is only preferred by name and the unrelated branch stays a candidate.
+	runner.config = nil
+	options.PreferredNames = []string{"bob/feature"}
+	_, _, err = FindCleanBranch(context.Background(), runner, options)
+	require.ErrorContains(t, err, "multiple local branches")
 }
 
 func TestFindCleanBranchRejectsAmbiguity(t *testing.T) {

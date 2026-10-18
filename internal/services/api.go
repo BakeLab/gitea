@@ -6,6 +6,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -110,7 +111,8 @@ func (s API) Visit(ctx context.Context, options APIOptions, visit func(*http.Res
 		}
 		seen[absolute] = true
 		current, _ := url.Parse(absolute)
-		response, err := s.Client.Send(ctx, options.Method, endpoint, options.Body, options.Headers)
+		captureCtx, failure := transport.CaptureErrors(ctx)
+		response, err := s.Client.Send(captureCtx, options.Method, endpoint, options.Body, options.Headers)
 		if err != nil {
 			return err
 		}
@@ -124,6 +126,9 @@ func (s API) Visit(ctx context.Context, options APIOptions, visit func(*http.Res
 			return closeErr
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			if captured := failure(); captured != nil {
+				return captured // carries the server message even when the visitor wrote the body to a file
+			}
 			return &transport.APIError{Status: response.StatusCode, Method: options.Method, Endpoint: current.Path}
 		}
 		if !options.Paginate {
@@ -146,13 +151,28 @@ func (s API) Visit(ctx context.Context, options APIOptions, visit func(*http.Res
 		if page+1 >= options.MaxPages {
 			return ErrMaxPages
 		}
-		if _, err := s.Client.URL(next); err != nil {
-			return err
-		}
 		relative, err := url.Parse(next)
 		if err != nil || strings.Contains(next, "\\") {
 			return errors.New("API returned an invalid pagination link")
 		}
+		if _, err := s.Client.URL(next); err != nil {
+			// Gitea builds links from its ROOT_URL, which can name the instance differently than the
+			// configured host. Take the page from the link's query and keep the request on this instance.
+			if !relative.IsAbs() || apiTail(relative.Path) == "" || apiTail(relative.Path) != apiTail(current.Path) {
+				return fmt.Errorf("%w (next page link points to %s, the request went to %s)", err, relative.Host, current.Host)
+			}
+			same := *current
+			same.RawQuery = relative.RawQuery
+			relative = &same
+		}
 		endpoint = current.ResolveReference(relative).String()
 	}
+}
+
+// apiTail returns the part of a path from its /api/ segment on.
+func apiTail(path string) string {
+	if i := strings.Index(path, "/api/"); i >= 0 {
+		return path[i:]
+	}
+	return ""
 }

@@ -18,6 +18,12 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Restore the default handling once the first signal arrived, so that a second Ctrl-C or SIGTERM
+	// ends gt even while it blocks on something that ignores ctx, such as reading stdin.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
 	code := run(ctx, app.System(), os.Args[1:])
 	stop()
 	os.Exit(code)
@@ -33,11 +39,21 @@ func run(ctx context.Context, deps app.Dependencies, args []string) int {
 	}
 	code := clierr.ExitCode(err)
 	switch {
-	case err == nil, code == clierr.Interrupted, clierr.IsQuiet(err):
+	case err == nil, clierr.IsQuiet(err):
+	case code == clierr.Interrupted:
+		reportDraft(deps, err)
 	case code == clierr.Canceled && !errors.Is(err, context.DeadlineExceeded):
 		fmt.Fprintln(deps.Streams.ErrOut, "Canceled.")
+		reportDraft(deps, err)
 	default:
 		fmt.Fprintf(deps.Streams.ErrOut, "Error: %v\n", app.Explain(ctx, deps, err))
 	}
 	return code
+}
+
+// reportDraft tells where the text of a canceled command was saved; the error is otherwise not shown.
+func reportDraft(deps app.Dependencies, err error) {
+	if path := app.DraftPath(err); path != "" {
+		fmt.Fprintf(deps.Streams.ErrOut, "Draft saved at %s\n", path)
+	}
 }

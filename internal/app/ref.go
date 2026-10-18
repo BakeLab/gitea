@@ -232,7 +232,7 @@ func (a *application) pullSelector(cmd *cobra.Command, args []string) (target, i
 
 // currentPull finds the pull request of the checked-out branch: the one pr checkout recorded
 // while it is open, else the open pull request whose head is the branch's upstream (and the
-// upstream remote's owner), else one whose head has the local branch's name, else N from a pr/N
+// upstream remote's owner), else one of this repository whose head has the local branch's name, else N from a pr/N
 // branch, else the recorded pull request even though it is no longer open.
 func (a *application) currentPull(ctx context.Context) (target, int64, error) {
 	branch, err := git.CurrentBranchConfig(ctx, a.gitProbe(), a.options.cwd)
@@ -263,11 +263,14 @@ func (a *application) currentPull(ctx context.Context) (target, int64, error) {
 				owner, _, _ = strings.Cut(repo, "/")
 			}
 		}
-		if n, err := pullForBranch(pulls, owner, branch.Merge, t.Repo); n > 0 || err != nil {
+		if n, err := pullForBranch(pulls, owner, branch.Merge, t.Repo); owner != "" && (n > 0 || err != nil) {
 			return t, n, err
 		}
 	}
-	if n, err := pullForBranch(pulls, "", branch.Name, t.Repo); n > 0 || err != nil {
+	// A bare branch name only identifies the repository's own pull requests: a contributor's
+	// fork may use main or fix as its head branch too.
+	own := slices.DeleteFunc(slices.Clone(pulls), func(pull services.Pull) bool { return !strings.EqualFold(pull.HeadRepo, t.Repo) })
+	if n, err := pullForBranch(own, "", branch.Name, t.Repo); n > 0 || err != nil {
 		return t, n, err
 	}
 	if number, ok := strings.CutPrefix(branch.Name, "pr/"); ok {

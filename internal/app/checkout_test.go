@@ -19,7 +19,7 @@ import (
 func TestCheckoutRemoteUsesOnlyMatchingRepository(t *testing.T) {
 	deps, _, _ := testDeps(t)
 	deps.Git = &fakeGit{results: map[string]string{
-		"remote": "fork\norigin\nupstream\ntracking", "symbolic-ref --short HEAD": "main", "config --get branch.main.remote": "tracking",
+		"remote": "fork\norigin\nupstream\ntracking", "symbolic-ref --quiet HEAD": "main", "config --get branch.main.remote": "tracking",
 		"remote get-url fork":     "https://example.org/bob/project.git",
 		"remote get-url origin":   "https://example.org/alice/project.git",
 		"remote get-url upstream": "https://other.example.org/alice/project.git",
@@ -43,7 +43,7 @@ func TestCheckoutRemoteUsesOnlyMatchingRepository(t *testing.T) {
 func TestCheckoutSelectedInstanceDisambiguatesSharedSSHRemote(t *testing.T) {
 	deps, _, _ := testDeps(t)
 	deps.Git = &fakeGit{results: map[string]string{
-		"remote": "local\norigin", "symbolic-ref --short HEAD": "main", "config --get branch.main.remote": "origin",
+		"remote": "local\norigin", "symbolic-ref --quiet HEAD": "main", "config --get branch.main.remote": "origin",
 		"remote get-url local":  "/srv/git/project.git",
 		"remote get-url origin": "ssh://git@git.example.org:2222/alice/project.git",
 	}}
@@ -132,6 +132,13 @@ func TestCheckoutNamesTheBranchAfterTheHead(t *testing.T) {
 		{"fork head name taken", fork, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "other"}, "bob/feature"},
 		{"fork names taken", fork, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "other", "rev-parse --verify refs/heads/bob/feature^{commit}": "other"}, "pr/7"},
 		{"deleted head", services.Pull{Number: 7, Head: "feature", HeadRemoteDeleted: true}, nil, "pr/7"},
+		{"fork branch at the head without upstream", fork, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "abc123"}, "feature"},
+		{"fork default branch tracking origin", services.Pull{Number: 7, Head: "main", HeadSHA: "abc123", HeadRepo: "bob/project"}, map[string]string{
+			"rev-parse --verify refs/heads/main^{commit}": "abc123", "config --get branch.main.remote": "origin"}, "bob/main"},
+		{"branch above the head name", services.Pull{Number: 7, Head: "feature/login", HeadSHA: "abc123", HeadRepo: "alice/project"}, map[string]string{
+			"rev-parse --verify refs/heads/feature^{commit}": "other"}, "pr/7"},
+		{"branches below the head name", same, map[string]string{
+			"for-each-ref --count=1 --format=%(refname) refs/heads/feature/": "refs/heads/feature/login"}, "pr/7"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, _, _ := testDeps(t)

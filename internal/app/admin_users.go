@@ -129,6 +129,7 @@ $ gt admin user view bob --json email,admin`,
 				return terminal.View{
 					Title: user.Username, ID: fmt.Sprintf("(ID %d)", user.ID), Badges: []terminal.Cell{role, status}, Meta: meta,
 					Fields: []terminal.Field{
+						{Label: "ID", Value: strconv.FormatInt(user.ID, 10), PipedOnly: true},
 						{Label: "Name", Value: user.FullName},
 						{Label: "Email", Value: user.Email},
 						{Label: "Role", Value: role.Text, PipedOnly: true},

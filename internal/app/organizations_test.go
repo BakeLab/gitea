@@ -95,3 +95,9 @@ func TestOrganizationViewShowsDetailsAndCounts(t *testing.T) {
 	require.Equal(t, "title:\tACME Corp\nname:\tacme\nvisibility:\tpublic\nwebsite:\thttps://acme.example\nlocation:\t\n"+
 		"repo admins manage team access:\tno\nmembers:\t2\nteams:\t3\nrepositories:\t1\nurl:\t"+server.URL+"/acme\n--\nTools\n", out.String())
 }
+
+func TestPipedTimeNormalizesToUTC(t *testing.T) {
+	require.Equal(t, "2026-01-02T01:04:05Z", pipedTime("2026-01-02T03:04:05+02:00"))
+	require.Equal(t, "", pipedTime(""))
+	require.Equal(t, "soon", pipedTime("soon"))
+}

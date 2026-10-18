@@ -92,7 +92,7 @@ func DiscoverRemote(ctx context.Context, runner Runner, dir, preferred string, r
 // CurrentUpstreamRemote names the checked-out branch and the remote it tracks; each is "" when
 // HEAD is detached or the branch tracks no remote.
 func CurrentUpstreamRemote(ctx context.Context, runner Runner, dir string) (branch, remote string) {
-	branch, err := runner.Output(ctx, dir, false, "symbolic-ref", "--short", "HEAD")
+	branch, err := CurrentBranch(ctx, runner, dir)
 	if err != nil {
 		return "", ""
 	}

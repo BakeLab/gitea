@@ -88,13 +88,14 @@ func issueView(item services.Issue, repo string, dependencies services.IssueDepe
 	}
 }
 
-// dueText words a due date for people: "Dec 24, 2026 (in about 2 months)".
+// dueText words a due date for people: "Dec 24, 2026 (in about 2 months)". The day is the one in the
+// offset Gitea returned: it stores a due date as the end of a day in its own time zone.
 func dueText(now time.Time, raw string) string {
 	due := terminal.ParseTime(raw)
 	if due.IsZero() {
 		return raw
 	}
-	return due.UTC().Format("Jan 2, 2006") + " (" + terminal.RelativeTime(now, due) + ")"
+	return due.Format("Jan 2, 2006") + " (" + terminal.RelativeTime(now, due) + ")"
 }
 
 // issueReferences lists issues as #N, qualifying those from other repositories.
@@ -290,7 +291,7 @@ func (a *application) writeDiscussion(cmd *cobra.Command, target target, v discu
 		var b strings.Builder
 		b.WriteString(view.Render(d))
 		for _, comment := range comments {
-			fmt.Fprintf(&b, "--\nauthor:\t%s\ncreated_at:\t%s\n", terminal.SafeLine(comment.author), terminal.SafeLine(comment.createdAt))
+			fmt.Fprintf(&b, "--\nauthor:\t%s\ncreated_at:\t%s\n", terminal.SafeLine(comment.author), pipedTime(comment.createdAt))
 			if comment.id > 0 {
 				fmt.Fprintf(&b, "id:\t%d\n", comment.id)
 			}

@@ -95,7 +95,11 @@ func (a *application) notificationCommand() *cobra.Command {
 						return s.Mark(cmd.Context(), id, mark.status)
 					}, func(item services.Notification) string { return fmt.Sprintf(mark.done, notificationLabel(item)) })
 				}
-				what := notificationsWith(filters) + " " + s.where
+				what := notificationsWith(filters)
+				if !until.IsZero() {
+					what += " updated before " + until.Format("2006-01-02 15:04")
+				}
+				what += " " + s.where
 				if a.canPrompt() {
 					if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf(mark.ask, what), DefaultYes: true}); err != nil {
 						return err
@@ -218,7 +222,7 @@ With --json it prints one JSON object per line.`,
 			err = s.Watch(ctx, listed, interval, func(items []services.Notification) error {
 				if a.options.json != "" {
 					for _, item := range items {
-						if err := (terminal.JSONOutput{Fields: a.options.json, Query: a.options.jq}).Write(cmd.OutOrStdout(), item); err != nil {
+						if err := (terminal.JSONOutput{Fields: a.options.json, Allowed: commandOutputFields(cmd), Query: a.options.jq, Safe: d.TTY}).Write(cmd.OutOrStdout(), item); err != nil {
 							return err
 						}
 					}

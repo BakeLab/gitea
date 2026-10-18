@@ -85,16 +85,21 @@ $ gt branch list -R alice/project --limit 100 --json name,sha`,
 				Columns: []terminal.Column{{Header: "Name"}, {Header: "Commit"}, {Header: "Protected"}, {Header: "Updated"}, {Header: "Message", Flex: true}},
 				Row: func(item services.Branch) []terminal.Cell {
 					name := terminal.Cell{Text: item.Name, Link: branchURL(repository, item.Name)}
-					if item.Name == repository.DefaultBranch {
-						name.Text += " (default)"
-						name.Bold = true
+					// Piped output keeps the plain name and the full commit, for scripts.
+					sha := item.SHA
+					if a.deps.Streams.OutTTY {
+						sha = shortSHA(sha)
+						if item.Name == repository.DefaultBranch {
+							name.Text += " (default)"
+							name.Bold = true
+						}
 					}
 					protected := ""
 					if item.Protected {
 						protected = "protected"
 					}
 					message, _, _ := strings.Cut(item.Message, "\n")
-					return []terminal.Cell{name, {Text: shortSHA(item.SHA), Muted: true}, {Text: protected, Color: "yellow"}, {Time: terminal.ParseTime(item.UpdatedAt)}, {Text: message}}
+					return []terminal.Cell{name, {Text: sha, Muted: true}, {Text: protected, Color: "yellow"}, {Time: terminal.ParseTime(item.UpdatedAt)}, {Text: message}}
 				},
 				Context: "branches in " + target.Repo, Empty: "no branches in " + target.Repo,
 			}
@@ -146,7 +151,7 @@ func (a *application) branchViewCommand() *cobra.Command {
 					meta = "updated " + terminal.RelativeTime(a.deps.Now(), updated)
 				}
 				return terminal.View{
-					Title: item.Name, Badges: badges, Meta: meta, Body: item.Message, Kind: "branch", URL: branchURL(repository, item.Name),
+					Title: item.Name, Badges: badges, Meta: meta, Body: item.Message, Plain: true, Kind: "branch", URL: branchURL(repository, item.Name),
 					Fields: []terminal.Field{{Label: "Commit", Value: item.SHA}, {Label: "Protection", Value: protection}, {Label: "You can push", Value: yesNo(item.CanPush)}},
 				}
 			})
@@ -277,7 +282,10 @@ $ gt branch protect --pattern 'release/*' --allow-push acme/release`,
 		Annotations: textOutput("branch protect does not return a resource"),
 		Args: func(cmd *cobra.Command, args []string) error {
 			if pattern != "" {
-				return usageArgs(cobra.NoArgs)(cmd, args)
+				if len(args) > 0 {
+					return clierr.Wrap(clierr.Usage, &argumentError{problem: "--pattern cannot be combined with branch names", cmd: cmd})
+				}
+				return nil
 			}
 			return usageArgs(cobra.MinimumNArgs(1))(cmd, args)
 		},
@@ -291,16 +299,21 @@ $ gt branch protect --pattern 'release/*' --allow-push acme/release`,
 			if err := requireNames("push", "", pushers, rule.StatusChecks); err != nil {
 				return err
 			}
+			target, err := a.resolve(cmd.Context(), true)
+			if err != nil {
+				return err
+			}
+			owner, _, _ := strings.Cut(target.Repo, "/")
 			for _, pusher := range pushers {
-				if _, team, ok := strings.Cut(pusher, "/"); ok {
+				if org, team, ok := strings.Cut(pusher, "/"); ok {
+					// Gitea only looks teams up in the organization that owns the repository.
+					if !strings.EqualFold(org, owner) {
+						return clierr.Wrap(clierr.Usage, fmt.Errorf("team %s is not in %s, the owner of %s", pusher, owner, target.Repo))
+					}
 					rule.PushTeams = append(rule.PushTeams, team)
 				} else {
 					rule.PushUsers = append(rule.PushUsers, pusher)
 				}
-			}
-			target, err := a.resolve(cmd.Context(), true)
-			if err != nil {
-				return err
 			}
 			service := services.Branches{Client: target.client}
 			rules := args
@@ -310,6 +323,11 @@ $ gt branch protect --pattern 'release/*' --allow-push acme/release`,
 			_, failures := applyBatch(cmd, rules, func(name string) string { return "protect " + name }, func(name string) (string, error) {
 				if pattern == "" {
 					if _, err := service.View(cmd.Context(), target.Repo, name); err != nil {
+						if services.IsNotFound(err) {
+							if _, repoErr := (services.Repositories{Client: target.client}).View(cmd.Context(), target.Repo); repoErr != nil {
+								return "", repoErr
+							}
+						}
 						return "", services.Classify(err, "branch", strconv.Quote(name), target.Repo)
 					}
 				}

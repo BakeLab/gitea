@@ -212,6 +212,7 @@ $ gt team view 2 --json units`,
 				return terminal.View{
 					Title: team.Slug(), ID: fmt.Sprintf("(ID %d)", team.ID), Badges: []terminal.Cell{{Text: team.Access(), Bold: true}},
 					Fields: []terminal.Field{
+						{Label: "ID", Value: strconv.FormatInt(team.ID, 10), PipedOnly: true},
 						{Label: "Access", Value: team.Access(), PipedOnly: true},
 						{Label: "Units", Value: strings.Join(units, ", ")},
 						{Label: "Members", Value: memberNames},

@@ -31,13 +31,13 @@ func attachmentRow(item services.IssueAttachment) []terminal.Cell {
 	}
 }
 
-func attachmentView(item services.IssueAttachment) terminal.View {
+func attachmentView(item services.IssueAttachment, d terminal.Display) terminal.View {
 	return terminal.View{
 		Title: item.Name, ID: "#" + strconv.FormatInt(item.ID, 10),
 		Fields: []terminal.Field{
 			{Label: "Size", Value: terminal.Bytes(item.Size)},
 			{Label: "Downloads", Value: strconv.FormatInt(item.DownloadCount, 10)},
-			{Label: "Created", Value: item.CreatedAt},
+			timeField("Created", item.CreatedAt, d),
 		},
 		Kind: "attachment", URL: item.URL,
 	}
@@ -93,7 +93,8 @@ are addressed by the %s number and the attachment ID that attachment list shows.
 		if err != nil {
 			return err
 		}
-		return writeView(a, cmd, item, attachmentView)
+		d := a.display()
+		return writeView(a, cmd, item, func(item services.IssueAttachment) terminal.View { return attachmentView(item, d) })
 	}}
 
 	var uploadName string

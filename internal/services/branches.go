@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/transport"
@@ -78,6 +79,10 @@ func (s Branches) Create(ctx context.Context, repo, branch, source string) (Bran
 	var created gitea.Branch
 	payload := map[string]string{"new_branch_name": branch, "old_ref_name": source}
 	if err := sendJSON(ctx, s.Client, http.MethodPost, "repos/"+repo+"/branches", payload, &created); err != nil {
+		// Gitea answers an unknown source with a 500 instead of a 404.
+		if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusInternalServerError && strings.Contains(apiErr.Message, "object does not exist") {
+			return Branch{}, &NotFoundError{Kind: "branch, tag or commit", Key: strconv.Quote(source), Scope: repo, Err: err}
+		}
 		return Branch{}, err
 	}
 	return branchFrom(&created), nil
@@ -97,6 +102,11 @@ func (s Branches) Delete(ctx context.Context, repo, branch string) error {
 		_, resp, err := c.Repositories.DeleteRepoBranch(ctx, owner, name, branch)
 		return resp, err
 	})
+	if IsNotFound(err) {
+		if _, repoErr := (Repositories{Client: s.Client}).get(ctx, repo); repoErr != nil {
+			return repoErr
+		}
+	}
 	return Classify(err, "branch", branch, repo)
 }
 

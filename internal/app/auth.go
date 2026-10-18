@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -22,6 +23,7 @@ import (
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
+	"gitea.dev/cli/internal/transport"
 	"github.com/spf13/cobra"
 )
 
@@ -64,12 +66,15 @@ func (a *application) sshPassphrase(ctx context.Context, policy terminal.Policy,
 }
 
 // instanceTarget selects the instance and account an auth command acts on, without authenticating:
-// with no --host, the instance of the working directory's repository when gt has accounts there,
-// else the one other commands select.
+// with no --host, the instance of the working directory's repository when gt has accounts there
+// (and the account named by --user or GITEA_CLI_USER, if any), else the one other commands select.
 func (a *application) instanceTarget(ctx context.Context) (target, error) {
 	if a.options.host == "" {
 		if t, err := a.resolveTarget(ctx, true, false); err == nil && len(t.host.Users) > 0 {
-			return t, nil
+			user, _ := a.selectedUser()
+			if _, ok := matchAccount(t.host.Users, user); user == "" || ok {
+				return t, nil
+			}
 		}
 	}
 	return a.resolveTarget(ctx, false, false)
@@ -267,7 +272,7 @@ $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 			}
 			user, err := services.CurrentAccount(cmd.Context(), a.deps.Client(instance, credential.AccessToken, insecure))
 			if err != nil {
-				return err
+				return rejectedLogin(err, "the token", "check it or create a new one under Settings > Applications")
 			}
 			if selectedUser, _ := a.selectedUser(); !services.MatchAccount(selectedUser, user) {
 				return clierr.Wrap(clierr.Usage, errors.New("token account does not match --user or GITEA_CLI_USER"))
@@ -302,6 +307,15 @@ $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 	enumValues(login, "scopes", oauthScopes...)
 	flagAliases(login, map[string]string{"web": "oauth"})
 	return login
+}
+
+// rejectedLogin words a 401 for the credential that gt auth login was given, so that Explain does
+// not blame GITEA_TOKEN or tell the user to run the command they are running.
+func rejectedLogin(err error, credential, advice string) error {
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusUnauthorized {
+		return explain(err, "%s was rejected by %s; %s", credential, cmp.Or(apiErr.Instance, "the instance"), advice)
+	}
+	return err
 }
 
 // confirmReplace asks before a login replaces the stored credential of an account that gt already
@@ -346,7 +360,7 @@ func (a *application) signedLogin(cmd *cobra.Command, snapshot settings.Snapshot
 	client.Signer = signer
 	user, err := services.CurrentAccount(cmd.Context(), client)
 	if err != nil {
-		return account, "", err
+		return account, "", rejectedLogin(err, "the SSH signature", "check that the key is registered for your account")
 	}
 	if selectedUser, _ := a.selectedUser(); !services.MatchAccount(selectedUser, user) {
 		return account, "", clierr.Wrap(clierr.Usage, errors.New("authenticated account does not match --user or GITEA_CLI_USER"))
@@ -420,6 +434,9 @@ $ gt auth status --host gitea.com --json`,
 			if err != nil {
 				return err
 			}
+			if s.Hosts.Hosts, err = a.environmentHosts(s.Hosts.Hosts); err != nil {
+				return err
+			}
 			selectedHost := ""
 			if a.options.host != "" {
 				if selectedHost, err = settings.ResolveHost(a.options.host, s.Hosts.Hosts); err != nil {
@@ -485,7 +502,16 @@ func (a *application) accountStatus(ctx context.Context, s settings.Snapshot, in
 	if verify {
 		err := errors.New("credential unavailable")
 		if row.Available {
-			row.Scopes, err = a.verifyAccount(ctx, a.policy(s), instance, user, host, account, credential.AccessToken)
+			err = nil
+			if account.AuthMethod == settings.AuthOAuth {
+				// An expired access token is not a broken credential: commands refresh it before use.
+				if credential, err = a.refreshedCredential(ctx, instance, user, host); err == nil && !credential.ExpiresAt.IsZero() {
+					row.ExpiresAt = &credential.ExpiresAt
+				}
+			}
+			if err == nil {
+				row.Scopes, err = a.verifyAccount(ctx, a.policy(s), instance, user, host, account, credential.AccessToken)
+			}
 		}
 		verified := err == nil
 		row.Verified = &verified
@@ -494,6 +520,15 @@ func (a *application) accountStatus(ctx context.Context, s settings.Snapshot, in
 		}
 	}
 	return row
+}
+
+// refreshedCredential loads the OAuth credential of an account, refreshing it first when it expires.
+func (a *application) refreshedCredential(ctx context.Context, instance, user string, host settings.Host) (auth.Credential, error) {
+	manager, err := auth.NewManager(a.deps.Settings, a.deps.Credentials)
+	if err != nil {
+		return auth.Credential{}, err
+	}
+	return manager.Refresh(ctx, instance, user, a.deps.Client(instance, "", host.Insecure).HTTP, false, a.deps.Now())
 }
 
 // environmentStatus reports the GITEA_TOKEN of the environment, when one is set.

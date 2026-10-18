@@ -17,7 +17,7 @@ import (
 // upstreamCheckout discovers the repository from the upstream remote, as in a clone of a fork.
 func upstreamCheckout(server *httptest.Server) *fakeGit {
 	return &fakeGit{results: map[string]string{
-		"symbolic-ref --short HEAD":       "main",
+		"symbolic-ref --quiet HEAD":       "main",
 		"config --get branch.main.remote": "upstream",
 		"remote get-url upstream":         server.URL + "/alice/project.git",
 	}}
@@ -135,7 +135,7 @@ func TestRepoRenameHintsAtTheRemote(t *testing.T) {
 	defer server.Close()
 	deps, out, diagnostics := repoTTYDeps(t, server.URL)
 	deps.Git = &fakeGit{results: map[string]string{
-		"symbolic-ref --short HEAD":       "main",
+		"symbolic-ref --quiet HEAD":       "main",
 		"config --get branch.main.remote": "origin",
 		"remote get-url origin":           server.URL + "/alice/project.git",
 	}}
@@ -199,4 +199,37 @@ func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
 	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", "remote rename origin upstream", "remote add -- origin " + fork}, runner.calls)
 	require.Equal(t, "✓ Forked bob/project to alice/mine\n✓ Renamed Git remote origin to upstream\n✓ Added Git remote origin for alice/mine\n", diagnostics.String())
 	require.Equal(t, "https://gitea.test/alice/mine\n", out.String())
+}
+
+func TestRepoForkRemoteChecksTheCloneBeforeForking(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	for name, results := range map[string]map[string]string{
+		"outside a clone":         {"rev-parse --is-inside-work-tree": "false"},
+		"origin points elsewhere": {"rev-parse --is-inside-work-tree": "true", "remote get-url origin": server.URL + "/carol/other.git"},
+	} {
+		deps, _, _ := serverDeps(t, server.URL)
+		deps.Git = &fakeGit{results: results}
+		err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--remote"})
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%s: %v", name, err)
+	}
+}
+
+func TestRepoRenameUpdatesTheSavedDefaultRepository(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"renamed","full_name":"alice/renamed"}`))
+	}))
+	defer server.Close()
+	deps, _, diagnostics := repoTTYDeps(t, server.URL)
+	saved := "config --local gt.repository " + server.URL + "/alice/renamed"
+	runner := &fakeGit{results: map[string]string{
+		"config --get gt.repository": server.URL + "/alice/project",
+		saved:                        "",
+	}}
+	deps.Git = runner
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rename", "renamed", "--yes"}))
+	require.Contains(t, runner.calls, saved)
+	require.Equal(t, "✓ Renamed repository alice/project to alice/renamed\n✓ Updated the default repository of this clone to alice/renamed\n", diagnostics.String())
 }

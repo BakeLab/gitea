@@ -125,6 +125,18 @@ func TestSyncBranchKeepsTheCheckedOutBranch(t *testing.T) {
 	}
 }
 
+func TestSyncBranchFastForwardsABranchWithoutCommits(t *testing.T) {
+	f := newSyncFixture(t)
+	empty := t.TempDir()
+	f.git(empty, "init", "-b", "main")
+	f.git(empty, "remote", "add", "origin", f.git(f.work, "remote", "get-url", "origin"))
+	result, err := SyncBranch(context.Background(), f.runner, SyncOptions{Directory: empty, Remote: "origin", Branch: "main"})
+	require.NoError(t, err)
+	require.Equal(t, SyncResult{"main", f.ahead, "", "origin"}, result)
+	require.Equal(t, f.ahead, f.git(empty, "rev-parse", "HEAD"))
+	require.Equal(t, "origin", f.git(empty, "config", "branch.main.remote"))
+}
+
 func TestSyncBranchRefusesWhatItCannotFastForward(t *testing.T) {
 	for _, tc := range []struct {
 		name, message string
@@ -149,6 +161,19 @@ func TestSyncBranchRefusesWhatItCannotFastForward(t *testing.T) {
 			name: "checked out in another worktree", message: "main is checked out in the worktree",
 			prepare: func(f syncFixture) { f.git(f.work, "worktree", "add", filepath.Join(t.TempDir(), "linked"), "main") },
 		},
+		{
+			name: "being rebased", message: "main is being rebased in",
+			prepare: func(f syncFixture) {
+				f.git(f.work, "switch", "main")
+				require.NoError(t, os.WriteFile(filepath.Join(f.work, "local.txt"), []byte("local"), 0o600))
+				f.git(f.work, "add", "local.txt")
+				f.git(f.work, "commit", "-m", "local")
+				f.git(f.work, "fetch", "origin")
+				// The failing exec step stops the rebase with main detached.
+				_, _ = f.runner.Output(context.Background(), f.work, false, "rebase", "--exec", "false", "origin/main")
+				require.Empty(t, f.git(f.work, "branch", "--show-current"))
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newSyncFixture(t)
@@ -156,6 +181,7 @@ func TestSyncBranchRefusesWhatItCannotFastForward(t *testing.T) {
 			branch, before := f.git(f.work, "branch", "--show-current"), f.git(f.work, "rev-parse", "main")
 			_, err := f.sync("main")
 			require.ErrorContains(t, err, tc.message)
+			require.NotContains(t, err.Error(), "credentials")
 			require.Equal(t, branch, f.git(f.work, "branch", "--show-current"))
 			require.Equal(t, before, f.git(f.work, "rev-parse", "main"))
 		})

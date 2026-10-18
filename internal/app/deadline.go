@@ -16,7 +16,7 @@ import (
 
 // numericDate matches dates such as 03/04/2026, which read as March 4 in the US and April 3
 // elsewhere.
-var numericDate = regexp.MustCompile(`^\d{1,2}[/.]\d{1,2}[/.]\d{2,4}$`)
+var numericDate = regexp.MustCompile(`^\d{1,2}[/.]\d{1,2}[/.]\d{2,4}(?:[ T].*)?$`)
 
 // parseDeadline parses a --deadline value; an empty value requests clearing.
 // Supplied timezone offsets are kept and Unix timestamps are UTC.

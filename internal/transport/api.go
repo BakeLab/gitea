@@ -14,7 +14,8 @@ import (
 )
 
 // API returns an HTTP client for requests to this instance. It attaches the credential and Sudo
-// header to every attempt, retries only body-free reads, never follows redirects, and records
+// header to every attempt, retries only body-free reads, follows redirects (a renamed or
+// transferred repository) only within this instance's API, and records
 // the sanitized error of a failed response for CaptureErrors.
 func (c *Client) API() *http.Client {
 	base := c.HTTP.Transport
@@ -27,10 +28,27 @@ func (c *Client) API() *http.Client {
 	}
 	return &http.Client{
 		Transport:     chain,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+		CheckRedirect: c.checkRedirect,
 		Jar:           c.HTTP.Jar,
 		Timeout:       c.HTTP.Timeout,
 	}
+}
+
+// maxRedirects bounds the redirects followed for one request.
+const maxRedirects = 5
+
+// checkRedirect follows a redirect when it stays within the API of this instance and keeps the
+// method, as the 301 of a renamed repository does for a read. Anything else returns the 3xx
+// response, so a credential is never sent elsewhere and a POST that Go would turn into a GET is
+// not silently dropped.
+func (c *Client) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) > maxRedirects || req.Method != via[0].Method {
+		return http.ErrUseLastResponse
+	}
+	if _, err := c.URL(req.URL.String()); err != nil {
+		return http.ErrUseLastResponse
+	}
+	return nil
 }
 
 type capturedErrorKey struct{}

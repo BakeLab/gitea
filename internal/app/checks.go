@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 )
 
@@ -153,8 +155,26 @@ func (a *application) checksRedraw(cmd *cobra.Command, interval time.Duration) f
 		if lines > 0 {
 			clear = fmt.Sprintf("\x1b[%dA\x1b[J", lines)
 		}
-		lines = strings.Count(text, "\n")
+		lines = screenRows(text, a.deps.Streams.Width)
 		_, err := io.WriteString(cmd.OutOrStdout(), clear+text)
 		return err
 	}
+}
+
+// displayEscapes matches the color and hyperlink sequences that take no room on screen.
+var displayEscapes = regexp.MustCompile("\x1b\\[[0-9;]*m|\x1b\\]8;[^\x07\x1b]*(?:\x07|\x1b\\\\)")
+
+// screenRows counts the rows the cursor sits below the start of text on a terminal width columns wide,
+// where a line wider than the terminal wraps onto more rows; a width of 0 means unlimited.
+func screenRows(text string, width int) int {
+	rows := strings.Count(text, "\n")
+	if width <= 0 {
+		return rows
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if cells := runewidth.StringWidth(displayEscapes.ReplaceAllString(line, "")); cells > width {
+			rows += (cells - 1) / width
+		}
+	}
+	return rows
 }

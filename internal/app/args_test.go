@@ -4,6 +4,8 @@
 package app
 
 import (
+	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -93,6 +95,9 @@ func TestArgumentErrorsShowTheUsageLine(t *testing.T) {
 		{[]string{"pr", "checkout"}, "missing pull request number\nUsage: gt pr checkout {<number> | <url> | <branch>} [flags]"},
 		{[]string{"run", "view"}, "missing run ID\nUsage: gt run view [<run-id>] [flags]"},
 		{[]string{"release", "asset", "edit", "v1"}, "missing asset\nUsage: gt release asset edit <tag> <asset> [flags]"},
+		{[]string{"time", "create"}, "missing issue number\nUsage: gt time create {<number> | <url>} <duration> [flags]"},
+		{[]string{"milestone", "issue", "add", "v1.0"}, "missing issue number\nUsage: gt milestone issue add <milestone> {<number> | <url>}... [flags]"},
+		{[]string{"branch", "protect", "main", "--pattern", "release/*"}, "--pattern cannot be combined with branch names\nUsage: gt branch protect <branch>... [flags]"},
 		{[]string{"repo", "clone"}, "missing repository\nUsage: gt repo clone <repository> [<directory>] [-- <gitflags>...] [flags]"},
 	} {
 		requireUsageBeforeRequests(t, tc.want, tc.args...)
@@ -107,4 +112,13 @@ func TestLimitAcceptsShorthandUpToOneThousand(t *testing.T) {
 	require.NoError(t, cmd.Flags().Parse([]string{"-L", "1000"}))
 	require.Equal(t, 1000, limit)
 	require.ErrorContains(t, cmd.Flags().Parse([]string{"-L", "1001"}), "must be 1..1000")
+}
+
+func TestPageRejectsValuesThatOverflowTheOffset(t *testing.T) {
+	var limit, page int
+	cmd := &cobra.Command{Use: "list"}
+	pageFlags(cmd, &limit, &page)
+	require.NoError(t, cmd.Flags().Parse([]string{"--page", strconv.Itoa(maxPage)}))
+	require.Equal(t, maxPage, page)
+	require.ErrorContains(t, cmd.Flags().Parse([]string{"--page", strconv.Itoa(math.MaxInt)}), "--page")
 }

@@ -29,11 +29,23 @@ type BranchConfig struct {
 // CurrentBranchConfig reads the configuration of the checked-out branch, failing with
 // ErrNotOnBranch when HEAD is detached or dir is not a checkout.
 func CurrentBranchConfig(ctx context.Context, runner Runner, dir string) (BranchConfig, error) {
-	name, err := runner.Output(ctx, dir, false, "symbolic-ref", "--short", "HEAD")
-	if err != nil || name == "" {
-		return BranchConfig{}, ErrNotOnBranch
+	name, err := CurrentBranch(ctx, runner, dir)
+	if err != nil {
+		return BranchConfig{}, err
 	}
 	return ReadBranchConfig(ctx, runner, dir, name), nil
+}
+
+// CurrentBranch names the checked-out branch, failing with ErrNotOnBranch when HEAD is detached
+// or dir is not a checkout. It reads the full ref because --short answers heads/NAME for a branch
+// that shares its name with a tag.
+func CurrentBranch(ctx context.Context, runner Runner, dir string) (string, error) {
+	ref, err := runner.Output(ctx, dir, false, "symbolic-ref", "--quiet", "HEAD")
+	name := strings.TrimPrefix(ref, "refs/heads/")
+	if err != nil || name == "" {
+		return "", ErrNotOnBranch
+	}
+	return name, nil
 }
 
 // ReadBranchConfig reads branch.<name>.remote, .merge and the keys pr checkout records.

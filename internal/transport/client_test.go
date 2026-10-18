@@ -213,3 +213,22 @@ func TestDebugRedactsOnlySensitiveQueryValues(t *testing.T) {
 		require.Equal(t, tc.redacted, sensitiveQuery(tc.path, tc.key), "%s %s", tc.path, tc.key)
 	}
 }
+
+func TestDebugStripsControlsFromTheStatusLine(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = rw.WriteString("HTTP/1.1 200 OK\x1b]0;PWNED\x07\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+		_ = rw.Flush()
+	}))
+	defer server.Close()
+	var log bytes.Buffer
+	_, err := New(server.URL, "t", false).Debug(&log).Do(context.Background(), http.MethodGet, "version", nil, nil)
+	require.NoError(t, err)
+	require.NotContains(t, log.String(), "\x1b")
+	require.NotContains(t, log.String(), "\x07")
+	require.Contains(t, log.String(), "-> 200 OK")
+}

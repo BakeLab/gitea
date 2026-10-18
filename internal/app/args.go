@@ -78,11 +78,14 @@ func oneOf(flag, value string, allowed ...string) error {
 // maxLimit bounds --limit; list services page through the server's smaller pages to reach it.
 const maxLimit = 1000
 
+// maxPage bounds --page so that the item offset of a page (page * limit) cannot overflow an int.
+const maxPage = math.MaxInt / (2 * maxLimit)
+
 // pageFlags registers -L/--limit and --page, which reject out-of-range values while parsing.
 func pageFlags(cmd *cobra.Command, limit, page *int) {
 	*limit = 30
 	cmd.Flags().VarP(positiveInt{limit, maxLimit}, "limit", "L", "Maximum number of results (1..1000)")
-	positiveIntVar(cmd, page, "page", 1, math.MaxInt, "Result page")
+	positiveIntVar(cmd, page, "page", 1, maxPage, "Result page")
 }
 
 // positiveIntVar registers an int flag that rejects values outside 1..upper while parsing.
@@ -103,7 +106,7 @@ func (f positiveInt) Type() string { return "int" }
 func (f positiveInt) Set(raw string) error {
 	n, err := strconv.Atoi(raw)
 	switch {
-	case (err != nil || n < 1) && f.upper == math.MaxInt:
+	case (err != nil || n < 1) && (f.upper == math.MaxInt || f.upper == maxPage):
 		return errors.New("must be a positive integer")
 	case err != nil || n < 1 || n > f.upper:
 		return fmt.Errorf("must be 1..%d", f.upper)
@@ -301,10 +304,23 @@ func argumentName(cmd *cobra.Command, argument string) string {
 		return text
 	}
 	noun := group.Name()
+	// The numbers under `time` and `milestone issue` are issue numbers.
+	if noun == "time" || slices.ContainsFunc(ancestors(cmd), func(c *cobra.Command) bool { return c.Name() == "issue" }) {
+		noun = "issue"
+	}
 	if noun == "pr" {
 		noun = "pull request"
 	}
 	return noun + " " + text
+}
+
+// ancestors returns the parents of cmd below the root command.
+func ancestors(cmd *cobra.Command) []*cobra.Command {
+	var parents []*cobra.Command
+	for parent := cmd.Parent(); parent != nil && parent.HasParent(); parent = parent.Parent() {
+		parents = append(parents, parent)
+	}
+	return parents
 }
 
 // localFlagsChanged reports whether a command-specific flag other than those in except was supplied.

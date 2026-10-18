@@ -61,3 +61,11 @@ func TestRemoveMilestoneRejectsDifferentMembership(t *testing.T) {
 	require.EqualError(t, err, `#7 is not in milestone "v1.0"`)
 	require.Zero(t, mutations)
 }
+
+func TestCommentViewExplainsAnEmptyAnswerForReviewComments(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	_, err := Comments{Client: client, Repository: "alice/project"}.View(context.Background(), 9)
+	require.EqualError(t, err, "comment 9 in alice/project is not a plain comment, such as an inline review comment, which this command cannot show")
+}

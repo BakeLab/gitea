@@ -194,7 +194,7 @@ func (a *application) completeAccounts(cmd *cobra.Command, _ []string, toComplet
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	hosts := snapshot.Hosts.Hosts
-	if t, err := a.resolveTarget(ctx, false, false); err == nil {
+	if t, err := a.instanceTarget(ctx); err == nil {
 		hosts = map[string]settings.Host{t.Host: hosts[t.Host]}
 	}
 	accounts := []cobra.Completion{}

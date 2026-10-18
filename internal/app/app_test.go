@@ -84,6 +84,14 @@ func TestAliasesAfterGlobalFlagsAndNestedHelp(t *testing.T) {
 	}
 }
 
+func TestBareJSONBeforeAnAliasKeepsTheAlias(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	require.NoError(t, Execute(context.Background(), deps, []string{"alias", "set", "prefs", "config list"}))
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"--json", "prefs"}))
+	require.Contains(t, out.String(), "git_protocol")
+}
+
 func TestJoinJSONFields(t *testing.T) {
 	for _, tc := range []struct{ args, want []string }{
 		{[]string{"issue", "list", "--json", "number,title"}, []string{"issue", "list", "--json=number,title"}},
@@ -101,6 +109,7 @@ func TestJoinJSONFields(t *testing.T) {
 		// A leading --json keeps the command word that follows it.
 		{[]string{"--json", "repo", "view", "alice/project"}, []string{"--json", "repo", "view", "alice/project"}},
 		{[]string{"--json", "pr", "list"}, []string{"--json", "pr", "list"}},
+		{[]string{"issue", "--json", "list"}, []string{"issue", "--json", "list"}},
 		{[]string{"--json", "number", "my-alias"}, []string{"--json=number", "my-alias"}},
 		// A word that cannot be an argument is a misspelled field, which then lists the available ones.
 		{[]string{"issue", "list", "--json", "Number"}, []string{"issue", "list", "--json=Number"}},
@@ -276,6 +285,14 @@ func TestCommandHelpShowsRelevantFlagsOnly(t *testing.T) {
 		require.Contains(t, out.String(), globalFlagsLine, args)
 	}
 	require.NotContains(t, out.String(), "--json fields", "version prints text")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "--help"}))
+	require.NotContains(t, out.String(), "--repo")
+	require.NotContains(t, out.String(), "--remote ")
+	require.NotContains(t, out.String(), "Without an argument")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "--help"}))
+	require.Equal(t, 1, strings.Count(out.String(), "\n  --remote "), "a local --remote hides the global one")
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "--help"}))
 	require.Contains(t, out.String(), "\nUSAGE\n  gt issue <command> [flags]\n\nAVAILABLE COMMANDS\n  attachment:  ")

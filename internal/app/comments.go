@@ -203,7 +203,7 @@ func commentView(t target, now time.Time) func(services.Comment) terminal.View {
 			Fields: []terminal.Field{
 				{Label: "ID", Value: strconv.FormatInt(comment.ID, 10), PipedOnly: true},
 				{Label: "Author", Value: comment.Author, PipedOnly: true},
-				{Label: "Created_at", Value: comment.CreatedAt, PipedOnly: true},
+				{Label: "Created_at", Value: pipedTime(comment.CreatedAt), PipedOnly: true},
 			},
 			Body: comment.Body, Kind: "comment", URL: comment.URL,
 		}
@@ -228,7 +228,7 @@ func (a *application) writeComments(cmd *cobra.Command, t target, n int64, items
 	var text strings.Builder
 	for i, comment := range items {
 		if !d.TTY {
-			text.WriteString(fmt.Sprintf("id:\t%d\nauthor:\t%s\ncreated_at:\t%s\nurl:\t%s\n--\n", comment.ID, terminal.SafeLine(comment.Author), comment.CreatedAt, terminal.SafeLine(comment.URL)))
+			text.WriteString(fmt.Sprintf("id:\t%d\nauthor:\t%s\ncreated_at:\t%s\nurl:\t%s\n--\n", comment.ID, terminal.SafeLine(comment.Author), pipedTime(comment.CreatedAt), terminal.SafeLine(comment.URL)))
 			text.WriteString(strings.TrimRight(terminal.SafeText(comment.Body), "\n") + "\n--\n")
 			continue
 		}
@@ -246,12 +246,12 @@ func (a *application) writeComments(cmd *cobra.Command, t target, n int64, items
 		text.WriteString(terminal.Table(nil, [][]terminal.Cell{{heading, {Text: meta, Muted: true}}}, d))
 		body := strings.TrimSpace(comment.Body)
 		if d.Markdown {
-			body = strings.TrimSpace(terminal.Markdown(body, d))
+			// Glamour already indents every line by its margin, which TrimSpace would strip from the first.
+			text.WriteString(strings.Trim(terminal.Markdown(body, d), "\n"))
 		} else {
-			body = terminal.SafeText(body)
-		}
-		for line := range strings.Lines(body) {
-			text.WriteString("  " + line)
+			for line := range strings.Lines(terminal.SafeText(body)) {
+				text.WriteString("  " + line)
+			}
 		}
 		text.WriteString("\n")
 	}
@@ -282,6 +282,9 @@ $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[st
 		}
 		if deleteLast && (cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") || flags.useEditor) {
 			return clierr.Wrap(clierr.Usage, errors.New("--delete-last takes no comment text"))
+		}
+		if deleteLast && a.options.json != "" {
+			return clierr.Wrap(clierr.Usage, errors.New("comment deletion does not return a resource; --json and --jq are not supported"))
 		}
 		t, n, err := a.resolveRef(cmd, args[0], kind)
 		if err != nil {

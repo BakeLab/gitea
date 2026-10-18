@@ -26,8 +26,25 @@ func finishDraft(draft *terminal.Draft, result *error) {
 		}
 	}
 	if *result != nil {
-		*result = fmt.Errorf("%w; draft saved at %s", *result, draft.Path)
+		*result = &draftError{err: *result, path: draft.Path}
 	}
+}
+
+// draftError reports where the text of a failed or canceled command was saved.
+type draftError struct {
+	err  error
+	path string
+}
+
+func (e *draftError) Error() string { return fmt.Sprintf("%v; draft saved at %s", e.err, e.path) }
+func (e *draftError) Unwrap() error { return e.err }
+
+// DraftPath returns the file that holds the unsubmitted text of a failed command, or "".
+func DraftPath(err error) string {
+	if draft, ok := errors.AsType[*draftError](err); ok {
+		return draft.path
+	}
+	return ""
 }
 
 func (a *application) editor() (terminal.Editor, string, error) {

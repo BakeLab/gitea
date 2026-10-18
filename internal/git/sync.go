@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -31,8 +33,8 @@ type SyncResult struct {
 // when it is missing, and never changes which branch is checked out. The checked-out branch merges
 // with --ff-only and needs a clean working tree; another branch moves with update-ref, which fails
 // if the branch changed meanwhile. A branch that already contains the remote history is kept. A
-// branch checked out in another linked worktree is refused, since moving it would leave that
-// worktree's files behind its HEAD.
+// branch checked out in another linked worktree, or being rebased in any worktree, is refused,
+// since moving it would leave that worktree's files behind its HEAD or break the rebase.
 func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResult, error) {
 	run := func(args ...string) (string, error) { return runner.Output(ctx, opts.Directory, opts.Prompt, args...) }
 	if opts.Remote == "" || opts.Branch == "" {
@@ -57,6 +59,9 @@ func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResul
 		}
 		if path := worktreeWithBranch(worktrees, ref); path != "" {
 			return SyncResult{}, fmt.Errorf("%s is checked out in the worktree %s; sync it from there", opts.Branch, path)
+		}
+		if path := rebasingWorktree(ctx, runner, worktrees, ref); path != "" {
+			return SyncResult{}, fmt.Errorf("%s is being rebased in %s; finish or abort the rebase first", opts.Branch, path)
 		}
 	}
 	if checkedOut {
@@ -91,11 +96,19 @@ func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResul
 				return SyncResult{}, err
 			}
 			if _, err := run("merge-base", "--is-ancestor", commit, previous); err != nil {
-				return SyncResult{}, fmt.Errorf("%s and %s/%s have diverged; merge or rebase before syncing: %w", opts.Branch, opts.Remote, opts.Branch, err)
+				return SyncResult{}, fmt.Errorf("%s and %s/%s have diverged; merge or rebase before syncing", opts.Branch, opts.Remote, opts.Branch)
 			}
 			result.Commit = previous
 			return result, nil
 		}
+	}
+	track := func() error {
+		for _, setting := range [][2]string{{"remote", opts.Remote}, {"merge", ref}} {
+			if _, err := run("config", "branch."+opts.Branch+"."+setting[0], setting[1]); err != nil {
+				return fmt.Errorf("created %s, but could not set it to track %s: %w", opts.Branch, opts.Remote, err)
+			}
+		}
+		return nil
 	}
 	if !checkedOut {
 		// The old value makes update-ref fail if the branch moved, or appeared, while fetching.
@@ -103,15 +116,14 @@ func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResul
 			return SyncResult{}, fmt.Errorf("%s changed while fetching; retry sync: %w", opts.Branch, err)
 		}
 		if previous == "" {
-			for _, setting := range [][2]string{{"remote", opts.Remote}, {"merge", ref}} {
-				if _, err := run("config", "branch."+opts.Branch+"."+setting[0], setting[1]); err != nil {
-					return SyncResult{}, fmt.Errorf("created %s, but could not set it to track %s: %w", opts.Branch, opts.Remote, err)
-				}
+			if err := track(); err != nil {
+				return SyncResult{}, err
 			}
 		}
 		return result, nil
 	}
-	current, err := run("rev-parse", "--verify", "HEAD^{commit}")
+	// A checked-out branch without commits has no HEAD to compare; merge fast-forwards it.
+	current, err := optional(run("rev-parse", "--verify", "--quiet", "HEAD^{commit}"))
 	if err != nil {
 		return SyncResult{}, err
 	}
@@ -123,6 +135,11 @@ func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResul
 	}
 	if actual, err := run("rev-parse", "--verify", "HEAD^{commit}"); err != nil || actual != commit {
 		return SyncResult{}, errors.New("HEAD changed during sync; inspect the working tree before retrying")
+	}
+	if previous == "" {
+		if err := track(); err != nil {
+			return SyncResult{}, err
+		}
 	}
 	return result, nil
 }
@@ -137,6 +154,33 @@ func worktreeWithBranch(porcelain, ref string) string {
 			path = value
 		} else if line == "branch "+ref {
 			return path
+		}
+	}
+	return ""
+}
+
+// rebasingWorktree returns the path of the worktree in worktree list --porcelain output whose
+// detached HEAD is the result of rebasing ref, or "" when none is. Git records the branch being
+// rebased in rebase-merge/head-name or rebase-apply/head-name of the worktree's Git directory.
+func rebasingWorktree(ctx context.Context, runner Runner, porcelain, ref string) string {
+	path := ""
+	for line := range strings.Lines(porcelain) {
+		line = strings.TrimRight(line, "\r\n")
+		if value, ok := strings.CutPrefix(line, "worktree "); ok {
+			path = value
+		} else if line == "detached" {
+			for _, name := range []string{"rebase-merge/head-name", "rebase-apply/head-name"} {
+				file, err := runner.Output(ctx, path, false, "rev-parse", "--git-path", name)
+				if err != nil {
+					continue
+				}
+				if !filepath.IsAbs(file) {
+					file = filepath.Join(path, file)
+				}
+				if head, err := os.ReadFile(file); err == nil && strings.TrimSpace(string(head)) == ref {
+					return path
+				}
+			}
 		}
 	}
 	return ""

@@ -496,6 +496,30 @@ func TestAuthStatusVerifyChecksStoredCredentials(t *testing.T) {
 	require.Equal(t, server.URL+"\talice\ttrue\toauth\tfile\ttrue\ttrue\t2030-01-02T03:04:05Z\t\n", out.String())
 }
 
+func TestAuthStatusVerifyRefreshesExpiredOAuthToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login/oauth/access_token":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "fresh", "refresh_token": "refresh2", "expires_in": 3600, "token_type": "Bearer"})
+		case "/api/v1/token":
+			_, _ = w.Write([]byte(`{"scopes":["all"]}`))
+		default:
+			if r.Header.Get("Authorization") != "token fresh" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	require.NoError(t, deps.Credentials.Save(server.URL, "alice", settings.StoreFile, auth.Credential{AccessToken: "stale", RefreshToken: "refresh", ExpiresAt: time.Now().Add(-time.Hour)}))
+	configureHost(t, deps, server.URL, settings.Host{User: "alice", Users: map[string]settings.Account{"alice": {AuthMethod: settings.AuthOAuth, CredentialStore: settings.StoreFile}}})
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--verify", "--json=user,verified,error"}))
+	require.JSONEq(t, `[{"user":"alice","verified":true,"error":""}]`, out.String())
+}
+
 func TestOAuthLoginOpensAuthorizationURLInBrowser(t *testing.T) {
 	opened := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -783,4 +807,37 @@ func TestLogoutAsksGitToForgetTheAccount(t *testing.T) {
 	require.Equal(t, "✓ Logged out of "+instance+" (alice)\n✓ Switched active account for "+instance+" to bob\n", withoutANSI(diagnostics.String()))
 	err := Execute(context.Background(), deps, []string{"auth", "logout", "carol", "--yes"})
 	require.EqualError(t, err, `account "carol" is not logged in on `+instance+" (accounts: bob)")
+}
+
+func TestLogoutFindsNamedAccountOnAnotherInstanceThanTheClone(t *testing.T) {
+	deps, _, _ := testDeps(t)
+	deps.Credentials.Keyring = &statusKeyring{}
+	deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": "https://a.example.org/alice/project.git"}}
+	configureHost(t, deps, "https://a.example.org", settings.Host{User: "alice", Users: tokenAccounts(settings.StoreKeyring, "alice")})
+	configureHost(t, deps, "https://b.example.org", settings.Host{User: "bob", Users: tokenAccounts(settings.StoreKeyring, "bob")})
+	require.NoError(t, deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error { s.Preferences.DefaultHost = "https://b.example.org"; return nil }))
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "logout", "bob", "--yes", "--no-input"}))
+	snapshot, err := deps.Settings.Load()
+	require.NoError(t, err)
+	require.NotContains(t, snapshot.Hosts.Hosts["https://b.example.org"].Users, "bob")
+	require.Contains(t, snapshot.Hosts.Hosts["https://a.example.org"].Users, "alice")
+}
+
+func TestAuthStatusVerifyHonorsInstanceInsecureForEnvironmentToken(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/token" {
+			_, _ = w.Write([]byte(`{"scopes":["all"]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"login":"alice"}`))
+	}))
+	defer server.Close()
+	environment := map[string]string{"GITEA_INSTANCE_URL": server.URL, "GITEA_TOKEN": "secret"}
+	deps, out, _ := testDeps(t)
+	deps.Getenv = envFunc(environment)
+	require.Error(t, Execute(context.Background(), deps, []string{"auth", "status", "--verify"}))
+	out.Reset()
+	environment["GITEA_INSTANCE_INSECURE"] = "true"
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--verify", "--json=user,verified"}))
+	require.JSONEq(t, `[{"user":"alice","verified":true}]`, out.String())
 }

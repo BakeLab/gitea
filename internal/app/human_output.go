@@ -51,7 +51,7 @@ func (a *application) writeHuman(cmd *cobra.Command, text string) error {
 // writeJSON writes v as JSON, filtered by --json fields and --jq.
 func (a *application) writeJSON(cmd *cobra.Command, v any) error {
 	pretty := a.deps.Streams.OutTTY
-	return terminal.JSONOutput{Fields: a.options.json, Query: a.options.jq, Pretty: pretty, Color: pretty && a.colorEnabled()}.Write(cmd.OutOrStdout(), v)
+	return terminal.JSONOutput{Fields: a.options.json, Allowed: commandOutputFields(cmd), Query: a.options.jq, Pretty: pretty, Color: pretty && a.colorEnabled()}.Write(cmd.OutOrStdout(), v)
 }
 
 // listSpec describes how a list command shows its items to people.

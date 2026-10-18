@@ -71,7 +71,7 @@ func TestStatusSummarySkipsRunsWhenActionsAreDisabled(t *testing.T) {
 			w.WriteHeader(http.StatusTeapot)
 		}
 	}))
-	result, err := (Status{Client: client, Repository: "alice/project"}).Summary(context.Background(), 30, "alice/project")
+	result, err := (Status{Client: client, Repository: "alice/project"}).Summary(context.Background(), 30, "alice/project", false)
 	require.NoError(t, err)
 	require.False(t, result.RunsIncluded)
 	require.Empty(t, result.FailingRuns)

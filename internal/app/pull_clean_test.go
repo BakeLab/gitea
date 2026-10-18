@@ -63,7 +63,7 @@ func TestPullCleanDeletesLocalAndRemoteBranches(t *testing.T) {
 		"status --porcelain=v1 --untracked-files=normal": "",
 		"rev-parse --verify refs/heads/pr/7^{commit}":    "abc123",
 		"rev-parse --verify refs/heads/main^{commit}":    "mainsha",
-		"symbolic-ref --short HEAD":                      "pr/7",
+		"symbolic-ref --quiet HEAD":                      "pr/7",
 		"switch --quiet -- main":                         "",
 		"branch -D -- pr/7":                              "",
 	}}

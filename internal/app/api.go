@@ -303,6 +303,9 @@ func (o apiResponse) write(w io.Writer, r *http.Response) error {
 			return err
 		}
 		if o.query != "" && succeeded {
+			if len(data) == 0 {
+				return nil
+			}
 			if !json.Valid(data) {
 				return fmt.Errorf("--jq needs a JSON response, but the response is %s", cmp.Or(mediaType, "not JSON"))
 			}
@@ -363,7 +366,7 @@ func writeRequestHead(w io.Writer, r *http.Request) error {
 
 func writeHead(w io.Writer, prefix, first string, headers http.Header) error {
 	var b strings.Builder
-	b.WriteString(prefix + first + "\n")
+	b.WriteString(prefix + terminal.SafeLine(first) + "\n")
 	for _, key := range slices.Sorted(maps.Keys(headers)) {
 		for _, value := range headers.Values(key) {
 			b.WriteString(prefix + terminal.SafeLine(key+": "+value) + "\n")

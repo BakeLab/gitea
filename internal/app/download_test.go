@@ -98,6 +98,9 @@ func TestDownloadDestinations(t *testing.T) {
 		{name: "--skip-existing", flags: downloadFlags{skipExisting: true}, file: "existing.txt", want: "existing.txt", skip: true},
 		{name: "parent directory name", file: "../escape.txt", err: `cannot use "../escape.txt" as a file name; pass --output`},
 		{name: "dot dot", file: "..", err: "cannot use"},
+		{name: "escape sequence in the name", file: "\x1b]0;PWNED\x07.txt", err: "cannot use"},
+		{name: "bidi override in the name", file: "a\u202etxt.exe", err: "cannot use"},
+		{name: "a file named dash stays a file", file: "-", want: "." + string(filepath.Separator) + "-"},
 		{name: "--output and --dir", flags: downloadFlags{output: "x", dir: "dl"}, file: "notes.txt", err: "--output and --dir cannot be combined"},
 		{name: "--clobber and --skip-existing", flags: downloadFlags{clobber: true, skipExisting: true}, file: "notes.txt", err: "--clobber and --skip-existing cannot be combined"},
 	} {
@@ -147,6 +150,8 @@ func TestDownloadsToATerminalRefuseBinaryData(t *testing.T) {
 		{name: "terminal text loses escapes", body: "title\x1b]0;PWNED\x07\n", want: "title]0;PWNED\n", tty: true},
 		{name: "terminal binary", body: "PK\x03\x04\x00\x01", tty: true, err: "refusing to write binary data to the terminal"},
 		{name: "terminal invalid UTF-8", body: "abc\xff\xfedef", tty: true, err: "refusing to write binary data"},
+		{name: "terminal 3-byte rune cut after 2 bytes", body: strings.Repeat("a", binarySniffLength-2) + "\u2026", want: strings.Repeat("a", binarySniffLength-2) + "\u2026", tty: true},
+		{name: "terminal 4-byte rune cut after 2 bytes", body: strings.Repeat("a", binarySniffLength-2) + "\U0001F600", want: strings.Repeat("a", binarySniffLength-2) + "\U0001F600", tty: true},
 		{name: "terminal UTF-8 cut at the sniff boundary", body: strings.Repeat("a", binarySniffLength-1) + "é", want: strings.Repeat("a", binarySniffLength-1) + "é", tty: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/settings"
 	"github.com/stretchr/testify/require"
 )
 
@@ -128,4 +129,19 @@ func TestRepoSyncOutsideACloneExplainsWhatItNeeds(t *testing.T) {
 	err := Execute(context.Background(), deps, []string{"repo", "sync", "-R", "alice/project", "-b", "main"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
 	require.ErrorContains(t, err, "repo sync needs a Git clone of alice/project; run it inside one, or pass a fork to update it on the server")
+}
+
+func TestRepoSyncOnTheServerIgnoresARemotePreferenceForAnotherRepository(t *testing.T) {
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		_, _ = w.Write([]byte(`{"full_name":"bob/project","mirror":true,"original_url":"https://example.test/source.git"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	require.NoError(t, deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error { s.Preferences.Remote = "origin"; return nil }))
+	// origin is a clone of alice/project, not of the repository named on the command line.
+	deps.Git = &syncGit{url: server.URL + "/alice/project.git", inside: "true"}
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "sync", "bob/project"}))
+	require.Equal(t, []string{"GET /api/v1/repos/bob/project", "POST /api/v1/repos/bob/project/mirror-sync"}, requests)
 }

@@ -43,7 +43,7 @@ func TestDeadlineInputAndExplicitClearing(t *testing.T) {
 }
 
 func TestAmbiguousNumericDeadlinesAreRejected(t *testing.T) {
-	for _, value := range []string{"03/04/2026", "04/03/2026", "01/15/2028", "15.01.2028", "3/4/26"} {
+	for _, value := range []string{"03/04/2026", "04/03/2026", "01/15/2028", "15.01.2028", "3/4/26", "04/03/2026 17:00", "4/3/2026 17:00:00", "04/03/2026 5:00 PM"} {
 		for _, command := range [][]string{{"issue", "edit", "1"}, {"issue", "create", "--title", "x"}, {"milestone", "create", "--title", "x"}} {
 			requireUsageBeforeRequests(t, fmt.Sprintf("invalid --deadline %q: the order of day and month is ambiguous; use YYYY-MM-DD", value), append(command, "--deadline="+value)...)
 		}

@@ -24,6 +24,27 @@ func TestJSONFieldSelectionAndJQ(t *testing.T) {
 	require.EqualError(t, ValidateOutput("number,,title", "", []string{"number", "title"}), "--json field names cannot be empty; use --json alone for every field")
 }
 
+func TestJSONFieldSelectionKeepsDocumentedFieldsOmittedByOmitempty(t *testing.T) {
+	type item struct {
+		Name   string  `json:"name"`
+		Parent *string `json:"parent,omitempty"`
+	}
+	var out bytes.Buffer
+	require.NoError(t, JSONOutput{Fields: "name,parent", Allowed: []string{"name", "parent"}}.Write(&out, []item{{Name: "x"}}))
+	require.Equal(t, "[{\"name\":\"x\",\"parent\":null}]\n", out.String())
+	require.EqualError(t, JSONOutput{Fields: "parent", Allowed: []string{"name"}}.Write(&out, []item{{Name: "x"}}), `unknown JSON field "parent"`)
+}
+
+func TestJSONOutputSafeStripsControlsAndStaysOnOneLine(t *testing.T) {
+	value := map[string]any{"title": "a\x1b]0;x\x07b\u202e"}
+	var out bytes.Buffer
+	require.NoError(t, JSONOutput{Query: ".title", Safe: true}.Write(&out, value))
+	require.Equal(t, "a]0;xb\n", out.String())
+	out.Reset()
+	require.NoError(t, JSONOutput{Safe: true}.Write(&out, value))
+	require.Equal(t, "{\"title\":\"a\\u001b]0;x\\u0007b\"}\n", out.String())
+}
+
 func TestJSONOutputIsIndentedAndColoredForTerminals(t *testing.T) {
 	var out bytes.Buffer
 	value := []map[string]any{{"title": "a \u202e\x1b[31mb", "done": true, "due": nil, "number": 1}}

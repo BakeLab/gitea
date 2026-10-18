@@ -85,7 +85,7 @@ func TestAPIBranchPlaceholderUsesEscapedCurrentBranch(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
-	deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --short HEAD": "feature/x"}}
+	deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --quiet HEAD": "feature/x"}}
 	require.NoError(t, Execute(context.Background(), deps, []string{"api", "repos/{owner}/{repo}/branches/{branch}", "-R", "alice/project"}))
 	require.Equal(t, 1, calls)
 	deps.Git = &fakeGit{}
@@ -219,6 +219,8 @@ func TestAPIFiltersAndFormatsJSONResponses(t *testing.T) {
 		case "/api/v1/repos/alice/nope":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		case "/api/v1/repos/alice/gone":
+			w.WriteHeader(http.StatusNoContent)
 		case "/api/v1/repos":
 			if r.URL.Query().Get("page") != "2" {
 				w.Header().Set("Link", `<?page=2>; rel="next"`)
@@ -247,6 +249,7 @@ func TestAPIFiltersAndFormatsJSONResponses(t *testing.T) {
 		{name: "error body ends with a newline", args: []string{"repos/alice/nope"}, want: "{\"message\":\"not found\"}\n", err: "HTTP 404"},
 		{name: "error body is not filtered", args: []string{"repos/alice/nope", "--jq", ".message"}, want: "{\"message\":\"not found\"}\n", err: "HTTP 404"},
 		{name: "jq needs JSON", args: []string{"text", "--jq", "."}, err: "--jq needs a JSON response, but the response is text/plain"},
+		{name: "jq on 204 No Content", args: []string{"repos/alice/gone", "-X", "DELETE", "--jq", "."}},
 		{name: "silent", args: []string{"version", "--silent"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -287,4 +290,21 @@ func TestAPIHelpShowsJQ(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"api", "--help"}))
 	require.Contains(t, out.String(), "\n  -q, --jq expression ")
 	require.NotContains(t, out.String(), "--json fields")
+}
+
+func TestAPIIncludeSanitizesTheStatusLine(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = rw.WriteString("HTTP/1.1 200 OK\x1b]0;PWNED\x07\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+		_ = rw.Flush()
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "version", "--include"}))
+	require.NotContains(t, diagnostics.String(), "\x1b")
+	require.NotContains(t, diagnostics.String(), "\x07")
 }

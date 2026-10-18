@@ -131,6 +131,27 @@ func TestTeamsAreAddressedAsOrganizationAndName(t *testing.T) {
 	require.EqualError(t, err, `team "ops" not found in acme`)
 }
 
+func TestTeamViewPrintsTheIDWhenPiped(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/orgs/acme/teams/search":
+			if r.URL.Query().Get("page") != "1" {
+				_, _ = w.Write([]byte(`{"ok":true,"data":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"data":[{"id":2,"name":"developers","permission":"none"}]}`))
+		case "/api/v1/teams/2/members", "/api/v1/teams/2/repos":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"team", "view", "acme/developers"}))
+	require.Contains(t, out.String(), "\nid:\t2\n")
+}
+
 func TestTeamListShowsAccessAndSizes(t *testing.T) {
 	totals := map[string]string{"/api/v1/teams/1/members": "1", "/api/v1/teams/1/repos": "4", "/api/v1/teams/2/members": "3", "/api/v1/teams/2/repos": "2"}
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

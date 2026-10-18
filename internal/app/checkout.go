@@ -159,6 +159,7 @@ $ gt pr checkout 13 --update`
 // checkoutBranchName names the local branch for a pull request: its head branch name when
 // that is free or already at the head, else OWNER/BRANCH for a fork, else pr/NUMBER. A branch that
 // an earlier checkout of the same pull request created is reused, so that --update can advance it.
+// A fork's head name is not reused when that local branch tracks something else, such as main.
 func (a *application) checkoutBranchName(ctx context.Context, t target, pull services.Pull) string {
 	fallback := fmt.Sprintf("pr/%d", pull.Number)
 	if pull.HeadRemoteDeleted || pull.Head == "" {
@@ -168,13 +169,36 @@ func (a *application) checkoutBranchName(ctx context.Context, t target, pull ser
 	if owner, _, _ := strings.Cut(pull.HeadRepo, "/"); owner != "" && !strings.EqualFold(pull.HeadRepo, t.Repo) {
 		candidates = append(candidates, owner+"/"+pull.Head)
 	}
+	sameRepo := strings.EqualFold(pull.HeadRepo, t.Repo)
 	for _, name := range candidates {
 		tip, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "refs/heads/"+name+"^{commit}")
-		if err != nil || tip == pull.HeadSHA || git.ReadBranchConfig(ctx, a.gitProbe(), a.options.cwd, name).PullNumber == pull.Number {
+		if err != nil {
+			if !a.branchPathTaken(ctx, name) {
+				return name
+			}
+			continue
+		}
+		config := git.ReadBranchConfig(ctx, a.gitProbe(), a.options.cwd, name)
+		if config.PullNumber == pull.Number || (tip == pull.HeadSHA && (sameRepo || config.Remote == "")) {
 			return name
 		}
 	}
 	return fallback
+}
+
+// branchPathTaken reports whether a branch name cannot be created because another branch is a
+// directory prefix of it (feature for feature/login) or lives below it.
+func (a *application) branchPathTaken(ctx context.Context, name string) bool {
+	for i, r := range name {
+		if r != '/' {
+			continue
+		}
+		if _, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "refs/heads/"+name[:i]+"^{commit}"); err == nil {
+			return true
+		}
+	}
+	below, err := a.gitProbe().Output(ctx, a.options.cwd, false, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads/"+name+"/")
+	return err == nil && below != ""
 }
 
 // ensureHeadRemote returns the remote holding the PR head, adding one when none matches.

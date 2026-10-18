@@ -206,3 +206,43 @@ func TestCaptureErrorsIgnoresSuccessAndUncapturedRequests(t *testing.T) {
 	require.NoError(t, resp.Body.Close())
 	require.JSONEq(t, `{"message":"ignored"}`, string(data))
 }
+
+func TestAPIFollowsRedirectsWithinTheInstanceAPI(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/old/issues":
+			http.Redirect(w, r, "/api/v1/repos/alice/new/issues", http.StatusMovedPermanently)
+		case "/api/v1/loop":
+			http.Redirect(w, r, "/api/v1/loop", http.StatusMovedPermanently)
+		case "/web":
+			http.Redirect(w, r, "/user/login", http.StatusFound)
+		default:
+			require.Equal(t, "token secret", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(r.Method + " " + r.URL.Path))
+		}
+	}))
+	defer server.Close()
+	client := New(server.URL, "secret", false)
+	for _, tc := range []struct {
+		method, path, body string
+		status             int
+	}{
+		{http.MethodGet, "/api/v1/repos/alice/old/issues", "GET /api/v1/repos/alice/new/issues", http.StatusOK},
+		{http.MethodHead, "/api/v1/repos/alice/old/issues", "", http.StatusOK},
+		{http.MethodPost, "/api/v1/repos/alice/old/issues", "", http.StatusMovedPermanently},
+		{http.MethodGet, "/web", "", http.StatusFound},
+		{http.MethodGet, "/api/v1/loop", "", http.StatusMovedPermanently},
+	} {
+		req, err := http.NewRequest(tc.method, server.URL+tc.path, nil)
+		require.NoError(t, err)
+		resp, err := client.API().Do(req)
+		require.NoError(t, err, tc.path)
+		data, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, tc.status, resp.StatusCode, tc.method+" "+tc.path)
+		if tc.status == http.StatusOK {
+			require.Equal(t, tc.body, string(data))
+		}
+	}
+}

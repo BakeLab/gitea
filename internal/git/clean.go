@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -34,6 +35,9 @@ type FindCleanBranchOptions struct {
 	DefaultBranch                   string
 	PreferredNames, MatchingRemotes []string
 	IgnoreSHA                       bool
+	// PullNumber is the pull request being cleaned; a branch that pr checkout recorded for it
+	// wins over branches that merely share the head branch's name.
+	PullNumber int64
 }
 
 // FindCleanBranch locates one local branch for PR cleanup without mutating Git state.
@@ -49,8 +53,8 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 		return "", "", err
 	}
 	type candidate struct {
-		name, remote string
-		matched      bool
+		name, remote      string
+		matched, recorded bool
 	}
 	setOf := func(names []string) map[string]bool {
 		out := map[string]bool{}
@@ -80,8 +84,9 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 		if len(parts) == 3 {
 			upstream = parts[2]
 		}
+		recorded := opts.PullNumber > 0 && ReadBranchConfig(ctx, runner, opts.Directory, name).PullNumber == opts.PullNumber
 		if opts.IgnoreSHA {
-			if name != opts.HeadBranch && !preferred[name] {
+			if name != opts.HeadBranch && !preferred[name] && !recorded {
 				continue
 			}
 		} else if opts.HeadSHA == "" || sha != opts.HeadSHA {
@@ -107,7 +112,7 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 				remoteName = remote
 			}
 		}
-		candidates = append(candidates, candidate{name: name, remote: remoteName, matched: matched})
+		candidates = append(candidates, candidate{name: name, remote: remoteName, matched: matched, recorded: recorded})
 	}
 	if len(candidates) == 0 {
 		if opts.IgnoreSHA {
@@ -119,12 +124,15 @@ Retry with --ignore-sha to select by branch name`, opts.HeadSHA)
 	}
 	selected := []candidate{}
 	for _, item := range candidates {
-		if item.matched || preferred[item.name] || item.name == opts.HeadBranch {
+		if item.matched || item.recorded || preferred[item.name] || item.name == opts.HeadBranch {
 			selected = append(selected, item)
 		}
 	}
 	if len(selected) == 0 {
 		selected = candidates
+	}
+	if recorded := slices.DeleteFunc(slices.Clone(selected), func(item candidate) bool { return !item.recorded }); len(recorded) > 0 {
+		selected = recorded
 	}
 	if len(selected) > 1 {
 		strong := make([]candidate, 0, len(selected))
@@ -183,7 +191,7 @@ func CleanPull(ctx context.Context, runner Runner, opts CleanOptions) (CleanResu
 	if _, err := run("rev-parse", "--verify", "refs/heads/"+opts.DefaultBranch+"^{commit}"); err != nil {
 		return CleanResult{}, fmt.Errorf("default branch is unavailable; create or fetch it before cleaning: %w", err)
 	}
-	current, err := run("symbolic-ref", "--short", "HEAD")
+	current, err := CurrentBranch(ctx, runner, opts.Directory)
 	if err == nil && current == opts.LocalBranch {
 		if _, err := run("switch", "--quiet", "--", opts.DefaultBranch); err != nil {
 			return CleanResult{}, fmt.Errorf("could not switch to %s before deleting %s: %w", opts.DefaultBranch, opts.LocalBranch, err)

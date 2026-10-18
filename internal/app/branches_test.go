@@ -75,7 +75,7 @@ func TestBranchProtectChecksTheBranchAndIsIdempotent(t *testing.T) {
 	deps, _, diagnostics := repoTTYDeps(t, server.URL)
 	err := Execute(context.Background(), deps, []string{"branch", "protect", "nope", "-R", "alice/x"})
 	require.EqualError(t, err, `protect nope: branch "nope" not found in alice/x`)
-	require.Equal(t, []string{"GET /api/v1/repos/alice/x/branches/nope"}, requests)
+	require.Equal(t, []string{"GET /api/v1/repos/alice/x/branches/nope", "GET /api/v1/repos/alice/x"}, requests)
 	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "protect", "main", "dev", "-R", "alice/x"}))
 	require.Equal(t, "! main is already protected in alice/x; change its rule on the web\n"+
 		"✓ Protected dev in alice/x (1 approval required, no direct pushes)\n", diagnostics.String())
@@ -111,4 +111,58 @@ func TestBranchDeleteTakesSeveralBranches(t *testing.T) {
 	require.Equal(t, []string{"Delete 2 branches (old-a, old-b) from alice/x?"}, prompt.confirmations)
 	require.Equal(t, []string{"old-a", "old-b"}, deleted)
 	require.Equal(t, "✓ Deleted branch old-a from alice/x\n✓ Deleted branch old-b from alice/x\n", diagnostics.String())
+}
+
+func TestBranchListPipedKeepsPlainNamesAndFullCommits(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/x":
+			_, _ = w.Write([]byte(`{"full_name":"alice/x","default_branch":"main"}`))
+		default:
+			_, _ = w.Write([]byte(`[{"name":"main","commit":{"id":"0123456789abcdef"}}]`))
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "list", "-R", "alice/x"}))
+	require.Contains(t, out.String(), "main\t0123456789abcdef\t")
+	require.NotContains(t, out.String(), "(default)")
+	deps, out, _ = repoTTYDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "list", "-R", "alice/x"}))
+	require.Contains(t, out.String(), "main (default)")
+	require.Contains(t, out.String(), "0123456")
+	require.NotContains(t, out.String(), "0123456789")
+}
+
+func TestBranchCreateWithAnUnknownSourceIsNotFound(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"object does not exist [id: nope, rel_path: ]"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := repoTTYDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"branch", "create", "hotfix", "--source", "nope", "-R", "alice/x"})
+	require.EqualError(t, err, `branch, tag or commit "nope" not found in alice/x`)
+}
+
+func TestBranchDeleteAndProtectNameAMissingRepository(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+	deps, _, _ := repoTTYDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"branch", "delete", "old", "-R", "alice/typo", "--yes"})
+	require.EqualError(t, err, "delete branch old: repository alice/typo not found")
+	err = Execute(context.Background(), deps, []string{"branch", "protect", "old", "-R", "alice/typo"})
+	require.EqualError(t, err, "protect old: repository alice/typo not found")
+}
+
+func TestBranchProtectRejectsATeamOfAnotherOrganization(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	deps, _, _ := repoTTYDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"branch", "protect", "main", "--allow-push", "other/devs", "-R", "acme/x"})
+	require.EqualError(t, err, "team other/devs is not in acme, the owner of acme/x")
 }

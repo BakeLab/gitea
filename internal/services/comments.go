@@ -5,6 +5,8 @@ package services
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"strconv"
 
 	"gitea.dev/cli/internal/transport"
@@ -61,9 +63,18 @@ func (s Comments) Page(ctx context.Context, n int64, limit, page int) ([]Comment
 
 // View retrieves a comment by its repository-scoped ID.
 func (s Comments) View(ctx context.Context, id int64) (Comment, error) {
+	status := 0
 	item, err := repoConvert(ctx, s.Client, s.Repository, commentFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Comment, *gitea.Response, error) {
-		return c.Issues.GetIssueComment(ctx, owner, repo, id)
+		comment, resp, err := c.Issues.GetIssueComment(ctx, owner, repo, id)
+		if resp != nil && resp.Response != nil {
+			status = resp.StatusCode
+		}
+		return comment, resp, err
 	})
+	if status == http.StatusNoContent {
+		// Gitea answers without a body for the comments that are not plain ones, such as inline review comments.
+		return Comment{}, fmt.Errorf("comment %d in %s is not a plain comment, such as an inline review comment, which this command cannot show", id, s.Repository)
+	}
 	return item, Classify(err, "comment", strconv.FormatInt(id, 10), s.Repository)
 }
 

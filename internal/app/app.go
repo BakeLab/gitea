@@ -361,12 +361,21 @@ func builtins(root *cobra.Command) map[string]bool {
 // Execute expands aliases and executes the fresh root without printing errors.
 func Execute(ctx context.Context, deps Dependencies, args []string) error {
 	root := NewRoot(deps)
-	if at := commandIndex(root, args); at == len(args) || (args[at] != cobra.ShellCompRequestCmd && args[at] != cobra.ShellCompNoDescRequestCmd) {
-		args = joinJSONFields(root, args)
-	}
 	// Broken settings or aliases must not prevent help or recovery commands.
 	snapshot, loadErr := deps.Settings.Load()
 	names := builtins(root)
+	if loadErr == nil {
+		for name, expansion := range snapshot.Preferences.Aliases {
+			if aliases.Check(name, snapshot.Preferences.Aliases, names) == nil {
+				root.AddCommand(&cobra.Command{Use: name, Short: fmt.Sprintf("Alias for %q", expansion), GroupID: "alias", Annotations: map[string]string{"gt.alias": "true"}, RunE: func(*cobra.Command, []string) error {
+					return clierr.Wrap(clierr.Usage, errors.New("alias must be expanded before execution"))
+				}})
+			}
+		}
+	}
+	if at := commandIndex(root, args); at == len(args) || (args[at] != cobra.ShellCompRequestCmd && args[at] != cobra.ShellCompNoDescRequestCmd) {
+		args = joinJSONFields(root, args)
+	}
 	if commandAt := commandIndex(root, args); commandAt < len(args) {
 		name := args[commandAt]
 		completion := name == cobra.ShellCompRequestCmd || name == cobra.ShellCompNoDescRequestCmd
@@ -392,15 +401,6 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 		}
 		if completion {
 			args = completeJSONValue(args)
-		}
-	}
-	if loadErr == nil {
-		for name, expansion := range snapshot.Preferences.Aliases {
-			if aliases.Check(name, snapshot.Preferences.Aliases, names) == nil {
-				root.AddCommand(&cobra.Command{Use: name, Short: fmt.Sprintf("Alias for %q", expansion), GroupID: "alias", Annotations: map[string]string{"gt.alias": "true"}, RunE: func(*cobra.Command, []string) error {
-					return clierr.Wrap(clierr.Usage, errors.New("alias must be expanded before execution"))
-				}})
-			}
 		}
 	}
 	root.SetArgs(args)

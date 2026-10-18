@@ -188,15 +188,32 @@ type Confirmation struct {
 	NonTTY string
 }
 
+// questionEnd returns the index of the first question mark outside double quotes, or -1, so a quoted
+// name such as "why? not" does not end the question.
+func questionEnd(prompt string) int {
+	quoted := false
+	for i, r := range prompt {
+		switch {
+		case r == '"':
+			quoted = !quoted
+		case r == '?' && !quoted:
+			return i
+		}
+	}
+	return -1
+}
+
 // ConfirmAction asks c unless yes is set. A declined or aborted confirmation returns ErrCanceled.
 func ConfirmAction(ctx context.Context, c Confirmation, yes bool, streams Streams, policy Policy, prompt Prompter) error {
 	if yes {
 		return nil
 	}
+	// Names in the question come from the server, so keep control characters off the terminal.
+	c.Prompt, c.NonTTY = SafeLine(c.Prompt), SafeLine(c.NonTTY)
 	if !policy.CanPrompt(streams) {
 		action := c.NonTTY
-		if question, _, ok := strings.Cut(c.Prompt, "?"); action == "" && ok && !c.DefaultYes && question != "" {
-			action = strings.ToLower(question[:1]) + question[1:]
+		if question := questionEnd(c.Prompt); action == "" && question > 0 && !c.DefaultYes {
+			action = strings.ToLower(c.Prompt[:1]) + c.Prompt[1:question]
 		}
 		if action != "" {
 			action = " to " + action

@@ -179,7 +179,7 @@ func TestWorkflowRunNeedsTheCheckedOutBranchOnTheServer(t *testing.T) {
 	deps, _, _ := actionsDeps(t, server.URL, false)
 	deps.Git = &fakeGit{results: map[string]string{
 		"remote": "origin", "remote get-url origin": server.URL + "/alice/project.git",
-		"symbolic-ref --short HEAD": "local-only", "config --get branch.local-only.remote": "origin",
+		"symbolic-ref --quiet HEAD": "local-only", "config --get branch.local-only.remote": "origin",
 	}}
 	err := Execute(context.Background(), deps, []string{"workflow", "run", "ci.yml", "-f", "note=x"})
 	require.EqualError(t, err, "branch local-only is not on alice/project; push it or pass --ref main")

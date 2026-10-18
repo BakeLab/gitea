@@ -96,6 +96,11 @@ func TestViewRendersMarkdownOnlyWhenEnabled(t *testing.T) {
 	require.Contains(t, view.Render(Display{TTY: true, Markdown: true, Color: true, Links: true}), "\x1b]8;id=")
 }
 
+func TestViewKeepsPlainBodiesVerbatim(t *testing.T) {
+	view := View{Title: "main", Body: "fix <parser> __init__\n# not a heading\x1b[2J", Plain: true}
+	require.Contains(t, view.Render(Display{TTY: true, Markdown: true}), "\nfix <parser> __init__\n# not a heading[2J\n")
+}
+
 func TestMarkdownSanitizesServerText(t *testing.T) {
 	rendered := Markdown("Hello \x1b]0;PWNED\x07world\n\n`\x1b[2Jcode`", Display{Color: true, Links: true})
 	require.NotContains(t, rendered, "\x1b]0;")

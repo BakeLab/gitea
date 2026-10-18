@@ -97,23 +97,25 @@ func TestCloneAddsUpstreamRemoteForForks(t *testing.T) {
 	parent = server.URL + "/alice/project.git"
 	runner := &fakeGit{results: map[string]string{
 		prefix + "clone -- " + remote + " destination": "",
-		"remote add -- upstream " + parent:             "",
-		"config branch.main.remote upstream":           "",
-		"config branch.main.merge refs/heads/main":     "",
-		"config branch.main.pushRemote origin":         "",
+		"remote":                                   "origin",
+		"remote add -- upstream " + parent:         "",
+		"config branch.main.remote upstream":       "",
+		"config branch.main.merge refs/heads/main": "",
+		"config branch.main.pushRemote origin":     "",
 	}}
 	deps.Git = runner
 	cwd := t.TempDir()
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "destination", "--cwd", cwd, "--no-input", "--json=id,full_name,fork"}))
 	require.Equal(t, []string{
 		prefix + "clone -- " + remote + " destination",
+		"remote",
 		"remote add -- upstream " + parent,
 		"config branch.main.remote upstream",
 		"config branch.main.merge refs/heads/main",
 		"config branch.main.pushRemote origin",
 	}, runner.calls)
 	clone := filepath.Join(cwd, "destination")
-	require.Equal(t, []string{cwd, clone, clone, clone, clone}, runner.dirs)
+	require.Equal(t, []string{cwd, clone, clone, clone, clone, clone}, runner.dirs)
 	require.JSONEq(t, `{"id":8,"full_name":"bob/project","fork":true}`, out.String())
 }
 
@@ -188,12 +190,12 @@ func TestClonePassesGitFlagsAndNamesTheUpstreamRemote(t *testing.T) {
 	clone := credentialCall(t, deps, server.URL, "alice", "clone", "--branch", "dev", "--", server.URL+"/bob/project.git")
 	parent := server.URL + "/alice/project.git"
 	runner := &fakeGit{results: map[string]string{
-		clone: "", "remote add -- parent " + parent: "", "config branch.main.remote parent": "",
-		"config branch.main.merge refs/heads/main": "", "config branch.main.pushRemote origin": "",
+		clone: "", "remote": "fork", "remote add -- parent " + parent: "", "config branch.main.remote parent": "",
+		"config branch.main.merge refs/heads/main": "", "config branch.main.pushRemote fork": "",
 	}}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "-u", "parent", "--", "--branch", "dev"}))
-	require.Equal(t, []string{clone, "remote add -- parent " + parent, "config branch.main.remote parent", "config branch.main.merge refs/heads/main", "config branch.main.pushRemote origin"}, runner.calls)
+	require.Equal(t, []string{clone, "remote", "remote add -- parent " + parent, "config branch.main.remote parent", "config branch.main.merge refs/heads/main", "config branch.main.pushRemote fork"}, runner.calls)
 	require.Equal(t, "✓ Cloned bob/project into project\n✓ Added remote parent for alice/project; gt commands in the clone target it (change with gt repo set-default)\n", diagnostics.String())
 	runner.calls = nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "--no-upstream", "--", "--branch", "dev"}))

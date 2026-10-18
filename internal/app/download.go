@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"gitea.dev/cli/internal/clierr"
@@ -53,10 +54,13 @@ func (f downloadFlags) destination(name string) (path string, skip bool, err err
 	}
 	path = f.output
 	if path == "" || isDirectory(path) {
-		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) || strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
 			return "", false, clierr.Wrap(clierr.Usage, fmt.Errorf("cannot use %q as a file name; pass --output", name))
 		}
 		path = filepath.Join(cmp.Or(path, f.dir, "."), name)
+		if path == "-" {
+			path = "." + string(filepath.Separator) + path // a file named "-", not standard output
+		}
 	}
 	if _, err := os.Lstat(path); err == nil {
 		if f.skipExisting {
@@ -115,8 +119,11 @@ func writeTerminalSafe(w io.Writer, tty bool, body io.Reader) error {
 // rune cut off at the end.
 func binary(data []byte) bool {
 	for len(data) > 0 {
+		if !utf8.FullRune(data) {
+			return false
+		}
 		r, size := utf8.DecodeRune(data)
-		if r == 0 || (r == utf8.RuneError && size == 1 && (len(data) >= utf8.UTFMax || utf8.FullRune(data))) {
+		if r == 0 || (r == utf8.RuneError && size == 1) {
 			return true
 		}
 		data = data[size:]

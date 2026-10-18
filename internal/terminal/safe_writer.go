@@ -10,7 +10,7 @@ import (
 )
 
 // maxSGRLength bounds how many bytes of a possible SGR sequence are held back between writes.
-const maxSGRLength = 32
+const maxSGRLength = 256
 
 // SafeWriter returns w unchanged when tty is false, so piped output stays byte-exact.
 // On a terminal it filters streamed server text like SafeText, and with allowSGR it keeps

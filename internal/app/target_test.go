@@ -205,7 +205,7 @@ func TestRepositoryResolutionPrecedence(t *testing.T) {
 	}
 	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": "https://example.org", "GITEA_TOKEN": "secret"})
 	runner := &fakeGit{results: map[string]string{
-		"symbolic-ref --short HEAD":       "main",
+		"symbolic-ref --quiet HEAD":       "main",
 		"config --get branch.main.remote": "feature-remote",
 		"remote get-url feature-remote":   "https://example.org/owner/current.git",
 		"remote get-url upstream":         "https://example.org/owner/upstream.git",

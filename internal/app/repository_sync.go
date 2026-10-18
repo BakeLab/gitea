@@ -55,6 +55,13 @@ $ gt repo sync bob/project`,
 			remote, err := "", errNoMatchingRemote
 			if inside == "true" {
 				remote, err = a.checkoutRemote(cmd.Context(), target, snapshot)
+				// A remote preference only picks among the remotes of this repository: a repository
+				// argument that no remote here names is synced on the server, as without one.
+				if err != nil && len(args) > 0 && a.options.remote == "" {
+					if matches, matchErr := a.remotesForRepositoryURLs(cmd.Context(), target.hosts(), "", "", target.Repo); matchErr == nil && len(matches) == 0 {
+						err = errNoMatchingRemote
+					}
+				}
 			}
 			switch {
 			case errors.Is(err, errNoMatchingRemote) && len(args) > 0:

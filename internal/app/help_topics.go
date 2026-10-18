@@ -168,7 +168,10 @@ func helpFlags(cmd *cobra.Command) (local, inherited string) {
 	slices.SortFunc(own, func(x, y *pflag.Flag) int { return strings.Compare(x.Name, y.Name) })
 	path := cmd.CommandPath()
 	repo := !slices.ContainsFunc(noRepoCommands, func(prefix string) bool { return path == prefix || strings.HasPrefix(path, prefix+" ") })
-	shown := map[string]bool{"repo": repo, "remote": repo, "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd) || cmd.Annotations["gt.rawjson"] != "", "yes": cmd.Annotations["gt.confirm"] != ""}
+	// A command's own --remote, as in repo fork, hides the global flag of that name.
+	// repo clone takes its repository as an argument only, so --repo and --remote do nothing there.
+	selects := repo && path != "gt repo clone"
+	shown := map[string]bool{"repo": selects, "remote": selects && cmd.LocalFlags().Lookup("remote") == nil, "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd) || cmd.Annotations["gt.rawjson"] != "", "yes": cmd.Annotations["gt.confirm"] != ""}
 	var shared []*pflag.Flag
 	for _, name := range []string{"repo", "remote", "cwd", "json", "jq", "yes"} {
 		if shown[name] {

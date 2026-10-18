@@ -335,3 +335,15 @@ func TestCompletionTargetAcceptsABareTokenHost(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, instance, resolved.Host)
 }
+
+func TestAccountCompletionUsesInstanceOfRepository(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": "https://a.example.org/alice/project.git"}}
+	configureHost(t, deps, "https://a.example.org", settings.Host{User: "alice", Users: tokenAccounts(settings.StoreKeyring, "alice", "adam")})
+	configureHost(t, deps, "https://b.example.org", settings.Host{User: "bob", Users: tokenAccounts(settings.StoreKeyring, "bob")})
+	require.NoError(t, deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error { s.Preferences.DefaultHost = "https://b.example.org"; return nil }))
+	for _, command := range []string{"switch", "logout"} {
+		values, _ := complete(t, deps, out, "auth", command, "")
+		require.Equal(t, []string{"adam\thttps://a.example.org", "alice\thttps://a.example.org (active)"}, values, command)
+	}
+}

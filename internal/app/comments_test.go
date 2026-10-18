@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"gitea.dev/cli/internal/settings"
 	"github.com/stretchr/testify/require"
 )
 
@@ -151,6 +152,7 @@ func TestCommentGroupCommentsLikeGh(t *testing.T) {
 		{[]string{"issue", "comment", "craete", "1"}, `unknown command "craete" for "gt issue comment"; did you mean create?`},
 		{[]string{"issue", "comment", "-b", "x"}, "missing issue number"},
 		{[]string{"issue", "comment", "1", "--edit-last", "--delete-last"}, "--edit-last and --delete-last cannot be combined"},
+		{[]string{"issue", "comment", "1", "--delete-last", "--json"}, "comment deletion does not return a resource; --json and --jq are not supported"},
 		{[]string{"issue", "comment", "1"}, "missing required input: supply --body, --body-file or --editor"},
 		{[]string{"pr", "comment", "1", "-b", "x"}, "#1 in alice/project is an issue, not a pull request; use gt issue comment 1"},
 	} {
@@ -167,4 +169,26 @@ func TestCommentGroupCommentsLikeGh(t *testing.T) {
 	require.Equal(t, "#79  alice • about 2 hours ago\n  First **one**\n\n"+
 		"#80  bob • about 1 hour ago (edited)\n  Second\n  line\n\n"+
 		"#81  bob • about 50 minutes ago\n  Third\n", out.String())
+	// Rendered Markdown carries its own two-space margin, so every line of a body is indented alike.
+	require.NoError(t, deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
+		s.Preferences.Markdown, s.Preferences.Hyperlinks = "auto", "never"
+		return nil
+	}))
+	require.NoError(t, run("issue", "comment", "list", "1"))
+	require.Contains(t, out.String(), "\n  Second\n  line\n")
+	require.NotContains(t, out.String(), "    line")
+}
+
+func TestViewCommentsCannotBeCombinedWithJSON(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"issue", "view", "1", "-R", "alice/project", "--comments", "--json"})
+	require.ErrorContains(t, err, "use gt issue comment list <number> --json")
+	err = Execute(context.Background(), deps, []string{"pr", "view", "13", "-R", "alice/project", "--comments", "--json"})
+	require.ErrorContains(t, err, "gt pr review list <number> --json")
+	require.Empty(t, out.String())
 }
