@@ -742,7 +742,9 @@ func TestAuthSwitchSelectsInstanceAndAccount(t *testing.T) {
 }
 
 func TestAuthTokenPrintsTheCredential(t *testing.T) {
-	const instance = "https://example.org"
+	server := newAuthenticatedServer(http.NotFoundHandler())
+	defer server.Close()
+	instance := server.URL
 	deps, out, _ := testDeps(t)
 	configureAccounts(t, deps, instance, "alice", "alice")
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "token"}))
@@ -777,7 +779,7 @@ func TestLogoutAsksGitToForgetTheAccount(t *testing.T) {
 	deps.Git = runner
 	configureAccounts(t, deps, instance, "alice", "alice", "bob")
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "logout", "--yes"}))
-	require.Equal(t, []string{"credential reject\nprotocol=https\nhost=example.org:3000\nusername=alice\n\n"}, runner.inputs)
+	require.Equal(t, []string{"credential reject\nprotocol=https\nhost=example.org:3000\nusername=alice\npassword=alice-token\n\n"}, runner.inputs)
 	require.Equal(t, "✓ Logged out of "+instance+" (alice)\n✓ Switched active account for "+instance+" to bob\n", withoutANSI(diagnostics.String()))
 	err := Execute(context.Background(), deps, []string{"auth", "logout", "carol", "--yes"})
 	require.EqualError(t, err, `account "carol" is not logged in on `+instance+" (accounts: bob)")

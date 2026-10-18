@@ -70,7 +70,9 @@ func TestRegisterAndLogoutIsolateAccounts(t *testing.T) {
 	for _, user := range []string{"alice", "bob", "charlie"} {
 		require.NoError(t, manager.Register("https://example.org", user, "keyring", "token", HostOptions{}, Credential{AccessToken: "secret-" + user}))
 	}
-	require.NoError(t, manager.Logout("https://example.org", "charlie"))
+	removed, err := manager.Logout("https://example.org", "charlie")
+	require.NoError(t, err)
+	require.Equal(t, "secret-charlie", removed.AccessToken)
 	s, err := config.Load()
 	require.NoError(t, err)
 	require.Empty(t, s.Hosts.Hosts["https://example.org"].User)
@@ -154,14 +156,17 @@ func TestLogoutRemovesAccountWithMissingCredential(t *testing.T) {
 	manager := newTestManager(t, config, &Store{Dir: config.Dir, Keyring: keyring})
 	require.NoError(t, manager.Register("https://example.org", "alice", settings.StoreKeyring, settings.AuthToken, HostOptions{}, Credential{AccessToken: "secret"}))
 	clear(keyring.values)
-	require.NoError(t, manager.Logout("https://example.org", "alice"))
+	removed, err := manager.Logout("https://example.org", "alice")
+	require.NoError(t, err)
+	require.Empty(t, removed.AccessToken)
 	s, err := config.Load()
 	require.NoError(t, err)
 	require.Empty(t, s.Hosts.Hosts["https://example.org"].Users)
 	require.NoError(t, manager.Register("https://example.org", "alice", settings.StoreKeyring, settings.AuthToken, HostOptions{}, Credential{AccessToken: "secret"}))
 	// An unavailable keyring keeps the account rather than orphaning its token.
 	keyring.fail = true
-	require.Error(t, manager.Logout("https://example.org", "alice"))
+	_, err = manager.Logout("https://example.org", "alice")
+	require.Error(t, err)
 	s, err = config.Load()
 	require.NoError(t, err)
 	require.Contains(t, s.Hosts.Hosts["https://example.org"].Users, "alice")
@@ -175,7 +180,8 @@ func TestRegisterHTTPSignRejectsTokenAccounts(t *testing.T) {
 	s, err := config.Load()
 	require.NoError(t, err)
 	require.Equal(t, settings.Account{AuthMethod: settings.AuthSSH, SSHKey: "/keys/id"}, s.Hosts.Hosts["https://example.org"].Users["alice"])
-	require.NoError(t, manager.Logout("https://example.org", "alice"))
+	_, err = manager.Logout("https://example.org", "alice")
+	require.NoError(t, err)
 }
 
 func TestRegisterReplacesAnAccountOnlyWhenAsked(t *testing.T) {

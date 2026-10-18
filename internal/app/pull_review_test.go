@@ -94,6 +94,10 @@ func TestReviewTypeFlags(t *testing.T) {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			var payload map[string]any
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews" {
+					_, _ = w.Write([]byte(`[]`))
+					return
+				}
 				if r.Method == http.MethodGet {
 					require.Equal(t, "/api/v1/repos/alice/x/pulls/13", r.URL.Path)
 					_, _ = w.Write([]byte(pullJSON("bob")))
@@ -119,6 +123,10 @@ func TestReviewTypeFlags(t *testing.T) {
 func TestReviewCreateIsTheReviewCommand(t *testing.T) {
 	var event any
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		if r.Method == http.MethodGet {
 			_, _ = w.Write([]byte(pullJSON("bob")))
 			return

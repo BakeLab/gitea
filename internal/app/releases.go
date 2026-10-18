@@ -309,6 +309,22 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 	return command
 }
 
+// rejectSwitchValue refuses the old gt syntax "--draft false": a switch reads no value, so the
+// word would be edited as one more release after the switch was applied as true.
+func rejectSwitchValue(cmd *cobra.Command, args []string, switches ...string) error {
+	for _, name := range switches {
+		if !cmd.Flags().Changed(name) {
+			continue
+		}
+		for _, arg := range args {
+			if strings.EqualFold(arg, "true") || strings.EqualFold(arg, "false") {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s takes no value; use --%s or --%s=false", name, name, name))
+			}
+		}
+	}
+	return nil
+}
+
 func (a *application) releaseEditCommand() *cobra.Command {
 	var fields releaseFields
 	command := &cobra.Command{
@@ -320,6 +336,9 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			var editorDraft terminal.Draft
 			defer finishDraft(&editorDraft, &runErr)
+			if err := rejectSwitchValue(cmd, args, "draft", "prerelease"); err != nil {
+				return err
+			}
 			if err := validateTextSources(cmd, "notes", "notes-file"); err != nil {
 				return err
 			}

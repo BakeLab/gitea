@@ -11,7 +11,10 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -114,25 +117,28 @@ func TestPullTemplateLookup(t *testing.T) {
 		status              map[string]int
 		requests            int
 	}{
-		{"root first", "template", "", map[string]int{"PULL_REQUEST_TEMPLATE.md": http.StatusOK, ".gitea/pull_request_template.md": http.StatusOK}, 1},
-		{"uppercase before lowercase", "template", "", map[string]int{".gitea/PULL_REQUEST_TEMPLATE.md": http.StatusOK}, 3},
-		{"later match", "template", "", map[string]int{".github/pull_request_template.md": http.StatusOK}, 6},
+		{"root first", "PULL_REQUEST_TEMPLATE.md", "", map[string]int{"PULL_REQUEST_TEMPLATE.md": http.StatusOK, ".gitea/pull_request_template.md": http.StatusOK}, 6},
+		{"uppercase before lowercase", ".gitea/PULL_REQUEST_TEMPLATE.md", "", map[string]int{".gitea/PULL_REQUEST_TEMPLATE.md": http.StatusOK, ".gitea/pull_request_template.md": http.StatusOK}, 6},
+		{"later match", ".github/pull_request_template.md", "", map[string]int{".github/pull_request_template.md": http.StatusOK}, 6},
 		{"docs is not searched", "", "", map[string]int{"docs/pull_request_template.md": http.StatusOK}, 6},
 		{"none", "", "", nil, 6},
-		{"server error", "", "500", map[string]int{".gitea/pull_request_template.md": http.StatusInternalServerError}, 4},
+		{"server error", "", "500", map[string]int{".gitea/pull_request_template.md": http.StatusInternalServerError}, 6},
+		{"match before error", "pull_request_template.md", "", map[string]int{"pull_request_template.md": http.StatusOK, ".github/PULL_REQUEST_TEMPLATE.md": http.StatusInternalServerError}, 6},
+		{"error before match", "", "500", map[string]int{"pull_request_template.md": http.StatusInternalServerError, ".github/PULL_REQUEST_TEMPLATE.md": http.StatusOK}, 6},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			requests := 0
+			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests++
+				requests.Add(1)
 				assert.Equal(t, "release/1.0", r.URL.Query().Get("ref"))
-				status, ok := tc.status[strings.TrimPrefix(r.URL.Path, "/api/v1/repos/owner/repo/raw/")]
+				path := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/owner/repo/raw/")
+				status, ok := tc.status[path]
 				if !ok {
 					w.WriteHeader(http.StatusNotFound)
 					return
 				}
 				w.WriteHeader(status)
-				_, _ = w.Write([]byte("template"))
+				_, _ = w.Write([]byte(path))
 			}))
 			defer server.Close()
 			got, err := (Pulls{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}).Template(context.Background(), "release/1.0")
@@ -142,9 +148,30 @@ func TestPullTemplateLookup(t *testing.T) {
 				require.NoError(t, err)
 			}
 			require.Equal(t, tc.want, got)
-			require.Equal(t, tc.requests, requests)
+			require.Equal(t, tc.requests, int(requests.Load()))
 		})
 	}
+}
+
+func TestPullTemplateProbesConcurrently(t *testing.T) {
+	// Every probe only completes once all of them are in flight.
+	var arrived sync.WaitGroup
+	arrived.Add(len(pullTemplatePaths))
+	allArrived := make(chan struct{})
+	go func() { arrived.Wait(); close(allArrived) }()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived.Done()
+		select {
+		case <-allArrived:
+		case <-time.After(5 * time.Second):
+			t.Errorf("%s did not run concurrently with the other template probes", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+	got, err := (Pulls{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}).Template(context.Background(), "main")
+	require.NoError(t, err)
+	require.Empty(t, got)
 }
 
 func TestPullMergeExplainsRefusal(t *testing.T) {
@@ -362,4 +389,21 @@ func TestPullClientFiltersCountWhenEveryPullWasRead(t *testing.T) {
 	require.False(t, page.More)
 	require.True(t, page.Counted)
 	require.Equal(t, 2, page.Total)
+}
+
+func TestPullNoAssigneeKeepsUnassignedPulls(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Empty(t, r.URL.Query().Get("assignee"))
+		if r.URL.Query().Get("page") != "1" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"number":1,"assignees":[{"login":"bob"}]},{"number":2},{"number":3,"assignees":[]}]`))
+	}))
+	page, err := (Pulls{Client: client, Repository: "alice/project"}).ListPage(context.Background(), PullListOptions{State: "open", NoAssignee: true, Limit: 30, Page: 1})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 2)
+	require.EqualValues(t, 2, page.Items[0].Number)
+	require.EqualValues(t, 3, page.Items[1].Number)
+	require.True(t, page.Counted)
 }

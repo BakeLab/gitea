@@ -167,7 +167,7 @@ func (a *application) created(cmd *cobra.Command, item any, url string) error {
 
 // refLabel names an issue or pull request in feedback: "alice/x#5 (Fix login)".
 func refLabel(repo string, number int64, title string) string {
-	return fmt.Sprintf("%s#%d (%s)", repo, number, title)
+	return fmt.Sprintf("%s#%d (%s)", repo, number, terminal.SafeLine(title))
 }
 
 // abortBatch stops a batch instead of recording an item failure.

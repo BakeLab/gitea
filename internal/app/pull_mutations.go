@@ -123,8 +123,9 @@ $ gt pr close 13 -c "Superseded by #15" --delete-branch`
 }
 
 // deleteHead deletes the head branch of a merged or closed pull request on Gitea, unless it is
-// gone, and then locally when local is set, reporting each step. merging tells that Gitea deleted
-// it as part of the merge.
+// gone, and then locally when local is set, reporting each step. merging tells that Gitea was
+// asked to delete it as part of the merge; a branch Gitea kept then stays, since Gitea keeps the
+// head branch of another open pull request, which deleting it would close.
 func (a *application) deleteHead(cmd *cobra.Command, service services.Pulls, item services.Pull, merging, local bool) {
 	switch {
 	case item.HeadRemoteDeleted && merging:
@@ -133,6 +134,8 @@ func (a *application) deleteHead(cmd *cobra.Command, service services.Pulls, ite
 		a.warn(cmd, "Remote branch %s was already deleted", item.Head)
 	case !item.HeadCanPush:
 		a.warn(cmd, "Kept remote branch %s: you cannot push to %s", item.Head, item.HeadRepo)
+	case merging:
+		a.warn(cmd, "Kept remote branch %s: Gitea did not delete it (it is protected, the default branch, or used by another open pull request)", item.Head)
 	default:
 		if err := service.DeleteHead(cmd.Context(), item); err != nil {
 			a.warn(cmd, "Kept remote branch %s: %v", item.Head, err)

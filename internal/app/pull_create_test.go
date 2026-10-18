@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -263,12 +264,15 @@ func TestPullCreateDerivesTitleAndBodyFromSingleCommit(t *testing.T) {
 
 func TestPullCreateEditorSeedsPullRequestTemplate(t *testing.T) {
 	var payload map[string]any
+	var mu sync.Mutex
 	var templateRequests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/api/v1/repos/alice/project/raw/"):
 			require.Equal(t, "main", r.URL.Query().Get("ref"))
+			mu.Lock()
 			templateRequests = append(templateRequests, strings.TrimPrefix(r.URL.Path, "/api/v1/repos/alice/project/raw/"))
+			mu.Unlock()
 			if r.URL.Path != "/api/v1/repos/alice/project/raw/.gitea/PULL_REQUEST_TEMPLATE.md" {
 				w.WriteHeader(http.StatusNotFound)
 				return
@@ -289,7 +293,11 @@ func TestPullCreateEditorSeedsPullRequestTemplate(t *testing.T) {
 	deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "editor"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--head", "feature", "--base", "main", "--editor", "--json=number", "--no-input"}))
 	require.Equal(t, "## Checklist\n", editor.initial)
-	require.Equal(t, []string{"PULL_REQUEST_TEMPLATE.md", "pull_request_template.md", ".gitea/PULL_REQUEST_TEMPLATE.md"}, templateRequests)
+	require.ElementsMatch(t, []string{
+		"PULL_REQUEST_TEMPLATE.md", "pull_request_template.md",
+		".gitea/PULL_REQUEST_TEMPLATE.md", ".gitea/pull_request_template.md",
+		".github/PULL_REQUEST_TEMPLATE.md", ".github/pull_request_template.md",
+	}, templateRequests)
 	require.Equal(t, "filled", payload["body"])
 }
 

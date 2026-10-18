@@ -83,6 +83,9 @@ type ListOptions struct {
 	Assignee, Labels, Milestones, Kind string
 	Author, Mentions                   string
 	Since, Before                      *time.Time
+	// NoAssignee keeps only issues without assignees. Gitea has no such filter, so ListPage
+	// applies it to every issue it reads.
+	NoAssignee bool
 }
 
 // Issues implements repository issue operations.
@@ -121,14 +124,20 @@ func (s Issues) ListPage(ctx context.Context, opts ListOptions) (Page[Issue], er
 	if opts.Before != nil {
 		query.Before = *opts.Before
 	}
-	issues, err := callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Issue, *gitea.Response, error) {
-		query.ListOptions = list
-		return c.Issues.ListRepoIssues(ctx, owner, repo, query)
-	})
-	if err != nil {
-		return Page[Issue]{}, err
+	fetch := func(limit, page int) (Page[Issue], error) {
+		issues, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Issue, *gitea.Response, error) {
+			query.ListOptions = list
+			return c.Issues.ListRepoIssues(ctx, owner, repo, query)
+		})
+		if err != nil {
+			return Page[Issue]{}, err
+		}
+		return convertPage(issues, discussionFrom), nil
 	}
-	return convertPage(issues, discussionFrom), nil
+	if opts.NoAssignee {
+		return filteredPage(opts.Limit, opts.Page, fetch, func(item Issue) bool { return len(item.Assignees) == 0 })
+	}
+	return fetch(opts.Limit, opts.Page)
 }
 
 // filterValues splits a comma-separated filter, which the SDK joins again.

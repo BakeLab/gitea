@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
+	"gitea.dev/cli/internal/transport"
 	"github.com/spf13/cobra"
 )
 
@@ -102,9 +104,13 @@ func (a *application) diagnose(ctx context.Context) doctorReport {
 		add(a.gitCheck(ctx, ""))
 		return report
 	}
-	instance := a.instanceCheck(ctx, t)
-	add(instance)
 	authenticated, accountErr := a.resolveTarget(ctx, t.Repo != "", true)
+	client := a.deps.Client(t.Host, "", t.host.Insecure)
+	if accountErr == nil {
+		client = authenticated.client
+	}
+	instance := a.instanceCheck(ctx, t, client)
+	add(instance)
 	switch {
 	case instance.Status == checkFailed:
 		accountErr = errors.New("instance does not answer")
@@ -138,17 +144,23 @@ func (a *application) diagnose(ctx context.Context) doctorReport {
 	return report
 }
 
-// instanceCheck asks the instance for its version.
-func (a *application) instanceCheck(ctx context.Context, t target) doctorCheck {
+// instanceCheck asks the instance for its version with client, the account's when it has one:
+// instances with [service] REQUIRE_SIGNIN_VIEW refuse every anonymous API request.
+func (a *application) instanceCheck(ctx context.Context, t target, client *transport.Client) doctorCheck {
 	ctx, cancel := context.WithTimeout(ctx, doctorTimeout)
 	defer cancel()
 	start := time.Now()
-	version, err := services.ServerVersion(ctx, a.deps.Client(t.Host, "", t.host.Insecure))
+	version, err := services.ServerVersion(ctx, client)
 	where := t.Host + " (" + describeSource(t.HostSource) + ")"
+	latency := max(time.Since(start).Milliseconds(), 1)
+	if refused, ok := errors.AsType[*transport.APIError](err); ok && (refused.Status == http.StatusUnauthorized || refused.Status == http.StatusForbidden) {
+		// The instance answers; the account check reports why the credential is refused.
+		return doctorCheck{"Instance", checkPassed, fmt.Sprintf("%s · answers signed-in requests only · %dms", where, latency), ""}
+	}
 	if err != nil {
 		return doctorCheck{"Instance", checkFailed, where + ": " + Explain(ctx, a.deps, err).Error(), "check --host, the instance URL and your network"}
 	}
-	return doctorCheck{"Instance", checkPassed, fmt.Sprintf("%s · Gitea %s · %dms", where, version, max(time.Since(start).Milliseconds(), 1)), ""}
+	return doctorCheck{"Instance", checkPassed, fmt.Sprintf("%s · Gitea %s · %dms", where, version, latency), ""}
 }
 
 // accountCheck reports whether the account authenticates, and the scopes of its token.

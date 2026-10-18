@@ -6,11 +6,13 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -233,6 +235,42 @@ func TestRepositoryResolutionPrecedence(t *testing.T) {
 	require.False(t, runner.prompt)
 }
 
+func TestRepositoryDiscoveryFindsGiteaRemoteBesideAnotherForge(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"full_name":"` + strings.TrimPrefix(r.URL.Path, "/api/v1/repos/") + `"}`))
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name    string
+		remotes map[string]string
+		args    []string
+		env     map[string]string
+		want    string
+	}{
+		{"origin on GitHub", map[string]string{"origin": "https://github.com/example/project.git", "gitea": server.URL + "/alice/project.git"}, nil, nil, "alice/project"},
+		{"no origin", map[string]string{"github": "https://github.com/example/project.git", "gitea": server.URL + "/alice/project.git"}, nil, nil, "alice/project"},
+		{"--host selects its remote", map[string]string{"origin": "https://gitea.com/alice/project.git", "gitea": server.URL + "/bob/tool.git"}, []string{"--host", server.URL}, nil, "bob/tool"},
+		{"GITEA_TOKEN selects its instance", map[string]string{"origin": "https://gitea.com/carol/project.git", "gitea": server.URL + "/alice/project.git"}, nil, map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL}, "alice/project"},
+		{"remotes naming one repository", map[string]string{"origin": "https://github.com/example/project.git", "gitea": server.URL + "/alice/project.git", "gitea-ssh": "git@127.0.0.1:alice/project.git"}, nil, nil, "alice/project"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, out, _ := testDeps(t)
+			if tc.env != nil {
+				deps.Getenv = envFunc(tc.env)
+			}
+			configureAccounts(t, deps, server.URL, "alice", "alice")
+			configureAccounts(t, deps, "https://gitea.com", "carol", "carol")
+			results := map[string]string{"remote": strings.Join(slices.Sorted(maps.Keys(tc.remotes)), "\n")}
+			for name, url := range tc.remotes {
+				results["remote get-url "+name] = url
+			}
+			deps.Git = &fakeGit{results: results}
+			require.NoError(t, Execute(context.Background(), deps, append([]string{"repo", "view", "--no-input", "--json=full_name"}, tc.args...)))
+			require.JSONEq(t, `{"full_name":"`+tc.want+`"}`, out.String())
+		})
+	}
+}
+
 func TestRepositoryArgumentsAcceptShorthands(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"full_name":"` + strings.TrimPrefix(r.URL.Path, "/api/v1/repos/") + `"}`))
@@ -285,7 +323,7 @@ func TestAccountErrorsNameTheInstanceAndAccounts(t *testing.T) {
 		{"unknown --user", []string{"alice", "bob"}, "alice", []string{"-R", "alice/project", "--user", "nobody"}, nil, `account "nobody" is not logged in on https://example.org (accounts: alice, bob)`},
 		{"unknown --user without accounts", nil, "", []string{"-R", "alice/project", "--user", "nobody", "--host", instance}, nil, `account "nobody" is not logged in on https://example.org; run gt auth login --host https://example.org`},
 		{"no active account", []string{"alice", "bob"}, "", []string{"-R", "alice/project"}, nil, "no active account on https://example.org (accounts: alice, bob); pass --user or run gt auth switch"},
-		{"instance from a remote", []string{"alice"}, "alice", nil, remote, `no account for https://gitea.com (instance from git remote "origin"); run gt auth login --host https://gitea.com, or use -R or --host to target another instance`},
+		{"instance from a remote", []string{"alice"}, "alice", nil, remote, `no account for https://gitea.com (instance from git remote "origin"); run gt auth login --host https://gitea.com, or use -R to target another repository`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, _, _ := testDeps(t)

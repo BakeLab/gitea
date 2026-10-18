@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,6 +156,8 @@ func TestIssueListWebOpensTheFilteredPage(t *testing.T) {
 	deps.Browser = browser
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "list", "-R", "alice/project", "-w", "-s", "closed", "-S", "login bug"}))
 	require.Equal(t, server.URL+"/alice/project/issues?q=login+bug&state=closed", browser.resource)
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "list", "-R", "alice/project", "-w", "--no-assignee"}))
+	require.Equal(t, server.URL+"/alice/project/issues?assignee=%28none%29&state=open", browser.resource)
 }
 
 func TestIssueListKindFilter(t *testing.T) {
@@ -225,9 +228,9 @@ func TestIssueMilestoneFiltersRejectUnknownMilestones(t *testing.T) {
 		require.NoError(t, Execute(context.Background(), deps, append(args, "--json")))
 	}
 	require.Equal(t, []string{
-		"/api/v1/repos/alice/project/issues?milestones=1,2",
-		"/api/v1/repos/alice/project/issues?milestones=1",
-		"/api/v1/repos/alice/project/issues?milestones=1",
+		"/api/v1/repos/alice/project/issues?milestones=v1.0,2026",
+		"/api/v1/repos/alice/project/issues?milestones=v1.0",
+		"/api/v1/repos/alice/project/issues?milestones=v1.0",
 		"/api/v1/repos/issues/search?milestones=nope",
 	}, listed)
 	require.Contains(t, diagnostics.String(), "pass --repo to check them")
@@ -269,4 +272,32 @@ func TestIssueCommandsComplete(t *testing.T) {
 		require.Equal(t, test.want, values, test.args)
 		require.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive&cobra.ShellCompDirectiveNoFileComp, test.args)
 	}
+}
+
+func TestIssueListNoAssigneeFiltersEveryPageRead(t *testing.T) {
+	var pages []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		require.Empty(t, query.Get("assigned_by"))
+		require.Equal(t, "50", query.Get("limit"))
+		pages = append(pages, query.Get("page"))
+		start, _ := strconv.Atoi(query.Get("page"))
+		issues := []string{}
+		for n := (start-1)*50 + 1; n <= min(start*50, 60); n++ {
+			assignees := `[{"login":"bob"}]`
+			if n%20 == 0 {
+				assignees = `[]`
+			}
+			issues = append(issues, `{"number":`+strconv.Itoa(n)+`,"state":"open","assignees":`+assignees+`}`)
+		}
+		_, _ = w.Write([]byte("[" + strings.Join(issues, ",") + "]"))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "list", "-R", "alice/project", "--no-assignee", "--json", "number"}))
+	require.JSONEq(t, `[{"number":20},{"number":40},{"number":60}]`, out.String())
+	require.Equal(t, []string{"1", "2"}, pages)
+	err := Execute(context.Background(), deps, []string{"issue", "list", "-R", "alice/project", "--no-assignee", "--assignee", "bob"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.Len(t, pages, 2)
 }

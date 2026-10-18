@@ -198,6 +198,12 @@ func IsNotFound(err error) bool {
 	return ok && failure.Status == http.StatusNotFound
 }
 
+// IsForbidden reports whether err is a 403 response.
+func IsForbidden(err error) bool {
+	failure, ok := errors.AsType[*transport.APIError](err)
+	return ok && failure.Status == http.StatusForbidden
+}
+
 // refusal returns the conflict reason of a refused request, or "".
 func refusal(apiErr *transport.APIError) string {
 	if apiErr.Status == http.StatusLocked {

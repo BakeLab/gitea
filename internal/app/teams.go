@@ -184,8 +184,10 @@ $ gt team view 2 --json units`,
 			if a.options.json != "" {
 				return a.writeJSON(cmd, team)
 			}
+			// Gitea shows a public team to non-members of its organization, but not its members.
 			members, err := service.Members(cmd.Context(), team.ID, teamViewNames, 1)
-			if err != nil {
+			membersHidden := services.IsForbidden(err)
+			if err != nil && !membersHidden {
 				return err
 			}
 			repos, err := service.Repositories(cmd.Context(), team.ID, teamViewNames, 1)
@@ -199,6 +201,10 @@ $ gt team view 2 --json units`,
 						units = append(units, strings.TrimPrefix(unit, "repo.")+": "+access)
 					}
 				}
+				memberNames := ""
+				if !membersHidden {
+					memberNames = listedNames(members, func(member services.OrganizationMember) string { return member.Username })
+				}
 				repositories := listedNames(repos, func(repo services.Repository) string { return repo.FullName })
 				if team.AllRepositories {
 					repositories = "all repositories of " + team.Organization
@@ -208,7 +214,7 @@ $ gt team view 2 --json units`,
 					Fields: []terminal.Field{
 						{Label: "Access", Value: team.Access(), PipedOnly: true},
 						{Label: "Units", Value: strings.Join(units, ", ")},
-						{Label: "Members", Value: listedNames(members, func(member services.OrganizationMember) string { return member.Username })},
+						{Label: "Members", Value: memberNames},
 						{Label: "Repositories", Value: repositories},
 						{Label: "Can create repos", Value: yesNo(team.CanCreateRepo)},
 					},
@@ -414,6 +420,9 @@ $ gt team edit acme/developers --name devs --description "Core developers"`,
 			_, service, team, err := a.team(cmd, args[0])
 			if err != nil {
 				return err
+			}
+			if opts.Units != nil && !opts.ReplaceUnits && (team.Permission == "admin" || team.Permission == "owner") {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("--unit cannot restrict the %s access of team %s; pass --permission read or write, or --unit-replace", team.Permission, team.Slug()))
 			}
 			edited, err := service.Edit(cmd.Context(), team.ID, opts)
 			if err != nil {

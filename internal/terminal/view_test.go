@@ -113,3 +113,14 @@ func TestMarkdownEnabled(t *testing.T) {
 	require.False(t, MarkdownEnabled("raw", true))
 	require.False(t, MarkdownEnabled("auto", false))
 }
+
+func TestMarkdownDropsEscapesFromCharacterReferences(t *testing.T) {
+	for _, in := range []string{"a &#27;]0;pwned&#7; b", "a &#x1b;[31m b", "a &amp;#27;]52;c;x&#7; b", "a &#155;31m b"} {
+		out := Markdown(in, Display{Width: 80})
+		for _, r := range out {
+			if r == 0x1b || r == 0x07 || (r >= 0x80 && r < 0xa0) {
+				t.Fatalf("Markdown(%q) = %q contains control %U", in, out, r)
+			}
+		}
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gitea.dev/cli/internal/transport"
@@ -143,15 +144,16 @@ type PullListOptions struct {
 	Limit, Page               int
 	Milestone                 int64
 	Labels                    []int64
-	// Draft, Head (BRANCH or OWNER:BRANCH), Assignee, Search (text in the title or body) and the
-	// merged state have no server filter; List applies them to every pull request it reads.
-	Draft                  bool
+	// Draft, Head (BRANCH or OWNER:BRANCH), Assignee, NoAssignee, Search (text in the title or
+	// body) and the merged state have no server filter; List applies them to every pull request
+	// it reads.
+	Draft, NoAssignee      bool
 	Head, Assignee, Search string
 }
 
 // filtered reports whether a filter needs every pull request read.
 func (o PullListOptions) filtered() bool {
-	return o.State == "merged" || o.Draft || o.Head != "" || o.Assignee != "" || o.Search != ""
+	return o.State == "merged" || o.Draft || o.NoAssignee || o.Head != "" || o.Assignee != "" || o.Search != ""
 }
 
 // matches applies the filters without a server equivalent to item.
@@ -165,6 +167,7 @@ func (o PullListOptions) matches(item Pull) bool {
 	return (o.State != "merged" || item.Merged) && (!o.Draft || item.Draft) &&
 		(branch == "" || (item.Head == branch && (owner == "" || strings.EqualFold(owner, headOwner)))) &&
 		(o.Assignee == "" || slices.ContainsFunc(item.Assignees, func(name string) bool { return strings.EqualFold(name, o.Assignee) })) &&
+		(!o.NoAssignee || len(item.Assignees) == 0) &&
 		(search == "" || strings.Contains(strings.ToLower(item.Title), search) || strings.Contains(strings.ToLower(item.Body), search))
 }
 
@@ -182,41 +185,14 @@ func (s Pulls) ListPage(ctx context.Context, options PullListOptions) (Page[Pull
 	if !options.filtered() {
 		return s.listPage(ctx, options)
 	}
-	if options.Limit <= 0 || options.Page <= 0 {
-		return Page[Pull]{}, errors.New("limit and page must be positive")
-	}
 	query := options
 	if query.State == "merged" {
 		query.State = "closed"
 	}
-	matching, wanted := []Pull{}, options.Page*options.Limit+1
-	for page := 1; ; page++ {
-		if page > maxListPages {
-			return Page[Pull]{}, fmt.Errorf("listing exceeded %d pages", maxListPages)
-		}
-		query.Limit, query.Page = 50, page
-		window, err := s.listPage(ctx, query)
-		if err != nil {
-			return Page[Pull]{}, err
-		}
-		for _, item := range window.Items {
-			if options.matches(item) {
-				matching = append(matching, item)
-			}
-		}
-		if len(matching) >= wanted {
-			items, err := pageOf(matching, options.Limit, options.Page)
-			return Page[Pull]{Items: items, More: true}, err
-		}
-		if len(window.Items) == 0 || (!window.More && len(window.Items) < query.Limit) {
-			break
-		}
-	}
-	items, err := pageOf(matching, options.Limit, options.Page)
-	if err != nil {
-		return Page[Pull]{}, err
-	}
-	return Page[Pull]{Items: items, More: options.Page*options.Limit < len(matching), Total: len(matching), Counted: true}, nil
+	return filteredPage(options.Limit, options.Page, func(limit, page int) (Page[Pull], error) {
+		query.Limit, query.Page = limit, page
+		return s.listPage(ctx, query)
+	}, options.matches)
 }
 
 func (s Pulls) listPage(ctx context.Context, options PullListOptions) (Page[Pull], error) {
@@ -499,20 +475,42 @@ var pullTemplatePaths = []string{
 const maxPullTemplateBytes = 1 << 20
 
 // Template returns the first pull request template found at ref, or "" when the repository has none.
+// All paths are probed concurrently; the result is decided in priority order, so a failure is
+// reported only when every higher-priority path is missing.
 func (s Pulls) Template(ctx context.Context, ref string) (string, error) {
-	for _, path := range pullTemplatePaths {
-		file, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (io.ReadCloser, *gitea.Response, error) {
-			return c.Repositories.GetFileReader(ctx, owner, name, ref, path)
+	type probe struct {
+		content string
+		missing bool
+		err     error
+	}
+	probes := make([]probe, len(pullTemplatePaths))
+	var wg sync.WaitGroup
+	for i, path := range pullTemplatePaths {
+		wg.Go(func() {
+			probes[i].content, probes[i].missing, probes[i].err = s.templateAt(ctx, ref, path)
 		})
-		if err != nil {
-			if IsNotFound(err) {
-				continue
-			}
-			return "", err
+	}
+	wg.Wait()
+	for _, p := range probes {
+		if !p.missing {
+			return p.content, p.err
 		}
-		data, err := io.ReadAll(io.LimitReader(file, maxPullTemplateBytes))
-		_ = file.Close()
-		return string(data), err
 	}
 	return "", nil
+}
+
+// templateAt reads one template path; missing reports a 404.
+func (s Pulls) templateAt(ctx context.Context, ref, path string) (content string, missing bool, err error) {
+	file, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (io.ReadCloser, *gitea.Response, error) {
+		return c.Repositories.GetFileReader(ctx, owner, name, ref, path)
+	})
+	if err != nil {
+		if IsNotFound(err) {
+			return "", true, nil
+		}
+		return "", false, err
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxPullTemplateBytes))
+	_ = file.Close()
+	return string(data), false, err
 }

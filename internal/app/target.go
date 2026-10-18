@@ -37,6 +37,9 @@ type target struct {
 
 var errRepositoryRequired = errors.New("repository required: use --repo owner/name")
 
+// errEnvironmentAccount must not reveal which account the GITEA_TOKEN belongs to.
+var errEnvironmentAccount = errors.New("GITEA_TOKEN does not belong to the selected account; supply its matching --user or remove the environment token to use stored credentials")
+
 func (a *application) resolve(ctx context.Context, requireRepo bool) (target, error) {
 	return a.resolveTarget(ctx, requireRepo, true)
 }
@@ -185,7 +188,7 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 		}
 		// The message must not reveal which account the token belongs to.
 		if !services.MatchAccount(t.User, actual) {
-			return t, clierr.Wrap(clierr.Authentication, errors.New("GITEA_TOKEN does not belong to the selected account; supply its matching --user or remove the environment token to use stored credentials"))
+			return t, clierr.Wrap(clierr.Authentication, errEnvironmentAccount)
 		}
 		if t.User == "" {
 			t.UserSource = "GITEA_TOKEN authenticated account"
@@ -225,19 +228,71 @@ func (a *application) repositorySource(ctx context.Context, t *target, s setting
 		return saved, nil
 	}
 	remote := cmp.Or(a.options.remote, s.Preferences.Remote)
-	remote, err := git.DiscoverRemote(ctx, a.gitProbe(), a.options.cwd, remote)
+	hosts, err := a.repositoryHosts(s.Hosts.Hosts)
+	if err != nil {
+		return "", err
+	}
+	urls := map[string]string{}
+	// Only remotes on an instance gt can act on name a repository, so that a clone whose origin is
+	// on another forge still finds its Gitea remote.
+	repository := func(name string) string {
+		raw, err := probe("remote", "get-url", name)
+		if err != nil {
+			return ""
+		}
+		urls[name] = raw
+		instance, slug, err := settings.RepositoryURL(raw, hosts)
+		if err != nil || !a.canActOn(instance, hosts) {
+			return ""
+		}
+		return instance + "/" + strings.ToLower(slug)
+	}
+	remote, err = git.DiscoverRemote(ctx, a.gitProbe(), a.options.cwd, remote, repository)
 	if errors.Is(err, git.ErrAmbiguousRemote) {
 		return "", clierr.Wrap(clierr.Usage, err)
 	}
 	if err != nil {
 		return "", clierr.Wrap(clierr.Usage, errRepositoryRequired)
 	}
-	raw, err := probe("remote", "get-url", remote)
-	if err != nil {
-		return "", fmt.Errorf("cannot read the URL of Git remote %q: %w", remote, err)
+	raw, known := urls[remote]
+	if !known {
+		if raw, err = probe("remote", "get-url", remote); err != nil {
+			return "", fmt.Errorf("cannot read the URL of Git remote %q: %w", remote, err)
+		}
 	}
 	t.RepoSource = "remote " + remote
 	return raw, nil
+}
+
+// canActOn reports whether gt can use a discovered remote on instance: it is the --host instance,
+// else the GITEA_TOKEN instance while that token is set (connect then ignores stored accounts), else
+// an instance with an account.
+func (a *application) canActOn(instance string, hosts map[string]settings.Host) bool {
+	selected := a.options.host
+	if selected == "" && a.deps.Getenv("GITEA_TOKEN") != "" {
+		selected = a.tokenInstance()
+	}
+	if selected != "" {
+		resolved, err := settings.ResolveHost(selected, hosts)
+		return err == nil && resolved == instance
+	}
+	return len(hosts[instance].Users) > 0
+}
+
+// repositoryHosts returns the instances a repository URL may name: with --host, only that one when
+// it is configured.
+func (a *application) repositoryHosts(configured map[string]settings.Host) (map[string]settings.Host, error) {
+	if a.options.host == "" {
+		return configured, nil
+	}
+	explicit, err := settings.ResolveHost(a.options.host, configured)
+	if err != nil {
+		return nil, clierr.Wrap(clierr.Usage, err)
+	}
+	if host, exists := configured[explicit]; exists {
+		return map[string]settings.Host{explicit: host}, nil
+	}
+	return configured, nil
 }
 
 // agreesWithRepoFlag rejects an argument naming another repository than --repo.
@@ -261,15 +316,9 @@ func (a *application) agreesWithRepoFlag(req targetRequest, hosts map[string]set
 // selectRepository parses raw into the target's repository and, for URLs and HOST/OWNER/REPO,
 // its instance. With --host, URLs match only that instance.
 func (a *application) selectRepository(ctx context.Context, t *target, s settings.Snapshot, raw string) error {
-	configured := s.Hosts.Hosts
-	if a.options.host != "" {
-		explicit, err := settings.ResolveHost(a.options.host, configured)
-		if err != nil {
-			return clierr.Wrap(clierr.Usage, err)
-		}
-		if host, exists := configured[explicit]; exists {
-			configured = map[string]settings.Host{explicit: host}
-		}
+	configured, err := a.repositoryHosts(s.Hosts.Hosts)
+	if err != nil {
+		return err
 	}
 	ref, err := settings.ParseRepository(raw, configured)
 	if err != nil {
@@ -382,6 +431,10 @@ func (t target) accountError(user string) error {
 	text := "no account for " + t.Host
 	if t.HostSource != "--host" {
 		text += " (instance from " + describeSource(t.HostSource) + ")"
+	}
+	// --host cannot override the instance that the repository names.
+	if t.RepoSource != "" && t.HostSource == t.RepoSource {
+		return errors.New(text + "; run gt auth login --host " + t.Host + ", or use -R to target another repository")
 	}
 	return errors.New(text + "; run gt auth login --host " + t.Host + ", or use -R or --host to target another instance")
 }

@@ -400,9 +400,9 @@ func watchLine(item services.Notification, d terminal.Display) string {
 		when = d.Now
 	}
 	subject := subjectRef(item)
-	details := strings.ToLower(item.Type)
+	details := terminal.SafeLine(strings.ToLower(item.Type))
 	if item.State != "" {
-		details += " · " + terminal.Colorize(stateColors[item.State], item.State, d.Color)
+		details += " · " + terminal.Colorize(stateColors[item.State], terminal.SafeLine(item.State), d.Color)
 	}
 	return terminal.Colorize("muted", when.Local().Format("15:04"), d.Color) + "  " + terminal.Emphasis(terminal.SafeLine(subject), d.Color) + "  " + terminal.SafeLine(item.Title) + "  " + details
 }

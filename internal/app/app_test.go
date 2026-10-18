@@ -98,6 +98,9 @@ func TestJoinJSONFields(t *testing.T) {
 		{[]string{"search", "issue", "--json", "bug"}, []string{"search", "issue", "--json", "bug"}},
 		{[]string{"repo", "clone", "--json", "project"}, []string{"repo", "clone", "--json", "project"}},
 		{[]string{"search", "repo", "--json", "name,url", "gt"}, []string{"search", "repo", "--json=name,url", "gt"}},
+		// A leading --json keeps the command word that follows it.
+		{[]string{"--json", "repo", "view", "alice/project"}, []string{"--json", "repo", "view", "alice/project"}},
+		{[]string{"--json", "pr", "list"}, []string{"--json", "pr", "list"}},
 		{[]string{"--json", "number", "my-alias"}, []string{"--json=number", "my-alias"}},
 		// A word that cannot be an argument is a misspelled field, which then lists the available ones.
 		{[]string{"issue", "list", "--json", "Number"}, []string{"issue", "list", "--json=Number"}},

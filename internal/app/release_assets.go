@@ -129,24 +129,29 @@ $ gt release upload v1.0.0 dist/gt-linux --clobber`,
 			if err != nil {
 				return err
 			}
-			replaced := map[string]services.ReleaseAsset{}
+			replaced := map[string][]services.ReleaseAsset{}
 			for _, file := range files {
 				for _, asset := range release.Assets {
 					if asset.Name == filename(file) {
 						if !clobber {
 							return clierr.Wrap(clierr.Usage, fmt.Errorf("asset %s already exists in release %s; pass --clobber to replace it", asset.Name, release.Tag))
 						}
-						replaced[asset.Name] = asset
+						replaced[asset.Name] = append(replaced[asset.Name], asset)
 					}
 				}
 			}
 			return batchDone(a, cmd, files, func(file *os.File) string { return "upload asset " + filename(file) }, func(file *os.File) (services.ReleaseAsset, error) {
-				if old, ok := replaced[filename(file)]; ok {
+				// Upload first: a failed upload must not leave the release without the old asset.
+				uploaded, err := service.UploadAsset(cmd.Context(), release.ID, filename(file), file)
+				if err != nil {
+					return services.ReleaseAsset{}, err
+				}
+				for _, old := range replaced[filename(file)] {
 					if err := service.DeleteAsset(cmd.Context(), release.ID, old.ID); err != nil {
-						return services.ReleaseAsset{}, fmt.Errorf("replace asset %s: %w", old.Name, err)
+						return uploaded, fmt.Errorf("uploaded %s, but could not delete the replaced asset %d: %w", old.Name, old.ID, err)
 					}
 				}
-				return service.UploadAsset(cmd.Context(), release.ID, filename(file), file)
+				return uploaded, nil
 			}, func(asset services.ReleaseAsset) string {
 				return fmt.Sprintf("Uploaded %s (%s) to release %s", asset.Name, terminal.Bytes(asset.Size), release.Tag)
 			})

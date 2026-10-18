@@ -424,6 +424,10 @@ func joinJSONFields(root *cobra.Command, args []string) []string {
 		if args[i] != "--json" || i+1 >= len(args) || !jsonFieldList.MatchString(args[i+1]) {
 			continue
 		}
+		// A word that names a subcommand at this position is the command, as in `gt --json repo view`.
+		if parent, _, err := root.Find(args[:i]); err == nil && slices.ContainsFunc(parent.Commands(), func(c *cobra.Command) bool { return c.Name() == args[i+1] || c.HasAlias(args[i+1]) }) {
+			continue
+		}
 		cmd, _, err := root.Find(slices.Concat(args[:i+1], args[i+2:]))
 		if err == nil && terminal.ValidateOutput(args[i+1], "", commandOutputFields(cmd)) != nil && acceptsArgs(args) {
 			continue

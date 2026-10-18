@@ -45,6 +45,9 @@ each pull request, which gt only makes when --json names them.`, Args: argsExact
 		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 1 {
 			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
 		}
+		if options.NoAssignee && options.Assignee != "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--assignee and --no-assignee are mutually exclusive"))
+		}
 		t, err := a.resolve(cmd.Context(), true)
 		if err != nil {
 			return err
@@ -106,6 +109,7 @@ each pull request, which gt only makes when --json names them.`, Args: argsExact
 	pageFlags(cmd, &limit, &page)
 	cmd.Flags().StringVarP(&options.Author, "author", "A", "", "Filter by author; @me for yourself")
 	cmd.Flags().StringVarP(&options.Assignee, "assignee", "a", "", "Filter by assignee; @me for yourself")
+	cmd.Flags().BoolVar(&options.NoAssignee, "no-assignee", false, "Only pull requests without an assignee")
 	cmd.Flags().StringVarP(&options.Base, "base", "B", "", "Filter by base branch")
 	cmd.Flags().StringVarP(&options.Head, "head", "H", "", "Filter by head branch, or OWNER:BRANCH for a fork")
 	cmd.Flags().BoolVarP(&options.Draft, "draft", "d", false, "Show only drafts")

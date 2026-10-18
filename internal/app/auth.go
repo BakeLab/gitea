@@ -578,7 +578,7 @@ func statusLine(row authStatusRow, d terminal.Display) string {
 	if row.environment() {
 		line = "Using GITEA_TOKEN from the environment"
 		if row.User != "" {
-			line += " as " + terminal.Emphasis(row.User, d.Color)
+			line += " as " + terminal.Emphasis(terminal.SafeLine(row.User), d.Color)
 		}
 	} else {
 		line = "Logged in as " + terminal.Emphasis(terminal.SafeLine(row.User), d.Color) + " " + muted("("+credentialLabel(row.account)+")")
@@ -597,7 +597,7 @@ func statusLine(row authStatusRow, d terminal.Display) string {
 	if row.Verified != nil && *row.Verified {
 		note := "verified"
 		if len(row.Scopes) > 0 {
-			note += ", scopes: " + strings.Join(row.Scopes, ", ")
+			note += ", scopes: " + terminal.SafeLine(strings.Join(row.Scopes, ", "))
 		}
 		notes = append(notes, note)
 	}
@@ -709,7 +709,7 @@ instance, such as a copy of its token that a keychain kept after a push.`,
 			if err != nil {
 				return err
 			}
-			account, exists := t.host.Users[t.User]
+			_, exists := t.host.Users[t.User]
 			switch {
 			case len(t.host.Users) == 0:
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("not logged in to %s", t.Host))
@@ -725,14 +725,14 @@ instance, such as a copy of its token that a keychain kept after a push.`,
 			if err != nil {
 				return err
 			}
-			if err := manager.Logout(t.Host, t.User); err != nil {
+			removed, err := manager.Logout(t.Host, t.User)
+			if err != nil {
 				return err
 			}
 			a.done(cmd, "Logged out of %s (%s)", t.Host, t.User)
-			if !account.Tokenless() {
-				if err := git.RejectCredentials(cmd.Context(), a.gitProbe(), a.options.cwd, t.Host, t.User); err != nil {
-					a.warn(cmd, "Could not ask git's credential helpers to forget %s on %s", t.User, t.Host)
-				}
+			// Helpers erase only the copies that hold the removed token, not the user's own credentials.
+			if err := git.RejectCredentials(cmd.Context(), a.gitProbe(), a.options.cwd, t.Host, t.User, removed.AccessToken); err != nil {
+				a.warn(cmd, "Could not ask git's credential helpers to forget %s on %s", t.User, t.Host)
 			}
 			if s, err := a.settings(); err == nil {
 				if active := s.Hosts.Hosts[t.Host].User; active != "" && active != t.host.User {
@@ -800,6 +800,16 @@ $ gt auth token --host gitea.com --user alice`,
 			token := a.deps.Getenv("GITEA_TOKEN")
 			if instance, err := settings.ResolveHost(a.tokenInstance(), s.Hosts.Hosts); err != nil || instance != t.Host {
 				token = ""
+			}
+			if token != "" && t.User != "" {
+				// Like connect, print the environment token only for the account it authenticates.
+				actual, err := services.CurrentAccount(cmd.Context(), a.deps.Client(t.Host, token, t.host.Insecure))
+				if err != nil {
+					return err
+				}
+				if !services.MatchAccount(t.User, actual) {
+					return clierr.Wrap(clierr.Authentication, errEnvironmentAccount)
+				}
 			}
 			if token == "" {
 				account, exists := t.host.Users[t.User]

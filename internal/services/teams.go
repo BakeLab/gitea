@@ -250,6 +250,10 @@ func (s Teams) Edit(ctx context.Context, id int64, opts TeamOptions) (Team, erro
 			opts.Units = current.Units
 		case !opts.ReplaceUnits:
 			units := maps.Clone(current.Units)
+			if len(units) == 0 && (current.Permission == "read" || current.Permission == "write") {
+				// The team grants its permission to every unit and has no unit policy yet.
+				units = UnitPolicy(current.Permission)
+			}
 			maps.Copy(units, opts.Units)
 			opts.Units = units
 		}

@@ -98,10 +98,11 @@ func (m Manager) register(instance, user string, account settings.Account, optio
 	})
 }
 
-// Logout removes one account and restores its credential if publication fails.
-// An unreadable credential does not prevent removing the account.
-func (m Manager) Logout(instance, user string) error {
-	return m.settings.Transaction(settings.TargetHosts, func(s *settings.Snapshot) (func() error, error) {
+// Logout removes one account, restores its credential if publication fails and returns the
+// removed credential. An unreadable credential does not prevent removing the account.
+func (m Manager) Logout(instance, user string) (Credential, error) {
+	var removed Credential
+	err := m.settings.Transaction(settings.TargetHosts, func(s *settings.Snapshot) (func() error, error) {
 		host := s.Hosts.Hosts[instance]
 		account, exists := host.Users[user]
 		if !exists {
@@ -111,6 +112,7 @@ func (m Manager) Logout(instance, user string) error {
 		if !account.Tokenless() {
 			credential, err := m.credentials.Load(instance, user, account.CredentialStore)
 			if err == nil {
+				removed = credential
 				// Preserve a compensating copy until the account file is successfully published.
 				restore = func() error { return m.credentials.Save(instance, user, account.CredentialStore, credential) }
 			}
@@ -132,4 +134,8 @@ func (m Manager) Logout(instance, user string) error {
 		s.Hosts.Hosts[instance] = host
 		return restore, nil
 	})
+	if err != nil {
+		return Credential{}, err
+	}
+	return removed, nil
 }

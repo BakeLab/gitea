@@ -42,11 +42,15 @@ func (a *application) issueListCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "list", Short: "List issues in a repository", Long: `List the issues of a repository, newest first. Filters combine: an issue must match all of them.
 Labels and milestones must exist in the repository.`, Example: `$ gt issue list --label bug --state all
 $ gt issue list --assignee @me --json number,title
+$ gt issue list --no-assignee --label bug
 # Issues and pull requests in a milestone, as tab-separated values
 $ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		var err error
 		if opts.Since, opts.Before, err = updated.parse(a.deps.Now()); err != nil {
 			return err
+		}
+		if opts.NoAssignee && opts.Assignee != "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--assignee and --no-assignee are mutually exclusive"))
 		}
 		if err := requireNames("label", "", labels); err != nil {
 			return err
@@ -66,7 +70,7 @@ $ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), Ru
 		if web {
 			return a.openBrowser(cmd, issuesURL(target, opts))
 		}
-		filtered := opts.Search+opts.Assignee+opts.Author+opts.Mentions != "" || len(labels)+len(milestones) > 0 || opts.Since != nil || opts.Before != nil
+		filtered := opts.Search+opts.Assignee+opts.Author+opts.Mentions != "" || len(labels)+len(milestones) > 0 || opts.Since != nil || opts.Before != nil || opts.NoAssignee
 		if opts.Labels, opts.Milestones, err = issueFilters(cmd, target, labels, milestones); err != nil {
 			return err
 		}
@@ -82,6 +86,7 @@ $ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), Ru
 	flags := cmd.Flags()
 	flags.StringVarP(&opts.Search, "search", "S", "", "Search issue titles and bodies")
 	flags.StringVarP(&opts.Assignee, "assignee", "a", "", "Filter by assignee; @me for yourself")
+	flags.BoolVar(&opts.NoAssignee, "no-assignee", false, "Only issues without an assignee")
 	flags.StringVarP(&opts.Author, "author", "A", "", "Filter by author; @me for yourself")
 	flags.StringVar(&opts.Mentions, "mentions", "", "Filter by mentioned user; @me for yourself")
 	flags.StringSliceVarP(&labels, "label", "l", nil, "Filter by label `names`")
@@ -97,7 +102,7 @@ $ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), Ru
 }
 
 // issuesURL is the web page of the repository's issues or pull requests in state, searched for
-// the --search text.
+// the --search text and limited to unassigned ones for --no-assignee.
 func issuesURL(t target, opts services.ListOptions) string {
 	section := "issues"
 	if opts.Kind == "pulls" {
@@ -106,6 +111,9 @@ func issuesURL(t target, opts services.ListOptions) string {
 	query := url.Values{"state": {opts.State}}
 	if opts.Search != "" {
 		query.Set("q", opts.Search)
+	}
+	if opts.NoAssignee {
+		query.Set("assignee", "(none)")
 	}
 	return repositoryURL(t) + "/" + section + "?" + query.Encode()
 }

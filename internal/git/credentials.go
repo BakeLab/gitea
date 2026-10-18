@@ -153,25 +153,23 @@ func (s System) Input(ctx context.Context, dir, input string, args ...string) (s
 	return s.Output(ctx, dir, true, args...)
 }
 
-// RejectCredentials asks Git's credential helpers to erase the credentials they stored for user on
-// instance, such as a copy of gt's token that another helper kept after a push. Runners that cannot
-// send input reject nothing.
-func RejectCredentials(ctx context.Context, runner Runner, dir, instance, user string) error {
+// RejectCredentials asks Git's credential helpers to erase the copies of token they stored for user on
+// instance, such as one that a keychain kept after a push. Helpers keep entries with another password,
+// such as the user's own. Runners that cannot send input reject nothing.
+func RejectCredentials(ctx context.Context, runner Runner, dir, instance, user, token string) error {
 	input, ok := runner.(InputRunner)
-	if !ok {
+	if !ok || user == "" || token == "" {
 		return nil
 	}
 	u, err := url.Parse(instance)
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("invalid instance URL %q", instance)
 	}
-	if strings.ContainsAny(user, "\x00\r\n") {
-		return errors.New("invalid account name")
+	if strings.ContainsAny(user+token, "\x00\r\n") {
+		return errors.New("invalid account name or token")
 	}
-	request := "protocol=" + u.Scheme + "\nhost=" + u.Host + "\n"
-	if user != "" {
-		request += "username=" + user + "\n"
-	}
+	// No path: copies are stored per repository when useHttpPath is set, and a path must match exactly.
+	request := "protocol=" + u.Scheme + "\nhost=" + u.Host + "\nusername=" + user + "\npassword=" + token + "\n"
 	_, err = input.Input(ctx, dir, request+"\n", "credential", "reject")
 	return err
 }

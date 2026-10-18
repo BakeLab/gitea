@@ -255,6 +255,22 @@ $ gt config list --host https://gitea.com`,
 	group.AddCommand(&cobra.Command{
 		Use: "set <key> <value>", Short: "Change a setting", Args: argsExact(2), ValidArgsFunction: a.completeConfig,
 		Annotations: textOutput("config set does not return a resource"),
+		Long: `Change a preference, an instance setting (--host) or an account setting (--host and --user).
+
+Preferences:
+  default_host    instance to use when no flag or repository selects one
+  git_protocol    https or ssh, for clones and remotes
+  editor          command that edits bodies and messages, such as "code --wait"
+  prompt          enabled or disabled; disabled turns prompts off
+  pager           command that pages long output on a terminal; GITEA_CLI_PAGER overrides it
+  browser         command that opens URLs; never disables opening
+  color           auto, always or never
+  hyperlinks      auto, always or never, for clickable links in terminals
+  markdown        auto renders Markdown on a terminal, raw prints the source
+  remote          Git remote used to find the repository of a clone
+
+Instance settings: user (active account), ssh_host, insecure, git_protocol, oauth_client_id.
+Account settings: ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint.`,
 		Example: `$ gt config set editor "code --wait"
 $ gt config set ssh_host git.example.com:2222 --host https://example.com
 $ gt config set ssh_key ~/.ssh/id_ed25519 --host https://example.com --user alice`,

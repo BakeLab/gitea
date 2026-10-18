@@ -121,6 +121,36 @@ func TestPullMergeAsksForTheMethodAndBranchDeletion(t *testing.T) {
 	require.Equal(t, "✓ Squashed and merged pull request alice/project#3 (Add login)\n✓ Deleted remote branch feature\n", diagnostics.String())
 }
 
+// Gitea keeps the head branch after a merge when another open pull request uses it, since
+// deleting it would close that one. gt must not delete it either: mergeServer fails on a DELETE.
+func TestPullMergeKeepsAHeadBranchThatGiteaKept(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flags []string
+	}{
+		{"repository default", nil},
+		{"flag", []string{"--delete-branch"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var payload map[string]any
+			pulls := mergeServer(t, openPull, &payload)
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3" && payload != nil {
+					_, _ = w.Write([]byte(`{"number":3,"title":"Add login","state":"closed","merged":true,"base":{"ref":"main"},"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"alice/project","permissions":{"push":true}}}}`))
+					return
+				}
+				pulls.ServeHTTP(w, r)
+			}))
+			defer server.Close()
+			deps, _, diagnostics := serverDeps(t, server.URL)
+			deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --short HEAD": "main"}}
+			require.NoError(t, Execute(context.Background(), deps, append([]string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, tc.flags...)))
+			require.Equal(t, true, payload["delete_branch_after_merge"])
+			require.Equal(t, "! Kept remote branch feature: Gitea did not delete it (it is protected, the default branch, or used by another open pull request)\n", diagnostics.String())
+		})
+	}
+}
+
 func TestPullMergeRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		name, pull string

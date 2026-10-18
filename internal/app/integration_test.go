@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -101,7 +102,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	require.Contains(t, foundRepos, generated)
 	execute("api", "user/starred/"+generated.FullName, "--method", "PUT")
 	require.NoError(t, json.Unmarshal(execute("repo", "list", "--starred", "--json"), &foundRepos))
-	require.Contains(t, foundRepos, generated)
+	require.True(t, slices.ContainsFunc(foundRepos, func(r services.Repository) bool { return r.ID == generated.ID }), "starred list misses the repository")
 	execute("api", "user/starred/"+generated.FullName, "--method", "DELETE")
 	require.NoError(t, json.Unmarshal(execute("repo", "list", "--watched", "--limit", "1", "--page", "2", "--json"), &foundRepos))
 	require.Len(t, foundRepos, 1)
@@ -333,7 +334,9 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	out.Reset()
 	diagnostics.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"release", "asset", "delete", "v1", bulkAssets[0].Name, bulkAssets[1].Name, "--by-name", "-R", repo.FullName, "--yes"}))
-	require.Contains(t, diagnostics.String(), "Deleted asset")
+	require.Empty(t, diagnostics.String(), "confirmation lines are only written on a terminal")
+	require.NoError(t, json.Unmarshal(scoped("release", "asset", "list", "v1"), &assets))
+	require.Empty(t, assets)
 	scoped("release", "create", "v2", "--asset", assetFile)
 	require.NoError(t, json.Unmarshal(scoped("release", "asset", "list", "v2"), &assets))
 	require.Len(t, assets, 1)
@@ -425,11 +428,11 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 			t.Errorf("organization repository cleanup: %v", err)
 		}
 	})
-	execute("team", "repo", "add", teamID, "-R", orgRepo.FullName)
+	execute("team", "repo", "add", teamID, orgRepo.FullName)
 	var teamRepos []services.Repository
 	require.NoError(t, json.Unmarshal(execute("team", "repo", "list", teamID, "--json"), &teamRepos))
 	require.Len(t, teamRepos, 1)
-	execute("team", "repo", "remove", teamID, "-R", orgRepo.FullName, "--yes")
+	execute("team", "repo", "remove", teamID, orgRepo.FullName, "--yes")
 	require.Equal(t, "[]\n", string(execute("team", "repo", "list", teamID, "--json")))
 	execute("team", "delete", teamID, "--yes")
 	execute("variable", "set", "ORG_MODE", "--org", orgName, "--value", "org value")

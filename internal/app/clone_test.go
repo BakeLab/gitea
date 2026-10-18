@@ -150,6 +150,35 @@ func TestSSHCloneTrustsAPIEndpointUnlessSSHHostIsConfigured(t *testing.T) {
 	require.Empty(t, runner.calls)
 }
 
+func TestCloneAddsSourceRemoteForMirrors(t *testing.T) {
+	original := ""
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"id":9,"name":"project","full_name":"alice/project","mirror":true,"clone_url":"http://%s/alice/project.git","original_url":%q}`, r.Host, original)
+	}))
+	defer server.Close()
+	deps, out, diagnostics := repoTTYDeps(t, server.URL)
+	clone := credentialCall(t, deps, server.URL, "alice", "clone", "--", server.URL+"/alice/project.git", "destination")
+	original = "https://github.com/upstream/project.git"
+	runner := &fakeGit{results: map[string]string{clone: "", "remote add -- source " + original: ""}}
+	deps.Git = runner
+	args := []string{"repo", "clone", "alice/project", "destination"}
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.Equal(t, []string{clone, "remote add -- source " + original}, runner.calls)
+	require.Equal(t, "✓ Cloned alice/project into destination\n✓ Added remote source for "+original+"\n", diagnostics.String())
+	runner.calls = nil
+	require.NoError(t, Execute(context.Background(), deps, append(args, "--json")))
+	require.Equal(t, []string{clone, "remote add -- source " + original}, runner.calls)
+	require.NotContains(t, out.String(), "github.com")
+	runner.calls = nil
+	require.NoError(t, Execute(context.Background(), deps, append(args, "--no-upstream")))
+	require.Equal(t, []string{clone}, runner.calls)
+	for _, unsafe := range []string{"https://user:secret@github.com/upstream/project.git", "file:///srv/project.git", "ext::sh -c touch% /tmp/pwned"} {
+		original, runner.calls = unsafe, nil
+		require.NoError(t, Execute(context.Background(), deps, args), unsafe)
+		require.Equal(t, []string{clone}, runner.calls, unsafe)
+	}
+}
+
 func TestClonePassesGitFlagsAndNamesTheUpstreamRemote(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, `{"name":"project","full_name":"bob/project","fork":true,"clone_url":"http://%[1]s/bob/project.git","parent":{"full_name":"alice/project","default_branch":"main","clone_url":"http://%[1]s/alice/project.git"}}`, r.Host)

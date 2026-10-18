@@ -5,7 +5,9 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"strings"
 )
 
 // All returns the open and closed milestones of the repository.
@@ -39,17 +41,36 @@ func (s Milestones) FindOne(ctx context.Context, raw string, byName bool) (Miles
 	return items[0], nil
 }
 
-// FilterIDs resolves the milestones that filter an issue listing, each an ID or a title, to their
-// IDs. Gitea drops filter values that name no milestone and lists every issue when none is left,
-// so an unknown milestone is an error here.
+// FilterIDs resolves the milestones that filter an issue listing, each an ID or a title, to the
+// values the issues API reads back as the same milestones: Gitea matches a filter value by title
+// first and by ID only then, so a unique title without a comma is sent as is, and an ID only when
+// no title reads like it. Gitea drops filter values that name no milestone and lists every issue
+// when none is left, so an unknown milestone is an error here.
 func (s Milestones) FilterIDs(ctx context.Context, values []string) ([]string, error) {
-	items, err := s.Find(ctx, values, false)
+	items, err := s.All(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]string, len(items))
-	for i, item := range items {
-		ids[i] = strconv.FormatInt(item.ID, 10)
+	titles := make(map[string]int, len(items))
+	for _, item := range items {
+		titles[item.Title]++
 	}
-	return ids, nil
+	finder := NameOrID[Milestone]{Kind: "milestone", Scope: s.Repository, ID: func(m Milestone) int64 { return m.ID }, Name: func(m Milestone) string { return m.Title }}
+	result := make([]string, len(values))
+	for i, raw := range values {
+		item, err := finder.Find(items, raw)
+		if err != nil {
+			return nil, err
+		}
+		id := strconv.FormatInt(item.ID, 10)
+		switch {
+		case titles[item.Title] == 1 && !strings.Contains(item.Title, ","):
+			result[i] = item.Title
+		case titles[id] == 0:
+			result[i] = id
+		default:
+			return nil, fmt.Errorf("milestone %q (ID %s) cannot filter issues: another milestone of %s is titled %q", item.Title, id, s.Repository, id)
+		}
+	}
+	return result, nil
 }

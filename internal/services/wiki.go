@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"gitea.dev/cli/internal/transport"
@@ -83,32 +84,52 @@ func (s Wiki) page(ctx context.Context, op repoOperation[*gitea.WikiPage]) (Wiki
 // default page size.
 const wikiPageSize = 50
 
-// ListPage lists a page of wiki pages, with whether more follow and how many there are. It reads
-// the whole page list and pages it on the client, because the server pages it inconsistently.
+// ListPage lists a page of wiki pages, with whether more follow and, when the whole wiki was read,
+// how many there are. Gitea windows the wiki's files, not its pages: a window holds fewer pages
+// than its size, or none, while later windows still hold pages. The windows are read in order
+// while the server links a next one, until one page past the requested page is found.
 func (s Wiki) ListPage(ctx context.Context, limit, page int) (Page[WikiPage], error) {
-	all, err := listAll(func(page int) ([]*gitea.WikiPageMetaData, error) {
-		return repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.WikiPageMetaData, *gitea.Response, error) {
-			return c.Wiki.ListPages(ctx, owner, repo, gitea.ListWikiPagesOptions{ListOptions: listOptions(wikiPageSize, page)})
-		})
-	})
-	if err != nil {
-		if !IsNotFound(err) {
-			return Page[WikiPage]{}, err
-		}
-		// An uninitialized wiki returns 404. Verify repository visibility and
-		// wiki configuration before treating that response as an empty list.
-		repository, checkErr := (Repositories{Client: s.Client}).get(ctx, s.Repository)
-		if checkErr != nil {
-			return Page[WikiPage]{}, checkErr
-		}
-		if !repository.HasWiki {
-			return Page[WikiPage]{}, err
-		}
-		return Page[WikiPage]{Items: []WikiPage{}, Counted: true}, nil
+	if limit < 1 || page < 1 {
+		return Page[WikiPage]{}, fmt.Errorf("limit and page must be positive")
 	}
-	items, err := pageOf(convertAll(all, func(item *gitea.WikiPageMetaData) WikiPage {
-		return wikiPageFrom(item.Title, item.HTMLURL, item.LastCommit)
-	}), limit, page)
+	all, wanted := []WikiPage{}, page*limit
+	for window := 1; ; window++ {
+		if window > maxListPages {
+			return Page[WikiPage]{}, fmt.Errorf("listing exceeded %d pages", maxListPages)
+		}
+		var headers http.Header
+		items, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.WikiPageMetaData, *gitea.Response, error) {
+			items, resp, err := c.Wiki.ListPages(ctx, owner, repo, gitea.ListWikiPagesOptions{ListOptions: listOptions(wikiPageSize, window)})
+			headers = headerOf(resp)
+			return items, resp, err
+		})
+		if err != nil {
+			if window > 1 || !IsNotFound(err) {
+				return Page[WikiPage]{}, err
+			}
+			// An uninitialized wiki returns 404. Verify repository visibility and
+			// wiki configuration before treating that response as an empty list.
+			repository, checkErr := (Repositories{Client: s.Client}).get(ctx, s.Repository)
+			if checkErr != nil {
+				return Page[WikiPage]{}, checkErr
+			}
+			if !repository.HasWiki {
+				return Page[WikiPage]{}, err
+			}
+			return Page[WikiPage]{Items: []WikiPage{}, Counted: true}, nil
+		}
+		all = append(all, convertAll(items, func(item *gitea.WikiPageMetaData) WikiPage {
+			return wikiPageFrom(item.Title, item.HTMLURL, item.LastCommit)
+		})...)
+		if next, _, _ := pageHints(headers); !next {
+			break
+		}
+		if len(all) >= wanted {
+			items, err := pageOf(all, limit, page)
+			return Page[WikiPage]{Items: items, More: true}, err
+		}
+	}
+	items, err := pageOf(all, limit, page)
 	return Page[WikiPage]{Items: items, More: page*limit < len(all), Total: len(all), Counted: true}, err
 }
 

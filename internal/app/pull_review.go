@@ -218,7 +218,19 @@ func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
 		if body = draft.Body; needsBody && strings.TrimSpace(body) == "" {
 			return missingBody
 		}
-		item, err := (services.Reviews{Client: t.client, Repository: t.Repo}).Create(cmd.Context(), n, services.ReviewOptions{Event: state, Body: body, Commit: commit, Comments: comments})
+		service := services.Reviews{Client: t.client, Repository: t.Repo}
+		if strings.TrimSpace(body) == "" && !explicit && !useEditor {
+			// Gitea adds a new review to the caller's oldest pending review and replaces its body,
+			// so keep the pending body when none was given, as gt pr review submit does.
+			pending, err := service.Pending(cmd.Context(), n, t.login())
+			if err != nil {
+				return err
+			}
+			if len(pending) > 0 {
+				body = pending[0].Body
+			}
+		}
+		item, err := service.Create(cmd.Context(), n, services.ReviewOptions{Event: state, Body: body, Commit: commit, Comments: comments})
 		if err != nil {
 			return err
 		}

@@ -77,7 +77,7 @@ func TestDoctorReportsEveryCheckInsteadOfFailingFirst(t *testing.T) {
 		{
 			name: "no account for the instance of the remote", env: map[string]string{"GITEA_CLI_HOST": server.URL},
 			statuses: "Config ok, Instance ok, Account failed, Repository skipped, Git warning",
-			account:  "no account for " + server.URL + " (instance from " + strings.Trim(origin, "()") + "); run gt auth login --host " + server.URL + ", or use -R or --host to target another instance",
+			account:  "no account for " + server.URL + " (instance from " + strings.Trim(origin, "()") + "); run gt auth login --host " + server.URL + ", or use -R to target another repository",
 		},
 		{
 			name: "token of another instance", env: map[string]string{"GITEA_CLI_HOST": "https://other.example.org", "GITEA_TOKEN": "token"},

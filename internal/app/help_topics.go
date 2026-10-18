@@ -290,9 +290,10 @@ func helpTopics(globals *pflag.FlagSet) []*cobra.Command {
 ` + indent(flagUsages(flags)) + `
 
 gt selects the repository from --repo, GITEA_CLI_REPO, git config gt.repository or a
-Git remote (--remote, else the current branch's remote, upstream or origin), and the
-instance from the repository URL, --host, GITEA_CLI_HOST or GITEA_INSTANCE_URL, default_host,
-or the only configured instance.
+Git remote (--remote, else the current branch's remote, upstream or origin, skipping
+remotes on instances without an account, or not on --host or the GITEA_TOKEN instance),
+and the instance from the repository URL, --host, GITEA_CLI_HOST or GITEA_INSTANCE_URL,
+default_host, or the only configured instance.
 
 Environment variables:
 

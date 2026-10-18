@@ -109,7 +109,8 @@ func (s Repositories) Readme(ctx context.Context, repo, ref string) (name, conte
 		return c.Repositories.ListContents(ctx, owner, name, ref, "")
 	})
 	if err != nil {
-		if IsNotFound(err) {
+		// A reader without code access sees the repository but not its files.
+		if IsNotFound(err) || IsForbidden(err) {
 			return "", "", nil
 		}
 		return "", "", err

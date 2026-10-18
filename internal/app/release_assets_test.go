@@ -66,7 +66,7 @@ func TestReleaseUploadRefusesDuplicateNamesWithoutClobber(t *testing.T) {
 	require.Equal(t, []string{"GET /api/v1/repos/owner/repo/releases/tags/v1"}, requests)
 	requests = nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"release", "upload", "v1", file, "--clobber", "-R", "owner/repo"}))
-	require.Equal(t, []string{"GET /api/v1/repos/owner/repo/releases/tags/v1", "DELETE /api/v1/repos/owner/repo/releases/1/assets/7", "POST /api/v1/repos/owner/repo/releases/1/assets"}, requests)
+	require.Equal(t, []string{"GET /api/v1/repos/owner/repo/releases/tags/v1", "POST /api/v1/repos/owner/repo/releases/1/assets", "DELETE /api/v1/repos/owner/repo/releases/1/assets/7"}, requests)
 	require.Equal(t, "✓ Uploaded hello.txt (5 B) to release v1\n", diagnostics.String())
 }
 

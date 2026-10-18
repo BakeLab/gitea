@@ -406,3 +406,7 @@ func TestShowing(t *testing.T) {
 		require.Equal(t, tc.want, showing(tc.shown, tc.page, "open issues"), "%+v", tc.page)
 	}
 }
+
+func TestRefLabelDropsTerminalControls(t *testing.T) {
+	require.Equal(t, "alice/x#5 (fix ]0;pwnevil)", refLabel("alice/x", 5, "fix \x1b]0;pwn\x07evil"))
+}

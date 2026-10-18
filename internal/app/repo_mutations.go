@@ -241,7 +241,8 @@ func (a *application) repoCloneCommand() *cobra.Command {
 		Short: "Clone a repository locally",
 		Long: `Clone a repository with the configured Git protocol and gt's credentials. Git flags can
 follow --. A fork's parent is added as the "upstream" remote, and gt commands in the clone then
-target the parent.`,
+target the parent. A pull mirror's source is added as the "source" remote; gt commands keep
+targeting the mirror.`,
 		Example: `# Clone a repository into ./project
 $ gt repo clone alice/project
 
@@ -287,7 +288,7 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 	}
 	command.Flags().IntVarP(&opts.depth, "depth", "d", 0, "Number of commits to fetch (0: full history)")
 	command.Flags().StringVarP(&opts.upstream, "upstream-remote-name", "u", "upstream", "Remote name for the parent of a fork")
-	command.Flags().BoolVar(&noUpstream, "no-upstream", false, "Do not add a remote for the parent of a fork")
+	command.Flags().BoolVar(&noUpstream, "no-upstream", false, "Do not add a remote for the parent of a fork or the source of a mirror")
 	command.ValidArgsFunction = pathArgs(1, false, completeDirectories, a.completeRepos())
 	return command
 }
@@ -419,7 +420,7 @@ type cloneOptions struct {
 	directory string
 	depth     int
 	gitFlags  []string
-	// upstream names the remote of a fork's parent; empty adds none.
+	// upstream names the remote of a fork's parent; empty adds neither it nor a mirror's source.
 	upstream string
 }
 
@@ -486,6 +487,13 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 			}
 		}
 		a.done(cmd, "Added remote %s for %s; gt commands in the clone target it (change with gt repo set-default)", opts.upstream, item.Parent.FullName)
+	}
+	// The remote is named source because repository discovery prefers a remote named upstream.
+	if source := mirrorSourceURL(item); source != "" && opts.upstream != "" {
+		if _, err := a.gitIn(cmd.Context(), clone, "remote", "add", "--", "source", source); err != nil {
+			return clone, fmt.Errorf("cloned the mirror, but could not add the source remote: %w", err)
+		}
+		a.done(cmd, "Added remote source for %s", source)
 	}
 	return clone, nil
 }

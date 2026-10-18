@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -46,6 +47,45 @@ func listAll[T any](fetch func(page int) ([]T, error)) ([]T, error) {
 		result = append(result, items...)
 	}
 	return nil, fmt.Errorf("listing exceeded %d pages", maxListPages)
+}
+
+// filterPageSize is the page size filteredPage reads, Gitea's default maximum.
+const filterPageSize = 50
+
+// filteredPage applies a filter without a server equivalent: it reads pages of filterPageSize
+// from fetch only until one item past the requested page is kept, and counts the matches when
+// it reads them all.
+func filteredPage[T any](limit, page int, fetch func(limit, page int) (Page[T], error), keep func(T) bool) (Page[T], error) {
+	if limit <= 0 || page <= 0 {
+		return Page[T]{}, errors.New("limit and page must be positive")
+	}
+	matching, wanted := []T{}, page*limit+1
+	for serverPage := 1; ; serverPage++ {
+		if serverPage > maxListPages {
+			return Page[T]{}, fmt.Errorf("listing exceeded %d pages", maxListPages)
+		}
+		window, err := fetch(filterPageSize, serverPage)
+		if err != nil {
+			return Page[T]{}, err
+		}
+		for _, item := range window.Items {
+			if keep(item) {
+				matching = append(matching, item)
+			}
+		}
+		if len(matching) >= wanted {
+			items, err := pageOf(matching, limit, page)
+			return Page[T]{Items: items, More: true}, err
+		}
+		if len(window.Items) == 0 || (!window.More && len(window.Items) < filterPageSize) {
+			break
+		}
+	}
+	items, err := pageOf(matching, limit, page)
+	if err != nil {
+		return Page[T]{}, err
+	}
+	return Page[T]{Items: items, More: page*limit < len(matching), Total: len(matching), Counted: true}, nil
 }
 
 // pageHints reads whether the server advertises a next page and the collection size.

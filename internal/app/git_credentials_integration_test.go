@@ -86,7 +86,7 @@ func TestGiteaGitCredentialHelperClonesPrivateRepository(t *testing.T) {
 	var checkout git.CheckoutResult
 	require.NoError(t, json.Unmarshal(out.Bytes(), &checkout))
 	require.Equal(t, pull.HeadSHA, checkout.Commit)
-	require.Equal(t, "pr/"+fmt.Sprint(pull.Number), checkout.Branch)
+	require.Equal(t, "feature", checkout.Branch)
 	branchesBefore, err := runner.Output(context.Background(), gtClone, false, "for-each-ref", "--format=%(refname):%(objectname)", "refs/heads/")
 	require.NoError(t, err)
 	out.Reset()
@@ -102,7 +102,7 @@ func TestGiteaGitCredentialHelperClonesPrivateRepository(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", fmt.Sprint(pull.Number), "-R", repo.FullName, "--cwd", gtClone, "--no-input", "--json"}))
 	require.NoError(t, json.Unmarshal(out.Bytes(), &checkout))
 	require.False(t, checkout.Detached)
-	require.Equal(t, "pr/"+fmt.Sprint(pull.Number), checkout.Branch)
+	require.Equal(t, "feature", checkout.Branch)
 	branchesAfter, err = runner.Output(context.Background(), gtClone, false, "for-each-ref", "--format=%(refname):%(objectname)", "refs/heads/")
 	require.NoError(t, err)
 	require.Equal(t, branchesBefore, branchesAfter)
@@ -131,12 +131,13 @@ func TestGiteaGitCredentialHelperClonesPrivateRepository(t *testing.T) {
 	var synced git.SyncResult
 	require.NoError(t, json.Unmarshal(out.Bytes(), &synced))
 	require.Equal(t, repo.DefaultBranch, synced.Branch)
-	localHead, err = runner.Output(context.Background(), gtClone, false, "rev-parse", "HEAD")
+	// Sync updates the branch without switching to it, so read the branch rather than HEAD.
+	localHead, err = runner.Output(context.Background(), gtClone, false, "rev-parse", "refs/heads/"+synced.Branch)
 	require.NoError(t, err)
 	require.Equal(t, synced.Commit, localHead)
-	contents, err := os.ReadFile(filepath.Join(gtClone, "sync.txt"))
+	contents, err := runner.Output(context.Background(), gtClone, false, "show", synced.Branch+":sync.txt")
 	require.NoError(t, err)
-	require.Equal(t, "sync\n", string(contents))
+	require.Equal(t, "sync", strings.TrimSpace(contents))
 	if endpoint := os.Getenv("GITEA_CLI_TEST_SSH_ENDPOINT"); endpoint != "" {
 		verifySSHCloneAndCheckout(t, deps, repo, pull, user, environment, endpoint)
 	}

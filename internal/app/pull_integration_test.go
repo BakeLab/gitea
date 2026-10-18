@@ -47,7 +47,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	execute("label", "export", "-R", repo.FullName, "--output-file", exportPath)
 	exported, err := os.ReadFile(exportPath)
 	require.NoError(t, err)
-	require.Contains(t, string(exported), "00ff00 review ;")
+	require.Contains(t, string(exported), "#00ff00 review\n")
 	jsonExportPath := exportPath + ".json"
 	execute("label", "export", "-R", repo.FullName, "--output-file", jsonExportPath, "--json")
 	jsonExport, err := os.ReadFile(jsonExportPath)

@@ -4,9 +4,11 @@
 package terminal
 
 import (
+	"html"
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"charm.land/glamour/v2"
 	"charm.land/glamour/v2/styles"
@@ -19,6 +21,28 @@ func MarkdownEnabled(preference string, outTTY bool) bool {
 
 // glamourLinks matches the OSC 8 hyperlinks that glamour writes for markdown links.
 var glamourLinks = regexp.MustCompile("\x1b\\]8;[^\x07\x1b]*(?:\x07|\x1b\\\\)")
+
+// glamourSequences matches the escape sequences glamour writes itself: colors and OSC 8 hyperlinks.
+var glamourSequences = regexp.MustCompile("\x1b\\[[0-9;]*m|\x1b\\]8;[^\x07\x1b]*(?:\x07|\x1b\\\\)")
+
+// stripControls removes every control character from rendered output except newlines and the
+// sequences glamour writes, which markdown cannot smuggle in after the input was sanitized.
+func stripControls(text string) string {
+	var b strings.Builder
+	for i := 0; i < len(text); {
+		if loc := glamourSequences.FindStringIndex(text[i:]); loc != nil && loc[0] == 0 {
+			b.WriteString(text[i : i+loc[1]])
+			i += loc[1]
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if r == '\n' || r == '\t' || !(r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0)) {
+			b.WriteString(text[i : i+size])
+		}
+		i += size
+	}
+	return b.String()
+}
 
 // renderers caches a glamour renderer per width and color, as building one parses its style each
 // time; the lock also serializes rendering.
@@ -52,6 +76,15 @@ func markdownRenderer(width int, color bool) (*glamour.TermRenderer, error) {
 // with links only when d allows them. It keeps line breaks like Gitea does, and returns the sanitized
 // text unrendered if rendering fails.
 func Markdown(text string, d Display) string {
+	// Markdown decodes character references such as &#27; into the characters they name, so decode
+	// them (to a fixed point, for &amp;#27;) before sanitizing instead of after.
+	for range 4 {
+		decoded := html.UnescapeString(text)
+		if decoded == text {
+			break
+		}
+		text = decoded
+	}
 	text = SafeText(text)
 	width := d.Width
 	if width <= 0 {
@@ -68,6 +101,7 @@ func Markdown(text string, d Display) string {
 	if err != nil {
 		return text
 	}
+	rendered = stripControls(rendered)
 	if !d.Links {
 		rendered = glamourLinks.ReplaceAllString(rendered, "")
 	}
