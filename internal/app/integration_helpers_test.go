@@ -111,7 +111,7 @@ func verifyEditorSubmission(t *testing.T, deps Dependencies, repository, number 
 	deps.Getenv = withEnv(deps.Getenv, map[string]string{"GITEA_CLI_EDITOR": shellquote.Join(program)})
 	args := []string{"issue", "comment", "create", number}
 	if review {
-		args = []string{"pr", "review", number, "--event", "PENDING"}
+		args = []string{"pr", "review", number, "--pending"}
 	}
 	require.NoError(t, Execute(context.Background(), deps, append(args, "--repo", repository, "--editor", "--no-input", "--json")))
 	var result struct {
@@ -191,7 +191,7 @@ func verifyIssueAttachmentLifecycle(t *testing.T, deps Dependencies, group, repo
 	require.EqualValues(t, 30, item.Size)
 	id := fmt.Sprint(item.ID)
 	downloaded := filepath.Join(t.TempDir(), "downloaded.txt")
-	require.NoError(t, Execute(context.Background(), deps, []string{group, "attachment", "download", number, id, "--repo", repository, "--no-input", "--output-file", downloaded}))
+	require.NoError(t, Execute(context.Background(), deps, []string{group, "attachment", "download", number, id, "--repo", repository, "--no-input", "--output", downloaded}))
 	content, err := os.ReadFile(downloaded)
 	require.NoError(t, err)
 	require.Equal(t, "Disposable attachment content\n", string(content))

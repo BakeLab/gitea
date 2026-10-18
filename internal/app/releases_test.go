@@ -21,7 +21,7 @@ func TestReleaseCreateWithTagFlagReturnsSingleJSONObject(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"release", "create", "--tag", "v1", "-R", "alice/project", "--json=id,tag"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "create", "v1", "-R", "alice/project", "--json=id,tag"}))
 	require.JSONEq(t, `{"id":7,"tag":"v1"}`, out.String())
 }
 

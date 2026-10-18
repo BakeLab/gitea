@@ -183,7 +183,6 @@ func (f *releaseFields) register(a *application, cmd *cobra.Command) {
 	flags.StringVar(&f.target, "target", "", "Branch or commit the tag points to, when it is new")
 	flags.BoolVarP(&f.draft, "draft", "d", false, "Save the release as a draft")
 	flags.BoolVarP(&f.prerelease, "prerelease", "p", false, "Mark the release as a prerelease")
-	flagAliases(cmd, map[string]string{"body": "notes", "body-file": "notes-file"})
 	_ = cmd.RegisterFlagCompletionFunc("target", a.completeBranches())
 }
 
@@ -241,9 +240,6 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 			var editorDraft terminal.Draft
 			defer finishDraft(&editorDraft, &runErr)
 			if len(args) > 0 {
-				if cmd.Flags().Changed("tag") {
-					return clierr.Wrap(clierr.Usage, errors.New("supply a tag argument or --tag, not both"))
-				}
 				fields.tag, assets = args[0], append(args[1:], assets...)
 			}
 			if err := validateTextSources(cmd, "notes", "notes-file"); err != nil {
@@ -315,8 +311,6 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 		},
 	}
 	fields.register(a, command)
-	command.Flags().StringVar(&fields.tag, "tag", "", "Release tag")
-	_ = command.Flags().MarkHidden("tag")
 	command.Flags().StringSliceVar(&assets, "asset", nil, "File to upload as an asset (repeatable)")
 	command.Flags().BoolVar(&verifyTag, "verify-tag", false, "Fail if the tag does not exist on the server yet")
 	command.ValidArgsFunction = pathArgs(1, true, completeFiles, a.completeTags())

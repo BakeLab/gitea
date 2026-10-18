@@ -57,7 +57,7 @@ func TestRunLogsStreamWithoutMixingDiagnosticsAndVerifyJobMembership(t *testing.
 	require.Equal(t, 1, downloads)
 	require.Empty(t, out.String())
 	path := filepath.Join(t.TempDir(), "logs.zip")
-	require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--output-file", path}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--output", path}))
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, "ZIP archive bytes", string(data))

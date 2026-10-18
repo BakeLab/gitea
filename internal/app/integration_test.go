@@ -72,12 +72,11 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 			t.Errorf("repository cleanup: %v", err)
 		}
 	})
-	require.NoError(t, json.Unmarshal(execute("repo", "edit", "-R", repo.FullName, "--name", name+"-renamed", "--website", "https://example.test", "--default-branch", repo.DefaultBranch, "--json"), &repo))
-	require.Equal(t, name+"-renamed", repo.Name)
+	require.NoError(t, json.Unmarshal(execute("repo", "edit", "-R", repo.FullName, "--description", "edited", "--website", "https://example.test", "--default-branch", repo.DefaultBranch, "--json"), &repo))
+	require.Equal(t, "edited", repo.Description)
 	require.Equal(t, "https://example.test", repo.Website)
-	require.NoError(t, json.Unmarshal(execute("repo", "edit", "-R", repo.FullName, "--website=", "--archived=false", "--json"), &repo))
+	require.NoError(t, json.Unmarshal(execute("repo", "edit", "-R", repo.FullName, "--website=", "--json"), &repo))
 	require.Empty(t, repo.Website)
-	require.False(t, repo.Archived)
 	scoped := func(args ...string) []byte { return execute(append(args, "-R", repo.FullName, "--json")...) }
 	templateName := fmt.Sprintf("gt-template-%d", time.Now().UnixNano())
 	var template, generated services.Repository
@@ -158,7 +157,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 		execute("webhook", "delete", hookID, scope, "--yes")
 	}
 	var label services.Label
-	require.NoError(t, json.Unmarshal(scoped("label", "create", "--name", "bug", "--color", "ff0000"), &label))
+	require.NoError(t, json.Unmarshal(scoped("label", "create", "bug", "--color", "ff0000"), &label))
 	require.Positive(t, label.ID)
 	id := strconv.FormatInt(label.ID, 10)
 	require.NoError(t, json.Unmarshal(scoped("label", "edit", id, "--description", "updated"), &label))
@@ -318,7 +317,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	require.NoError(t, json.Unmarshal(scoped("release", "asset", "upload", "v1", assetFile), &asset))
 	require.Equal(t, int64(19), asset.Size)
 	assetID := strconv.FormatInt(asset.ID, 10)
-	downloaded := execute("release", "asset", "download", "v1", assetID, "-R", repo.FullName, "--output-file", "-")
+	downloaded := execute("release", "asset", "download", "v1", assetID, "-R", repo.FullName, "--output", "-")
 	require.Equal(t, "release asset bytes", string(downloaded))
 	require.NoError(t, json.Unmarshal(scoped("release", "asset", "edit", "v1", assetID, "--name", "renamed.txt"), &asset))
 	require.Equal(t, "renamed.txt", asset.Name)
@@ -349,9 +348,9 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	require.Empty(t, tags)
 	require.Equal(t, "[]\n", string(scoped("release", "list")))
 	var variable services.ActionVariable
-	require.NoError(t, json.Unmarshal(scoped("variable", "set", "BUILD_MODE", "--value", "first"), &variable))
+	require.NoError(t, json.Unmarshal(scoped("variable", "set", "BUILD_MODE", "--body", "first"), &variable))
 	require.Equal(t, "first", variable.Value)
-	scoped("variable", "set", "BUILD_MODE", "--value", "second")
+	scoped("variable", "set", "BUILD_MODE", "--body", "second")
 	require.NoError(t, json.Unmarshal(scoped("variable", "view", "BUILD_MODE"), &variable))
 	require.Equal(t, "second", variable.Value)
 	var variables []services.ActionVariable
@@ -359,7 +358,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	require.Len(t, variables, 1)
 	execute("variable", "delete", "BUILD_MODE", "-R", repo.FullName, "--yes")
 	require.Equal(t, "[]\n", string(scoped("variable", "list")))
-	secretOutput := scoped("secret", "set", "BUILD_TOKEN", "--value", "sensitive-local-test-value")
+	secretOutput := scoped("secret", "set", "BUILD_TOKEN", "--body", "sensitive-local-test-value")
 	require.NotContains(t, string(secretOutput), "sensitive-local-test-value")
 	var secrets []services.ActionSecret
 	require.NoError(t, json.Unmarshal(scoped("secret", "list"), &secrets))
@@ -368,7 +367,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	execute("secret", "delete", "BUILD_TOKEN", "-R", repo.FullName, "--yes")
 	require.Equal(t, "[]\n", string(scoped("secret", "list")))
 	accountName := fmt.Sprintf("CLI_IT_%d", time.Now().UnixNano())
-	execute("variable", "set", accountName, "--account", "--value", "account value")
+	execute("variable", "set", accountName, "--account", "--body", "account value")
 	t.Cleanup(func() {
 		if err := Execute(context.Background(), deps, []string{"variable", "delete", accountName, "--account", "--yes"}); err != nil {
 			t.Errorf("account variable cleanup: %v", err)
@@ -435,15 +434,15 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	execute("team", "repo", "remove", teamID, orgRepo.FullName, "--yes")
 	require.Equal(t, "[]\n", string(execute("team", "repo", "list", teamID, "--json")))
 	execute("team", "delete", teamID, "--yes")
-	execute("variable", "set", "ORG_MODE", "--org", orgName, "--value", "org value")
+	execute("variable", "set", "ORG_MODE", "--org", orgName, "--body", "org value")
 	require.NoError(t, json.Unmarshal(execute("variable", "view", "ORG_MODE", "--org", orgName, "--json"), &variable))
 	require.Equal(t, "org value", variable.Value)
 	execute("variable", "delete", "ORG_MODE", "--org", orgName, "--yes")
-	execute("secret", "set", "ORG_TOKEN", "--org", orgName, "--value", "org-local-secret")
+	execute("secret", "set", "ORG_TOKEN", "--org", orgName, "--body", "org-local-secret")
 	require.NoError(t, json.Unmarshal(execute("secret", "list", "--org", orgName, "--json"), &secrets))
 	require.Len(t, secrets, 1)
 	execute("secret", "delete", "ORG_TOKEN", "--org", orgName, "--yes")
-	execute("secret", "set", accountName, "--account", "--value", "account-local-secret")
+	execute("secret", "set", accountName, "--account", "--body", "account-local-secret")
 	execute("secret", "delete", accountName, "--account", "--yes")
 	var wiki services.WikiPage
 	require.NoError(t, json.Unmarshal(executeWithEditorIntegration(t, deps, "", "# Unicode ü content", "wiki", "create", "--repo", repo.FullName, "--title", "Home", "--message", "Create page"), &wiki))

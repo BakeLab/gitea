@@ -213,41 +213,14 @@ var rootGroups = map[string]string{
 // verbAliases are the gh-style short names of common verbs; commands add others to their own Aliases.
 var verbAliases = map[string]string{"list": "ls", "delete": "rm"}
 
-// addVerbAliases gives every list and delete command its short name and accepts plural flag names.
+// addVerbAliases gives every list and delete command its short name.
 func addVerbAliases(cmd *cobra.Command) {
 	if alias, ok := verbAliases[cmd.Name()]; ok && cmd.HasParent() && !slices.Contains(cmd.Aliases, alias) {
 		cmd.Aliases = append(cmd.Aliases, alias)
 	}
-	acceptPlurals(cmd)
 	for _, child := range cmd.Commands() {
 		addVerbAliases(child)
 	}
-}
-
-// acceptPlurals lets the flags of cmd be named in the plural, such as --add-labels for the gh name
-// --add-label, without showing the plural in help.
-func acceptPlurals(cmd *cobra.Command) {
-	names := map[string]bool{}
-	cmd.Flags().VisitAll(func(flag *pflag.Flag) { names[flag.Name] = true })
-	normalize := cmd.Flags().GetNormalizeFunc()
-	cmd.Flags().SetNormalizeFunc(func(flags *pflag.FlagSet, name string) pflag.NormalizedName {
-		if singular, ok := strings.CutSuffix(name, "s"); ok && !names[name] && names[singular] {
-			name = singular
-		}
-		return normalize(flags, name)
-	})
-}
-
-// flagAliases makes the flags of cmd accept each key of aliases as another name of the flag it maps
-// to, without showing it in help. Renamed flags keep their old names working this way.
-func flagAliases(cmd *cobra.Command, aliases map[string]string) {
-	normalize := cmd.Flags().GetNormalizeFunc()
-	cmd.Flags().SetNormalizeFunc(func(flags *pflag.FlagSet, name string) pflag.NormalizedName {
-		if to, ok := aliases[name]; ok {
-			name = to
-		}
-		return normalize(flags, name)
-	})
 }
 
 // suggestFlags adds the flags of cmd with a similar name to an unknown flag error, as in

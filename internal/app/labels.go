@@ -101,7 +101,9 @@ func (f *labelFields) register(cmd *cobra.Command, nameUsage string) {
 	flags.StringVarP(&f.description, "description", "d", "", "Description of the label")
 	flags.BoolVar(&f.exclusive, "exclusive", false, "Allow only one label of its scope, such as priority/high, per issue")
 	flags.BoolVar(&f.archived, "archived", false, "Archive the label so that it cannot be applied anymore")
-	flags.StringVarP(&f.name, "name", "n", "", nameUsage)
+	if nameUsage != "" {
+		flags.StringVarP(&f.name, "name", "n", "", nameUsage)
+	}
 }
 
 // options returns the fields that were passed, checking them before any request.
@@ -134,7 +136,6 @@ func (f *labelFields) options(cmd *cobra.Command) (services.LabelOptions, error)
 
 func (a *application) labelCreateCommand(scope labelScope) *cobra.Command {
 	var fields labelFields
-	var file string
 	var force bool
 	cmd := &cobra.Command{Use: "create <name>", Aliases: []string{"new"}, Short: "Create a label", Long: `Create a label. Without --color, the label gets a random color. A label with the same
 name, ignoring case, is refused unless --force updates it. Without a name on a terminal,
@@ -142,16 +143,11 @@ prompts ask for the name, color and description.`, Example: `$ gt label create b
 $ gt label create "priority/high" --exclusive
 # Update the label if it exists
 $ gt label create bug -c ee0701 --force`, Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
-		if file != "" {
-			return a.importLabels(cmd, scope, file, force)
-		}
 		if len(args) == 1 {
-			if cmd.Flags().Changed("name") {
-				return clierr.Wrap(clierr.Usage, errors.New("pass the label name as an argument or --name, not both"))
+			if strings.TrimSpace(args[0]) == "" {
+				return clierr.Wrap(clierr.Usage, errors.New("label name cannot be empty"))
 			}
-			if err := cmd.Flags().Set("name", args[0]); err != nil {
-				return err
-			}
+			fields.name = args[0]
 		}
 		opts, err := fields.options(cmd)
 		if err != nil {
@@ -191,11 +187,8 @@ $ gt label create bug -c ee0701 --force`, Args: usageArgs(cobra.MaximumNArgs(1))
 		a.done(cmd, "%s %s", verb, labelName(s, item))
 		return a.jsonResult(cmd, item)
 	}}
-	fields.register(cmd, "Label `name`")
-	_ = cmd.Flags().MarkHidden("name")
+	fields.register(cmd, "")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Update the label if one with the same name exists")
-	cmd.Flags().StringVar(&file, "file", "", "Import labels from a `file`, like gt label import")
-	_ = cmd.Flags().MarkHidden("file")
 	return cmd
 }
 

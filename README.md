@@ -1,4 +1,4 @@
-# <img alt='gt logo' src='https://gitea.com/repo-avatars/550-80a3a8c2ab0e2c2d69f296b7f8582485' height="40"/> *T E A*
+# <img alt='gitea-cli logo' src='https://gitea.com/repo-avatars/550-80a3a8c2ab0e2c2d69f296b7f8582485' height="40"/> gitea-cli
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Release](https://raster.shields.io/badge/dynamic/json.svg?label=release&url=https://gitea.com/api/v1/repos/gitea/cli/releases&query=$[0].tag_name)](https://gitea.com/gitea/cli/releases)
@@ -9,7 +9,7 @@
 ## The official CLI for Gitea
 
 gitea-cli manages repositories, issues, pull requests, releases, and other Gitea resources
-with explicit commands suitable for local development and CI.
+with explicit commands suitable for local development and CI. The binary is called `gt`.
 
 ```sh
 gt auth login --host https://gitea.example.org --with-token < token-file
@@ -19,11 +19,8 @@ gt alias set bugs 'issue list --label bug'
 gt help
 ```
 
-gt 1.0 is a breaking release: it requires Gitea 28 or newer, commands, flags and
-output formats changed, it uses separate `config.yml` and `hosts.yml` files, and it
-requires fresh authentication.
-Existing combined configuration files are left untouched; archive the old file or
-choose an isolated `GITEA_CLI_CONFIG_DIR` before setup.
+gt requires Gitea 28 or newer. It keeps its preferences in `config.yml` and its
+instances and accounts in `hosts.yml`.
 Run `gt --help` or `gt <command> --help` for supported commands and flags; the
 full reference, man pages, and shell completions ship in each release's docs archive.
 Credentials use the operating-system keyring by default; explicitly
@@ -35,20 +32,11 @@ environment credentials are never persisted.
 
 There are different ways to get `gt`:
 
-1. Install via your system package manager:
-    - macOS via `brew` (official):
-      ```sh
-      brew install gt
-      ```
-    - arch linux ([gt](https://archlinux.org/packages/extra/x86_64/gt/), thirdparty)
-    - alpine linux ([gt](https://pkgs.alpinelinux.org/packages?name=gt&branch=edge), thirdparty)
-    - Windows via `MSYS2` ([gt](https://packages.msys2.org/base/mingw-w64-gt), thirdparty)
+1. Use the prebuilt binaries from [dl.gitea.com](https://dl.gitea.com/gitea-cli/)
 
-2. Use the prebuilt binaries from [dl.gitea.com](https://dl.gitea.com/gitea-cli/)
+2. Docker: [gitea-cli at docker hub](https://hub.docker.com/r/gitea/gitea-cli)
 
 3. Install from source: [see *Compilation*](#compilation)
-
-4. Docker: [gitea-cli at docker hub](https://hub.docker.com/r/gitea/gitea-cli)
 
 ### Log in to Gitea from gt
 

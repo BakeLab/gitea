@@ -142,7 +142,6 @@ func TestPullCreateAllowMaintainerEditsDefaultAndOverride(t *testing.T) {
 	}{
 		{"default true", nil, true},
 		{"explicit false", []string{"--allow-maintainer-edits=false"}, false},
-		{"edits alias", []string{"--edits=false"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var payload map[string]any

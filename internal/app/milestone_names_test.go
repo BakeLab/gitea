@@ -159,7 +159,7 @@ func TestMilestonesAcceptTitlesOrIDs(t *testing.T) {
 	require.Contains(t, out.String(), `"id":3`)
 	require.NoError(t, run("milestone", "close", "V1.0", "2026"))
 	require.NoError(t, run("issue", "create", "--title", "x", "-m", "v1.0"))
-	require.NoError(t, run("issue", "edit", "8", "--milestone-name", "3"))
+	require.NoError(t, run("issue", "edit", "8", "--milestone", "3"))
 	require.NoError(t, run("issue", "edit", "8", "--remove-milestone"))
 	require.NoError(t, run("issue", "edit", "8", "--milestone", "0"))
 	require.Equal(t, []string{

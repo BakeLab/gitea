@@ -64,7 +64,7 @@ func TestReviewPromptAndFlagsReachIdenticalOptions(t *testing.T) {
 	prompt := &scriptedPrompter{}
 	deps.Prompter = prompt
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
-	args := []string{"pr", "review", "1", "-R", "owner/repo", "--event", "REQUEST_CHANGES"}
+	args := []string{"pr", "review", "1", "-R", "owner/repo", "--request-changes"}
 	require.NoError(t, Execute(context.Background(), deps, args))
 	require.Equal(t, []string{"Body (markdown): "}, prompt.texts)
 	require.Empty(t, prompt.confirmations, "no confirmation right after typing the body")
@@ -87,9 +87,6 @@ func TestReviewTypeFlags(t *testing.T) {
 		{[]string{"-r", "--body", "Hash it"}, "REQUEST_CHANGES", "Hash it"},
 		{[]string{"-c", "-b", "Nit"}, "COMMENT", "Nit"},
 		{[]string{"--pending", "-b", "Draft"}, "PENDING", "Draft"},
-		{[]string{"--event", "approve"}, "APPROVED", ""},
-		{[]string{"--event", "request_changes", "-b", "x"}, "REQUEST_CHANGES", "x"},
-		{[]string{"--event", "Comment", "-b", "x"}, "COMMENT", "x"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			var payload map[string]any
@@ -151,8 +148,7 @@ func TestReviewUsageErrors(t *testing.T) {
 		{[]string{"pr", "review", "create", "13"}, "Run 'gt pr review create --help' for examples."},
 		{[]string{"pr", "review", "13", "--body", "x"}, "choose a review type"},
 		{[]string{"pr", "review", "13", "-a", "-c"}, "choose one review type"},
-		{[]string{"pr", "review", "13", "--approve", "--event", "comment"}, "choose one review type"},
-		{[]string{"pr", "review", "13", "--event", "bogus"}, "--event must be"},
+		{[]string{"pr", "review", "13", "--approve", "--comment"}, "choose one review type"},
 		{[]string{"pr", "review", "approve", "13"}, `unknown review command "approve"; to approve run: gt pr review 13 --approve (see gt pr review --help)`},
 		{[]string{"pr", "review", "reject"}, `to request changes run: gt pr review <number> --request-changes`},
 		{[]string{"pr", "review", "lst", "13"}, `unknown command "lst" for "gt pr review"; did you mean list?`},

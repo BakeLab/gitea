@@ -61,7 +61,7 @@ func TestSearchIssueAcceptsFlexibleTimeBounds(t *testing.T) {
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
 	deps.Now = func() time.Time { return time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) }
-	require.NoError(t, Execute(context.Background(), deps, []string{"search", "issue", "--since", "24h", "--before", "2026-10-05T12:00:00Z", "--json"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"search", "issue", "--since", "24h", "--until", "2026-10-05T12:00:00Z", "--json"}))
 	require.JSONEq(t, `[]`, out.String())
 	require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, []string{"search", "issue", "--since", "invalid"})))
 }

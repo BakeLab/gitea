@@ -353,7 +353,7 @@ func TestHelpTopicsAndUnknownTopics(t *testing.T) {
 	require.Equal(t, []string{"list\tList issues in a repository"}, values)
 }
 
-func TestVerbAndFlagAliases(t *testing.T) {
+func TestVerbAliases(t *testing.T) {
 	deps, _, _ := testDeps(t)
 	root := NewRoot(deps)
 	for _, args := range [][]string{{"issue", "ls"}, {"label", "rm"}, {"pr", "review", "ls"}} {
@@ -371,14 +371,6 @@ func TestVerbAndFlagAliases(t *testing.T) {
 			}
 		}
 	})
-	var labels []string
-	edit := &cobra.Command{Use: "edit", RunE: func(*cobra.Command, []string) error { return nil }}
-	edit.Flags().StringSliceVar(&labels, "add-label", nil, "Add labels")
-	flagAliases(edit, map[string]string{"add-labels": "add-label"})
-	edit.SetArgs([]string{"--add-labels", "bug", "--add-label", "docs"})
-	require.NoError(t, edit.Execute())
-	require.Equal(t, []string{"bug", "docs"}, labels)
-	require.NotContains(t, edit.UsageString(), "add-labels")
 }
 
 // TestHelpTextsAreComplete checks the help texts of every command: a Short line without a final period,

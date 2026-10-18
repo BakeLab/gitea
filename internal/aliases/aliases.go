@@ -128,7 +128,7 @@ func ExpandCompletion(args []string, definitions map[string]string, builtins map
 	if len(args) < 2 {
 		return append([]string{}, args...), nil
 	}
-	const marker = "\x00tea-completion\x00"
+	const marker = "\x00gt-completion\x00"
 	marked := append([]string{}, args...)
 	current := marked[len(marked)-1]
 	marked[len(marked)-1] = marker

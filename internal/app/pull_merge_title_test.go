@@ -31,7 +31,7 @@ func TestPullMergeSendsTitleAndMessage(t *testing.T) {
 	server = newAuthenticatedServer(mergeServer(t, openPull, &payload))
 	defer server.Close()
 	deps.Getenv = serverEnv(server.URL, nil)
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "--style", "rebase", "--yes"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "--method", "rebase", "--yes"}))
 	require.Equal(t, "rebase", payload["Do"])
 }
 

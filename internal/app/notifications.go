@@ -28,9 +28,7 @@ type notificationScope struct {
 func (a *application) notificationCommand() *cobra.Command {
 	group := &cobra.Command{Use: "notification", Short: "Read and triage your notifications", Long: `Read and triage the notifications of your account, across your whole inbox unless -R or
 --this-repo selects a repository. IDs identify notification threads, not issue numbers.`}
-	var mine, thisRepo bool
-	group.PersistentFlags().BoolVar(&mine, "mine", false, "Read your whole inbox (the default)")
-	_ = group.PersistentFlags().MarkHidden("mine")
+	var thisRepo bool
 	group.PersistentFlags().BoolVar(&thisRepo, "this-repo", false, "Only notifications of the repository in the current directory")
 	scope := func(cmd *cobra.Command) (notificationScope, error) {
 		t, err := a.resolve(cmd.Context(), thisRepo)

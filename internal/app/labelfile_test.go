@@ -82,7 +82,7 @@ func TestLabelImportAcceptsColorPrefixedRows(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	file := filepath.Join(t.TempDir(), "labels.txt")
 	require.NoError(t, os.WriteFile(file, []byte("# Gitea default labels\n#ee0701 bug ; Something is not working\n84b6eb enhancement\n"), 0o600))
-	require.NoError(t, Execute(context.Background(), deps, []string{"label", "create", "-R", "alice/project", "--file", file, "--yes"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"label", "import", "-R", "alice/project", file, "--yes"}))
 	require.Len(t, created, 2)
 	requirePayload(t, `{"name":"bug","color":"ee0701","description":"Something is not working"}`, strings.NewReader(created[0]))
 	requirePayload(t, `{"name":"enhancement","color":"84b6eb"}`, strings.NewReader(created[1]))

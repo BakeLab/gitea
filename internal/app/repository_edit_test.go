@@ -7,9 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -24,19 +22,19 @@ func TestRepositoryEditPreservesExplicitClearsAndFalse(t *testing.T) {
 		case "GET /api/v1/repos/alice/project/branches/main":
 			_, _ = w.Write([]byte(`{"name":"main"}`))
 		case "PATCH /api/v1/repos/alice/project":
-			requirePayload(t, `{"name":"renamed","website":"","default_branch":"main","archived":false,"private":false,"template":false,"has_actions":false,"has_wiki":false,"default_merge_style":"squash"}`, r.Body)
-			_, _ = w.Write([]byte(`{"name":"renamed","full_name":"alice/renamed","website":"","default_branch":"main"}`))
-		case "GET /api/v1/repos/alice/renamed":
-			_, _ = w.Write([]byte(`{"name":"renamed","full_name":"alice/renamed","website":"","default_branch":"main"}`))
+			requirePayload(t, `{"website":"","default_branch":"main","private":false,"template":false,"has_actions":false,"has_wiki":false,"default_merge_style":"squash"}`, r.Body)
+			_, _ = w.Write([]byte(`{"name":"project","full_name":"alice/project","website":"","default_branch":"main"}`))
+		case "GET /api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(`{"name":"project","full_name":"alice/project","website":"","default_branch":"main"}`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
 	}))
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "edit", "-R", "alice/project", "--name", "renamed", "--website=", "--default-branch", "main", "--archived=false", "--private=false", "--as-template=false", "--actions=false", "--enable-wiki=false", "--default-merge-style", "squash", "--json=name,website,default_branch"}))
-	require.JSONEq(t, `{"name":"renamed","website":"","default_branch":"main"}`, out.String())
-	require.Equal(t, []string{"GET /api/v1/repos/alice/project/branches/main", "PATCH /api/v1/repos/alice/project", "GET /api/v1/repos/alice/renamed"}, requests)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "edit", "-R", "alice/project", "--website=", "--default-branch", "main", "--private=false", "--as-template=false", "--actions=false", "--enable-wiki=false", "--default-merge-style", "squash", "--json=name,website,default_branch"}))
+	require.JSONEq(t, `{"name":"project","website":"","default_branch":"main"}`, out.String())
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/branches/main", "PATCH /api/v1/repos/alice/project", "GET /api/v1/repos/alice/project"}, requests)
 }
 
 func TestRepositoryEditRejectsAMissingDefaultBranch(t *testing.T) {
@@ -77,28 +75,6 @@ func TestRepositoryEditReportsTheChangedSettings(t *testing.T) {
 	require.Equal(t, "✓ Edited repository alice/project (add-topic, description, remove-topic, visibility)\n", diagnostics.String())
 }
 
-func TestRepositoryEditArchivesAfterTheOtherChanges(t *testing.T) {
-	var requests []string
-	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, _ := io.ReadAll(r.Body)
-		request := r.Method + " " + r.URL.Path
-		if strings.Contains(string(data), `"archived":true`) {
-			request += " archived"
-		}
-		requests = append(requests, request)
-		_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
-	}))
-	defer server.Close()
-	deps, _, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "edit", "alice/project", "-d", "CLI", "--archived", "--add-topic", "cli", "--yes"}))
-	require.Equal(t, []string{
-		"GET /api/v1/repos/alice/project/topics",
-		"PATCH /api/v1/repos/alice/project",
-		"PUT /api/v1/repos/alice/project/topics",
-		"PATCH /api/v1/repos/alice/project archived",
-	}, requests)
-}
-
 func TestRepositoryEditSetsTheDefaultBranchOfAnEmptyRepository(t *testing.T) {
 	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,18 +93,6 @@ func TestRepositoryEditSetsTheDefaultBranchOfAnEmptyRepository(t *testing.T) {
 	deps, _, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "edit", "alice/project", "--default-branch", "develop"}))
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/branches/develop", "GET /api/v1/repos/alice/project", "PATCH /api/v1/repos/alice/project"}, requests)
-}
-
-func TestRepositoryEditArchiveRequiresAnExplicitRepositoryWithYes(t *testing.T) {
-	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
-	}))
-	defer server.Close()
-	deps, _, _ := serverDeps(t, server.URL)
-	deps.Git = upstreamCheckout(server)
-	err := Execute(context.Background(), deps, []string{"repo", "edit", "--archived", "--yes"})
-	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
-	require.ErrorContains(t, err, "--yes requires an explicit repository, not one inferred from git remote upstream")
 }
 
 func TestRepositoryEditChecksTopicsBeforeChangingAnything(t *testing.T) {

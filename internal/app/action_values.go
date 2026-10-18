@@ -267,7 +267,6 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 	cmd.Flags().StringVarP(&bodyFile, "body-file", "F", "", "Read the value from a file, or - for standard input")
 	cmd.Flags().StringVarP(&envFile, "env-file", "f", "", "Set every NAME=value of a dotenv file, or - for standard input")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Description")
-	flagAliases(cmd, map[string]string{"value": "body", "value-file": "body-file"})
 	scope.register(a, cmd, kind, true)
 	cmd.ValidArgsFunction = a.completeActionValues(secret, &scope)
 	return cmd

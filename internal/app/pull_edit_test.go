@@ -64,7 +64,7 @@ func TestPullEditAddsAssigneesWithoutExtraReads(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "edit", "7", "-R", "alice/project", "--add-assignees", "bob,Alice", "--json=number"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "edit", "7", "-R", "alice/project", "--add-assignee", "bob,Alice", "--json=number"}))
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/issues/7", "PATCH /api/v1/repos/alice/project/pulls/7"}, calls)
 }
 

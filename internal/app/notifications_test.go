@@ -28,7 +28,7 @@ func TestNotificationBoundsShareClockAndReachServer(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	reads := 0
 	deps.Now = func() time.Time { reads++; return now }
-	err := Execute(context.Background(), deps, []string{"notification", "list", "--mine", "--since=24h", "--before=1h", "--json"})
+	err := Execute(context.Background(), deps, []string{"notification", "list", "--since=24h", "--before=1h", "--json"})
 	require.NoError(t, err)
 	require.Equal(t, 1, reads)
 	require.Equal(t, 1, calls)

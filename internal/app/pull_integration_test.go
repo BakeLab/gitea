@@ -42,14 +42,14 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	deps.Streams.In = strings.NewReader("{\"branch\":\"feature\",\"content\":\"dGVzdAo=\",\"message\":\"Disposable PR change\"}")
 	execute("api", "repos/"+repo.FullName+"/contents/change.txt", "--input", "-")
 	var label services.Label
-	require.NoError(t, json.Unmarshal(execute("label", "create", "--name", "review", "--color", "00ff00", "-R", repo.FullName, "--json"), &label))
+	require.NoError(t, json.Unmarshal(execute("label", "create", "review", "--color", "00ff00", "-R", repo.FullName, "--json"), &label))
 	exportPath := filepath.Join(t.TempDir(), "labels.txt")
-	execute("label", "export", "-R", repo.FullName, "--output-file", exportPath)
+	execute("label", "export", "-R", repo.FullName, "--output", exportPath)
 	exported, err := os.ReadFile(exportPath)
 	require.NoError(t, err)
 	require.Contains(t, string(exported), "#00ff00 review\n")
 	jsonExportPath := exportPath + ".json"
-	execute("label", "export", "-R", repo.FullName, "--output-file", jsonExportPath, "--json")
+	execute("label", "export", "-R", repo.FullName, "--output", jsonExportPath, "--json")
 	jsonExport, err := os.ReadFile(jsonExportPath)
 	require.NoError(t, err)
 	var exportedLabels []services.Label
@@ -93,7 +93,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 		}
 	}
 	var pull services.Pull
-	require.NoError(t, json.Unmarshal(executeWithEditorIntegration(t, deps, "", "Editor PR body", "pr", "create", "-R", repo.FullName, "--title", "[wip] Initial", "--head", "feature", "--base", repo.DefaultBranch, "--deadline", "2028-01-15", "--assignee", strings.SplitN(repo.FullName, "/", 2)[0], "--label", "review", "--milestone-name", milestone.Title), &pull))
+	require.NoError(t, json.Unmarshal(executeWithEditorIntegration(t, deps, "", "Editor PR body", "pr", "create", "-R", repo.FullName, "--title", "[wip] Initial", "--head", "feature", "--base", repo.DefaultBranch, "--deadline", "2028-01-15", "--assignee", strings.SplitN(repo.FullName, "/", 2)[0], "--label", "review", "--milestone", milestone.Title), &pull))
 	require.Equal(t, []services.Label{label}, pull.Labels)
 	require.Equal(t, []string{strings.SplitN(repo.FullName, "/", 2)[0]}, pull.Assignees)
 	require.Equal(t, &services.IssueMilestone{ID: milestone.ID, Title: milestone.Title}, pull.Milestone)
@@ -170,7 +170,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--set-labels=", "--json"), &pull))
 	require.Empty(t, pull.Labels)
 	require.NotNil(t, pull.Labels)
-	require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--ready", "--body", "Updated", "--milestone-name", milestone.Title, "--allow-maintainer-edit=false", "--json"), &pull))
+	require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--ready", "--body", "Updated", "--milestone", milestone.Title, "--allow-maintainer-edit=false", "--json"), &pull))
 	require.Equal(t, "Initial", pull.Title)
 	require.Equal(t, "Updated", pull.Body)
 	execute("pr", "edit", n, "-R", repo.FullName, "--milestone=0", "--body=", "--set-assignees=", "--draft", "--deadline=")
@@ -192,7 +192,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.Nil(t, pull.Deadline)
 	var issue services.Issue
 	owner, _, _ := strings.Cut(repo.FullName, "/")
-	require.NoError(t, json.Unmarshal(execute("issue", "create", "-R", repo.FullName, "--title", "Deadline fixture", "--deadline", "2028-01-15", "--ref", "feature", "--assignee", owner, "--milestone-name", milestone.Title, "--json"), &issue))
+	require.NoError(t, json.Unmarshal(execute("issue", "create", "-R", repo.FullName, "--title", "Deadline fixture", "--deadline", "2028-01-15", "--ref", "feature", "--assignee", owner, "--milestone", milestone.Title, "--json"), &issue))
 	require.NotNil(t, issue.Deadline)
 	require.Equal(t, "feature", issue.Ref)
 	require.Equal(t, []string{owner}, issue.Assignees)
@@ -243,10 +243,10 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.NoError(t, json.Unmarshal(execute("pr", "review", "comments", n, "-R", repo.FullName, "--json"), &comments))
 	require.Empty(t, comments[0].Resolver)
 	var pending services.Review
-	require.NoError(t, json.Unmarshal(execute("pr", "review", n, "-R", repo.FullName, "--event", "PENDING", "--body", "Preserved draft text", "--json"), &pending))
+	require.NoError(t, json.Unmarshal(execute("pr", "review", n, "-R", repo.FullName, "--pending", "--body", "Preserved draft text", "--json"), &pending))
 	require.Equal(t, "PENDING", pending.State)
 	var submitted services.Review
-	require.NoError(t, json.Unmarshal(executeWithEditorIntegration(t, deps, pending.Body, "Edited draft text", "pr", "review", "submit", n, fmt.Sprint(pending.ID), "-R", repo.FullName, "--event", "COMMENT"), &submitted))
+	require.NoError(t, json.Unmarshal(executeWithEditorIntegration(t, deps, pending.Body, "Edited draft text", "pr", "review", "submit", n, fmt.Sprint(pending.ID), "-R", repo.FullName, "--comment"), &submitted))
 	require.Equal(t, "COMMENT", submitted.State)
 	require.Equal(t, "Edited draft text", submitted.Body)
 	out.Reset()
@@ -266,7 +266,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 		deps.Streams.In = strings.NewReader(`{"permission":"write"}`)
 		execute("api", "repos/"+repo.FullName+"/collaborators/"+reviewer.Login, "--method", "PUT", "--input", "-")
 		var requested services.Pull
-		require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--add-reviewers", reviewer.Login, "--json"), &requested))
+		require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--add-reviewer", reviewer.Login, "--json"), &requested))
 		require.Contains(t, requested.Reviewers, reviewer.Login)
 		require.Empty(t, requested.ReviewerTeams)
 		out.Reset()
@@ -280,12 +280,12 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 		require.NotContains(t, requested.Reviewers, reviewer.Login)
 		require.NoError(t, json.Unmarshal(execute("pr", "review", "request", n, "-R", repo.FullName, "--reviewer", reviewer.Login, "--json"), &requested))
 		require.Contains(t, requested.Reviewers, reviewer.Login)
-		require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--remove-reviewers", reviewer.Login, "--body", "Updated alongside review request", "--json"), &requested))
+		require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--remove-reviewer", reviewer.Login, "--body", "Updated alongside review request", "--json"), &requested))
 		require.NotContains(t, requested.Reviewers, reviewer.Login)
 		require.Equal(t, "Updated alongside review request", requested.Body)
 		execute("pr", "review", "request", n, "-R", repo.FullName, "--reviewer", reviewer.Login)
 		out.Reset()
-		require.NoError(t, Execute(context.Background(), reviewerDeps, []string{"pr", "review", n, "-R", repo.FullName, "--event", "APPROVED", "--json"}))
+		require.NoError(t, Execute(context.Background(), reviewerDeps, []string{"pr", "review", n, "-R", repo.FullName, "--approve", "--json"}))
 		var approval services.Review
 		require.NoError(t, json.Unmarshal(out.Bytes(), &approval))
 		require.Equal(t, "APPROVED", approval.State)
@@ -333,14 +333,14 @@ func testTeamReviewRequests(t *testing.T, deps *Dependencies, execute func(...st
 	var pull services.Pull
 	require.NoError(t, json.Unmarshal(execute("pr", "create", "-R", repo.FullName, "--title", "Team review fixture", "--head", "feature", "--base", repo.DefaultBranch, "--json"), &pull))
 	n := fmt.Sprint(pull.Number)
-	require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--add-reviewer-teams", team.Name, "--json"), &pull))
+	require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--add-reviewer-team", team.Name, "--json"), &pull))
 	require.Equal(t, []string{team.Name}, pull.ReviewerTeams)
 	require.Empty(t, pull.Reviewers)
 	require.NoError(t, json.Unmarshal(execute("pr", "review", "cancel-request", n, "-R", repo.FullName, "--team", team.Name, "--json"), &pull))
 	require.Empty(t, pull.ReviewerTeams)
 	require.NoError(t, json.Unmarshal(execute("pr", "review", "request", n, "-R", repo.FullName, "--team", team.Name, "--json"), &pull))
 	require.Equal(t, []string{team.Name}, pull.ReviewerTeams)
-	require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--remove-reviewer-teams", team.Name, "--json"), &pull))
+	require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--remove-reviewer-team", team.Name, "--json"), &pull))
 	require.Empty(t, pull.ReviewerTeams)
 }
 

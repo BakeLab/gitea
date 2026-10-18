@@ -36,7 +36,7 @@ func TestLabelExportReadsAllPagesAndPublishesOnlyCompleteFiles(t *testing.T) {
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
 	output := filepath.Join(t.TempDir(), "labels.txt")
-	args := []string{"label", "export", "-R", "alice/project", "--output-file", output}
+	args := []string{"label", "export", "-R", "alice/project", "--output", output}
 	require.NoError(t, Execute(context.Background(), deps, args))
 	require.Empty(t, out.String())
 	require.Equal(t, []string{"1", "2", "3"}, pages)
@@ -65,7 +65,7 @@ func TestLabelJSONExportPreservesTextAndTextFailureLeavesNoFile(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	directory := t.TempDir()
 	output := filepath.Join(directory, "labels.txt")
-	args := []string{"label", "export", "-R", "alice/project", "--output-file", output}
+	args := []string{"label", "export", "-R", "alice/project", "--output", output}
 	require.ErrorContains(t, Execute(context.Background(), deps, args), "label export --json")
 	entries, err := os.ReadDir(directory)
 	require.NoError(t, err)
@@ -82,7 +82,7 @@ func TestEmptyLabelJSONExportIsAnArray(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`[]`)) }))
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"label", "export", "-R", "alice/project", "--output-file", "-", "--json"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"label", "export", "-R", "alice/project", "--output", "-", "--json"}))
 	require.JSONEq(t, `[]`, out.String())
 	require.Empty(t, diagnostics.String())
 }

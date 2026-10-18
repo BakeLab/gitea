@@ -327,7 +327,6 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 	flags.StringSliceVarP(&labelNames, "label", "l", nil, "Add labels by `name`; prefix repo: or org: to disambiguate")
 	flags.StringSliceVarP(&assignees, "assignee", "a", nil, "Assign people by their `login`; @me for yourself")
 	flags.StringVarP(&milestone, "milestone", "m", "", "Add the issue to a milestone by `title` or ID")
-	flagAliases(cmd, map[string]string{"milestone-name": "milestone"})
 	flags.StringVarP(&templateName, "template", "T", "", "Start from the repository issue template with this `name`")
 	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to")
 	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339, or Unix timestamp")
@@ -556,8 +555,7 @@ type metadataFlags struct {
 	setAssignees, addAssignees, removeAssignees []string
 }
 
-// register adds the flags under their gh names, --add-label and so on, and keeps the plural
-// names working.
+// register adds the flags under their gh names, --add-label and so on.
 func (f *metadataFlags) register(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	flags.StringSliceVar(&f.addLabels, "add-label", nil, "Add labels by `name`; prefix repo: or org: to disambiguate")

@@ -72,9 +72,9 @@ func TestNameFlagsAreTrimmed(t *testing.T) {
 	deps, _, diagnostics := serverDeps(t, server.URL)
 	for _, args := range [][]string{
 		{"issue", "create", "--title", "Title", "--assignee", " alice, bob ", "--label", " bug", "--no-input"},
-		{"issue", "edit", "1", "--add-assignees", " alice"},
+		{"issue", "edit", "1", "--add-assignee", " alice"},
 		{"pr", "review", "request", "1", "--reviewer", " alice"},
-		{"pr", "edit", "1", "--add-reviewers", "bob "},
+		{"pr", "edit", "1", "--add-reviewer", "bob "},
 		{"pr", "create", "--title", "Title", "--head", "feature", "--base", "main", "--reviewer", " dave", "--no-input"},
 	} {
 		require.NoError(t, Execute(context.Background(), deps, append(args, "-R", "owner/repo", "--json=number")), args)

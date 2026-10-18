@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -116,6 +117,12 @@ func TestBodySourcesRejectInvalidInputBeforeAuthentication(t *testing.T) {
 				{"--editor", "--body", "text"},
 				{"--editor", "--body-file", "missing.md"},
 			} {
+				if command[0] == "release" {
+					input = slices.Clone(input)
+					for i, arg := range input {
+						input[i] = strings.Replace(arg, "--body", "--notes", 1)
+					}
+				}
 				want := "mutually exclusive"
 				if len(input) == 1 {
 					want = "--body-file must name a file or -"
@@ -303,7 +310,7 @@ func TestReviewLifecycleEditorRejectsEmptyRequiredText(t *testing.T) {
 			deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "editor"})
 			args := []string{"pr", "review", verb, "3", "7", "--repo", "alice/project", "--editor", "--no-input", "--yes"}
 			if verb == "submit" {
-				args = append(args, "--event", "REQUEST_CHANGES")
+				args = append(args, "--request-changes")
 			}
 			err := Execute(context.Background(), deps, args)
 			require.Equal(t, clierr.Usage, clierr.ExitCode(err))

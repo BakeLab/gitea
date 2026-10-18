@@ -115,7 +115,6 @@ $ gt time list --mine --since 168h`, Args: argsExact(0), RunE: func(cmd *cobra.C
 	cmd.Flags().StringVar(&opts.Username, "username", "", "List the time of one `user`; @me for yourself")
 	pageFlags(cmd, &opts.Limit, &opts.Page)
 	tracked.register(cmd, "since", "Only time tracked since a date, timestamp, or duration ago", "until", "Only time tracked before a date, timestamp, or duration ago")
-	flagAliases(cmd, map[string]string{"from": "since"})
 	cmd.Flags().BoolVar(&total, "total", false, "Print the total of the listed time also when piped")
 	_ = cmd.RegisterFlagCompletionFunc("issue", a.completeIssues("all"))
 	_ = cmd.RegisterFlagCompletionFunc("username", a.completeUsers())

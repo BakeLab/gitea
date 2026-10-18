@@ -115,7 +115,6 @@ $ gt issue edit 12 --remove-label wontfix --remove-milestone`, Annotations: map[
 	metadata.register(cmd)
 	flags.StringVarP(&milestone, "milestone", "m", "", "Move the issue to a milestone by `title` or ID")
 	flags.BoolVar(&removeMilestone, "remove-milestone", false, "Remove the issue from its milestone")
-	flagAliases(cmd, map[string]string{"milestone-name": "milestone"})
 	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to; empty clears it")
 	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339, or Unix timestamp; empty clears it")
 	a.completeMetadataFlags(cmd)

@@ -46,33 +46,19 @@ func argumentsAnnotation(annotations map[string]string, text string) map[string]
 	return annotations
 }
 
-// reviewStates maps the review types --event accepts onto the API's review states.
-var reviewStates = map[string]string{
-	"approve": "APPROVED", "approved": "APPROVED",
-	"request-changes": "REQUEST_CHANGES", "request_changes": "REQUEST_CHANGES",
-	"comment": "COMMENT", "pending": "PENDING",
-}
-
 type reviewType struct {
 	approve, requestChanges, comment, pending bool
-	// event is the hidden spelling of the type that gt 0.x and scripts use.
-	event string
 }
 
-// register adds -a, -r, -c, --pending when pending is set, and the hidden --event to cmd.
+// register adds -a, -r, -c, --pending when pending is set, to cmd.
 func (r *reviewType) register(cmd *cobra.Command, pending bool) {
 	flags := cmd.Flags()
 	flags.BoolVarP(&r.approve, "approve", "a", false, "Approve the pull request")
 	flags.BoolVarP(&r.requestChanges, "request-changes", "r", false, "Request changes (requires a body)")
 	flags.BoolVarP(&r.comment, "comment", "c", false, "Comment without approving (requires a body or inline comments)")
-	values := []string{"approve", "approved", "request-changes", "request_changes", "comment"}
 	if pending {
 		flags.BoolVar(&r.pending, "pending", false, "Save the review as pending, to submit later with gt pr review submit")
-		values = append(values, "pending")
 	}
-	flags.StringVar(&r.event, "event", "", "Review type")
-	enumValues(cmd, "event", values...)
-	_ = flags.MarkHidden("event")
 }
 
 // state returns the API state of the chosen review type, or "" when none was chosen.
@@ -82,9 +68,6 @@ func (r reviewType) state() (string, error) {
 		if chosen {
 			states = append(states, state)
 		}
-	}
-	if r.event != "" {
-		states = append(states, reviewStates[strings.ToLower(r.event)])
 	}
 	switch len(states) {
 	case 0:

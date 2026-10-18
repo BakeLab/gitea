@@ -94,7 +94,6 @@ var repositorySwitches = []struct {
 	{"allow-squash", "Allow squash merging pull requests", func(e *services.RepositoryEdit) **bool { return &e.Squash }},
 	{"allow-rebase", "Allow rebase merging pull requests", func(e *services.RepositoryEdit) **bool { return &e.Rebase }},
 	{"delete-branch-on-merge", "Delete head branches after merging pull requests", func(e *services.RepositoryEdit) **bool { return &e.DeleteBranch }},
-	{"archived", "Archive the repository (=false unarchives it)", func(e *services.RepositoryEdit) **bool { return &e.Archived }},
 }
 
 // validTopic is the form Gitea accepts for a lowercased topic name.
@@ -120,7 +119,7 @@ func finalTopics(current, add, remove []string) []string {
 }
 
 func (a *application) repoEditCommand() *cobra.Command {
-	var name, website, defaultBranch, description, visibility, mergeStyle string
+	var website, defaultBranch, description, visibility, mergeStyle string
 	var addTopics, removeTopics []string
 	switches := make([]bool, len(repositorySwitches))
 	command := &cobra.Command{
@@ -153,7 +152,7 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 				flag  string
 				value *string
 				into  **string
-			}{{"name", &name, &options.Name}, {"default-branch", &defaultBranch, &options.DefaultBranch}, {"default-merge-style", &mergeStyle, &options.MergeStyle}} {
+			}{{"default-branch", &defaultBranch, &options.DefaultBranch}, {"default-merge-style", &mergeStyle, &options.MergeStyle}} {
 				if changed(field.flag) {
 					if strings.TrimSpace(*field.value) == "" {
 						return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be empty", field.flag))
@@ -218,18 +217,7 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 				}
 				setTopics = !slices.Equal(slices.Sorted(slices.Values(topics)), slices.Sorted(slices.Values(finalTopics(current, nil, nil))))
 			}
-			// Gitea refuses topic changes on an archived repository, so archiving comes last.
-			repo, archive := t.Repo, options.Archived != nil && *options.Archived
-			if archive {
-				inferred, err := a.inferredRepository(t, "archive", true)
-				if err != nil {
-					return err
-				}
-				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Archive " + t.Repo + inferred + "? It becomes read-only."}); err != nil {
-					return err
-				}
-				options.Archived = nil
-			}
+			repo := t.Repo
 			settings := options != (services.RepositoryEdit{})
 			if settings {
 				item, err := service.Edit(cmd.Context(), t.Repo, options)
@@ -244,14 +232,6 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 						return fmt.Errorf("repository settings were changed, but setting the topics failed: %w", err)
 					}
 					return fmt.Errorf("set topics: %w", err)
-				}
-			}
-			if archive {
-				if _, err := service.Edit(cmd.Context(), repo, services.RepositoryEdit{Archived: &archive}); err != nil {
-					if settings || setTopics {
-						return fmt.Errorf("the other changes were applied, but archiving failed: %w", err)
-					}
-					return err
 				}
 			}
 			var edited []string
@@ -273,8 +253,6 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 		},
 	}
 	flags := command.Flags()
-	flags.StringVar(&name, "name", "", "Rename the repository")
-	_ = flags.MarkHidden("name")
 	flags.StringVarP(&description, "description", "d", "", "Repository description")
 	flags.StringVar(&website, "website", "", "Repository website (empty clears it)")
 	flags.StringVar(&defaultBranch, "default-branch", "", "Default branch; it must exist")
@@ -285,7 +263,6 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 	for i, toggle := range repositorySwitches {
 		flags.BoolVar(&switches[i], toggle.flag, false, toggle.usage)
 	}
-	_ = flags.MarkHidden("archived")
 	_ = command.RegisterFlagCompletionFunc("default-branch", a.completeBranches())
 	command.ValidArgsFunction = a.completeRepos()
 	return command

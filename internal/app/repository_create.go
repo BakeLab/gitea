@@ -51,9 +51,6 @@ $ gt repo create project --source . --push`,
 		Args: usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
-				if cmd.Flags().Changed("name") {
-					return clierr.Wrap(clierr.Usage, errors.New("supply name as an argument or --name, not both"))
-				}
 				opts.Name = args[0]
 			}
 			if err := a.rejectRepoFlag(cmd, func(owner string) string { return "gt repo create " + owner + "/" + cmp.Or(opts.Name, "NAME") }); err != nil {
@@ -166,8 +163,6 @@ $ gt repo create project --source . --push`,
 		},
 	}
 	flags := command.Flags()
-	flags.StringVar(&opts.Name, "name", "", "Repository name")
-	_ = flags.MarkHidden("name")
 	flags.StringVar(&org, "org", "", "Create the repository in this organization")
 	flags.StringVar(&team, "team", "", "Grant this organization team access")
 	flags.BoolVar(&clone, "clone", false, "Clone the new repository into the current directory")

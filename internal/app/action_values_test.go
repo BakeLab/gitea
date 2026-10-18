@@ -33,7 +33,7 @@ func TestSecretValueFileDropsTrailingLineEnding(t *testing.T) {
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
 	deps.Streams.In = strings.NewReader("sensitive\r\n")
-	require.NoError(t, Execute(context.Background(), deps, []string{"secret", "set", "BUILD_TOKEN", "-R", "alice/project", "--value-file", "-", "--yes"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"secret", "set", "BUILD_TOKEN", "-R", "alice/project", "--body-file", "-", "--yes"}))
 	require.Equal(t, "sensitive", stored)
 }
 

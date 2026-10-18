@@ -24,8 +24,8 @@ func TestLoadDoesNotCreateFiles(t *testing.T) {
 	require.True(t, errors.Is(err, os.ErrNotExist))
 }
 
-func TestLegacyAndMalformedFilesAreNeverOverwritten(t *testing.T) {
-	for _, input := range []string{"logins: []\npreferences: {}\n", "version: '2'\n", "version: '1'\nunknown: true\n", "version: '1'\n---\nversion: '1'\n", "version: '1'\nprompt: nonsense\n", "bad: ["} {
+func TestMalformedFilesAreNeverOverwritten(t *testing.T) {
+	for _, input := range []string{"version: '2'\n", "version: '1'\nunknown: true\n", "version: '1'\n---\nversion: '1'\n", "version: '1'\nprompt: nonsense\n", "bad: ["} {
 		t.Run(input, func(t *testing.T) {
 			s := New(t.TempDir())
 			file := filepath.Join(s.Dir, "config.yml")
@@ -41,18 +41,6 @@ func TestLegacyAndMalformedFilesAreNeverOverwritten(t *testing.T) {
 			require.True(t, errors.Is(err, os.ErrNotExist))
 		})
 	}
-	t.Run("legacy gt.yml", func(t *testing.T) {
-		home := t.TempDir()
-		legacy := filepath.Join(home, ".gt", "gt.yml")
-		require.NoError(t, os.MkdirAll(filepath.Dir(legacy), 0o700))
-		require.NoError(t, os.WriteFile(legacy, []byte("logins: []\n"), 0o600))
-		s := &Store{Dir: filepath.Join(home, "config", "gt"), LegacyPath: legacy}
-		_, err := s.Load()
-		require.ErrorIs(t, err, ErrLegacy)
-		require.ErrorIs(t, s.Update(TargetPreferences, func(snapshot *Snapshot) error { snapshot.Preferences.Editor = "vi"; return nil }), ErrLegacy)
-		_, err = os.Stat(s.Dir)
-		require.True(t, errors.Is(err, os.ErrNotExist))
-	})
 }
 
 func TestNormalizeHost(t *testing.T) {

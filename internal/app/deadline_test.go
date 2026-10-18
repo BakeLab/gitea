@@ -52,7 +52,7 @@ func TestAmbiguousNumericDeadlinesAreRejected(t *testing.T) {
 
 func TestInvalidDeadlineBeforeInputCollectionOrNetwork(t *testing.T) {
 	for _, value := range []string{"bad", "2026-02-30", "0", "not-a-timestamp", "999999999999999999999999999999999999"} {
-		for _, command := range [][]string{{"issue", "edit", "1"}, {"pr", "edit", "1", "--add-reviewers=alice"}, {"issue", "create"}, {"pr", "create"}} {
+		for _, command := range [][]string{{"issue", "edit", "1"}, {"pr", "edit", "1", "--add-reviewer=alice"}, {"issue", "create"}, {"pr", "create"}} {
 			requireUsageBeforeRequests(t, "invalid --deadline", append(command, "--deadline="+value)...)
 		}
 	}

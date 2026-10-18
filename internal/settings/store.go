@@ -29,9 +29,6 @@ const Version = "1"
 // LockTimeout bounds the wait for another process's settings update or token refresh.
 const LockTimeout = 30 * time.Second
 
-// ErrLegacy prevents overwriting the old combined login configuration.
-var ErrLegacy = errors.New("legacy gt configuration: archive the old config.yml or select a separate GITEA_CLI_CONFIG_DIR, then run gt auth login; existing files have not been changed")
-
 // Authentication methods and credential stores recorded for accounts.
 const (
 	AuthToken    = "token"
@@ -100,9 +97,8 @@ type Snapshot struct {
 
 // Store coordinates configuration reads and locked atomic updates.
 type Store struct {
-	Dir        string
-	LegacyPath string
-	mu         sync.Mutex
+	Dir string
+	mu  sync.Mutex
 	// generation counts the updates made through the store.
 	generation atomic.Uint64
 }
@@ -113,12 +109,10 @@ func (s *Store) Generation() uint64 { return s.generation.Load() }
 
 // New selects an explicit directory or the platform configuration directory.
 func New(dir string) *Store {
-	legacy := ""
 	if dir == "" {
 		dir = filepath.Join(xdg.ConfigHome, "gitea-cli")
-		legacy = filepath.Join(xdg.Home, ".gt", "gt.yml")
 	}
-	return &Store{Dir: dir, LegacyPath: legacy}
+	return &Store{Dir: dir}
 }
 
 // Defaults returns a fresh preferences value with built-in settings.
@@ -191,23 +185,10 @@ func (s *Store) Load() (Snapshot, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return snapshot, err
 	}
-	if errors.Is(err, os.ErrNotExist) && s.LegacyPath != "" {
-		if _, legacyErr := os.Stat(s.LegacyPath); legacyErr == nil {
-			return snapshot, ErrLegacy
-		} else if !errors.Is(legacyErr, os.ErrNotExist) {
-			return snapshot, legacyErr
-		}
-	}
 	if err == nil {
 		var keys map[string]yaml.Node
 		if err := yaml.Unmarshal(data, &keys); err != nil {
 			return snapshot, fmt.Errorf("parse %s: %w", configPath, err)
-		}
-		if _, ok := keys["logins"]; ok {
-			return snapshot, ErrLegacy
-		}
-		if _, ok := keys["preferences"]; ok {
-			return snapshot, ErrLegacy
 		}
 		version, ok := keys["version"]
 		if !ok || version.Value != Version {

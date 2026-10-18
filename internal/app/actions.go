@@ -157,7 +157,7 @@ func (a *application) renderWorkflow(t target, workflow services.Workflow, runs 
 
 func (a *application) workflowRunCommand() *cobra.Command {
 	var ref string
-	var fields, inputs []string
+	var fields []string
 	var follow bool
 	var interval, timeout time.Duration
 	cmd := &cobra.Command{
@@ -190,7 +190,7 @@ $ gt workflow run nightly --follow`,
 			if interval <= 0 || timeout <= 0 {
 				return clierr.Wrap(clierr.Usage, errors.New("--interval and --timeout must be positive"))
 			}
-			values, err := inputValues(append(fields, inputs...))
+			values, err := inputValues(fields)
 			if err != nil {
 				return err
 			}
@@ -224,7 +224,7 @@ $ gt workflow run nightly --follow`,
 			if err != nil {
 				return err
 			}
-			if values, err = a.dispatchValues(cmd, workflow, declared, values, len(fields)+len(inputs) == 0); err != nil {
+			if values, err = a.dispatchValues(cmd, workflow, declared, values, len(fields) == 0); err != nil {
 				return err
 			}
 			result, err := service.Dispatch(cmd.Context(), workflow.ID, ref, values)
@@ -266,15 +266,12 @@ $ gt workflow run nightly --follow`,
 	}
 	cmd.Flags().StringVarP(&ref, "ref", "r", "", "Branch or tag to run the workflow on (default: the current or default branch)")
 	cmd.Flags().StringArrayVarP(&fields, "field", "f", nil, "Workflow input as `key=value` (repeatable)")
-	cmd.Flags().StringArrayVarP(&inputs, "input", "i", nil, "Alias of --field")
-	_ = cmd.Flags().MarkHidden("input")
 	cmd.Flags().BoolVar(&follow, "follow", false, "Follow the logs of the run's jobs after dispatching it")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "Polling interval with --follow")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to follow")
 	cmd.ValidArgsFunction = firstArg(a.completeWorkflows())
 	_ = cmd.RegisterFlagCompletionFunc("ref", a.completeBranches())
 	_ = cmd.RegisterFlagCompletionFunc("field", a.completeWorkflowInputs())
-	_ = cmd.RegisterFlagCompletionFunc("input", a.completeWorkflowInputs())
 	return cmd
 }
 

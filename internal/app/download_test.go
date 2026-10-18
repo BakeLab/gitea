@@ -179,10 +179,9 @@ func TestDownloadFlagsRegisterGhNames(t *testing.T) {
 	flags.register(cmd)
 	require.NoError(t, cmd.Flags().Parse([]string{"-O", "file", "--clobber"}))
 	require.Equal(t, downloadFlags{output: "file", clobber: true}, flags)
-	require.NoError(t, cmd.Flags().Parse([]string{"--output-file", "legacy", "-D", "dir", "--skip-existing"}))
-	require.Equal(t, "legacy", flags.output)
+	require.NoError(t, cmd.Flags().Parse([]string{"--output", "other", "-D", "dir", "--skip-existing"}))
+	require.Equal(t, "other", flags.output)
 	require.Equal(t, "dir", flags.dir)
-	require.True(t, cmd.Flags().Lookup("output-file").Hidden)
 }
 
 func TestDownloadCreatesTheMissingDirectory(t *testing.T) {

@@ -99,7 +99,6 @@ repository with --repo. Words of the query match titles and bodies.`, nouns), Ex
 	flags.StringSliceVarP(&labels, "label", "l", nil, "Filter by label `names`")
 	flags.StringVarP(&opts.Milestones, "milestone", "m", "", "Filter by milestone `titles`, comma-separated")
 	updated.register(command, "since", "Updated since a date, timestamp, or duration ago", "until", "Updated before a date, timestamp, or duration ago")
-	flagAliases(command, map[string]string{"before": "until"})
 	flags.BoolVar(&opts.Assigned, "assigned", false, "Assigned to you")
 	flags.BoolVar(&opts.Authored, "authored", false, "Created by you")
 	flags.BoolVar(&opts.Mentioned, "mentioned", false, "Mentioning you")

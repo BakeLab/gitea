@@ -60,7 +60,7 @@ func TestIssueEditMergesAssigneesWithOneRead(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "7", "-R", "alice/project", "--add-assignees", "carol,carol", "--remove-assignees", "bob", "--json"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "7", "-R", "alice/project", "--add-assignee", "carol,carol", "--remove-assignee", "bob", "--json"}))
 	require.Equal(t, 1, reads)
 	require.Equal(t, []any{"alice", "carol"}, patched)
 }

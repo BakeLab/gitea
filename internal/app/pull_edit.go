@@ -143,7 +143,6 @@ pull request, or mark it as a draft or ready for review.`, Annotations: pullArgu
 	cmd.Flags().StringSliceVar(&reviewers.Remove.Users, "remove-reviewer", nil, "Withdraw review requests from users")
 	cmd.Flags().StringSliceVar(&reviewers.Add.Teams, "add-reviewer-team", nil, "Request reviews from teams of the repository's organization")
 	cmd.Flags().StringSliceVar(&reviewers.Remove.Teams, "remove-reviewer-team", nil, "Withdraw review requests from teams")
-	flagAliases(cmd, map[string]string{"milestone-name": "milestone"})
 	for _, name := range []string{"add-reviewer", "remove-reviewer"} {
 		_ = cmd.RegisterFlagCompletionFunc(name, a.completeUsers())
 	}

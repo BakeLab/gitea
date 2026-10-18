@@ -52,6 +52,5 @@ $ gt label export -R alice/old | gt label import - -R alice/new`, Args: argsExac
 		})
 	}}
 	command.Flags().StringVarP(&output, "output", "O", "", "Write to a new `file` instead of standard output")
-	flagAliases(command, map[string]string{"output-file": "output"})
 	return command
 }

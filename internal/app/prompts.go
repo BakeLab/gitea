@@ -55,8 +55,8 @@ func (a *application) requireInput(cmd *cobra.Command, value *string, flag, labe
 	if err != nil {
 		return false, err
 	}
-	if hidden := cmd.Flags().Lookup(flag); *value == "" && hidden != nil && hidden.Hidden && !a.policy(s).CanPrompt(a.deps.Streams) {
-		// --help does not list the flag, so point at the argument it stands in for.
+	if named := cmd.Flags().Lookup(flag); *value == "" && (named == nil || named.Hidden) && !a.policy(s).CanPrompt(a.deps.Streams) {
+		// The input is an argument, not a listed flag, so point at the argument.
 		return false, clierr.Wrap(clierr.Usage, fmt.Errorf("missing required input: %s (pass it as an argument)", label))
 	}
 	return terminal.RequireInput(cmd.Context(), value, flag, label, validate, a.deps.Streams, a.policy(s), a.deps.Prompter)

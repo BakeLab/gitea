@@ -40,6 +40,7 @@ func TestRequireInputPromptsWithTheLabel(t *testing.T) {
 	deps.Prompter = prompt
 	a, cmd := outputApplication(deps, "")
 	name := ""
+	cmd.Flags().StringVar(&name, "name", "", "")
 	_, err := a.requireInput(cmd, &name, "name", "Label name", nil)
 	require.EqualError(t, err, "missing required input: supply --name")
 

@@ -366,9 +366,6 @@ the base branch.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.co
 		return a.jsonResult(cmd, merged)
 	}}
 	enumFlag(cmd, &method, "method", "s", "", "Merge method (default: the repository's default merge style)", mergeMethods...)
-	cmd.Flags().StringVar(&method, "style", "", "Alias of --method")
-	enumValues(cmd, "style", mergeMethods...)
-	_ = cmd.Flags().MarkHidden("style")
 	cmd.Flags().BoolVar(&style.merge, "merge", false, "Create a merge commit")
 	cmd.Flags().BoolVar(&style.squash, "squash", false, "Squash the commits into one commit and merge it")
 	cmd.Flags().BoolVar(&style.rebase, "rebase", false, "Rebase the commits onto the base branch")

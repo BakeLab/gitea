@@ -34,8 +34,6 @@ type downloadFlags struct {
 func (f *downloadFlags) register(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	flags.StringVarP(&f.output, "output", "O", "", "File or directory to write to, or - for standard output (default: the download's name)")
-	flags.StringVar(&f.output, "output-file", "", "Alias of --output")
-	_ = flags.MarkHidden("output-file")
 	flags.StringVarP(&f.dir, "dir", "D", "", "Directory to download into")
 	flags.BoolVar(&f.clobber, "clobber", false, "Replace an existing file")
 	flags.BoolVar(&f.skipExisting, "skip-existing", false, "Keep an existing file and skip the download")

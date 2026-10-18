@@ -62,13 +62,10 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 				return err
 			}
 			if len(args) > 0 {
-				if cmd.Flags().Changed("clone-url") {
-					return clierr.Wrap(clierr.Usage, errors.New("supply clone URL as an argument or --clone-url, not both"))
-				}
 				opts.CloneURL = args[0]
 			}
 			if cmd.Flags().Changed("server-path") {
-				if cmd.Flags().Changed("clone-url") || len(args) > 0 {
+				if len(args) > 0 {
 					return clierr.Wrap(clierr.Usage, errors.New("--server-path and clone URL inputs are mutually exclusive"))
 				}
 				if !path.IsAbs(serverPath) {
@@ -153,8 +150,6 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 	flags.StringVar(&opts.Owner, "owner", "", "Destination user or organization (default: your account)")
 	flags.StringVar(&serverPath, "server-path", "", "Absolute source Git repository path on the Gitea server (requires server permission)")
 	_ = command.MarkFlagDirname("server-path")
-	flags.StringVar(&opts.CloneURL, "clone-url", "", "Remote repository URL")
-	_ = flags.MarkHidden("clone-url")
 	enumFlag(command, &opts.Service, "service", "", "git", "Source service", "git", "gitea", "gitlab", "gogs", "github")
 	flags.StringVarP(&opts.Description, "description", "d", "", "Repository description")
 	flags.BoolVar(&opts.Mirror, "mirror", false, "Create a pull mirror")

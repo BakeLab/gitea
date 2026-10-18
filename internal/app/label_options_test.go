@@ -50,7 +50,7 @@ func TestLabelCreateAndEditExclusiveArchived(t *testing.T) {
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
 	fields := "--json=id,name,color,exclusive,is_archived"
-	require.NoError(t, Execute(context.Background(), deps, []string{"label", "create", "-R", "owner/repo", "--name", "scoped", "--color", "00aa00", "--exclusive", fields, "--no-input"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"label", "create", "-R", "owner/repo", "scoped", "--color", "00aa00", "--exclusive", fields, "--no-input"}))
 	require.JSONEq(t, `{"id":3,"name":"scoped","color":"00aa00","exclusive":true,"is_archived":false}`, out.String())
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "edit", "3", "-R", "owner/repo", "--exclusive=false", "--archived", fields}))
@@ -81,12 +81,12 @@ func TestLabelCreateRefusesDuplicateNames(t *testing.T) {
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
 	for _, name := range []string{"bug", "BUG"} {
-		err := Execute(context.Background(), deps, []string{"label", "create", "-R", "alice/project", "--name", name, "--color", "000000"})
+		err := Execute(context.Background(), deps, []string{"label", "create", "-R", "alice/project", name, "--color", "000000"})
 		require.EqualError(t, err, `label "bug" already exists in alice/project; pass --force to update it`)
 	}
 	require.Empty(t, changed)
 	require.Empty(t, out.String())
-	require.NoError(t, Execute(context.Background(), deps, []string{"label", "create", "-R", "alice/project", "--name", "bug", "--color", "000000", "--force", "--json=id,color"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"label", "create", "-R", "alice/project", "bug", "--color", "000000", "--force", "--json=id,color"}))
 	require.JSONEq(t, `{"id":11,"color":"000000"}`, out.String())
 	require.Equal(t, []string{"PATCH /api/v1/repos/alice/project/labels/11"}, changed)
 }

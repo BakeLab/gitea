@@ -147,9 +147,6 @@ $ gt repo list --starred --json full_name,url`,
 				return err
 			}
 			if len(args) > 0 {
-				if cmd.Flags().Changed("owner") {
-					return clierr.Wrap(clierr.Usage, errors.New("supply the owner as an argument or --owner, not both"))
-				}
 				opts.Owner = args[0]
 			}
 			scopes := 0
@@ -175,8 +172,6 @@ $ gt repo list --starred --json full_name,url`,
 		},
 	}
 	pageFlags(list, &opts.Limit, &opts.Page)
-	list.Flags().StringVar(&opts.Owner, "owner", "", "List the repositories of this user or organization")
-	_ = list.Flags().MarkHidden("owner")
 	enumFlag(list, &opts.Kind, "type", "", "", "Only list repositories of this kind", "fork", "source", "mirror")
 	list.Flags().BoolVar(&opts.Starred, "starred", false, "List your starred repositories")
 	list.Flags().BoolVar(&opts.Watched, "watched", false, "List the repositories you watch")

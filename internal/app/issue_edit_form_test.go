@@ -99,7 +99,7 @@ func TestIssueEditAddAndRemoveLabels(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "7", "-R", "alice/project", "--add-labels", "help", "--remove-labels", "docs", "--json=number,labels"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "7", "-R", "alice/project", "--add-label", "help", "--remove-label", "docs", "--json=number,labels"}))
 	require.Equal(t, 1, puts)
 	require.Contains(t, out.String(), `"number":7`)
 }

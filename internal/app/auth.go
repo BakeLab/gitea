@@ -306,7 +306,6 @@ $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 	login.Flags().StringVar(&sshAgentKey, "ssh-agent-key", "", "Sign requests with the ssh-agent key of `fingerprint`")
 	enumFlag(login, &backend, "credential-store", "", settings.StoreKeyring, "Where to keep the token", settings.StoreKeyring, settings.StoreFile)
 	enumValues(login, "scopes", oauthScopes...)
-	flagAliases(login, map[string]string{"web": "oauth"})
 	return login
 }
 
