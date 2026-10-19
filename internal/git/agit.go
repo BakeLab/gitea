@@ -24,8 +24,8 @@ func PushAgitPR(ctx context.Context, runner Runner, opts AgitOptions) error {
 	if opts.Remote == "" || opts.Head == "" || opts.Base == "" || opts.Topic == "" {
 		return errors.New("AGit pull creation requires remote, head, base, and topic")
 	}
-	if opts.Head == opts.Base || opts.Topic == opts.Base {
-		return fmt.Errorf("cannot create an AGit pull from %s to %s", opts.Topic, opts.Base)
+	if opts.Topic == opts.Base {
+		return fmt.Errorf("the AGit topic %s must differ from the base branch", opts.Topic)
 	}
 	run := func(args ...string) (string, error) {
 		return runner.Output(ctx, opts.Directory, opts.Prompt, args...)

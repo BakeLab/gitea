@@ -57,7 +57,7 @@ func TestPullCleanDeletesLocalAndRemoteBranches(t *testing.T) {
 		"remote":                          "origin",
 		"remote get-url origin":           "https://example.org/alice/project.git",
 		"rev-parse --is-inside-work-tree": "true",
-		"for-each-ref --format=%(objectname)%09%(refname:short)%09%(upstream:remotename) refs/heads/": "abc123\tpr/7\torigin/feature",
+		"for-each-ref --format=%(objectname)%09%(refname:short)%09%(upstream:remotename) refs/heads/": "abc123\tpr/7\torigin",
 		"check-ref-format --branch pr/7":              "",
 		"check-ref-format --branch main":              "",
 		"status --porcelain=v1 --untracked-files=no":  "",
@@ -121,5 +121,38 @@ func TestPullCleanRequiresIgnoreSHAWhenHeadMissingLocally(t *testing.T) {
 	err := Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.ErrorContains(t, err, "--ignore-sha")
+	require.Empty(t, out.String())
+}
+
+func TestPullCleanFindsTheLocalBranchOfAnAGitPullRequestByItsCommit(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project":
+			_, _ = fmt.Fprint(w, `{"full_name":"alice/project","default_branch":"main"}`)
+		case "/api/v1/repos/alice/project/pulls/7":
+			_, _ = fmt.Fprint(w, `{"number":7,"state":"closed","merged":true,"head":{"sha":"abc123","ref":"refs/pull/7/head","repo":{"full_name":"alice/project","clone_url":"https://example.org/alice/project.git"}}}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	runner := &fakeGit{results: map[string]string{
+		"remote":                          "origin",
+		"remote get-url origin":           "https://example.org/alice/project.git",
+		"rev-parse --is-inside-work-tree": "true",
+		"for-each-ref --format=%(objectname)%09%(refname:short)%09%(upstream:remotename) refs/heads/": "abc123\tpr/7\t",
+		"check-ref-format --branch pr/7":              "",
+		"check-ref-format --branch main":              "",
+		"status --porcelain=v1 --untracked-files=no":  "",
+		"rev-parse --verify refs/heads/pr/7^{commit}": "abc123",
+		"rev-parse --verify refs/heads/main^{commit}": "mainsha",
+		"symbolic-ref --quiet HEAD":                   "main",
+		"branch -D -- pr/7":                           "",
+	}}
+	deps.Git = runner
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--yes"}))
+	require.Contains(t, runner.calls, "branch -D -- pr/7")
 	require.Empty(t, out.String())
 }

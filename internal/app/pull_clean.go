@@ -42,8 +42,9 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		if pull.State == "open" {
 			return errors.New("pull request is still open; close or merge it before cleaning branches")
 		}
-		if pull.Head == "" {
-			return errors.New("Gitea did not return the pull request head branch")
+		// AGit pull requests have no head branch; their local branch is found by its commit.
+		if pull.Head == "" && ignoreSHA {
+			return errors.New("Gitea did not return the pull request head branch; clean it without --ignore-sha")
 		}
 		if !ignoreSHA && pull.HeadSHA == "" {
 			return errors.New("Gitea did not return the pull request head commit; retry with --ignore-sha")

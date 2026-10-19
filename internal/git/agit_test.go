@@ -5,9 +5,11 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,8 +31,12 @@ func TestPushAgitPREncodesOptionsAndRefspec(t *testing.T) {
 func TestPushAgitPRRejectsSameBaseAndTopic(t *testing.T) {
 	runner := &checkoutRunner{}
 	err := PushAgitPR(context.Background(), runner, AgitOptions{Directory: "/work", Remote: "origin", Head: "main", Base: "main", Topic: "main"})
-	require.ErrorContains(t, err, "cannot create")
+	require.ErrorContains(t, err, "the AGit topic main must differ from the base branch")
 	require.Empty(t, runner.calls)
+	// Pushing the base branch itself under a topic is the usual AGit flow.
+	err = PushAgitPR(context.Background(), runner, AgitOptions{Directory: "/work", Remote: "origin", Head: "main", Base: "main", Topic: "fix"})
+	require.NotContains(t, fmt.Sprint(err), "must differ")
+	require.Contains(t, strings.Join(runner.calls, "\n"), "refs/heads/main:refs/for/main/fix")
 }
 
 func TestPushAgitPRWithOptionsToRealRemote(t *testing.T) {
