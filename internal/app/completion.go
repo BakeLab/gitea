@@ -5,7 +5,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"maps"
 	"net/url"
 	"slices"
@@ -13,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"gitea.dev/cli/internal/auth"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
@@ -310,45 +308,14 @@ func (a *application) apiCompletionIn(repo string, requireRepo bool, list func(c
 	}
 }
 
-// completionTarget resolves an API completion's target like resolve, but never prompts or rotates
-// credentials: an expired OAuth token or an encrypted SSH key completes nothing.
+// completionTarget resolves an API completion's target like resolve, but offline: it never prompts,
+// refreshes credentials or retries.
 func (a *application) completionTarget(ctx context.Context, repo string, requireRepo bool) (target, error) {
-	t, err := a.resolveRequest(ctx, targetRequest{requireRepo: requireRepo, repo: repo, repoSource: "argument"})
-	if err != nil {
-		return t, err
+	t, err := a.resolveRequest(ctx, targetRequest{requireRepo: requireRepo, authenticate: true, offline: true, repo: repo, repoSource: "argument"})
+	if err == nil {
+		t.client.Retries = 0
 	}
-	var signer *auth.HTTPSign
-	token := a.deps.Getenv("GITEA_TOKEN")
-	if token != "" {
-		if instance, err := settings.ResolveHost(a.tokenInstance(), t.hosts()); err != nil || instance != t.Host {
-			return t, errors.New("GITEA_TOKEN belongs to another instance")
-		}
-	} else {
-		account, exists := t.host.Users[t.User]
-		switch {
-		case !exists:
-			return t, errors.New("no account selected")
-		case account.Tokenless():
-			if signer, err = auth.SignerForAccount(account, nil); err != nil {
-				return t, err
-			}
-		default:
-			credential, err := a.deps.Credentials.Load(t.Host, t.User, account.CredentialStore)
-			if err != nil {
-				return t, err
-			}
-			if !credential.ExpiresAt.IsZero() && !a.deps.Now().Before(credential.ExpiresAt) {
-				return t, errors.New("access token expired")
-			}
-			token = credential.AccessToken
-		}
-	}
-	t.client = a.deps.Client(t.Host, token, t.host.Insecure)
-	if signer != nil {
-		t.client.Signer = signer
-	}
-	t.client.Retries, t.client.Sudo = 0, a.options.sudo
-	return t, nil
+	return t, err
 }
 
 // completeIssues completes issue numbers in state (open, closed or all) with their titles.

@@ -112,6 +112,9 @@ type targetRequest struct {
 	// repo names the repository a command argument selected, such as the repository of an
 	// issue URL; it takes precedence over discovery and must agree with --repo.
 	repo, repoSource string
+	// offline authenticates without prompts, token refreshes or identity checks, as shell
+	// completion needs: an expired OAuth token or an encrypted SSH key fails instead.
+	offline bool
 }
 
 func (a *application) resolveTarget(ctx context.Context, requireRepo, authenticate bool) (target, error) {
@@ -163,7 +166,7 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 	host := s.Hosts.Hosts[t.Host]
 	t.host = host
 	t.gitProtocol = cmp.Or(host.GitProtocol, s.Preferences.GitProtocol)
-	if err := a.selectAccount(ctx, &t, s, req.authenticate); err != nil {
+	if err := a.selectAccount(ctx, &t, s, req.authenticate && !req.offline); err != nil {
 		return t, err
 	}
 	if !req.authenticate {
@@ -182,7 +185,11 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 			return t, clierr.Wrap(clierr.Authentication, t.accountError(t.User))
 		}
 		if account.Tokenless() {
-			signer, err := auth.SignerForAccount(account, a.sshPassphrase(ctx, a.policy(s), account.SSHKey))
+			passphrase := a.sshPassphrase(ctx, a.policy(s), account.SSHKey)
+			if req.offline {
+				passphrase = nil
+			}
+			signer, err := auth.SignerForAccount(account, passphrase)
 			if err != nil {
 				return t, clierr.Wrap(clierr.Authentication, err)
 			}
@@ -191,24 +198,14 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 			t.client = client
 			return t, nil
 		}
-		credential, err := a.deps.Credentials.Load(t.Host, t.User, account.CredentialStore)
+		credential, err := a.loadCredential(ctx, t, account, req.offline)
 		if err != nil {
 			return t, clierr.Wrap(clierr.Authentication, err)
-		}
-		if account.AuthMethod == settings.AuthOAuth {
-			manager, err := auth.NewManager(a.deps.Settings, a.deps.Credentials)
-			if err != nil {
-				return t, err
-			}
-			credential, err = manager.Refresh(ctx, t.Host, t.User, a.deps.Client(t.Host, "", host.Insecure).HTTP, false, a.deps.Now())
-			if err != nil {
-				return t, clierr.Wrap(clierr.Authentication, err)
-			}
 		}
 		token = credential.AccessToken
 	}
 	t.client = a.deps.Client(t.Host, token, host.Insecure)
-	if environmentCredential {
+	if environmentCredential && !req.offline {
 		actual, err := services.CurrentAccount(ctx, t.client)
 		if err != nil {
 			return t, err
@@ -227,6 +224,23 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 	// Set after the environment-token identity check, which must see the authenticated account.
 	t.client.Sudo = a.options.sudo
 	return t, nil
+}
+
+// loadCredential loads the account's stored credential, refreshing an expiring OAuth token unless
+// offline, when an expired one fails instead.
+func (a *application) loadCredential(ctx context.Context, t target, account settings.Account, offline bool) (auth.Credential, error) {
+	if account.AuthMethod != settings.AuthOAuth || offline {
+		credential, err := a.deps.Credentials.Load(t.Host, t.User, account.CredentialStore)
+		if err == nil && !credential.ExpiresAt.IsZero() && !a.deps.Now().Before(credential.ExpiresAt) {
+			err = errors.New("access token expired")
+		}
+		return credential, err
+	}
+	manager, err := auth.NewManager(a.deps.Settings, a.deps.Credentials)
+	if err != nil {
+		return auth.Credential{}, err
+	}
+	return manager.Refresh(ctx, t.Host, t.User, a.deps.Client(t.Host, "", t.host.Insecure).HTTP, false, a.deps.Now())
 }
 
 // repositorySource returns the raw repository the command targets and records its source: an
