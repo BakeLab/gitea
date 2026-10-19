@@ -205,14 +205,15 @@ func TestListsHintWhenMorePagesExist(t *testing.T) {
 		require.NoError(t, Execute(context.Background(), deps, append(args, "--limit", "100")))
 		require.Len(t, strings.Split(strings.TrimSpace(out.String()), "\n"), 100, args)
 		require.Equal(t, "more results available; use --page 2\n", diagnostics.String(), args)
+		diagnostics.Reset()
+		require.NoError(t, Execute(context.Background(), deps, append(args, "--limit", "100", "--json", "id")))
+		require.Equal(t, "more results available; use --page 2\n", diagnostics.String(), "JSON output says it is incomplete too: %v", args)
 		out.Reset()
 		diagnostics.Reset()
 		require.NoError(t, Execute(context.Background(), deps, append(args, "--limit", "100", "--page", "2")))
 		require.Len(t, strings.Split(strings.TrimSpace(out.String()), "\n"), 20, args)
 		require.Empty(t, diagnostics.String(), args)
 		diagnostics.Reset()
-		require.NoError(t, Execute(context.Background(), deps, append(args, "--json=id")))
-		require.Empty(t, diagnostics.String(), args)
 	}
 }
 
@@ -285,7 +286,7 @@ func TestWriteTable(t *testing.T) {
 		{name: "nothing when empty and piped", page: listPage{Number: 1}},
 		{name: "next-page hint when an empty page has more", tty: true, page: listPage{Number: 1, More: true}, stderr: "more results available; use --page 2\n"},
 		{name: "next-page hint when an empty page has more and piped", page: listPage{Number: 1, More: true}, stderr: "more results available; use --page 2\n"},
-		{name: "JSON", tty: true, json: "number", items: items[:1], page: listPage{Number: 1, More: true}, out: "[\n  {\n    \"number\": 12\n  }\n]\n"},
+		{name: "JSON", tty: true, json: "number", items: items[:1], page: listPage{Number: 1, More: true}, out: "[\n  {\n    \"number\": 12\n  }\n]\n", stderr: "more results available; use --page 2\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, out, diagnostics := testDeps(t)

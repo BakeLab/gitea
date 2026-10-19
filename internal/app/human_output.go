@@ -79,7 +79,10 @@ type listPage struct {
 // the spec's Context line, or its Empty message on stderr; piped as TSV with the next-page hint on stderr.
 func writeTable[T any](a *application, cmd *cobra.Command, items []T, spec listSpec[T], page listPage) error {
 	if a.options.json != "" {
-		return a.writeJSON(cmd, items)
+		if err := a.writeJSON(cmd, items); err != nil {
+			return err
+		}
+		return a.morePagesHint(cmd, page.More, page.Number)
 	}
 	d := a.display()
 	if len(items) == 0 {
@@ -229,9 +232,10 @@ func batchDone[K, T any](a *application, cmd *cobra.Command, keys []K, label fun
 // stateColors colors issue, pull request and milestone states with the terminal's own palette.
 var stateColors = map[string]string{"open": "green", "closed": "red", "merged": "magenta", "draft": "muted"}
 
-// morePagesHint tells human readers on stderr that the listing continues past this page.
+// morePagesHint tells on stderr that the listing continues past this page, also beside JSON on
+// stdout, so that a script can tell a complete listing from a truncated one.
 func (a *application) morePagesHint(cmd *cobra.Command, more bool, page int) error {
-	if !more || a.options.json != "" {
+	if !more {
 		return nil
 	}
 	_, err := fmt.Fprintf(cmd.ErrOrStderr(), "more results available; use --page %d\n", page+1)

@@ -103,8 +103,12 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	require.NoError(t, json.Unmarshal(execute("repo", "list", "--starred", "--json"), &foundRepos))
 	require.True(t, slices.ContainsFunc(foundRepos, func(r services.Repository) bool { return r.ID == generated.ID }), "starred list misses the repository")
 	execute("api", "user/starred/"+generated.FullName, "--method", "DELETE")
-	require.NoError(t, json.Unmarshal(execute("repo", "list", "--watched", "--limit", "1", "--page", "2", "--json"), &foundRepos))
+	out.Reset()
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "list", "--watched", "--limit", "1", "--page", "2", "--json"}))
+	require.NoError(t, json.Unmarshal(out.Bytes(), &foundRepos))
 	require.Len(t, foundRepos, 1)
+	require.Contains(t, diagnostics.String(), "more results available; use --page 3", "a page in the middle says that more follow")
 	if serverRoot := os.Getenv("GITEA_CLI_TEST_REPOSITORY_ROOT"); serverRoot != "" {
 		migrationName := fmt.Sprintf("gt-migrated-%d", time.Now().UnixNano())
 		var migrated services.Repository
