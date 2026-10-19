@@ -166,7 +166,12 @@ func (a *application) instanceCheck(ctx context.Context, t target, client *trans
 	if err != nil {
 		return doctorCheck{"Instance", checkFailed, where + ": " + Explain(ctx, a.deps, err).Error(), "check --host, the instance URL and your network"}
 	}
-	return doctorCheck{"Instance", checkPassed, fmt.Sprintf("%s · Gitea %s · %dms", where, version, latency), ""}
+	detail := fmt.Sprintf("%s · Gitea %s · %dms", where, version, latency)
+	// Listings of more items than one page holds take several requests.
+	if size, err := services.MaxPageSize(ctx, client); err == nil && size > 0 {
+		detail += fmt.Sprintf(" · %d items per page at most", size)
+	}
+	return doctorCheck{"Instance", checkPassed, detail, ""}
 }
 
 // accountCheck reports whether the account authenticates, and the scopes of its token.

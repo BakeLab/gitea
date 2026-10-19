@@ -24,6 +24,8 @@ func doctorServer(t *testing.T) http.Handler {
 		switch r.URL.Path {
 		case "/api/v1/version":
 			_, _ = w.Write([]byte(`{"version":"28.1.0"}`))
+		case "/api/v1/settings/api":
+			_, _ = w.Write([]byte(`{"max_response_items":50}`))
 		case "/api/v1/token":
 			_, _ = w.Write([]byte(`{"scopes":["all"]}`))
 		case "/api/v1/repos/alice/project":
@@ -147,5 +149,5 @@ func TestDoctorShowsChecksOnATerminal(t *testing.T) {
 	} {
 		require.Contains(t, lines, want)
 	}
-	require.Regexp(t, `✓  Instance    `+server.URL+` \(git remote "origin"\) · Gitea 28.1.0 · \d+ms\n`, lines)
+	require.Regexp(t, `✓  Instance    `+server.URL+` \(git remote "origin"\) · Gitea 28.1.0 · \d+ms · 50 items per page at most\n`, lines)
 }

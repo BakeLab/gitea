@@ -66,6 +66,17 @@ func ServerVersion(ctx context.Context, client *transport.Client) (string, error
 	return version, err
 }
 
+// MaxPageSize returns the most items the instance returns for one page of a listing.
+func MaxPageSize(ctx context.Context, client *transport.Client) (int, error) {
+	settings, _, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) (*gitea.GlobalAPISettings, *gitea.Response, error) {
+		return c.Settings.GetGlobalAPISettings(ctx)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return settings.MaxResponseItems, nil
+}
+
 // MatchAccount reports whether selected matches the authenticated login.
 // An empty selection accepts any account.
 func MatchAccount(selected, authenticated string) bool {
