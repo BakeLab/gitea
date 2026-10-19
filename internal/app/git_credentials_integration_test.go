@@ -42,7 +42,7 @@ func TestGiteaGitCredentialHelperClonesPrivateRepository(t *testing.T) {
 	if os.PathSeparator == '\\' {
 		binary += ".exe"
 	}
-	build := exec.CommandContext(context.Background(), "go", "build", "-o", binary, ".")
+	build := exec.CommandContext(context.Background(), "go", "build", "-o", binary, "./cmd/gt")
 	build.Dir = filepath.Join("..", "..")
 	output, err := build.CombinedOutput()
 	require.NoError(t, err, "build: %s", output)
