@@ -219,6 +219,8 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"time", "list", "--since", "1h", "--until", "2h"}, "--since must not be later than --until"},
 		{[]string{"time", "list", "--total", "--json"}, "--total is a human-output summary"},
 		{[]string{"variable", "set", "BUILD_MODE", "--body="}, "the value of BUILD_MODE is empty"},
+		{[]string{"secret", "set", "DEPLOY_KEY", "--body=  "}, "the value of DEPLOY_KEY is empty"},
+		{[]string{"secret", "set", "DEPLOY_KEY", "--body=" + strings.Repeat("é", 32769)}, "the value of DEPLOY_KEY exceeds 65536 bytes"},
 		{[]string{"variable", "set", "GITEA_RESERVED", "--body", "text"}, "CI and names starting with GITEA_ or GITHUB_ are reserved"},
 		{[]string{"variable", "list", "--org", "team", "--account"}, "--org, --account and --repo select different scopes; pass one"},
 		{[]string{"variable", "list", "--org", "team", "--repo", "alice/project"}, "--org, --account and --repo select different scopes; pass one"},

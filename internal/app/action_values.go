@@ -226,8 +226,13 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 				if err := checkActionValueName(entry.name); err != nil {
 					return err
 				}
-				if entry.value == "" {
+				// A variable may hold only whitespace, such as a separator; a secret may not.
+				if entry.value == "" || (secret && strings.TrimSpace(entry.value) == "") {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("the value of %s is empty", entry.name))
+				}
+				// Gitea counts the bytes of a secret and the characters of a variable.
+				if secret && len(entry.value) > 65536 {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("the value of %s exceeds 65536 bytes", entry.name))
 				}
 				if !secret && utf8.RuneCountInString(entry.value) > 65536 {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("the value of %s exceeds 65536 characters", entry.name))
