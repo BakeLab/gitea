@@ -83,10 +83,8 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		if a.options.json != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--json/--jq cannot be combined with --agit; AGit creates the pull request through git push"))
 		}
-		for _, name := range []string{"assignee", "label", "milestone", "deadline", "reviewer", "reviewer-team", "attachment", "project"} {
-			if cmd.Flags().Changed(name) {
-				return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --agit; AGit pushes carry only a title and body", name))
-			}
+		if err := onlyFlagsWith(cmd, "agit", "AGit pushes carry only a title and body", "title", "body", "body-file", "editor", "head", "base", "draft", "fill", "web", "allow-maintainer-edits", "topic"); err != nil {
+			return err
 		}
 	} else if f.topic != "" {
 		return clierr.Wrap(clierr.Usage, errors.New("--topic requires --agit"))

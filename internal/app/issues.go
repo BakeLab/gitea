@@ -260,10 +260,8 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 		}
 		if web {
 			// The new-issue page is prefilled with the title and body only.
-			for _, name := range []string{"label", "assignee", "milestone", "deadline", "ref", "attachment", "project", "editor"} {
-				if cmd.Flags().Changed(name) {
-					return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --web; the browser only receives the title and body", name))
-				}
+			if err := onlyFlagsWith(cmd, "web", "the browser only receives the title and body", "title", "body", "body-file", "template"); err != nil {
+				return err
 			}
 		}
 		if !localFlagsChanged(cmd, "template") && a.canPrompt() && a.deps.IssueForm != nil {

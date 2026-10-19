@@ -332,17 +332,22 @@ func localFlagsChanged(cmd *cobra.Command, except ...string) bool {
 	return changed
 }
 
-// requireWebFlags fails when --web is combined with a flag other than allowed, since the browser
-// only receives those.
-func requireWebFlags(cmd *cobra.Command, allowed ...string) error {
+// onlyFlagsWith fails when the flag mode, such as --web, is combined with a flag other than
+// allowed; passes says what mode passes on, such as "the browser only receives the title".
+func onlyFlagsWith(cmd *cobra.Command, mode, passes string, allowed ...string) error {
 	var rejected string
 	cmd.LocalNonPersistentFlags().VisitAll(func(flag *pflag.Flag) {
-		if rejected == "" && flag.Changed && flag.Name != "web" && !slices.Contains(allowed, flag.Name) {
+		if rejected == "" && flag.Changed && flag.Name != mode && !slices.Contains(allowed, flag.Name) {
 			rejected = flag.Name
 		}
 	})
 	if rejected == "" {
 		return nil
 	}
-	return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --web; the browser only receives --%s", rejected, strings.Join(allowed, ", --")))
+	return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --%s; %s", rejected, mode, passes))
+}
+
+// requireWebFlags is onlyFlagsWith for --web, naming the flags the browser receives.
+func requireWebFlags(cmd *cobra.Command, allowed ...string) error {
+	return onlyFlagsWith(cmd, "web", "the browser only receives --"+strings.Join(allowed, ", --"), allowed...)
 }
