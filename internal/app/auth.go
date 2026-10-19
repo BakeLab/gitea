@@ -107,7 +107,7 @@ func (a *application) authCommand() *cobra.Command {
 gt keeps the accounts of each instance in hosts.yml and their tokens in the system
 keyring, or in a private file when you choose so. One account per instance is active;
 --user or GITEA_CLI_USER selects another for a single command. GITEA_TOKEN, together with
-GITEA_INSTANCE_URL or GITEA_CLI_HOST, replaces the stored credentials of its instance for the
+GITEA_CLI_HOST or GITEA_INSTANCE_URL, replaces the stored credentials of its instance for the
 active account too; it must belong to the account that --user or GITEA_CLI_USER names. See
 gt help environment for how commands select the instance.`}
 	group.AddCommand(a.loginCommand(), a.logoutCommand(), a.authStatusCommand(), a.authSwitchCommand(), a.authRefreshCommand(), a.authTokenCommand(), a.setupGitCommand(), a.gitCredentialCommand())
@@ -163,7 +163,7 @@ $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 				return clierr.Wrap(clierr.Usage, errors.New("select how to log in: --with-token, --oauth or --ssh-key; on a terminal, gt auth login asks"))
 			}
 			resolveHost := func(raw string) (string, error) { return settings.ResolveHost(raw, snapshot.Hosts.Hosts) }
-			instance := cmp.Or(a.options.host, a.deps.Getenv("GITEA_CLI_HOST"), a.deps.Getenv("GITEA_INSTANCE_URL"))
+			instance := cmp.Or(a.options.host, a.tokenInstance())
 			if instance != "" {
 				if instance, err = resolveHost(instance); err != nil {
 					return clierr.Wrap(clierr.Usage, err)
@@ -540,7 +540,7 @@ func (a *application) environmentStatus(ctx context.Context, s settings.Snapshot
 	row := authStatusRow{Method: settings.AuthToken, Store: "environment", Active: true, Available: true}
 	instance, err := settings.ResolveHost(a.tokenInstance(), s.Hosts.Hosts)
 	if a.tokenInstance() == "" || err != nil {
-		row.Available, row.Error = false, "GITEA_TOKEN needs GITEA_INSTANCE_URL or GITEA_CLI_HOST naming its instance"
+		row.Available, row.Error = false, "GITEA_TOKEN needs GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance"
 		return row, true
 	}
 	row.Host = instance

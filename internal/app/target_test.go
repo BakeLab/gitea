@@ -163,6 +163,18 @@ func TestEnvironmentTokenCannotCrossInstances(t *testing.T) {
 	require.NotContains(t, err.Error(), "secret")
 }
 
+func TestEnvironmentTokenBelongsToTheDefaultEnvironmentInstance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "token secret", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"login":"alice"}`))
+	}))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": server.URL, "GITEA_INSTANCE_URL": "https://other.example.org", "GITEA_TOKEN": "secret"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user", "--jq", ".login"}))
+	require.Equal(t, "alice\n", out.String())
+}
+
 func TestEnvironmentLoginHonorsInstanceInsecureAndSSHHost(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "token secret", r.Header.Get("Authorization"))

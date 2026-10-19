@@ -476,8 +476,9 @@ func TestRunSuggestionsNameTheInstanceThatWasSelectedExplicitly(t *testing.T) {
 		{[]string{"-R", host + "/alice/project", "--host", server.URL}, " -R " + host + "/alice/project"},
 	} {
 		deps, _, _ := actionsDeps(t, server.URL, false)
+		configureAccounts(t, deps, server.URL, "alice", "alice")
 		// The instance that commands use by default is another one than the server.
-		deps.Getenv = serverEnv(server.URL, map[string]string{"TERM": "dumb", "GITEA_INSTANCE_URL": server.URL, "GITEA_CLI_HOST": "https://default.test"})
+		deps.Getenv = envFunc(map[string]string{"TERM": "dumb", "GITEA_CLI_HOST": "https://default.test"})
 		err := Execute(context.Background(), deps, append([]string{"run", "rerun", "47"}, tc.args...))
 		require.EqualError(t, err, "run 47 is still queued; cancel it first: gt run cancel 47"+tc.want, tc.args)
 	}

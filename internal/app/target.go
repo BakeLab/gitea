@@ -46,12 +46,21 @@ func (a *application) resolve(ctx context.Context, requireRepo bool) (target, er
 	return a.resolveTarget(ctx, requireRepo, true)
 }
 
-// tokenInstance returns the instance a GITEA_TOKEN belongs to: GITEA_INSTANCE_URL, else GITEA_CLI_HOST.
-func (a *application) tokenInstance() string {
-	if instance := a.deps.Getenv("GITEA_INSTANCE_URL"); instance != "" {
-		return instance
+// envHost returns the instance named by GITEA_CLI_HOST, else GITEA_INSTANCE_URL, and the variable
+// that named it. A GITEA_TOKEN belongs to this instance.
+func (a *application) envHost() (host, key string) {
+	for _, key := range []string{"GITEA_CLI_HOST", "GITEA_INSTANCE_URL"} {
+		if value := a.deps.Getenv(key); value != "" {
+			return value, key
+		}
 	}
-	return a.deps.Getenv("GITEA_CLI_HOST")
+	return "", ""
+}
+
+// tokenInstance returns the instance a GITEA_TOKEN belongs to.
+func (a *application) tokenInstance() string {
+	host, _ := a.envHost()
+	return host
 }
 
 // environmentHosts applies GITEA_INSTANCE_INSECURE and GITEA_INSTANCE_SSH_HOST to the instance
@@ -153,7 +162,7 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 	if token != "" {
 		normalized, err := settings.ResolveHost(a.tokenInstance(), s.Hosts.Hosts)
 		if err != nil || normalized != t.Host {
-			return t, clierr.Wrap(clierr.Authentication, errors.New("GITEA_TOKEN requires GITEA_INSTANCE_URL or GITEA_CLI_HOST matching the selected instance"))
+			return t, clierr.Wrap(clierr.Authentication, errors.New("GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL matching the selected instance"))
 		}
 	} else {
 		account, exists := host.Users[t.User]
@@ -374,17 +383,12 @@ func (a *application) selectHost(t *target, s settings.Snapshot) error {
 
 // defaultHost picks the instance of a target that neither the repository nor --host named.
 func (a *application) defaultHost(t *target, s settings.Snapshot) error {
-	if t.Host == "" {
-		for _, key := range []string{"GITEA_CLI_HOST", "GITEA_INSTANCE_URL"} {
-			if value := a.deps.Getenv(key); value != "" {
-				host, err := settings.ResolveHost(value, s.Hosts.Hosts)
-				if err != nil {
-					return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid %s: %w", key, err))
-				}
-				t.Host, t.HostSource = host, key
-				break
-			}
+	if value, key := a.envHost(); t.Host == "" && value != "" {
+		host, err := settings.ResolveHost(value, s.Hosts.Hosts)
+		if err != nil {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid %s: %w", key, err))
 		}
+		t.Host, t.HostSource = host, key
 	}
 	if t.Host == "" && s.Preferences.DefaultHost != "" {
 		t.Host, t.HostSource = s.Preferences.DefaultHost, "config.yml default_host"

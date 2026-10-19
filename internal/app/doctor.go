@@ -172,7 +172,7 @@ func (a *application) accountCheck(ctx context.Context, t target, snapshot setti
 		instance, resolveErr := settings.ResolveHost(a.tokenInstance(), snapshot.Hosts.Hosts)
 		switch {
 		case a.tokenInstance() == "" || resolveErr != nil:
-			return doctorCheck{"Account", checkFailed, "GITEA_TOKEN is set, but neither GITEA_INSTANCE_URL nor GITEA_CLI_HOST names its instance", "export GITEA_INSTANCE_URL=" + t.Host}
+			return doctorCheck{"Account", checkFailed, "GITEA_TOKEN is set, but neither GITEA_CLI_HOST nor GITEA_INSTANCE_URL names its instance", "export GITEA_INSTANCE_URL=" + t.Host}
 		case instance != t.Host:
 			return doctorCheck{"Account", checkFailed, "GITEA_TOKEN belongs to " + instance + ", but the instance here is " + t.Host + " (" + describeSource(t.HostSource) + ")", "pass --host " + instance + " or -R a repository there, or unset GITEA_TOKEN"}
 		}

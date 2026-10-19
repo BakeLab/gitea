@@ -50,13 +50,8 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 	host, source := preferences.DefaultHost, sources["default_host"]
 	if a.options.host != "" {
 		host, source = a.options.host, "--host"
-	} else {
-		for _, key := range []string{"GITEA_CLI_HOST", "GITEA_INSTANCE_URL"} {
-			if value := a.deps.Getenv(key); value != "" {
-				host, source = value, key
-				break
-			}
-		}
+	} else if value, key := a.envHost(); value != "" {
+		host, source = value, key
 	}
 	if host == "" && len(snapshot.Hosts.Hosts) == 1 {
 		for name := range snapshot.Hosts.Hosts {
