@@ -59,6 +59,10 @@ lint:
 lint-fix:
 	$(GO) run $(GOLANGCI_LINT_PACKAGE) run --fix
 
+.PHONY: lint-pr-title
+lint-pr-title: ## lint PR title against Conventional Commits (set PR_TITLE=...)
+	@node ./tools/lint-pr-title.ts
+
 .PHONY: fmt-check
 fmt-check:
 	# get all go files and run gofumpt on them
