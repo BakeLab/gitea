@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/services"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,10 +55,44 @@ deleted file mode 100644
 }
 
 func TestSaveDiffReviewIncludesHelpHeader(t *testing.T) {
-	path, err := saveDiffReview(t.TempDir(), 7, "owner/repo", strings.NewReader("diff --git a/x b/x\n"))
+	path, err := saveDiffReview(t.TempDir(), 7, "owner/repo", strings.NewReader("diff --git a/x b/x\n"), nil)
 	require.NoError(t, err)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "PR #7 on owner/repo")
 	require.Contains(t, string(data), "diff --git a/x b/x")
+}
+
+func TestExistingReviewCommentsAreShownButNotSentAgain(t *testing.T) {
+	diff := `diff --git a/sample.go b/sample.go
+--- a/sample.go
++++ b/sample.go
+@@ -1,4 +1,4 @@
+ package sample
+--- old note
++// new note
+ func f() {}
+`
+	existing := []services.ReviewComment{
+		{Author: "bob", Path: "sample.go", OldLine: 2, Body: "Why drop this?"},
+		{Author: "carol", Path: "sample.go", Line: 2, Body: "Better\nThanks"},
+		{Author: "dave", Path: "other.go", Line: 1, Body: "elsewhere"},
+	}
+	annotated := annotateDiff(diff, existing)
+	require.Equal(t, `diff --git a/sample.go b/sample.go
+--- a/sample.go
++++ b/sample.go
+@@ -1,4 +1,4 @@
+ package sample
+--- old note
+### bob: Why drop this?
++// new note
+### carol: Better
+### Thanks
+ func f() {}
+`, annotated)
+	comments, err := parseDiffComments(strings.NewReader(annotated + "# A new remark\n"))
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "A new remark", comments[0].Body)
 }

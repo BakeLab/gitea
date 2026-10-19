@@ -104,6 +104,8 @@ func TestPullReviewInteractiveDiffRoundTrip(t *testing.T) {
  package sample
 +func added() {}
 `))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/4/reviews":
+			writeFirstPage(w, r, `[]`)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls/4/reviews":
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&createPayload))
 			_, _ = w.Write([]byte(`{"id":12,"state":"COMMENT","body":"nits","user":{"login":"alice"}}`))
@@ -137,6 +139,10 @@ func TestPullReviewDiffFailureKeepsAnnotatedDiff(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/alice/project/pulls/4" {
 			_, _ = w.Write([]byte(`{"number":4,"title":"Add","user":{"login":"bob"}}`))
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/4/reviews" {
+			writeFirstPage(w, r, `[]`)
 			return
 		}
 		require.Equal(t, "/api/v1/repos/alice/project/pulls/4.diff", r.URL.Path, "no review may be submitted")

@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
@@ -355,12 +356,26 @@ func pullHead(item services.Pull, repo string) string {
 // collectDiffReviewComments returns the comments annotated into the diff of pull request n and the
 // file holding it, which the caller removes once the review is created.
 func (a *application) collectDiffReviewComments(cmd *cobra.Command, t target, n int64) ([]terminal.ReviewCommentDraft, string, error) {
+	// The existing comments only help the reviewer, so the review goes on without them.
+	var existing []services.ReviewComment
+	var loaded sync.WaitGroup
+	ctx, cancel := context.WithCancel(cmd.Context())
+	defer cancel()
+	loaded.Go(func() {
+		reviews := services.Reviews{Client: t.client, Repository: t.Repo}
+		if all, err := reviews.All(ctx, n); err == nil {
+			existing, _ = reviews.Inline(ctx, n, all)
+		}
+	})
 	diff, err := (services.Pulls{Client: t.client, Repository: t.Repo}).Diff(cmd.Context(), n)
 	if err != nil {
+		cancel()
+		loaded.Wait()
 		return nil, "", err
 	}
+	loaded.Wait()
 	defer diff.Close()
-	path, err := saveDiffReview("", n, t.Repo, diff)
+	path, err := saveDiffReview("", n, t.Repo, diff, existing)
 	if err != nil {
 		return nil, "", err
 	}
