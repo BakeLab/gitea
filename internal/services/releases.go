@@ -151,15 +151,6 @@ func (s Releases) Delete(ctx context.Context, item Release, deleteTag bool) erro
 	return nil
 }
 
-// Assets applies CLI pagination to Gitea's unpaginated attachment collection.
-func (s Releases) Assets(ctx context.Context, id int64, limit, page int) ([]ReleaseAsset, error) {
-	items, err := s.AllAssets(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return pageOf(items, limit, page)
-}
-
 // AllAssets retrieves the full collection; this endpoint has no server pagination.
 func (s Releases) AllAssets(ctx context.Context, id int64) ([]ReleaseAsset, error) {
 	attachments, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.Attachment, *gitea.Response, error) {

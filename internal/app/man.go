@@ -27,7 +27,8 @@ func (a *application) manCommand() *cobra.Command {
 				return clierr.Wrap(clierr.Usage, errors.New("unknown manual command; use gt help to list commands"))
 			}
 			date := ManualDate(a.deps.Getenv)
-			return writeOutput(cmd, output, func(writer io.Writer) error {
+			// Manual pages are for everyone to read, unlike the private files other commands write.
+			write := func(writer io.Writer) error {
 				var render func(*cobra.Command) error
 				render = func(page *cobra.Command) error {
 					if err := cmd.Context().Err(); err != nil {
@@ -49,7 +50,11 @@ func (a *application) manCommand() *cobra.Command {
 					return nil
 				}
 				return render(target)
-			})
+			}
+			if output == "" || output == "-" {
+				return write(cmd.OutOrStdout())
+			}
+			return publish(cmd, output, false, false, write)
 		},
 	}
 	command.Flags().StringVarP(&output, "output-file", "o", "", "Write the man page to a new file (default stdout)")

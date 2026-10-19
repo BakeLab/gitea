@@ -71,7 +71,8 @@ func (a *application) assetListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			items, err := service.Assets(cmd.Context(), release.ID, limit, page)
+			// The release already lists all of its assets.
+			items, err := services.PageOf(release.Assets, limit, page)
 			if err != nil {
 				return err
 			}
@@ -86,7 +87,7 @@ func (a *application) assetListCommand() *cobra.Command {
 				},
 				Context: "assets of release " + release.Tag + " in " + target.Repo, Empty: "no assets in release " + release.Tag + " of " + target.Repo,
 			}
-			return writeTable(a, cmd, items, spec, listPage{Number: page, More: len(release.Assets) > page*limit})
+			return writeTable(a, cmd, items.Items, spec, servicePage(items, page))
 		},
 	}
 	pageFlags(command, &limit, &page)
@@ -108,6 +109,9 @@ $ gt release upload v1.0.0 dist/gt-linux --clobber`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("name") && (len(args) != 2 || strings.TrimSpace(name) == "") {
 				return clierr.Wrap(clierr.Usage, errors.New("--name requires exactly one file and a nonempty name"))
+			}
+			if err := requireUniqueAssetNames(args[1:]); err != nil {
+				return err
 			}
 			files, err := openRegularFiles(args[1:])
 			defer closeFiles(files)
@@ -418,4 +422,18 @@ $ gt release asset delete v1.0.0 12 13 --yes`,
 	command.Flags().BoolVar(&byName, "by-name", false, "Match assets by name only, also when numeric")
 	command.ValidArgsFunction = a.completeReleaseAssets()
 	return command
+}
+
+// requireUniqueAssetNames refuses files that would become assets of the same name, which Gitea
+// accepts as separate assets.
+func requireUniqueAssetNames(paths []string) error {
+	seen := map[string]string{}
+	for _, path := range paths {
+		name := filepath.Base(path)
+		if previous, ok := seen[name]; ok {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("%s and %s would both be uploaded as %s; rename one of them", previous, path, name))
+		}
+		seen[name] = path
+	}
+	return nil
 }

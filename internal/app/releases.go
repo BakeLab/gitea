@@ -248,6 +248,9 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 			if fields.tag == "" && fields.notesFile == "-" {
 				return clierr.Wrap(clierr.Usage, errors.New("--notes-file - requires a tag; stdin cannot also supply a prompt"))
 			}
+			if err := requireUniqueAssetNames(assets); err != nil {
+				return err
+			}
 			files, err := openRegularFiles(assets)
 			defer closeFiles(files)
 			if err != nil {
@@ -321,7 +324,8 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 // instead of from the local commit the tag names: --verify-tag refuses a tag the server lacks, and
 // without it a tag that only exists locally is warned about.
 func (a *application) checkReleaseTag(cmd *cobra.Command, t target, service services.Releases, tag string, hasTarget, verify bool) error {
-	local := a.localRefExists(cmd.Context(), "refs/tags/"+tag)
+	// Only the clone of the selected repository says anything about its tags.
+	local := t.repoFromClone() && a.localRefExists(cmd.Context(), "refs/tags/"+tag)
 	if !verify && (!local || hasTarget) {
 		return nil
 	}
@@ -343,6 +347,9 @@ func (a *application) checkReleaseTag(cmd *cobra.Command, t target, service serv
 
 // pushHint tells how to publish a ref that only the local clone has, or returns "".
 func (a *application) pushHint(ctx context.Context, t target, ref string) string {
+	if !t.repoFromClone() {
+		return ""
+	}
 	remote := a.releaseRemote(t)
 	for _, prefix := range []string{"refs/tags/", "refs/heads/"} {
 		if a.localRefExists(ctx, prefix+ref) {

@@ -63,14 +63,6 @@ func TestReleaseAssetPaginationUsesOneUnpaginatedRequest(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 3)
 	require.Equal(t, 1, requests)
-	page, err := service.Assets(context.Background(), 1, 2, 2)
-	require.NoError(t, err)
-	require.Len(t, page, 1)
-	require.EqualValues(t, 3, page[0].ID)
-	page, err = service.Assets(context.Background(), 1, 100, int(^uint(0)>>1))
-	require.NoError(t, err)
-	require.Empty(t, page)
-	require.NotNil(t, page)
 }
 
 func TestReleaseAssetDownloadFollowsObjectStorageRedirect(t *testing.T) {

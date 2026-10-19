@@ -336,10 +336,13 @@ func parseEnvFile(data []byte) ([]envEntry, error) {
 		value, _, _ = strings.Cut(value, " #")
 		entries = append(entries, envEntry{name, value})
 	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
 	if len(entries) == 0 {
 		return nil, errors.New("no NAME=value lines")
 	}
-	return entries, scanner.Err()
+	return entries, nil
 }
 
 // closingQuote returns the index of the quote that closes the quoted value, or 0 when it is not

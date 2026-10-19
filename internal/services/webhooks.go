@@ -77,8 +77,8 @@ func webhookFrom(hook *gitea.Hook, reveal bool) Webhook {
 	}
 }
 
-// eventGroupMembers are the events that sending issues or pull_request enables besides that event.
-var eventGroupMembers = map[string][]string{
+// WebhookEventGroups are the events that sending issues or pull_request enables besides that event.
+var WebhookEventGroups = map[string][]string{
 	"issues":       {"issue_assign", "issue_comment", "issue_label", "issue_milestone"},
 	"pull_request": {"pull_request_assign", "pull_request_comment", "pull_request_label", "pull_request_milestone", "pull_request_review", "pull_request_review_request", "pull_request_sync"},
 }
@@ -89,7 +89,7 @@ var eventGroupMembers = map[string][]string{
 // pull_request_only unless every member of the group is there too.
 func narrowedEvents(events []string) []string {
 	narrowed := slices.Clone(events)
-	for head, members := range eventGroupMembers {
+	for head, members := range WebhookEventGroups {
 		index := slices.Index(narrowed, head)
 		if index >= 0 && slices.ContainsFunc(members, func(member string) bool { return !slices.Contains(events, member) }) {
 			narrowed[index] = head + "_only"

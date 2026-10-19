@@ -52,7 +52,7 @@ func (f downloadFlags) destination(name string) (path string, skip bool, err err
 	}
 	path = f.output
 	if path == "" || isDirectory(path) {
-		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) || strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
+		if !filepath.IsLocal(name) || strings.ContainsAny(name, `/\`) || strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
 			return "", false, clierr.Wrap(clierr.Usage, fmt.Errorf("cannot use %q as a file name; pass --output", name))
 		}
 		path = filepath.Join(cmp.Or(path, f.dir, "."), name)

@@ -93,7 +93,7 @@ func (s AdminUsers) Search(ctx context.Context, query string, limit int) ([]Admi
 // /users/{name}, that answers only administrators, only with complete role and status fields,
 // and only for individual accounts, never for organizations.
 func (s AdminUsers) get(ctx context.Context, username string) (*gitea.User, error) {
-	for page := 1; ; page++ {
+	for page := 1; page <= maxListPages; page++ {
 		users, err := callPage(ctx, s.Client, 50, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.User, *gitea.Response, error) {
 			return c.Admin.ListUsers(ctx, gitea.AdminListUsersOptions{ListOptions: list, Query: username})
 		})
@@ -109,6 +109,7 @@ func (s AdminUsers) get(ctx context.Context, username string) (*gitea.User, erro
 			return nil, NotFound("user", strconv.Quote(username), "")
 		}
 	}
+	return nil, fmt.Errorf("listing exceeded %d pages", maxListPages)
 }
 
 // View retrieves one account.

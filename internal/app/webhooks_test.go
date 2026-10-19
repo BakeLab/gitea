@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/services"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,7 +45,7 @@ func TestWebhookListShowsDeliveryURLsAndSortedEvents(t *testing.T) {
 }
 
 func TestWebhookEventsCollapseCompleteGroups(t *testing.T) {
-	pulls := webhookEventGroups["pull_request"]
+	pulls := append([]string{"pull_request"}, services.WebhookEventGroups["pull_request"]...)
 	for _, tc := range []struct {
 		events []string
 		want   string

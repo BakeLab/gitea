@@ -112,9 +112,13 @@ func TestReleaseCreateWithUnknownTargetNamesTheTargetAndHintsAtPushing(t *testin
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
-	deps.Git = &fakeGit{results: map[string]string{"rev-parse --verify --quiet refs/tags/v2": "abc"}}
-	err := Execute(context.Background(), deps, []string{"release", "create", "v1", "--target", "v2", "-R", "alice/project"})
+	clone := map[string]string{"remote": "origin", "remote get-url origin": server.URL + "/alice/project.git", "rev-parse --verify --quiet refs/tags/v2": "abc"}
+	deps.Git = &fakeGit{results: clone}
+	err := Execute(context.Background(), deps, []string{"release", "create", "v1", "--target", "v2"})
 	require.EqualError(t, Explain(context.Background(), deps, err), `target "v2" not found in alice/project; push it first: git push origin v2`)
+	// A clone of another repository says nothing about the one -R selects.
+	err = Execute(context.Background(), deps, []string{"release", "create", "v1", "--target", "v2", "-R", "alice/other"})
+	require.EqualError(t, Explain(context.Background(), deps, err), `target "v2" not found in alice/other`)
 	deps.Git = &fakeGit{}
 	err = Execute(context.Background(), deps, []string{"release", "create", "v1", "--target", "nowhere", "-R", "alice/project"})
 	require.EqualError(t, Explain(context.Background(), deps, err), `target "nowhere" not found in alice/project`)
@@ -129,8 +133,19 @@ func TestReleaseCreateVerifyTagRefusesATagTheServerLacks(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
-	deps.Git = &fakeGit{results: map[string]string{"rev-parse --verify --quiet refs/tags/v1": "abc"}}
-	err := Execute(context.Background(), deps, []string{"release", "create", "v1", "--verify-tag", "-R", "alice/project"})
+	deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": server.URL + "/alice/project.git", "rev-parse --verify --quiet refs/tags/v1": "abc"}}
+	err := Execute(context.Background(), deps, []string{"release", "create", "v1", "--verify-tag"})
 	require.EqualError(t, err, "tag v1 not found in alice/project; push it first: git push origin v1")
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/tags/v1"}, requests)
+}
+
+func TestReleaseUploadsRefuseFilesWithTheSameName(t *testing.T) {
+	dir := t.TempDir()
+	for _, sub := range []string{"a", "b"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, sub), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, sub, "gt"), []byte(sub), 0o600))
+	}
+	first, second := filepath.Join(dir, "a", "gt"), filepath.Join(dir, "b", "gt")
+	requireUsageBeforeRequests(t, "would both be uploaded as gt", "release", "upload", "v1", first, second)
+	requireUsageBeforeRequests(t, "would both be uploaded as gt", "release", "create", "v1", "--asset", first, "--asset", second)
 }

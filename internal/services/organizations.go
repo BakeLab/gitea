@@ -174,7 +174,7 @@ func (s Organizations) Edit(ctx context.Context, name string, opts OrganizationO
 	var org gitea.Organization
 	// TODO(sdk): EditOrgOption needs pointer fields so omitted preferences stay unchanged, and EditOrg should return the organization.
 	if err := sendJSON(ctx, s.Client, http.MethodPatch, "orgs/"+url.PathEscape(name), opts, &org); err != nil {
-		return Organization{}, err
+		return Organization{}, Classify(err, "organization", strconv.Quote(name), "")
 	}
 	return organizationFrom(&org), nil
 }

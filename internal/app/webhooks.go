@@ -26,17 +26,12 @@ func validateWebhookURL(raw string) error {
 	return nil
 }
 
-// webhookEventGroups are the events that issues and pull_request select; tables show a complete
-// group as one entry.
-var webhookEventGroups = map[string][]string{
-	"issues":       {"issue_assign", "issue_comment", "issue_label", "issue_milestone", "issues"},
-	"pull_request": {"pull_request", "pull_request_assign", "pull_request_comment", "pull_request_label", "pull_request_milestone", "pull_request_review", "pull_request_review_request", "pull_request_sync"},
-}
-
-// collapsedEvents lists events with each complete group as one entry, such as "pull_request (8)".
+// collapsedEvents lists events with each complete group of services.WebhookEventGroups as one
+// entry, such as "pull_request (8)".
 func collapsedEvents(events []string) string {
 	grouped := map[string]bool{}
-	for _, group := range webhookEventGroups {
+	for head, members := range services.WebhookEventGroups {
+		group := append([]string{head}, members...)
 		if !slices.ContainsFunc(group, func(event string) bool { return !slices.Contains(events, event) }) {
 			for _, event := range group {
 				grouped[event] = true
@@ -45,9 +40,9 @@ func collapsedEvents(events []string) string {
 	}
 	var shown []string
 	for _, event := range events {
-		switch group, head := webhookEventGroups[event]; {
+		switch members, head := services.WebhookEventGroups[event]; {
 		case head && grouped[event]:
-			shown = append(shown, fmt.Sprintf("%s (%d)", event, len(group)))
+			shown = append(shown, fmt.Sprintf("%s (%d)", event, len(members)+1))
 		case !grouped[event]:
 			shown = append(shown, event)
 		}

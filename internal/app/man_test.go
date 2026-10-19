@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -23,6 +24,11 @@ func TestManWritesSelectedCommandWithoutReplacingFiles(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(data), "gt-pr-checkout")
 	require.Contains(t, string(data), "detach")
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		require.Equal(t, umaskMode(t), info.Mode().Perm(), "a manual page is for everyone to read")
+	}
 	require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, args)))
 	after, err := os.ReadFile(path)
 	require.NoError(t, err)

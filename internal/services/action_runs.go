@@ -241,7 +241,7 @@ func (s Actions) Run(ctx context.Context, id int64) (Run, error) {
 	var response runResponse
 	// TODO(sdk): ActionsWorkflowRun lacks created_at/updated_at.
 	err := getJSON(ctx, s.Client, fmt.Sprintf("%sruns/%d", s.endpoint(), id), &response)
-	return response.result(), err
+	return response.result(), Classify(err, "run", strconv.FormatInt(id, 10), s.Repository)
 }
 
 // NameRun names a run that a mutation returned after its workflow; it stays as is when the

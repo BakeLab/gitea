@@ -43,6 +43,11 @@ func (t target) ownerName() (owner, name string) {
 	return owner, name
 }
 
+// repoFromClone reports whether the repository was found in the working directory's clone.
+func (t target) repoFromClone() bool {
+	return strings.HasPrefix(t.RepoSource, "remote ") || strings.HasPrefix(t.RepoSource, "git config")
+}
+
 // owner returns the owner of the selected repository.
 func (t target) owner() string {
 	owner, _ := t.ownerName()

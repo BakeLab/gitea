@@ -260,7 +260,7 @@ func (a *application) runHints(t target, run services.Run) []string {
 // suggestedRepo repeats --repo for commands that gt suggests, unless the repository came from the
 // working directory, where the suggestion finds it again.
 func (a *application) suggestedRepo(t target) string {
-	if strings.HasPrefix(t.RepoSource, "remote ") || strings.HasPrefix(t.RepoSource, "git config") {
+	if t.repoFromClone() {
 		return ""
 	}
 	// An instance that --host or the repository itself selected is not the one a copied command finds.
