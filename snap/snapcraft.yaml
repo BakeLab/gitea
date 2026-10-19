@@ -25,8 +25,6 @@ parts:
     stage-packages: [ git,  openssh-client ]
     build-packages: [ git, build-essential]
     build-snaps: [ go/1.27/stable ]
-    build-environment:
-      - LDFLAGS: ""
     override-pull: |
       craftctl default
 
@@ -34,7 +32,7 @@ parts:
       last_committed_tag="$(git for-each-ref --sort=creatordate --format '%(refname:short)' 'refs/tags/v*' | tail -n 1)"
       last_released_tag="$(snap info gt | awk '$1 == "latest/candidate:" { print $2 }')"
       # If the latest tag from the upstream project has not been released to
-      # stable, build that tag instead of main.
+      # the candidate channel, build that tag instead of main.
       if [ "${last_committed_tag}" != "${last_released_tag}" ]; then
         git fetch
         git checkout "${last_committed_tag}"

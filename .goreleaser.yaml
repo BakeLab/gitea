@@ -31,14 +31,6 @@ builds:
   ignore:
     - goos: darwin
       goarch: arm
-    - goos: darwin
-      goarch: ppc64le
-    - goos: darwin
-      goarch: s390x
-    - goos: windows
-      goarch: ppc64le
-    - goos: windows
-      goarch: s390x
     - goos: windows
       goarch: arm
       goarm: "5"
