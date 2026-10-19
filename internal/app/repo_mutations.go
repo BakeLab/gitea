@@ -4,11 +4,13 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
@@ -37,7 +39,7 @@ func (a *application) inferredRepository(t target, verb string, refuseYes bool) 
 // repoArchiveCommand builds repo archive, or repo unarchive.
 func (a *application) repoArchiveCommand(archive bool) *cobra.Command {
 	command := &cobra.Command{
-		Use:   "archive [<repository>]",
+		Use:   "archive [<repository>...]",
 		Short: "Archive a repository",
 		Long: `Archive a repository. An archived repository is read-only: nobody can push to it or change its
 issues, pull requests, releases or wiki until it is unarchived with gt repo unarchive.`,
@@ -45,17 +47,23 @@ issues, pull requests, releases or wiki until it is unarchived with gt repo unar
 $ gt repo archive alice/old-project
 
 # Archive without a prompt; scripts must name the repository
-$ gt repo archive alice/old-project --yes`,
+$ gt repo archive alice/old-project --yes
+
+# Archive several repositories after one confirmation
+$ gt repo archive acme/legacy-api acme/legacy-web`,
 		Annotations: map[string]string{"gt.arguments": repositoryArguments, "gt.confirm": "true"},
-		Args:        usageArgs(cobra.MaximumNArgs(1)),
+		Args:        usageArgs(cobra.ArbitraryArgs),
 	}
 	if !archive {
-		command.Use, command.Short = "unarchive [<repository>]", "Unarchive a repository"
+		command.Use, command.Short = "unarchive [<repository>...]", "Unarchive a repository"
 		command.Long = "Unarchive an archived repository, so that it accepts pushes and changes again."
 		command.Example = "$ gt repo unarchive alice/old-project"
 		delete(command.Annotations, "gt.confirm")
 	}
 	command.RunE = func(cmd *cobra.Command, args []string) error {
+		if len(args) > 1 {
+			return a.archiveRepositories(cmd, args, archive)
+		}
 		if err := a.repositoryArgument(args); err != nil {
 			return err
 		}
@@ -98,6 +106,52 @@ $ gt repo archive alice/old-project --yes`,
 	}
 	command.ValidArgsFunction = a.completeRepos()
 	return command
+}
+
+// archiveRepositories archives or unarchives each named repository, after one confirmation.
+func (a *application) archiveRepositories(cmd *cobra.Command, repositories []string, archive bool) error {
+	if a.options.repo != "" {
+		return clierr.Wrap(clierr.Usage, errors.New("supply the repositories as arguments or --repo, not both"))
+	}
+	verb := "Unarchived"
+	if archive {
+		verb = "Archived"
+		prompt := fmt.Sprintf("Archive %d repositories (%s)? They become read-only.", len(repositories), strings.Join(repositories, ", "))
+		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: prompt, NonTTY: "archive " + strings.Join(repositories, ", ")}); err != nil {
+			return err
+		}
+	}
+	snapshot, err := a.settings()
+	if err != nil {
+		return err
+	}
+	hosts, err := a.repositoryHosts(snapshot.Hosts.Hosts)
+	if err != nil {
+		return err
+	}
+	// Each instance is connected to once, however many of its repositories are named.
+	clients := map[string]target{}
+	return batchDone(a, cmd, repositories, func(repository string) string { return repository }, func(repository string) (services.Repository, error) {
+		ref, err := settings.ParseRepository(repository, hosts)
+		if err != nil {
+			return services.Repository{}, clierr.Wrap(clierr.Usage, err)
+		}
+		t, connected := clients[ref.Host]
+		switch {
+		case !connected:
+			if t, err = a.resolveRequest(cmd.Context(), targetRequest{requireRepo: true, authenticate: true, repo: repository, repoSource: "argument"}); err != nil {
+				return services.Repository{}, err
+			}
+			clients[ref.Host], clients[t.Host] = t, t
+		case ref.Owner != "":
+			t.Repo = ref.Slug()
+		default:
+			if t.Repo, err = a.accountRepo(t, ref.Name); err != nil {
+				return services.Repository{}, err
+			}
+		}
+		return services.Repositories{Client: t.client}.Edit(cmd.Context(), t.Repo, services.RepositoryEdit{Archived: &archive})
+	}, func(item services.Repository) string { return verb + " repository " + item.FullName })
 }
 
 func (a *application) repoRenameCommand() *cobra.Command {

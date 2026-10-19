@@ -132,20 +132,26 @@ func (a *application) resolveRequest(ctx context.Context, req targetRequest) (ta
 	if err != nil {
 		return t, err
 	}
-
 	// A bare repository NAME belongs to the account gt acts as, which is known only now.
 	if t.Repo != "" && !strings.Contains(t.Repo, "/") {
 		// A name that is also a directory here may be meant as that checkout, as in gt -R ./project.
 		if info, statErr := os.Stat(filepath.Join(cmp.Or(a.options.cwd, "."), t.Repo)); statErr == nil && info.IsDir() && t.RepoSource == "--repo" {
 			return t, clierr.Wrap(clierr.Usage, fmt.Errorf("%q is both a repository name and a directory here; use OWNER/%s for the repository, or --cwd %s for that checkout", t.Repo, t.Repo, t.Repo))
 		}
-		owner := cmp.Or(a.options.sudo, t.User)
-		if owner == "" {
-			return t, clierr.Wrap(clierr.Usage, fmt.Errorf("cannot tell who owns repository %q; use OWNER/%s", t.Repo, t.Repo))
+		if t.Repo, err = a.accountRepo(t, t.Repo); err != nil {
+			return t, err
 		}
-		t.Repo = owner + "/" + t.Repo
 	}
 	return t, nil
+}
+
+// accountRepo returns the repository name of the account gt acts as on t's instance as OWNER/NAME.
+func (a *application) accountRepo(t target, name string) (string, error) {
+	owner := cmp.Or(a.options.sudo, t.User)
+	if owner == "" {
+		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("cannot tell who owns repository %q; use OWNER/%s", name, name))
+	}
+	return owner + "/" + name, nil
 }
 
 // connect selects the instance, account and repository and builds the authenticated client.

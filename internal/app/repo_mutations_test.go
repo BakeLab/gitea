@@ -5,9 +5,11 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -232,4 +234,29 @@ func TestRepoRenameUpdatesTheSavedDefaultRepository(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rename", "renamed", "--yes"}))
 	require.Contains(t, runner.calls, saved)
 	require.Equal(t, "✓ Renamed repository alice/project to alice/renamed\n✓ Updated the default repository of this clone to alice/renamed\n", diagnostics.String())
+}
+
+func TestRepoArchiveTakesSeveralRepositories(t *testing.T) {
+	var archived []string
+	users := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/user" {
+			users++
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+			return
+		}
+		require.Equal(t, http.MethodPatch, r.Method)
+		var edit map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&edit))
+		require.Equal(t, true, edit["archived"])
+		name := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/")
+		archived = append(archived, name)
+		_, _ = w.Write([]byte(`{"full_name":"` + name + `","archived":true}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "archive", "acme/one", "acme/two", "--yes"}))
+	require.Equal(t, []string{"acme/one", "acme/two"}, archived)
+	require.Equal(t, 1, users, "the GITEA_TOKEN account is checked once")
+	requireUsageBeforeRequests(t, "--yes", "repo", "archive", "acme/one", "acme/two")
 }
