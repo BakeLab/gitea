@@ -48,6 +48,11 @@ each pull request, which gt only makes when --json names them.`, Args: argsExact
 		if options.NoAssignee && options.Assignee != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--assignee and --no-assignee are mutually exclusive"))
 		}
+		if web {
+			if err := requireWebFlags(cmd, "state"); err != nil {
+				return err
+			}
+		}
 		t, err := a.resolve(cmd.Context(), true)
 		if err != nil {
 			return err

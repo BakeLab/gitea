@@ -331,3 +331,18 @@ func localFlagsChanged(cmd *cobra.Command, except ...string) bool {
 	})
 	return changed
 }
+
+// requireWebFlags fails when --web is combined with a flag other than allowed, since the browser
+// only receives those.
+func requireWebFlags(cmd *cobra.Command, allowed ...string) error {
+	var rejected string
+	cmd.LocalNonPersistentFlags().VisitAll(func(flag *pflag.Flag) {
+		if rejected == "" && flag.Changed && flag.Name != "web" && !slices.Contains(allowed, flag.Name) {
+			rejected = flag.Name
+		}
+	})
+	if rejected == "" {
+		return nil
+	}
+	return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --web; the browser only receives --%s", rejected, strings.Join(allowed, ", --")))
+}

@@ -59,6 +59,11 @@ $ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), Ru
 		if err != nil {
 			return err
 		}
+		if web {
+			if err := requireWebFlags(cmd, "state", "kind", "search", "no-assignee"); err != nil {
+				return err
+			}
+		}
 		target, err := a.resolve(cmd.Context(), true)
 		if err != nil {
 			if errors.Is(err, errRepositoryRequired) {

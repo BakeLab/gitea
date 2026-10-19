@@ -588,3 +588,10 @@ func TestIssueListNoAssigneeFiltersEveryPageRead(t *testing.T) {
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.Len(t, pages, 2)
 }
+
+func TestIssueListWebRejectsFiltersTheBrowserCannotReceive(t *testing.T) {
+	for _, flag := range []string{"--label=bug", "--assignee=alice", "--milestone=v1", "--author=bob"} {
+		requireUsageBeforeRequests(t, "cannot be combined with --web", "issue", "list", "--web", flag)
+		requireUsageBeforeRequests(t, "cannot be combined with --web; the browser only receives --state", "pr", "list", "--web", flag)
+	}
+}
