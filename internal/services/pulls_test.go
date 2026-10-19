@@ -26,7 +26,7 @@ func TestPullMilestoneClearUsesIssueEndpoint(t *testing.T) {
 	for _, failCompletion := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "partial failure"}[failCompletion], func(t *testing.T) {
 			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				if calls == 1 {
 					assert.Equal(t, http.MethodPatch, r.Method)
@@ -45,10 +45,9 @@ func TestPullMilestoneClearUsesIssueEndpoint(t *testing.T) {
 				}
 				_, _ = w.Write([]byte("{\"number\":1,\"title\":\"Title\"}"))
 			}))
-			defer server.Close()
 			cleared, body := int64(0), ""
 			clearDeadline := true
-			item, err := (Pulls{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}).Edit(context.Background(), 1, PullEdit{Milestone: &cleared, Body: &body, RemoveDeadline: &clearDeadline})
+			item, err := (Pulls{Client: client, Repository: "owner/repo"}).Edit(context.Background(), 1, PullEdit{Milestone: &cleared, Body: &body, RemoveDeadline: &clearDeadline})
 			if failCompletion {
 				require.ErrorContains(t, err, "issue fields were updated")
 			} else {
@@ -159,7 +158,7 @@ func TestPullTemplateProbesConcurrently(t *testing.T) {
 	arrived.Add(len(pullTemplatePaths))
 	allArrived := make(chan struct{})
 	go func() { arrived.Wait(); close(allArrived) }()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		arrived.Done()
 		select {
 		case <-allArrived:
@@ -168,8 +167,7 @@ func TestPullTemplateProbesConcurrently(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}))
-	defer server.Close()
-	got, err := (Pulls{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}).Template(context.Background(), "main")
+	got, err := (Pulls{Client: client, Repository: "owner/repo"}).Template(context.Background(), "main")
 	require.NoError(t, err)
 	require.Empty(t, got)
 }

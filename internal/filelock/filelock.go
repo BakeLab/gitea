@@ -9,13 +9,8 @@ import (
 	"time"
 )
 
-const (
-	// DefaultTimeout is the default timeout for acquiring a file lock.
-	DefaultTimeout = 5 * time.Second
-
-	// FileLockPollInterval is how often to retry acquiring the file lock.
-	FileLockPollInterval = 50 * time.Millisecond
-)
+// FileLockPollInterval is how often to retry acquiring the file lock.
+const FileLockPollInterval = 50 * time.Millisecond
 
 // Locker provides file-based locking with timeout.
 type Locker struct {

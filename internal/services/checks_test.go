@@ -6,12 +6,10 @@ package services
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +17,7 @@ import (
 func TestCheckWatchRevalidatesHeadBeforeReturning(t *testing.T) {
 	heads := 0
 	newSnapshots := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/pulls/") {
 			heads++
 			sha := "old"
@@ -45,8 +43,7 @@ func TestCheckWatchRevalidatesHeadBeforeReturning(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`[{"id":2,"context":"build","status":"` + state + `"}]`))
 	}))
-	defer server.Close()
-	service := Pulls{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
+	service := Pulls{Client: client, Repository: "owner/repo"}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	items, err := service.WatchChecks(ctx, 7, time.Millisecond, nil)

@@ -130,7 +130,7 @@ func TestAPISignsRequestBodies(t *testing.T) {
 	require.Equal(t, signer.bodies, received)
 }
 
-func TestAPINeverFollowsRedirects(t *testing.T) {
+func TestAPIDoesNotFollowRedirectsOffTheInstance(t *testing.T) {
 	leaked := false
 	outside := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { leaked = true }))
 	defer outside.Close()

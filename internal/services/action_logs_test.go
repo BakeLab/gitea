@@ -8,18 +8,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
 
 func TestFollowLogsEmitsOnlyAppendedBytesAndStops(t *testing.T) {
 	snapshots := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/jobs"):
 			if r.URL.Query().Get("page") != "1" {
@@ -43,8 +41,7 @@ func TestFollowLogsEmitsOnlyAppendedBytesAndStops(t *testing.T) {
 			w.WriteHeader(404)
 		}
 	}))
-	defer server.Close()
-	service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
+	service := Actions{Client: client, Repository: "owner/repo"}
 	var output strings.Builder
 	err := service.FollowJobLogs(context.Background(), 7, 9, time.Millisecond, func(chunk []byte) error { _, err := output.Write(chunk); return err })
 	require.NoError(t, err)
@@ -60,7 +57,7 @@ func TestFollowLogsWaitsForQueuedJobAndRejectsChangedSnapshots(t *testing.T) {
 	for _, changed := range []bool{false, true} {
 		t.Run(fmt.Sprint(changed), func(t *testing.T) {
 			reads := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case strings.HasSuffix(r.URL.Path, "/jobs"):
 					if r.URL.Query().Get("page") != "1" {
@@ -88,8 +85,7 @@ func TestFollowLogsWaitsForQueuedJobAndRejectsChangedSnapshots(t *testing.T) {
 					_, _ = w.Write([]byte("first\n"))
 				}
 			}))
-			defer server.Close()
-			service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
+			service := Actions{Client: client, Repository: "owner/repo"}
 			var output strings.Builder
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()

@@ -17,7 +17,7 @@ import (
 )
 
 func TestRepositoryTemplateUsesAuthenticatedDestination(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			require.Equal(t, "/api/v1/user", r.URL.Path)
 			_, _ = w.Write([]byte(`{"login":"account"}`))
@@ -30,8 +30,7 @@ func TestRepositoryTemplateUsesAuthenticatedDestination(t *testing.T) {
 		require.Equal(t, false, payload["git_hooks"])
 		_, _ = w.Write([]byte(`{"id":2,"name":"generated"}`))
 	}))
-	defer server.Close()
-	item, err := (Repositories{Client: transport.New(server.URL, "", false)}).Generate(context.Background(), "owner/template", RepositoryTemplateOptions{Name: "generated", Content: true})
+	item, err := (Repositories{Client: client}).Generate(context.Background(), "owner/template", RepositoryTemplateOptions{Name: "generated", Content: true})
 	require.NoError(t, err)
 	require.Equal(t, "generated", item.Name)
 }

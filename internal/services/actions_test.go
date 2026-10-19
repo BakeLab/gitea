@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -78,7 +77,7 @@ func TestWorkflowsMapDefinitions(t *testing.T) {
 
 func TestWatchReportsEveryPollWithJobsUntilTheRunCompletes(t *testing.T) {
 	polls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/repos/owner/repo/actions/workflows":
 			_, _ = w.Write([]byte(`{"workflows":[{"id":"ci.yml","name":"CI"}]}`))
@@ -95,9 +94,8 @@ func TestWatchReportsEveryPollWithJobsUntilTheRunCompletes(t *testing.T) {
 			t.Errorf("unexpected request %s", r.URL.Path)
 		}
 	}))
-	defer server.Close()
 	var updates []string
-	service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
+	service := Actions{Client: client, Repository: "owner/repo"}
 	final, err := service.Watch(context.Background(), 1, time.Millisecond, func(run Run) error {
 		updates = append(updates, run.Workflow+" "+run.Status+" "+run.Jobs[0].Name)
 		return nil
@@ -177,7 +175,7 @@ func TestTerminalActionsRecognizeGiteaAndLegacyStatuses(t *testing.T) {
 
 func TestRunFiltersEncodeServerQueriesAndRejectInvalidStatus(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		require.Equal(t, "/api/v1/repos/owner/repo/actions/workflows/ci.yml/runs", r.URL.Path)
 		require.Equal(t, []string{"queued", "failure"}, r.URL.Query()["status"])
@@ -187,8 +185,7 @@ func TestRunFiltersEncodeServerQueriesAndRejectInvalidStatus(t *testing.T) {
 		require.Equal(t, "abc123", r.URL.Query().Get("head_sha"))
 		_, _ = w.Write([]byte(`{"workflow_runs":[]}`))
 	}))
-	defer server.Close()
-	service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
+	service := Actions{Client: client, Repository: "owner/repo"}
 	opts := RunListOptions{Limit: 20, Page: 2, Branch: "feature/a b", Event: "push", Actor: "alice", Commit: "abc123", Workflow: "ci.yml", Statuses: []string{"queued", "failure"}}
 	items, err := service.Runs(context.Background(), opts)
 	require.NoError(t, err)
@@ -202,7 +199,7 @@ func TestRunFiltersEncodeServerQueriesAndRejectInvalidStatus(t *testing.T) {
 
 func TestRunTimeFilteringPaginatesMatchingResults(t *testing.T) {
 	until := time.Date(2028, 1, 2, 0, 0, 0, 0, time.UTC)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Query().Get("page") {
 		case "1":
 			w.Header().Set("Link", `<`+r.URL.Path+`?page=2>; rel="next"`)
@@ -213,8 +210,7 @@ func TestRunTimeFilteringPaginatesMatchingResults(t *testing.T) {
 			_, _ = w.Write([]byte(`{"workflow_runs":[]}`))
 		}
 	}))
-	defer server.Close()
-	service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
+	service := Actions{Client: client, Repository: "owner/repo"}
 	items, err := service.Runs(context.Background(), RunListOptions{Limit: 1, Page: 2, Until: &until})
 	require.NoError(t, err)
 	require.Len(t, items, 1)
@@ -224,15 +220,14 @@ func TestRunTimeFilteringPaginatesMatchingResults(t *testing.T) {
 func TestRunTimeFilteringUsesCreationTimeAndStopsAtOlderRuns(t *testing.T) {
 	since := time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC)
 	pages := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pages++
 		_, _ = w.Write([]byte(`{"workflow_runs":[
 			{"id":3,"status":"queued","created_at":"2028-01-02T00:00:00Z","started_at":"1970-01-01T00:00:00Z","completed_at":"1970-01-01T00:00:00Z"},
 			{"id":2,"status":"completed","created_at":"2028-01-01T00:00:00Z","started_at":"2028-01-01T00:00:05Z","completed_at":"2028-01-01T00:01:00Z"},
 			{"id":1,"status":"completed","created_at":"2027-12-31T00:00:00Z","started_at":"2027-12-31T00:00:05Z"}]}`))
 	}))
-	defer server.Close()
-	service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
+	service := Actions{Client: client, Repository: "owner/repo"}
 	items, err := service.Runs(context.Background(), RunListOptions{Limit: 30, Page: 1, Since: &since})
 	require.NoError(t, err)
 	require.Equal(t, 1, pages)
@@ -249,14 +244,13 @@ func TestRunTimeFilteringUsesCreationTimeAndStopsAtOlderRuns(t *testing.T) {
 func TestRunTimeFilteringStopsAtScanCap(t *testing.T) {
 	until := time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC)
 	pages := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pages++
 		w.Header().Set("Link", `<`+r.URL.Path+`?page=2>; rel="next"`)
 		run := `{"id":1,"created_at":"2028-12-31T00:00:00Z"}`
 		_, _ = w.Write([]byte(`{"workflow_runs":[` + strings.Repeat(run+",", 99) + run + `]}`))
 	}))
-	defer server.Close()
-	service := Actions{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}
+	service := Actions{Client: client, Repository: "owner/repo"}
 	_, err := service.Runs(context.Background(), RunListOptions{Limit: 1, Page: 1, Until: &until})
 	require.ErrorIs(t, err, ErrRunScanExhausted)
 	require.Equal(t, maxRunScanPages, pages)

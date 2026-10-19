@@ -17,7 +17,7 @@ func TestLocker_WithLock(t *testing.T) {
 	tmpDir := t.TempDir()
 	lockPath := filepath.Join(tmpDir, "test.lock")
 
-	locker := New(lockPath, DefaultTimeout)
+	locker := New(lockPath, lockTimeout)
 
 	counter := 0
 	err := locker.WithLock(func() error {
@@ -41,7 +41,7 @@ func TestLocker_Acquire(t *testing.T) {
 	tmpDir := t.TempDir()
 	lockPath := filepath.Join(tmpDir, "test.lock")
 
-	locker := New(lockPath, DefaultTimeout)
+	locker := New(lockPath, lockTimeout)
 
 	unlock, err := locker.Acquire()
 	if err != nil {
@@ -99,7 +99,7 @@ func TestLocker_ConcurrentAccess(t *testing.T) {
 
 func TestLocker_Timeout(t *testing.T) {
 	lockPath := filepath.Join(t.TempDir(), "test.lock")
-	unlock, err := New(lockPath, DefaultTimeout).Acquire()
+	unlock, err := New(lockPath, lockTimeout).Acquire()
 	if err != nil {
 		t.Fatalf("Acquire failed: %v", err)
 	}
@@ -117,3 +117,5 @@ func TestLocker_Timeout(t *testing.T) {
 		t.Errorf("timeout took %v", elapsed)
 	}
 }
+
+const lockTimeout = 5 * time.Second

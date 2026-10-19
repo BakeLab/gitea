@@ -31,7 +31,7 @@ func TestReviewRequestNamesValidatedBeforeNetwork(t *testing.T) {
 
 func TestReviewRequestPartialFailureStopsFurtherEdits(t *testing.T) {
 	mutations := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mutations++
 		require.Equal(t, "/api/v1/repos/owner/repo/pulls/1/requested_reviewers", r.URL.Path)
 		var input ReviewRequestInput
@@ -46,10 +46,9 @@ func TestReviewRequestPartialFailureStopsFurtherEdits(t *testing.T) {
 			w.WriteHeader(http.StatusForbidden)
 		}
 	}))
-	defer server.Close()
 	title := "New title"
 	changes := ReviewRequestChanges{Remove: ReviewRequestInput{Users: []string{"alice"}}, Add: ReviewRequestInput{Users: []string{"bob"}}}
-	_, err := (Pulls{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}).Edit(context.Background(), 1, PullEdit{Title: &title, ReviewerChanges: &changes})
+	_, err := (Pulls{Client: client, Repository: "owner/repo"}).Edit(context.Background(), 1, PullEdit{Title: &title, ReviewerChanges: &changes})
 	require.ErrorContains(t, err, "reviewer removals succeeded")
 	require.Equal(t, 2, mutations)
 }
@@ -79,7 +78,7 @@ func TestReviewerTeamCheckSkippedWhenTeamListingIsForbidden(t *testing.T) {
 }
 
 func TestUnknownReviewerTeamRejectsBeforeUserRemoval(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method)
 		switch r.URL.Path {
 		case "/api/v1/orgs/owner":
@@ -90,9 +89,8 @@ func TestUnknownReviewerTeamRejectsBeforeUserRemoval(t *testing.T) {
 			t.Errorf("unexpected request: %s", r.URL.Path)
 		}
 	}))
-	defer server.Close()
 	changes := ReviewRequestChanges{Remove: ReviewRequestInput{Users: []string{"alice"}}, Add: ReviewRequestInput{Teams: []string{"missing"}}}
-	_, err := (Reviews{Client: transport.New(server.URL, "", false), Repository: "owner/repo"}).ChangeRequests(context.Background(), 1, changes)
+	_, err := (Reviews{Client: client, Repository: "owner/repo"}).ChangeRequests(context.Background(), 1, changes)
 	require.ErrorContains(t, err, `team "missing" is unavailable`)
 }
 
