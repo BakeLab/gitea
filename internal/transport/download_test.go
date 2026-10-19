@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -155,4 +156,20 @@ func TestURLAndDownloadShareScopeRejections(t *testing.T) {
 func TestSignedDownloadRejectsInvalidInstanceURL(t *testing.T) {
 	_, err := New("http://[invalid", "sensitive", false).DownloadSigned(context.Background(), "http://example.test/file")
 	require.ErrorContains(t, err, "invalid instance URL")
+}
+
+func TestDownloadsOutlastTheRequestTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.(http.Flusher).Flush()
+		time.Sleep(100 * time.Millisecond)
+		_, _ = w.Write([]byte("slow"))
+	}))
+	defer server.Close()
+	client := New(server.URL, "", false).WithTimeout(20 * time.Millisecond)
+	response, err := client.Download(context.Background(), server.URL+"/attachments/x")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	data, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, "slow", string(data))
 }

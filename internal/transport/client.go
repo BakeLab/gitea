@@ -124,13 +124,12 @@ func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error)
 }
 
 // New constructs an instance-scoped client. Its HTTP client follows no redirects itself; API
-// requests follow only those within the instance API. Only connection setup and the wait for
-// response headers are bounded, so slow but progressing transfers are not cut off.
+// requests follow only those within the instance API. Only connection setup is bounded here;
+// WithTimeout bounds whole requests, which a synchronous migration may need minutes to answer.
 func New(instance, token string, insecure bool) *Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	tr.TLSHandshakeTimeout = 10 * time.Second
-	tr.ResponseHeaderTimeout = 120 * time.Second
 	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecure} // user-controlled, instance-scoped
 	return &Client{BaseURL: instance, Token: token, Retries: 2, HTTP: &http.Client{Transport: userAgentTransport{tr}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
 }

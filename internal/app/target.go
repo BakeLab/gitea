@@ -131,6 +131,7 @@ func (a *application) resolveRequest(ctx context.Context, req targetRequest) (ta
 	if err != nil {
 		return t, err
 	}
+
 	// A bare repository NAME belongs to the account gt acts as, which is known only now.
 	if t.Repo != "" && !strings.Contains(t.Repo, "/") {
 		// A name that is also a directory here may be meant as that checkout, as in gt -R ./project.
@@ -177,6 +178,15 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 	if !req.authenticate {
 		return t, nil
 	}
+	preferences, _, err := a.effectivePreferences(s)
+	if err != nil {
+		return t, err
+	}
+	// Validated with the settings and GITEA_CLI_HTTP_TIMEOUT, so it parses.
+	timeout, _ := settings.ParseTimeout(preferences.HTTPTimeout)
+	newClient := func(token string) *transport.Client {
+		return a.deps.Client(t.Host, token, host.Insecure).WithTimeout(timeout)
+	}
 	token := a.deps.Getenv("GITEA_TOKEN")
 	environmentCredential := token != ""
 	if token != "" {
@@ -198,7 +208,7 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 			if err != nil {
 				return t, clierr.Wrap(clierr.Authentication, err)
 			}
-			client := a.deps.Client(t.Host, "", host.Insecure)
+			client := newClient("")
 			client.Signer, client.Sudo = signer, a.options.sudo
 			t.client = client
 			return t, nil
@@ -209,7 +219,7 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 		}
 		token = credential.AccessToken
 	}
-	t.client = a.deps.Client(t.Host, token, host.Insecure)
+	t.client = newClient(token)
 	if environmentCredential && !req.offline {
 		actual, err := services.CurrentAccount(ctx, t.client)
 		if err != nil {

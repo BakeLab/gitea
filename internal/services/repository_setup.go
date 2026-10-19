@@ -96,11 +96,12 @@ type RepositoryMigrationOptions struct {
 
 // Migrate imports a remote repository through Gitea's migration API.
 func (s Repositories) Migrate(ctx context.Context, opts RepositoryMigrationOptions) (Repository, error) {
+	// A migration takes as long as the clone does, unless --timeout bounds it.
+	s.Client = s.Client.WithTimeout(opts.Timeout)
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
-		s.Client = s.Client.WithTimeout(opts.Timeout)
 	}
 	// TODO(sdk): MigrateRepoOption.Validate counts the description in bytes, but Gitea allows 2048
 	// characters; a longer one is set by an edit once the (synchronous) migration is done.

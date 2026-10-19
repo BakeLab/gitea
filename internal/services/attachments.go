@@ -41,6 +41,8 @@ func assetFrom(attachment *gitea.Attachment) ReleaseAsset {
 // buffering the file in memory.
 // TODO(sdk): CreateReleaseAttachment and CreateIssueAttachment buffer the whole file.
 func uploadAttachment(ctx context.Context, client *transport.Client, endpoint, name string, input io.Reader) (ReleaseAsset, error) {
+	// A large file may take longer than one API request may.
+	client = client.WithTimeout(0)
 	reader, writer := io.Pipe()
 	multipartWriter := multipart.NewWriter(writer)
 	defer reader.Close()

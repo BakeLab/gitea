@@ -21,7 +21,7 @@ import (
 
 // Settings that gt config reads and writes, by where they are stored.
 var (
-	preferenceKeys = []string{"browser", "color", "default_host", "editor", "git_protocol", "hyperlinks", "markdown", "pager", "prompt", "remote"}
+	preferenceKeys = []string{"browser", "color", "default_host", "editor", "git_protocol", "http_timeout", "hyperlinks", "markdown", "pager", "prompt", "remote"}
 	instanceKeys   = []string{"git_protocol", "insecure", "oauth_client_id", "ssh_host", "user"}
 	accountKeys    = []string{"ssh_agent", "ssh_certificate_principal", "ssh_key", "ssh_key_fingerprint"}
 	// configKeys are every setting that config get reads, in alphabetical order.
@@ -81,6 +81,13 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 		preferences.Pager = value
 		sources["pager"] = "PAGER"
 	}
+	if value := strings.TrimSpace(a.deps.Getenv("GITEA_CLI_HTTP_TIMEOUT")); value != "" {
+		if _, err := settings.ParseTimeout(value); err != nil {
+			return preferences, nil, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid GITEA_CLI_HTTP_TIMEOUT: %w", err))
+		}
+		preferences.HTTPTimeout = value
+		sources["http_timeout"] = "GITEA_CLI_HTTP_TIMEOUT"
+	}
 	if value := strings.TrimSpace(a.deps.Getenv("GITEA_CLI_COLOR")); value != "" {
 		preferences.Color = value
 		sources["color"] = "GITEA_CLI_COLOR"
@@ -124,7 +131,7 @@ func (a *application) settingValues(snapshot settings.Snapshot) (map[string]any,
 		"prompt": preferences.Prompt, "pager": preferences.Pager,
 		"browser": preferences.Browser, "color": preferences.Color,
 		"hyperlinks": preferences.Hyperlinks, "markdown": preferences.Markdown,
-		"remote": preferences.Remote,
+		"remote": preferences.Remote, "http_timeout": preferences.HTTPTimeout,
 	}
 	host, configured := snapshot.Hosts.Hosts[preferences.DefaultHost]
 	if !configured {
@@ -178,12 +185,12 @@ func (a *application) configCommand() *cobra.Command {
 	group := &cobra.Command{Use: "config", Short: "Manage settings", Long: `Manage gt's settings.
 
 Preferences live in config.yml and instance settings in hosts.yml, in the configuration
-directory ($GITEA_CLI_CONFIG_DIR, or gt under the XDG config directory); gt config path prints
+directory ($GITEA_CLI_CONFIG_DIR, or gitea-cli under the XDG config directory); gt config path prints
 both files. Environment variables that override settings are listed in gt help environment.
 
 Preferences: default_host, git_protocol, editor, prompt (enabled or disabled), pager,
-browser (never disables opening), color, hyperlinks and markdown (auto or raw), remote and
-aliases (see gt alias).
+browser (never disables opening), color, hyperlinks and markdown (auto or raw), remote,
+http_timeout and aliases (see gt alias).
 Instance settings (--host <url>): user, ssh_host, insecure, git_protocol, oauth_client_id.
 Account settings (--host <url> --user <name>): ssh_key, ssh_agent,
 ssh_certificate_principal, ssh_key_fingerprint.`}
@@ -274,6 +281,8 @@ Preferences:
   hyperlinks      auto, always or never, for clickable links in terminals
   markdown        auto renders Markdown on a terminal, raw prints the source
   remote          Git remote used to find the repository of a clone
+  http_timeout    longest wait for one API request, such as 30s; 0 waits as long as it takes;
+                  uploads, downloads and migrations are never cut off
 
 Instance settings: user (active account), ssh_host, insecure, git_protocol, oauth_client_id.
 Account settings: ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint.`,
@@ -385,6 +394,8 @@ func (a *application) setPreference(key, value string) (string, error) {
 			p.Markdown = value
 		case "remote":
 			p.Remote = value
+		case "http_timeout":
+			p.HTTPTimeout = value
 		case "user":
 			return clierr.Wrap(clierr.Usage, errors.New("the active account changes with gt auth switch"))
 		default:

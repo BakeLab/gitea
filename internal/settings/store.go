@@ -53,6 +53,7 @@ type Preferences struct {
 	Hyperlinks  string            `yaml:"hyperlinks,omitempty" json:"hyperlinks"`
 	Markdown    string            `yaml:"markdown,omitempty" json:"markdown"`
 	Remote      string            `yaml:"remote,omitempty" json:"remote"`
+	HTTPTimeout string            `yaml:"http_timeout,omitempty" json:"http_timeout"`
 	Aliases     map[string]string `yaml:"aliases,omitempty" json:"aliases"`
 }
 
@@ -117,7 +118,7 @@ func New(dir string) *Store {
 
 // Defaults returns a fresh preferences value with built-in settings.
 func Defaults() Preferences {
-	return Preferences{Version: Version, GitProtocol: "https", Prompt: "enabled", Color: "auto", Hyperlinks: "auto", Markdown: "auto", Aliases: map[string]string{}}
+	return Preferences{Version: Version, GitProtocol: "https", Prompt: "enabled", Color: "auto", Hyperlinks: "auto", Markdown: "auto", HTTPTimeout: "2m", Aliases: map[string]string{}}
 }
 
 // stored omits built-in defaults so that only explicit settings are persisted.
@@ -137,6 +138,9 @@ func (p Preferences) stored() Preferences {
 	}
 	if p.Markdown == defaults.Markdown {
 		p.Markdown = ""
+	}
+	if p.HTTPTimeout == defaults.HTTPTimeout {
+		p.HTTPTimeout = ""
 	}
 	return p
 }
@@ -239,6 +243,9 @@ func (s Snapshot) Validate() error {
 	}
 	if p.Markdown != "auto" && p.Markdown != "raw" {
 		return errors.New("markdown must be auto or raw")
+	}
+	if _, err := ParseTimeout(p.HTTPTimeout); err != nil {
+		return err
 	}
 	if p.DefaultHost != "" {
 		normalized, err := NormalizeHost(p.DefaultHost)
@@ -401,4 +408,13 @@ func versionedKeys(path string, data []byte) (map[string]yaml.Node, error) {
 		return nil, fmt.Errorf("unsupported configuration version in %s", path)
 	}
 	return keys, nil
+}
+
+// ParseTimeout parses the http_timeout preference: a duration such as 30s or 5m, or 0 for none.
+func ParseTimeout(value string) (time.Duration, error) {
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout < 0 {
+		return 0, errors.New("http_timeout must be a duration such as 30s or 5m, or 0 for none")
+	}
+	return timeout, nil
 }

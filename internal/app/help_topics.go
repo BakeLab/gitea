@@ -312,6 +312,7 @@ Environment variables:
   GITEA_CLI_EDITOR                      editor, overriding config.yml
   GITEA_CLI_PAGER                       pager, overriding config.yml
   GITEA_CLI_COLOR                       color preference: auto, always or never
+  GITEA_CLI_HTTP_TIMEOUT                longest wait for one API request, overriding config.yml
   NO_COLOR                        disables automatic color when set
   VISUAL, EDITOR, PAGER, BROWSER  editor (VISUAL first), pager and browser when config.yml sets none
 

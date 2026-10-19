@@ -123,7 +123,7 @@ func TestTransportBoundsOnlySetupAndSendsUserAgent(t *testing.T) {
 	// A whole-request timeout would cut off long uploads and downloads that are still progressing.
 	require.Zero(t, client.HTTP.Timeout)
 	tr := client.HTTP.Transport.(userAgentTransport).base.(*http.Transport)
-	require.Equal(t, 120*time.Second, tr.ResponseHeaderTimeout)
+	require.Zero(t, tr.ResponseHeaderTimeout, "a synchronous migration answers only when it is done")
 	require.Equal(t, 10*time.Second, tr.TLSHandshakeTimeout)
 	for _, open := range []func() (*http.Response, error){
 		func() (*http.Response, error) {

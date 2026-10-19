@@ -406,3 +406,20 @@ func TestRepositoryFlagNamedLikeADirectoryIsAmbiguous(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "view", "-R", "other", "--cwd", dir, "--no-input", "--json=full_name"}))
 	require.Contains(t, out.String(), "alice/other")
 }
+
+func TestHTTPTimeoutBoundsEachAPIRequest(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer server.Close()
+	defer close(release)
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_HTTP_TIMEOUT": "50ms"})
+	deps.Client = transport.New
+	err := Execute(context.Background(), deps, []string{"repo", "view", "alice/project"})
+	require.Regexp(t, `(?i)timeout|deadline exceeded`, err.Error())
+	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_HTTP_TIMEOUT": "soon"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, []string{"repo", "view", "alice/project"})))
+	require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, []string{"config", "set", "http_timeout", "-1s"})))
+}
