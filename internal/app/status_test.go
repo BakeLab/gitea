@@ -140,3 +140,22 @@ func TestStatusInACloneListsItsRunsWithoutFailingOnAnUnreadableRepository(t *tes
 	out.Reset()
 	require.EqualError(t, Execute(context.Background(), deps, []string{"status", "-R", "alice/project", "--json=runs_included"}), "repository alice/project not found")
 }
+
+func TestPullStatusWarnsWhenTheCurrentPullRequestCannotBeRead(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project/pulls/1" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"message":"database is down"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	plainTTY(t, &deps, server.URL)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1", "GITEA_CLI_REPO": "alice/project"})
+	deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --quiet HEAD": "feat/one", "config --get branch.feat/one.gitea-cli-pr": "1"}}
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "status"}))
+	require.Contains(t, diagnostics.String(), "database is down")
+	require.Contains(t, out.String(), "Created by you")
+}

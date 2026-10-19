@@ -4,10 +4,12 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
@@ -89,7 +91,8 @@ pull requests you created, those assigned to you, and those that request your re
 }
 
 // currentPullStatus reads the pull request of the checked-out branch with its checks and reviews.
-// Outside a checkout, or with --repo, it reports none; branch names the checked-out branch.
+// Outside a checkout, or with --repo, it reports none; branch names the checked-out branch. A
+// failed lookup is reported as a warning, since the rest of the status still helps.
 func (a *application) currentPullStatus(cmd *cobra.Command) (*services.Pull, pullDetails, string) {
 	var details pullDetails
 	if a.options.repo != "" {
@@ -101,11 +104,15 @@ func (a *application) currentPullStatus(cmd *cobra.Command) (*services.Pull, pul
 	}
 	t, n, err := a.pullSelectorAny(cmd, nil)
 	if err != nil {
+		if !errors.Is(err, errNoBranchPull) && clierr.ExitCode(err) != clierr.Usage {
+			a.warn(cmd, "Could not look up the pull request of %s: %v", branch, err)
+		}
 		return nil, details, branch
 	}
 	service := services.Pulls{Client: t.client, Repository: t.Repo}
 	pull, err := service.View(cmd.Context(), n)
 	if err != nil {
+		a.warn(cmd, "Could not read pull request #%d: %v", n, err)
 		return nil, details, branch
 	}
 	if details.reviews, err = (services.Reviews{Client: t.client, Repository: t.Repo}).All(cmd.Context(), n); err == nil {

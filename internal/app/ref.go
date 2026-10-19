@@ -217,6 +217,9 @@ func (a *application) pullSelector(cmd *cobra.Command, args []string) (target, i
 	return a.selectPull(cmd, args, false)
 }
 
+// errNoBranchPull reports that a branch has no pull request.
+var errNoBranchPull = errors.New("no open pull request")
+
 // pullSelectorAny is pullSelector that, when no open pull request has the branch, falls back
 // to the most recently updated closed or merged one, like gh.
 func (a *application) pullSelectorAny(cmd *cobra.Command, args []string) (target, int64, error) {
@@ -261,7 +264,7 @@ func (a *application) selectPull(cmd *cobra.Command, args []string, closed bool)
 		}
 	}
 	if n == 0 {
-		return t, 0, fmt.Errorf("no open pull request for branch %q in %s; pass a number, URL or branch", raw, t.Repo)
+		return t, 0, fmt.Errorf("%w for branch %q in %s; pass a number, URL or branch", errNoBranchPull, raw, t.Repo)
 	}
 	return t, n, nil
 }
@@ -331,7 +334,7 @@ func (a *application) currentPull(ctx context.Context, closed bool) (target, int
 			return t, n, err
 		}
 	}
-	return t, 0, fmt.Errorf("no open pull request for branch %q in %s; pass a number, URL or branch", branch.Name, t.Repo)
+	return t, 0, fmt.Errorf("%w for branch %q in %s; pass a number, URL or branch", errNoBranchPull, branch.Name, t.Repo)
 }
 
 // newestClosedForBranch returns the number of the most recently updated closed or merged pull
