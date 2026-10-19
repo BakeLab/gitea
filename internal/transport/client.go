@@ -127,7 +127,8 @@ func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error)
 
 // New constructs an instance-scoped client. Its HTTP client follows no redirects itself; API
 // requests follow only those within the instance API. Only connection setup is bounded here;
-// WithTimeout bounds whole requests, which a synchronous migration may need minutes to answer.
+// WithResponseTimeout bounds the wait for an answer, which a synchronous migration may need
+// minutes to start.
 func New(instance, token string, insecure bool) *Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
@@ -221,13 +222,64 @@ func (t hostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.other.RoundTrip(req)
 }
 
-// WithTimeout returns an independent HTTP policy while sharing the connection transport.
-func (c *Client) WithTimeout(timeout time.Duration) *Client {
+// WithResponseTimeout returns a client whose requests fail when the instance takes longer than
+// timeout to start answering; once it answers, a slow body, such as a download, is not cut off.
+// Zero waits as long as it takes.
+func (c *Client) WithResponseTimeout(timeout time.Duration) *Client {
+	if timeout <= 0 {
+		return c
+	}
 	clone := *c
 	httpClient := *c.HTTP
-	httpClient.Timeout = timeout
+	httpClient.Transport = responseTimeout{base: cmp.Or[http.RoundTripper](c.HTTP.Transport, http.DefaultTransport), timeout: timeout}
 	clone.HTTP = &httpClient
 	return &clone
+}
+
+type unboundedResponse struct{}
+
+// UnboundedResponse marks ctx for requests whose answer starts only when a long operation is done,
+// such as a synchronous migration, so that no response timeout applies to them.
+func UnboundedResponse(ctx context.Context) context.Context {
+	return context.WithValue(ctx, unboundedResponse{}, true)
+}
+
+type responseTimeout struct {
+	base    http.RoundTripper
+	timeout time.Duration
+}
+
+func (t responseTimeout) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Context().Value(unboundedResponse{}) != nil {
+		return t.base.RoundTrip(req)
+	}
+	ctx, cancel := context.WithCancel(req.Context())
+	timer := time.AfterFunc(t.timeout, cancel)
+	resp, err := t.base.RoundTrip(req.WithContext(ctx))
+	if !timer.Stop() {
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		cancel()
+		return nil, fmt.Errorf("no answer within %s: %w", t.timeout, context.DeadlineExceeded)
+	}
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	// The body is read under the request's context, which lives until the body is closed.
+	resp.Body = cancelOnClose{resp.Body, cancel}
+	return resp, nil
+}
+
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b cancelOnClose) Close() error {
+	defer b.cancel()
+	return b.ReadCloser.Close()
 }
 
 // scoped parses raw for this instance, rejecting userinfo, fragments, dot

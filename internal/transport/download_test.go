@@ -165,7 +165,7 @@ func TestDownloadsOutlastTheRequestTimeout(t *testing.T) {
 		_, _ = w.Write([]byte("slow"))
 	}))
 	defer server.Close()
-	client := New(server.URL, "", false).WithTimeout(20 * time.Millisecond)
+	client := New(server.URL, "", false).WithResponseTimeout(20 * time.Millisecond)
 	response, err := client.Download(context.Background(), server.URL+"/attachments/x")
 	require.NoError(t, err)
 	defer response.Body.Close()
@@ -206,4 +206,19 @@ func TestConfiguredHeadersYieldToTheRequestsOwn(t *testing.T) {
 	require.NoError(t, err)
 	_ = response.Body.Close()
 	require.Equal(t, "explicit", tenant)
+}
+
+func TestResponseTimeoutBoundsOnlyTheWaitForAnAnswer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		_, _ = w.Write([]byte("late"))
+	}))
+	defer server.Close()
+	client := New(server.URL, "", false).WithResponseTimeout(20 * time.Millisecond)
+	_, err := client.Send(context.Background(), http.MethodGet, "version", nil, nil)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	// A synchronous migration answers only once it is done.
+	response, err := client.Send(UnboundedResponse(context.Background()), http.MethodGet, "version", nil, nil)
+	require.NoError(t, err)
+	_ = response.Body.Close()
 }

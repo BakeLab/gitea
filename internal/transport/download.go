@@ -37,8 +37,7 @@ func (c *Client) get(ctx context.Context, target *url.URL, allowRedirect bool) (
 	if err != nil {
 		return nil, errors.New("cannot construct download request")
 	}
-	// A download may take longer than one API request may.
-	response, err := c.WithTimeout(0).API().Do(request)
+	response, err := c.API().Do(request)
 	if err != nil {
 		return nil, RequestError(ctx, "download failed", err)
 	}

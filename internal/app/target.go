@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"gitea.dev/cli/internal/auth"
 	"gitea.dev/cli/internal/clierr"
@@ -185,15 +186,11 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 	if !req.authenticate {
 		return t, nil
 	}
-	preferences, _, err := a.effectivePreferences(s)
-	if err != nil {
+	// An invalid http_timeout, such as from GITEA_CLI_HTTP_TIMEOUT, fails before any request.
+	if _, _, err := a.effectivePreferences(s); err != nil {
 		return t, err
 	}
-	// Validated with the settings and GITEA_CLI_HTTP_TIMEOUT, so it parses.
-	timeout, _ := settings.ParseTimeout(preferences.HTTPTimeout)
-	newClient := func(token string) *transport.Client {
-		return a.instanceClient(t.Host, token, host).WithTimeout(timeout)
-	}
+	newClient := func(token string) *transport.Client { return a.instanceClient(t.Host, token, host) }
 	token := a.deps.Getenv("GITEA_TOKEN")
 	environmentCredential := token != ""
 	if token != "" {
@@ -250,7 +247,18 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 
 // instanceClient builds a client for instance with the TLS setting and headers of its host settings.
 func (a *application) instanceClient(instance, token string, host settings.Host) *transport.Client {
-	return a.deps.Client(instance, token, host.Insecure).WithClientCertificate(host.ClientCert, host.ClientKey).WithHeaders(a.instanceHeaders(host))
+	return a.deps.Client(instance, token, host.Insecure).WithClientCertificate(host.ClientCert, host.ClientKey).WithHeaders(a.instanceHeaders(host)).WithResponseTimeout(a.responseTimeout())
+}
+
+// responseTimeout is the http_timeout preference: how long the instance may take to start
+// answering a request.
+func (a *application) responseTimeout() time.Duration {
+	preferences, err := a.preferences()
+	if err != nil {
+		preferences = settings.Defaults()
+	}
+	timeout, _ := settings.ParseTimeout(preferences.HTTPTimeout)
+	return timeout
 }
 
 // instanceHeaders returns the configured headers of host, reading a $NAME value from the

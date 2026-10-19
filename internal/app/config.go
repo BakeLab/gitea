@@ -286,8 +286,8 @@ Preferences:
   hyperlinks      auto, always or never, for clickable links in terminals
   markdown        auto renders Markdown on a terminal, raw prints the source
   remote          Git remote used to find the repository of a clone
-  http_timeout    longest wait for one API request, such as 30s; 0 waits as long as it takes;
-                  uploads, downloads and migrations are never cut off
+  http_timeout    longest wait for the instance to answer a request, such as 30s; 0 waits as
+                  long as it takes; a transfer that has started and migrations are not cut off
 
 Instance settings: user (active account), ssh_host, insecure, git_protocol, oauth_client_id,
 and headers: "Name: value" adds a header to every API request to the instance, such as an
