@@ -65,7 +65,7 @@ func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResul
 		}
 	}
 	if checkedOut {
-		status, err := run("status", "--porcelain=v1", "--untracked-files=normal")
+		status, err := run("status", "--porcelain=v1", "--untracked-files=no")
 		if err != nil {
 			return SyncResult{}, err
 		}

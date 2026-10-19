@@ -57,15 +57,15 @@ func TestPullCleanDeletesLocalAndRemoteBranches(t *testing.T) {
 		"remote":                          "origin",
 		"remote get-url origin":           "https://example.org/alice/project.git",
 		"rev-parse --is-inside-work-tree": "true",
-		"for-each-ref --format=%(objectname)%09%(refname:short)%09%(upstream:short) refs/heads/": "abc123\tpr/7\torigin/feature",
-		"check-ref-format --branch pr/7":                 "",
-		"check-ref-format --branch main":                 "",
-		"status --porcelain=v1 --untracked-files=normal": "",
-		"rev-parse --verify refs/heads/pr/7^{commit}":    "abc123",
-		"rev-parse --verify refs/heads/main^{commit}":    "mainsha",
-		"symbolic-ref --quiet HEAD":                      "pr/7",
-		"switch --quiet -- main":                         "",
-		"branch -D -- pr/7":                              "",
+		"for-each-ref --format=%(objectname)%09%(refname:short)%09%(upstream:remotename) refs/heads/": "abc123\tpr/7\torigin/feature",
+		"check-ref-format --branch pr/7":              "",
+		"check-ref-format --branch main":              "",
+		"status --porcelain=v1 --untracked-files=no":  "",
+		"rev-parse --verify refs/heads/pr/7^{commit}": "abc123",
+		"rev-parse --verify refs/heads/main^{commit}": "mainsha",
+		"symbolic-ref --quiet HEAD":                   "pr/7",
+		"switch --quiet -- main":                      "",
+		"branch -D -- pr/7":                           "",
 	}}
 	deps.Git = runner
 	err := Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input", "--json"})
@@ -115,8 +115,8 @@ func TestPullCleanRequiresIgnoreSHAWhenHeadMissingLocally(t *testing.T) {
 		"remote":                          "origin",
 		"remote get-url origin":           "https://example.org/alice/project.git",
 		"rev-parse --is-inside-work-tree": "true",
-		"for-each-ref --format=%(objectname)%09%(refname:short)%09%(upstream:short) refs/heads/": "deadbeef\tfeature\torigin/feature",
-		"rev-parse --verify refs/remotes/origin/feature^{commit}":                                "deadbeef",
+		"for-each-ref --format=%(objectname)%09%(refname:short)%09%(upstream:remotename) refs/heads/": "deadbeef\tfeature\torigin/feature",
+		"rev-parse --verify refs/remotes/origin/feature^{commit}":                                     "deadbeef",
 	}}
 	err := Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))

@@ -68,7 +68,7 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 			return CheckoutResult{}, fmt.Errorf("invalid checkout branch: %w", err)
 		}
 	}
-	status, err := run("status", "--porcelain=v1", "--untracked-files=normal")
+	status, err := run("status", "--porcelain=v1", "--untracked-files=no")
 	if err != nil {
 		return CheckoutResult{}, err
 	}
@@ -185,13 +185,8 @@ func requireBranchFreeElsewhere(run func(...string) (string, error), branch stri
 	if err != nil {
 		return err
 	}
-	path := ""
-	for line := range strings.SplitSeq(listing, "\n") {
-		if value, ok := strings.CutPrefix(line, "worktree "); ok {
-			path = value
-		} else if line == "branch refs/heads/"+branch && path != top {
-			return fmt.Errorf("branch %q is checked out in the worktree %s; pass --detach to check out the pull request without a branch, or choose another branch with --branch", branch, path)
-		}
+	if path := worktreeWithBranch(listing, "refs/heads/"+branch); path != "" && path != top {
+		return fmt.Errorf("branch %q is checked out in the worktree %s; pass --detach to check out the pull request without a branch, or choose another branch with --branch", branch, path)
 	}
 	return nil
 }

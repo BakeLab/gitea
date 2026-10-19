@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -48,10 +50,11 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 	if err := requireWorkTree(run, "PR clean"); err != nil {
 		return "", "", err
 	}
-	refs, err := run("for-each-ref", "--format=%(objectname)%09%(refname:short)%09%(upstream:short)", "refs/heads/")
+	refs, err := run("for-each-ref", "--format=%(objectname)%09%(refname:short)%09%(upstream:remotename)", "refs/heads/")
 	if err != nil {
 		return "", "", err
 	}
+	pullNumbers := recordedPullNumbers(ctx, runner, opts.Directory)
 	type candidate struct {
 		name, remote      string
 		matched, recorded bool
@@ -84,7 +87,7 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 		if len(parts) == 3 {
 			upstream = parts[2]
 		}
-		recorded := opts.PullNumber > 0 && ReadBranchConfig(ctx, runner, opts.Directory, name).PullNumber == opts.PullNumber
+		recorded := opts.PullNumber > 0 && pullNumbers[name] == opts.PullNumber
 		if opts.IgnoreSHA {
 			if name != opts.HeadBranch && !preferred[name] && !recorded {
 				continue
@@ -92,12 +95,7 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 		} else if opts.HeadSHA == "" || sha != opts.HeadSHA {
 			continue
 		}
-		remoteName := ""
-		matched := false
-		if upstream != "" {
-			remoteName = strings.SplitN(upstream, "/", 2)[0]
-			matched = matching[remoteName]
-		}
+		remoteName, matched := upstream, matching[upstream]
 		if !matched {
 			for remote := range matching {
 				tracking, trackErr := run("rev-parse", "--verify", "refs/remotes/"+remote+"/"+opts.HeadBranch+"^{commit}")
@@ -178,7 +176,7 @@ func CleanPull(ctx context.Context, runner Runner, opts CleanOptions) (CleanResu
 	if _, err := run("check-ref-format", "--branch", opts.DefaultBranch); err != nil {
 		return CleanResult{}, fmt.Errorf("invalid default branch: %w", err)
 	}
-	status, err := run("status", "--porcelain=v1", "--untracked-files=normal")
+	status, err := run("status", "--porcelain=v1", "--untracked-files=no")
 	if err != nil {
 		return CleanResult{}, err
 	}
@@ -213,4 +211,22 @@ func CleanPull(ctx context.Context, runner Runner, opts CleanOptions) (CleanResu
 	}
 	result.Remote, result.RemoteBranch, result.RemoteDeleted = opts.Remote, opts.RemoteBranch, true
 	return result, nil
+}
+
+// recordedPullNumbers returns the pull request number that gt pr checkout recorded for each local
+// branch, read in one git call.
+func recordedPullNumbers(ctx context.Context, runner Runner, dir string) map[string]int64 {
+	numbers := map[string]int64{}
+	listing, err := runner.Output(ctx, dir, false, "config", "--get-regexp", `^branch\..*\.`+regexp.QuoteMeta(pullNumberKey)+`$`)
+	if err != nil {
+		return numbers
+	}
+	for line := range strings.Lines(listing) {
+		key, value, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
+		name := strings.TrimSuffix(strings.TrimPrefix(key, "branch."), "."+pullNumberKey)
+		if n, err := strconv.ParseInt(value, 10, 64); err == nil && n > 0 {
+			numbers[name] = n
+		}
+	}
+	return numbers
 }

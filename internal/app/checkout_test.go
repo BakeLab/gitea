@@ -68,7 +68,7 @@ func TestCheckoutMatchesRemoteThroughEnvironmentSSHHost(t *testing.T) {
 	deps.Git = &fakeGit{results: map[string]string{
 		"remote": "origin", "remote get-url origin": "git@ssh.example.org:alice/project.git",
 		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch feature": "",
-		"status --porcelain=v1 --untracked-files=normal": "", "for-each-ref --format=%(refname) refs/heads/": "",
+		"status --porcelain=v1 --untracked-files=no": "", "for-each-ref --format=%(refname) refs/heads/": "",
 		"fetch --quiet --no-tags -- origin refs/heads/feature": "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --quiet --create feature abc123": "",
 		"config branch.feature.remote origin": "", "config branch.feature.merge refs/heads/feature": "",
 		"config branch.feature.gitea-cli-pr 7": "", "config branch.feature.gitea-cli-base-remote origin": "",
@@ -94,7 +94,7 @@ func TestSSHCheckoutUsesAccountKeyOnlyForFetch(t *testing.T) {
 	runner := &fakeGit{results: map[string]string{
 		"remote": "origin", "remote get-url origin": "ssh://git@git.example.org:2222/alice/project.git",
 		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch feature": "",
-		"status --porcelain=v1 --untracked-files=normal": "", "for-each-ref --format=%(refname) refs/heads/": "",
+		"status --porcelain=v1 --untracked-files=no": "", "for-each-ref --format=%(refname) refs/heads/": "",
 		fetch: "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --quiet --create feature abc123": "",
 		"config branch.feature.remote origin": "", "config branch.feature.merge refs/heads/feature": "",
 		"config branch.feature.gitea-cli-pr 7": "", "config branch.feature.gitea-cli-base-remote origin": "",

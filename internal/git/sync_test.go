@@ -69,6 +69,7 @@ func TestSyncBranchKeepsTheCheckedOutBranch(t *testing.T) {
 			name: "another branch with local changes", checkout: "experiment",
 			prepare: func(f syncFixture) {
 				require.NoError(t, os.WriteFile(filepath.Join(f.work, "draft.txt"), []byte("draft"), 0o600))
+				f.git(f.work, "add", "draft.txt")
 			},
 			want: func(f syncFixture) SyncResult { return SyncResult{"main", f.ahead, f.behind, "origin"} },
 		},
@@ -147,6 +148,7 @@ func TestSyncBranchRefusesWhatItCannotFastForward(t *testing.T) {
 			prepare: func(f syncFixture) {
 				f.git(f.work, "switch", "main")
 				require.NoError(t, os.WriteFile(filepath.Join(f.work, "draft.txt"), []byte("draft"), 0o600))
+				f.git(f.work, "add", "draft.txt")
 			},
 		},
 		{

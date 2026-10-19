@@ -71,7 +71,7 @@ func TestPullCheckoutValidatesBeforeChangingGitState(t *testing.T) {
 	result, err := CheckoutPull(context.Background(), runner, options)
 	require.NoError(t, err)
 	require.Equal(t, CheckoutResult{Branch: "pr/7", Commit: "abc123", Remote: "origin"}, result)
-	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "check-ref-format --branch pr/7", "status --porcelain=v1 --untracked-files=normal", "for-each-ref --format=%(refname) refs/heads/", "fetch --quiet --no-tags -- origin refs/pull/7/head", "rev-parse --verify FETCH_HEAD^{commit}", "switch --quiet --create pr/7 abc123", "config branch.pr/7.gitea-cli-pr 7", "config branch.pr/7.gitea-cli-base-remote origin"}, runner.calls)
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "check-ref-format --branch pr/7", "status --porcelain=v1 --untracked-files=no", "for-each-ref --format=%(refname) refs/heads/", "fetch --quiet --no-tags -- origin refs/pull/7/head", "rev-parse --verify FETCH_HEAD^{commit}", "switch --quiet --create pr/7 abc123", "config branch.pr/7.gitea-cli-pr 7", "config branch.pr/7.gitea-cli-base-remote origin"}, runner.calls)
 }
 
 func TestPullCheckoutRejectsChangedHead(t *testing.T) {

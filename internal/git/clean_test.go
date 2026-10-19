@@ -5,6 +5,7 @@ package git
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -45,6 +46,15 @@ func (r *cleanRunner) Output(_ context.Context, dir string, prompt bool, args ..
 			return "", &CommandError{ExitCode: 1}
 		}
 	case "config":
+		if args[1] == "--get-regexp" {
+			var lines []string
+			for key, value := range r.config {
+				if regexp.MustCompile(args[2]).MatchString(key) {
+					lines = append(lines, key+" "+value)
+				}
+			}
+			return strings.Join(lines, "\n"), nil
+		}
 		if value, ok := r.config[args[2]]; ok {
 			return value, nil
 		}
@@ -67,7 +77,7 @@ func (r *cleanRunner) Output(_ context.Context, dir string, prompt bool, args ..
 }
 
 func TestFindCleanBranchBySHAAndPreferredName(t *testing.T) {
-	runner := &cleanRunner{branches: "abc123\tpr/7\torigin/feature\ndef456\tother\t\n"}
+	runner := &cleanRunner{branches: "abc123\tpr/7\torigin\ndef456\tother\t\n"}
 	branch, remote, err := FindCleanBranch(context.Background(), runner, FindCleanBranchOptions{
 		Directory: "/work", HeadSHA: "abc123", HeadBranch: "feature", PreferredNames: []string{"pr/7"}, MatchingRemotes: []string{"origin"},
 	})
@@ -77,7 +87,7 @@ func TestFindCleanBranchBySHAAndPreferredName(t *testing.T) {
 }
 
 func TestFindCleanBranchIgnoreSHAUsesName(t *testing.T) {
-	runner := &cleanRunner{branches: "deadbeef\tfeature\torigin/feature\n"}
+	runner := &cleanRunner{branches: "deadbeef\tfeature\torigin\n"}
 	branch, remote, err := FindCleanBranch(context.Background(), runner, FindCleanBranchOptions{
 		Directory: "/work", HeadSHA: "abc123", HeadBranch: "feature", IgnoreSHA: true, MatchingRemotes: []string{"origin"},
 	})
@@ -159,4 +169,14 @@ func TestCleanPullSkipsRemoteWhenUnavailable(t *testing.T) {
 	for _, call := range runner.calls {
 		require.False(t, strings.HasPrefix(call, "push "))
 	}
+}
+
+func TestFindCleanBranchMatchesTheRemotesThatPullCheckoutAdds(t *testing.T) {
+	runner := &cleanRunner{branches: "abc123\tfeature\tpulls/bob/project\n"}
+	branch, remote, err := FindCleanBranch(context.Background(), runner, FindCleanBranchOptions{
+		Directory: "/work", HeadSHA: "abc123", HeadBranch: "feature", MatchingRemotes: []string{"origin", "pulls/bob/project"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "feature", branch)
+	require.Equal(t, "pulls/bob/project", remote)
 }
