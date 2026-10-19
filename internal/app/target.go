@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -185,7 +186,7 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 	// Validated with the settings and GITEA_CLI_HTTP_TIMEOUT, so it parses.
 	timeout, _ := settings.ParseTimeout(preferences.HTTPTimeout)
 	newClient := func(token string) *transport.Client {
-		return a.deps.Client(t.Host, token, host.Insecure).WithTimeout(timeout)
+		return a.instanceClient(t.Host, token, host).WithTimeout(timeout)
 	}
 	token := a.deps.Getenv("GITEA_TOKEN")
 	environmentCredential := token != ""
@@ -200,9 +201,9 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 			return t, clierr.Wrap(clierr.Authentication, t.accountError(t.User))
 		}
 		if account.Tokenless() {
-			passphrase := a.sshPassphrase(ctx, a.policy(s), account.SSHKey)
-			if req.offline {
-				passphrase = nil
+			var passphrase func() ([]byte, error)
+			if !req.offline {
+				passphrase = a.sshPassphrase(ctx, a.policy(s), account.SSHKey)
 			}
 			signer, err := auth.SignerForAccount(account, passphrase)
 			if err != nil {
@@ -241,6 +242,28 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 	return t, nil
 }
 
+// instanceClient builds a client for instance with the TLS setting and headers of its host settings.
+func (a *application) instanceClient(instance, token string, host settings.Host) *transport.Client {
+	return a.deps.Client(instance, token, host.Insecure).WithHeaders(a.instanceHeaders(host))
+}
+
+// instanceHeaders returns the configured headers of host, reading a $NAME value from the
+// environment variable NAME; a header whose value is empty is not sent. Of names that differ only
+// in case, as a hand-edited hosts.yml may hold, the last in sorted order wins.
+func (a *application) instanceHeaders(host settings.Host) http.Header {
+	headers := http.Header{}
+	for _, name := range slices.Sorted(maps.Keys(host.Headers)) {
+		value := host.Headers[name]
+		if variable, ok := strings.CutPrefix(value, "$"); ok {
+			value = a.deps.Getenv(variable)
+		}
+		if value != "" {
+			headers.Set(name, value)
+		}
+	}
+	return headers
+}
+
 // loadCredential loads the account's stored credential, refreshing an expiring OAuth token unless
 // offline, when an expired one fails instead.
 func (a *application) loadCredential(ctx context.Context, t target, account settings.Account, offline bool) (auth.Credential, error) {
@@ -251,11 +274,7 @@ func (a *application) loadCredential(ctx context.Context, t target, account sett
 		}
 		return credential, err
 	}
-	manager, err := auth.NewManager(a.deps.Settings, a.deps.Credentials)
-	if err != nil {
-		return auth.Credential{}, err
-	}
-	return manager.Refresh(ctx, t.Host, t.User, a.deps.Client(t.Host, "", t.host.Insecure).HTTP, false, a.deps.Now())
+	return a.refreshedCredential(ctx, t.Host, t.User, t.host)
 }
 
 // repositorySource returns the raw repository the command targets and records its source: an

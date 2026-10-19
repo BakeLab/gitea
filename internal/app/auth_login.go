@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,7 +36,7 @@ var oauthScopes = func() []string {
 func (a *application) loginCommand() *cobra.Command {
 	var withToken, oauth, insecure bool
 	var backend, clientID, sshKey, sshAgentPrincipal, sshAgentKey string
-	var scopes []string
+	var scopes, headerArgs []string
 	login := &cobra.Command{
 		Use: "login", Short: "Log in to a Gitea instance", Args: argsExact(0),
 		Annotations: map[string]string{"gt.text": "login does not return a resource", "gt.confirm": "true"},
@@ -46,8 +47,17 @@ Create a token on the instance under Settings > Applications. Logging in to an a
 that gt already has replaces its stored credential after a confirmation (or with --yes).`,
 		Example: `$ gt auth login
 $ gt auth login --host gitea.com --with-token < token.txt
-$ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
+$ gt auth login --host gitea.com --oauth --scopes read:repository,read:user
+$ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client-Id: $CF_ID' --header 'CF-Access-Client-Secret: $CF_SECRET'`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			headers := map[string]string{}
+			for _, raw := range headerArgs {
+				name, value, err := settings.ParseHeader(raw)
+				if err != nil {
+					return clierr.Wrap(clierr.Usage, err)
+				}
+				headers[name] = value
+			}
 			selected := 0
 			for _, chosen := range []bool{withToken, oauth, sshKey != "", sshAgentPrincipal != "", sshAgentKey != ""} {
 				if chosen {
@@ -111,6 +121,13 @@ $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 			instance = answers.Host
 			host := snapshot.Hosts.Hosts[instance]
 			insecure = insecure || host.Insecure
+			loginHost := settings.Host{Insecure: insecure, Headers: maps.Clone(host.Headers)}
+			if len(headers) > 0 {
+				if loginHost.Headers == nil {
+					loginHost.Headers = map[string]string{}
+				}
+				maps.Copy(loginHost.Headers, headers)
+			}
 			replacing := false
 			if selectedUser, _ := a.selectedUser(); selectedUser != "" {
 				if replacing, err = a.confirmReplace(cmd, instance, selectedUser); err != nil {
@@ -122,7 +139,7 @@ $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 				return err
 			}
 			if answers.Method == terminal.LoginSSHKey {
-				account, user, err := a.signedLogin(cmd, snapshot, instance, insecure, settings.Account{SSHKey: answers.SSHKey}, sshAgentPrincipal, sshAgentKey)
+				account, user, err := a.signedLogin(cmd, snapshot, instance, loginHost, settings.Account{SSHKey: answers.SSHKey}, sshAgentPrincipal, sshAgentKey)
 				if err != nil {
 					return err
 				}
@@ -131,7 +148,7 @@ $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 						return err
 					}
 				}
-				if err := manager.RegisterHTTPSign(instance, user, account, auth.HostOptions{Insecure: insecure, Replace: true}); err != nil {
+				if err := manager.RegisterHTTPSign(instance, user, account, auth.HostOptions{Insecure: insecure, Headers: headers, Replace: true}); err != nil {
 					return err
 				}
 				a.done(cmd, "Logged in to %s as %s (%s)", instance, user, credentialLabel(account))
@@ -145,7 +162,7 @@ $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 					return clierr.Wrap(clierr.Usage, errors.New("OAuth authorization requires interaction; use --with-token with --no-input"))
 				}
 				clientID = cmp.Or(clientID, host.OAuthClientID, auth.DefaultClientID)
-				credential, err = auth.OAuthLogin(cmd.Context(), auth.OAuthOptions{Instance: instance, ClientID: clientID, Scopes: scopes, HTTP: a.deps.Client(instance, "", insecure).HTTP, Authorize: func(_ context.Context, authorizationURL string) error {
+				credential, err = auth.OAuthLogin(cmd.Context(), auth.OAuthOptions{Instance: instance, ClientID: clientID, Scopes: scopes, HTTP: a.instanceClient(instance, "", loginHost).HTTP, Authorize: func(_ context.Context, authorizationURL string) error {
 					if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Open this URL to authorize gt:", authorizationURL); err != nil {
 						return err
 					}
@@ -180,7 +197,7 @@ $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 					return clierr.Wrap(clierr.Usage, errors.New("stdin must contain one nonempty token"))
 				}
 			}
-			user, err := services.CurrentAccount(cmd.Context(), a.deps.Client(instance, credential.AccessToken, insecure))
+			user, err := services.CurrentAccount(cmd.Context(), a.instanceClient(instance, credential.AccessToken, loginHost))
 			if err != nil {
 				return rejectedLogin(err, "the token", "check it or create a new one under Settings > Applications")
 			}
@@ -193,7 +210,7 @@ $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 				}
 			}
 			account := settings.Account{AuthMethod: method, CredentialStore: answers.Store}
-			if err := manager.Register(instance, user, answers.Store, method, auth.HostOptions{OAuthClientID: clientID, Insecure: insecure, Replace: true}, credential); err != nil {
+			if err := manager.Register(instance, user, answers.Store, method, auth.HostOptions{OAuthClientID: clientID, Insecure: insecure, Headers: headers, Replace: true}, credential); err != nil {
 				return err
 			}
 			a.done(cmd, "Logged in to %s as %s (%s)", instance, user, credentialLabel(account))
@@ -209,6 +226,7 @@ $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user`,
 	login.Flags().StringVar(&clientID, "client-id", "", "OAuth application `ID` registered on the instance (default: the instance's stored ID, then gt's)")
 	login.Flags().StringSliceVar(&scopes, "scopes", nil, "OAuth token `scopes`, such as read:repository (default: write access to everything but administration)")
 	login.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification for this instance")
+	login.Flags().StringArrayVar(&headerArgs, "header", nil, "Send the `\"Name: value\"` header with every request to this instance, such as an access proxy needs; a value of $NAME is read from that environment variable (repeatable)")
 	login.Flags().BoolVar(&withToken, "with-token", false, "Read an access token from stdin, or ask for it on a terminal")
 	login.Flags().StringVar(&sshKey, "ssh-key", "", "Sign requests with the SSH private key in `file`")
 	login.Flags().StringVar(&sshAgentPrincipal, "ssh-agent-principal", "", "Sign requests with the ssh-agent certificate of `principal`")
@@ -246,7 +264,7 @@ func (a *application) confirmReplace(cmd *cobra.Command, instance, user string) 
 }
 
 // signedLogin authenticates with an SSH key or ssh-agent and returns the account to store and its login.
-func (a *application) signedLogin(cmd *cobra.Command, snapshot settings.Snapshot, instance string, insecure bool, account settings.Account, agentPrincipal, agentKey string) (settings.Account, string, error) {
+func (a *application) signedLogin(cmd *cobra.Command, snapshot settings.Snapshot, instance string, host settings.Host, account settings.Account, agentPrincipal, agentKey string) (settings.Account, string, error) {
 	switch {
 	case agentPrincipal != "":
 		account = settings.Account{AuthMethod: settings.AuthSSH, SSHAgent: true, SSHCertPrincipal: agentPrincipal}
@@ -270,7 +288,7 @@ func (a *application) signedLogin(cmd *cobra.Command, snapshot settings.Snapshot
 	if err != nil {
 		return account, "", clierr.Wrap(clierr.Authentication, err)
 	}
-	client := a.deps.Client(instance, "", insecure)
+	client := a.instanceClient(instance, "", host)
 	client.Signer = signer
 	user, err := services.CurrentAccount(cmd.Context(), client)
 	if err != nil {

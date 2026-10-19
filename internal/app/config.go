@@ -22,7 +22,7 @@ import (
 // Settings that gt config reads and writes, by where they are stored.
 var (
 	preferenceKeys = []string{"browser", "color", "default_host", "editor", "git_protocol", "http_timeout", "hyperlinks", "markdown", "pager", "prompt", "remote"}
-	instanceKeys   = []string{"git_protocol", "insecure", "oauth_client_id", "ssh_host", "user"}
+	instanceKeys   = []string{"git_protocol", "headers", "insecure", "oauth_client_id", "ssh_host", "user"}
 	accountKeys    = []string{"ssh_agent", "ssh_certificate_principal", "ssh_key", "ssh_key_fingerprint"}
 	// configKeys are every setting that config get reads, in alphabetical order.
 	configKeys = slices.Compact(slices.Sorted(slices.Values(slices.Concat(preferenceKeys, instanceKeys, accountKeys, []string{"version"}))))
@@ -140,7 +140,11 @@ func (a *application) settingValues(snapshot settings.Snapshot) (map[string]any,
 		}
 		return values, sources, nil
 	}
-	for key, value := range map[string]any{"user": host.User, "ssh_host": host.SSHHost, "insecure": host.Insecure, "oauth_client_id": host.OAuthClientID} {
+	headers := host.Headers
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	for key, value := range map[string]any{"user": host.User, "ssh_host": host.SSHHost, "insecure": host.Insecure, "oauth_client_id": host.OAuthClientID, "headers": headers} {
 		values[key] = value
 		sources[key] = "hosts.yml " + preferences.DefaultHost
 	}
@@ -191,7 +195,8 @@ both files. Environment variables that override settings are listed in gt help e
 Preferences: default_host, git_protocol, editor, prompt (enabled or disabled), pager,
 browser (never disables opening), color, hyperlinks and markdown (auto or raw), remote,
 http_timeout and aliases (see gt alias).
-Instance settings (--host <url>): user, ssh_host, insecure, git_protocol, oauth_client_id.
+Instance settings (--host <url>): user, ssh_host, insecure, git_protocol, oauth_client_id,
+headers.
 Account settings (--host <url> --user <name>): ssh_key, ssh_agent,
 ssh_certificate_principal, ssh_key_fingerprint.`}
 	group.AddCommand(&cobra.Command{
@@ -284,7 +289,10 @@ Preferences:
   http_timeout    longest wait for one API request, such as 30s; 0 waits as long as it takes;
                   uploads, downloads and migrations are never cut off
 
-Instance settings: user (active account), ssh_host, insecure, git_protocol, oauth_client_id.
+Instance settings: user (active account), ssh_host, insecure, git_protocol, oauth_client_id,
+and headers: "Name: value" adds a header to every API request to the instance, such as an
+access proxy needs, "Name:" removes it, and a value of $NAME is read from that environment
+variable when sent.
 Account settings: ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint.`,
 		Example: `$ gt config set editor "code --wait"
 $ gt config set ssh_host git.example.com:2222 --host https://example.com
@@ -460,10 +468,24 @@ func (a *application) setInstanceSetting(key, value string) (string, error) {
 			host.Insecure = value == "true"
 		case "oauth_client_id":
 			host.OAuthClientID = value
+		case "headers":
+			name, header, err := settings.ParseHeader(value)
+			if err != nil {
+				return clierr.Wrap(clierr.Usage, err)
+			}
+			// "Name:" without a value removes the header, in whatever case hosts.yml spells it.
+			host.Headers = maps.Clone(host.Headers)
+			maps.DeleteFunc(host.Headers, func(key, _ string) bool { return strings.EqualFold(key, name) })
+			if header != "" {
+				if host.Headers == nil {
+					host.Headers = map[string]string{}
+				}
+				host.Headers[name] = header
+			}
 		case "user":
 			return clierr.Wrap(clierr.Usage, errors.New("the active account changes with gt auth switch"))
 		default:
-			return clierr.Wrap(clierr.Usage, fmt.Errorf("%q is not an instance setting; instance settings: git_protocol, insecure, oauth_client_id, ssh_host", key))
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("%q is not an instance setting; instance settings: git_protocol, headers, insecure, oauth_client_id, ssh_host", key))
 		}
 		s.Hosts.Hosts[instance] = host
 		return clierr.Wrap(clierr.Usage, s.Validate())

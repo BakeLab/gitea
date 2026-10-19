@@ -5,6 +5,7 @@ package auth
 
 import (
 	"errors"
+	"maps"
 
 	"gitea.dev/cli/internal/settings"
 )
@@ -30,6 +31,8 @@ func NewManager(settingsStore *settings.Store, credentials *Store) (Manager, err
 type HostOptions struct {
 	OAuthClientID string
 	Insecure      bool
+	// Headers are added to the instance's headers, replacing those of the same name.
+	Headers map[string]string
 	// Replace lets a registration replace the metadata and stored credential of an account that is
 	// already configured, as when logging in again with a new token.
 	Replace bool
@@ -99,6 +102,12 @@ func (m Manager) register(instance, user string, account settings.Account, optio
 			host.OAuthClientID = options.OAuthClientID
 		}
 		host.Insecure = host.Insecure || options.Insecure
+		if len(options.Headers) > 0 {
+			if host.Headers == nil {
+				host.Headers = map[string]string{}
+			}
+			maps.Copy(host.Headers, options.Headers)
+		}
 		s.Hosts.Hosts[instance] = host
 		return rollback, nil
 	})

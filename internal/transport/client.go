@@ -5,6 +5,7 @@
 package transport
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -132,6 +133,40 @@ func New(instance, token string, insecure bool) *Client {
 	tr.TLSHandshakeTimeout = 10 * time.Second
 	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecure} // user-controlled, instance-scoped
 	return &Client{BaseURL: instance, Token: token, Retries: 2, HTTP: &http.Client{Transport: userAgentTransport{tr}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
+}
+
+// headerTransport adds headers, such as those an access proxy in front of the instance requires,
+// to the requests that go to the instance's host, and to no other host. A header the request
+// already sets, such as one of gt api -H, is kept.
+type headerTransport struct {
+	base    http.RoundTripper
+	host    string
+	headers http.Header
+}
+
+func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host == t.host {
+		req = req.Clone(req.Context())
+		for name, values := range t.headers {
+			if _, set := req.Header[name]; !set {
+				req.Header[name] = values
+			}
+		}
+	}
+	return t.base.RoundTrip(req)
+}
+
+// WithHeaders returns a client that adds headers to every request to its instance.
+func (c *Client) WithHeaders(headers http.Header) *Client {
+	base, err := url.Parse(c.BaseURL)
+	if len(headers) == 0 || err != nil {
+		return c
+	}
+	clone := *c
+	httpClient := *c.HTTP
+	httpClient.Transport = headerTransport{base: cmp.Or[http.RoundTripper](c.HTTP.Transport, http.DefaultTransport), host: base.Host, headers: headers}
+	clone.HTTP = &httpClient
+	return &clone
 }
 
 // WithTimeout returns an independent HTTP policy while sharing the connection transport.

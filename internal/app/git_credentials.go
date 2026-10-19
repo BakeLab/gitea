@@ -73,7 +73,7 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 		token := a.deps.Getenv("GITEA_TOKEN")
 		environmentMatches := environmentHost != "" && environmentHost == instance
 		if token != "" && environmentMatches {
-			actual, err := services.CurrentAccount(cmd.Context(), a.deps.Client(instance, token, host.Insecure))
+			actual, err := services.CurrentAccount(cmd.Context(), a.instanceClient(instance, token, host))
 			if err != nil {
 				return err
 			}
@@ -92,7 +92,7 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			credential, err = manager.GitCredential(cmd.Context(), instance, user, a.deps.Client(instance, "", host.Insecure).HTTP, a.deps.Now())
+			credential, err = manager.GitCredential(cmd.Context(), instance, user, a.instanceClient(instance, "", host).HTTP, a.deps.Now())
 			if err != nil {
 				return clierr.Wrap(clierr.Authentication, err)
 			}

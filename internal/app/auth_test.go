@@ -873,3 +873,30 @@ func TestAuthSwitchTreatsThePositionalAccountLikeUser(t *testing.T) {
 	require.Equal(t, "alice", s.Hosts.Hosts[instance].User)
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "switch", "BOB", "--user", "bob"}))
 }
+
+func TestLoginHeadersReachEveryRequestToTheInstance(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("Cf-Access-Client-Id")+" "+r.Header.Get("Cf-Access-Client-Secret"))
+		_, _ = w.Write([]byte(`{"login":"alice"}`))
+	}))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	deps.Getenv = envFunc(map[string]string{"CF_SECRET": "from-env"})
+	deps.Streams.In = strings.NewReader("token\n")
+	login := []string{"auth", "login", "--host", server.URL, "--with-token", "--credential-store", "file", "--no-input"}
+	require.NoError(t, Execute(context.Background(), deps, append(login, "--header", "cf-access-client-id: client", "--header", "CF-Access-Client-Secret: $CF_SECRET")))
+	snapshot, err := deps.Settings.Load()
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"Cf-Access-Client-Id": "client", "Cf-Access-Client-Secret": "$CF_SECRET"}, snapshot.Hosts.Hosts[server.URL].Headers)
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user", "--host", server.URL}))
+	require.Equal(t, []string{"client from-env", "client from-env"}, seen)
+
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "headers", "Cf-Access-Client-Secret:", "--host", server.URL}))
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "headers", "--host", server.URL, "--json"}))
+	require.JSONEq(t, `{"headers":{"Cf-Access-Client-Id":"client"}}`, out.String())
+	for _, header := range []string{"Authorization: token other", "Bad Name: x", "missing colon"} {
+		requireUsageBeforeRequests(t, "", "auth", "login", "--host", server.URL, "--with-token", "--header", header)
+	}
+}

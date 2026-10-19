@@ -173,3 +173,37 @@ func TestDownloadsOutlastTheRequestTimeout(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "slow", string(data))
 }
+
+func TestConfiguredHeadersReachOnlyTheInstance(t *testing.T) {
+	var storageHeader string
+	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		storageHeader = r.Header.Get("Cf-Access-Client-Secret")
+		_, _ = w.Write([]byte("file"))
+	}))
+	defer storage.Close()
+	var instanceHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		instanceHeader = r.Header.Get("Cf-Access-Client-Secret")
+		http.Redirect(w, r, storage.URL+"/signed", http.StatusFound)
+	}))
+	defer server.Close()
+	client := New(server.URL, "", false).WithHeaders(http.Header{"Cf-Access-Client-Secret": {"secret"}})
+	response, err := client.DownloadSigned(context.Background(), server.URL+"/attachments/x")
+	require.NoError(t, err)
+	_ = response.Body.Close()
+	require.Equal(t, "secret", instanceHeader)
+	require.Empty(t, storageHeader)
+}
+
+func TestConfiguredHeadersYieldToTheRequestsOwn(t *testing.T) {
+	var tenant string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tenant = r.Header.Get("X-Tenant")
+	}))
+	defer server.Close()
+	client := New(server.URL, "", false).WithHeaders(http.Header{"X-Tenant": {"configured"}})
+	response, err := client.Send(context.Background(), http.MethodGet, "version", nil, http.Header{"X-Tenant": {"explicit"}})
+	require.NoError(t, err)
+	_ = response.Body.Close()
+	require.Equal(t, "explicit", tenant)
+}

@@ -157,7 +157,7 @@ func (a *application) refreshedCredential(ctx context.Context, instance, user st
 	if err != nil {
 		return auth.Credential{}, err
 	}
-	return manager.Refresh(ctx, instance, user, a.deps.Client(instance, "", host.Insecure).HTTP, false, a.deps.Now())
+	return manager.Refresh(ctx, instance, user, a.instanceClient(instance, "", host).HTTP, false, a.deps.Now())
 }
 
 // environmentStatus reports the GITEA_TOKEN of the environment, when one is set.
@@ -174,7 +174,7 @@ func (a *application) environmentStatus(ctx context.Context, s settings.Snapshot
 	}
 	row.Host = instance
 	if verify {
-		client := a.deps.Client(instance, token, s.Hosts.Hosts[instance].Insecure)
+		client := a.instanceClient(instance, token, s.Hosts.Hosts[instance])
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		user, err := services.CurrentAccount(ctx, client)

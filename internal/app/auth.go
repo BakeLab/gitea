@@ -19,7 +19,7 @@ import (
 // verifyAccount checks that a stored credential still authenticates as its account, and returns the
 // scopes of its token when the instance reports them.
 func (a *application) verifyAccount(ctx context.Context, policy terminal.Policy, instance, user string, host settings.Host, account settings.Account, token string) ([]string, error) {
-	client := a.deps.Client(instance, token, host.Insecure)
+	client := a.instanceClient(instance, token, host)
 	if account.Tokenless() {
 		signer, err := auth.SignerForAccount(account, a.sshPassphrase(ctx, policy, account.SSHKey))
 		if err != nil {

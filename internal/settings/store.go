@@ -9,10 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -74,12 +77,15 @@ func (a Account) Tokenless() bool {
 
 // Host contains shared connection settings and the active account.
 type Host struct {
-	User          string             `yaml:"user,omitempty" json:"user"`
-	SSHHost       string             `yaml:"ssh_host,omitempty" json:"ssh_host,omitempty"`
-	Insecure      bool               `yaml:"insecure,omitempty" json:"insecure"`
-	GitProtocol   string             `yaml:"git_protocol,omitempty" json:"git_protocol,omitempty"`
-	OAuthClientID string             `yaml:"oauth_client_id,omitempty" json:"oauth_client_id,omitempty"`
-	Users         map[string]Account `yaml:"users" json:"users"`
+	User          string `yaml:"user,omitempty" json:"user"`
+	SSHHost       string `yaml:"ssh_host,omitempty" json:"ssh_host,omitempty"`
+	Insecure      bool   `yaml:"insecure,omitempty" json:"insecure"`
+	GitProtocol   string `yaml:"git_protocol,omitempty" json:"git_protocol,omitempty"`
+	OAuthClientID string `yaml:"oauth_client_id,omitempty" json:"oauth_client_id,omitempty"`
+	// Headers are sent with every request to the instance, such as those of an access proxy in
+	// front of it. A value of $NAME is read from the environment variable NAME when sent.
+	Headers map[string]string  `yaml:"headers,omitempty" json:"headers,omitempty"`
+	Users   map[string]Account `yaml:"users" json:"users"`
 }
 
 // Hosts stores instances keyed by their normalized installation URLs.
@@ -266,6 +272,11 @@ func (s Snapshot) Validate() error {
 		if host.GitProtocol != "" && host.GitProtocol != "https" && host.GitProtocol != "ssh" {
 			return fmt.Errorf("invalid git_protocol for %s", instance)
 		}
+		for name, value := range host.Headers {
+			if err := ValidateHeader(name, value); err != nil {
+				return fmt.Errorf("invalid header for %s: %w", instance, err)
+			}
+		}
 		if host.User != "" {
 			if _, exists := host.Users[host.User]; !exists {
 				return fmt.Errorf("active user %q is missing on %s", host.User, instance)
@@ -417,4 +428,34 @@ func ParseTimeout(value string) (time.Duration, error) {
 		return 0, errors.New("http_timeout must be a duration such as 30s or 5m, or 0 for none")
 	}
 	return timeout, nil
+}
+
+// headerName is the token form of an HTTP header name.
+var headerName = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+
+// reservedHeaders are set by gt itself and cannot be configured.
+var reservedHeaders = []string{"Authorization", "Sudo", "Signature", "X-Ssh-Certificate", "Date", "Digest", "Host", "Content-Length", "Content-Type", "Transfer-Encoding"}
+
+// ValidateHeader checks a configured header: a valid name that gt does not set itself, and a value
+// on one line.
+func ValidateHeader(name, value string) error {
+	switch {
+	case !headerName.MatchString(name):
+		return fmt.Errorf("%q is not a valid header name", name)
+	case slices.ContainsFunc(reservedHeaders, func(reserved string) bool { return strings.EqualFold(reserved, name) }):
+		return fmt.Errorf("%s is set by gt and cannot be configured", name)
+	case strings.ContainsAny(value, "\x00\r\n"):
+		return fmt.Errorf("the value of %s must be on one line", name)
+	}
+	return nil
+}
+
+// ParseHeader parses a "Name: value" header argument.
+func ParseHeader(raw string) (name, value string, err error) {
+	name, value, ok := strings.Cut(raw, ":")
+	name, value = strings.TrimSpace(name), strings.TrimSpace(value)
+	if !ok {
+		return "", "", fmt.Errorf("header %q must have the form \"Name: value\"", raw)
+	}
+	return http.CanonicalHeaderKey(name), value, ValidateHeader(name, value)
 }

@@ -185,7 +185,7 @@ replaced by logging in again.`,
 			if err != nil {
 				return err
 			}
-			if _, err := manager.Refresh(cmd.Context(), t.Host, t.User, a.deps.Client(t.Host, "", t.host.Insecure).HTTP, true, a.deps.Now()); err != nil {
+			if _, err := manager.Refresh(cmd.Context(), t.Host, t.User, a.instanceClient(t.Host, "", t.host).HTTP, true, a.deps.Now()); err != nil {
 				return clierr.Wrap(clierr.Authentication, err)
 			}
 			a.done(cmd, "Refreshed the OAuth token of %s on %s", t.User, t.Host)
@@ -220,7 +220,7 @@ $ gt auth token --host gitea.com --user alice`,
 			}
 			if token != "" && t.explicitUser() {
 				// Like connect, print the environment token only for the account --user or GITEA_CLI_USER names.
-				actual, err := services.CurrentAccount(cmd.Context(), a.deps.Client(t.Host, token, t.host.Insecure))
+				actual, err := services.CurrentAccount(cmd.Context(), a.instanceClient(t.Host, token, t.host))
 				if err != nil {
 					return err
 				}
@@ -240,7 +240,7 @@ $ gt auth token --host gitea.com --user alice`,
 				if err != nil {
 					return err
 				}
-				credential, err := manager.GitCredential(cmd.Context(), t.Host, t.User, a.deps.Client(t.Host, "", t.host.Insecure).HTTP, a.deps.Now())
+				credential, err := manager.GitCredential(cmd.Context(), t.Host, t.User, a.instanceClient(t.Host, "", t.host).HTTP, a.deps.Now())
 				if err != nil {
 					return clierr.Wrap(clierr.Authentication, err)
 				}

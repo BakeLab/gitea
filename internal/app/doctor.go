@@ -108,7 +108,7 @@ func (a *application) diagnose(ctx context.Context) doctorReport {
 	resolveCtx, cancel := context.WithTimeout(ctx, doctorTimeout)
 	authenticated, accountErr := a.resolveTarget(resolveCtx, t.Repo != "", true)
 	cancel()
-	client := a.deps.Client(t.Host, "", t.host.Insecure)
+	client := a.instanceClient(t.Host, "", t.host)
 	if accountErr == nil {
 		client = authenticated.client
 	}
