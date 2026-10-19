@@ -29,7 +29,7 @@ $ gt pr merge --squash --delete-branch`
 	a.addPullMutations(group)
 	group.AddCommand(a.pullEditCommand(), a.pullReadyCommand())
 	group.AddCommand(a.issueAttachmentCommand(pullRef), a.commentCommand(pullRef))
-	return group
+	return jsonOutput(group, jsonFields[services.Pull]())
 }
 
 func (a *application) pullListCommand() *cobra.Command {

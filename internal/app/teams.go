@@ -91,7 +91,7 @@ func (a *application) teamCommand() *cobra.Command {
 	group := &cobra.Command{Use: "team", Short: "Manage organization teams and access", Long: `Manage the teams of an organization: what they may do in its repositories, who belongs to
 them, and which repositories they can reach.`}
 	group.AddCommand(a.teamListCommand(), a.teamViewCommand(), a.teamCreateCommand(), a.teamEditCommand(), a.teamDeleteCommand(), a.teamMemberCommand(), a.teamRepoCommand())
-	return group
+	return jsonOutput(group, jsonFields[services.Team]())
 }
 
 func (a *application) teamListCommand() *cobra.Command {
@@ -572,7 +572,7 @@ $ gt team member add 2 bob carol`,
 		},
 	}
 	group.AddCommand(list, add, remove)
-	return group
+	return jsonOutput(group, jsonFields[services.TeamMember]())
 }
 
 // teamRepository resolves a repository argument of team repo add and remove: a name inside the
@@ -619,7 +619,7 @@ its organization. Repositories are named alone, such as service, or as ORG/NAME.
 	}
 	pageFlags(list, &limit, &page)
 	group.AddCommand(list, a.teamRepoAccessCommand(true), a.teamRepoAccessCommand(false))
-	return group
+	return jsonOutput(group, jsonFields[services.Repository]())
 }
 
 func (a *application) teamRepoAccessCommand(grant bool) *cobra.Command {

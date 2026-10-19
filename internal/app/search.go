@@ -68,6 +68,6 @@ $ gt search repo go --topic --sort updated --order desc`,
 	flags.BoolVar(&private, "private", false, "Only private repositories (use =false for public)")
 	flags.BoolVar(&archived, "archived", false, "Only archived repositories (use =false for active)")
 	_ = command.RegisterFlagCompletionFunc("owner", a.completeOrgs())
-	group.AddCommand(command, a.discussionSearchCommand(false), a.discussionSearchCommand(true))
-	return group
+	group.AddCommand(jsonOutput(command, jsonFields[services.Repository]()), a.discussionSearchCommand(false), a.discussionSearchCommand(true))
+	return jsonOutput(group, jsonFields[services.SearchItem]())
 }

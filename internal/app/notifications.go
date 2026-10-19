@@ -124,7 +124,7 @@ func (a *application) notificationCommand() *cobra.Command {
 		command.Flags().StringVar(&before, "before", "", "With --all, only notifications updated before a date, timestamp, or duration such as 1h")
 		group.AddCommand(command)
 	}
-	return group
+	return jsonOutput(group, jsonFields[services.Notification]())
 }
 
 // notificationFilters registers the list filters of list and watch.

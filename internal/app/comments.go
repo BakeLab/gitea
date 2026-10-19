@@ -389,7 +389,7 @@ $ gt %[1]s comment edit 81`, words.group), Args: argsExact(1), RunE: func(cmd *c
 		return a.deleteComment(cmd, t, comment)
 	}}
 	group.AddCommand(list, view, create, edit, remove)
-	return group
+	return jsonOutput(group, jsonFields[services.Comment]())
 }
 
 // commentArgs accepts at most an issue or pull request, and reports a misspelled subcommand, such

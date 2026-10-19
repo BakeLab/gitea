@@ -200,5 +200,5 @@ $ gt %[1]s attachment download %[2]s 9 -O - | less`, words.group, words.example)
 	}}
 	destination.register(download)
 	group.AddCommand(list, view, upload, edit, remove, download)
-	return group
+	return jsonOutput(group, jsonFields[services.IssueAttachment]())
 }

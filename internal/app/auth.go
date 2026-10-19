@@ -480,7 +480,7 @@ $ gt auth status --host gitea.com --json`,
 		},
 	}
 	status.Flags().BoolVar(&verify, "verify", false, "Check each credential against its instance")
-	return status
+	return jsonOutput(status, jsonFields[authStatusRow]())
 }
 
 // accountStatus reports a stored account without revealing its credential.

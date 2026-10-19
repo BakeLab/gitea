@@ -153,7 +153,7 @@ that git push updates it and pr commands without an argument select the pull req
 	cmd.Example = `$ gt pr checkout 13
 $ gt pr co feature/login
 $ gt pr checkout 13 --update`
-	return cmd
+	return jsonOutput(cmd, jsonFields[git.CheckoutResult]())
 }
 
 // checkoutBranchName names the local branch for a pull request: its head branch name when

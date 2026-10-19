@@ -39,7 +39,7 @@ $ gt run jobs 34 --json id,conclusion --jq '.[] | select(.conclusion == "failure
 	}
 	pageFlags(cmd, &limit, &page)
 	cmd.ValidArgsFunction = firstArg(a.completeRuns())
-	return cmd
+	return jsonOutput(cmd, jsonFields[services.Job]())
 }
 
 // jobColumns head jobRow: an icon on a terminal, the status and conclusion words for scripts.

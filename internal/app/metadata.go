@@ -33,7 +33,7 @@ Milestones are addressed by title or ID.`}
 	}
 	group.AddCommand(a.milestoneListCommand(service), a.milestoneViewCommand(service), a.milestoneCreateCommand(service), a.milestoneEditCommand(service),
 		a.milestoneDeleteCommand(service), a.milestoneStateCommand("close", service), a.milestoneStateCommand("reopen", service), a.milestoneIssueCommand())
-	return group
+	return jsonOutput(group, jsonFields[services.Milestone]())
 }
 
 func (a *application) milestoneListCommand(service milestoneService) *cobra.Command {

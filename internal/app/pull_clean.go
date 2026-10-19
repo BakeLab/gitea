@@ -123,7 +123,7 @@ func (a *application) pullCleanCommand() *cobra.Command {
 	cmd.ValidArgsFunction = firstArg(a.completePulls("closed"))
 	cmd.Example = `# After #13 was merged, delete its branch locally and on Gitea
 $ gt pr clean 13`
-	return cmd
+	return jsonOutput(cmd, jsonFields[git.CleanResult]())
 }
 
 func (a *application) remotesForRepositoryURLs(ctx context.Context, hosts map[string]settings.Host, cloneURL, sshURL, fullName string) ([]string, error) {

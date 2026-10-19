@@ -47,7 +47,7 @@ delete them, and protect them from direct pushes. To work with local branches, u
 	}
 	group.AddCommand(a.branchListCommand(), a.branchViewCommand(), a.branchCreateCommand(), a.branchRenameCommand(), a.branchDeleteCommand())
 	group.AddCommand(a.branchProtectCommand(), a.branchUnprotectCommand())
-	return group
+	return jsonOutput(group, jsonFields[services.Branch]())
 }
 
 // branchURL links a branch's files on the web.

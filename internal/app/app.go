@@ -462,128 +462,32 @@ func commandIndex(root *cobra.Command, args []string) int {
 	return len(args)
 }
 
-func commandOutputFields(cmd *cobra.Command) []string {
-	if cmd.Name() == "status" && cmd.Parent() != nil {
-		if cmd.Parent().Name() == "pr" {
-			return jsonFields[services.PullStatus]()
-		}
-		if cmd.Parent().Parent() == nil {
-			return jsonFields[services.AccountStatus]()
-		}
+// fieldsAnnotation holds the comma-separated fields that --json selects for a command and, unless
+// they declare their own, its direct subcommands.
+const fieldsAnnotation = "gt.fields"
+
+// jsonOutput declares the JSON fields cmd and its direct subcommands output.
+func jsonOutput(cmd *cobra.Command, fields []string) *cobra.Command {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
 	}
-	if cmd.Parent() == nil {
+	cmd.Annotations[fieldsAnnotation] = strings.Join(fields, ",")
+	return cmd
+}
+
+// commandOutputFields returns the JSON fields declared on cmd or its parent, or nil for a command
+// group, which outputs nothing itself.
+func commandOutputFields(cmd *cobra.Command) []string {
+	if cmd.Annotations["gt.group"] != "" {
 		return nil
 	}
-	if cmd.Parent().Name() == "search" {
-		if cmd.Name() == "repo" {
-			return jsonFields[services.Repository]()
+	for _, c := range []*cobra.Command{cmd, cmd.Parent()} {
+		if c == nil {
+			continue
 		}
-		return jsonFields[services.SearchItem]()
-	}
-	switch cmd.Parent().Name() {
-	case "auth":
-		if cmd.Name() == "status" {
-			return jsonFields[authStatusRow]()
+		if fields, ok := c.Annotations[fieldsAnnotation]; ok {
+			return strings.Split(fields, ",")
 		}
-	case "config":
-		if cmd.Name() == "get" || cmd.Name() == "list" {
-			return configKeys
-		}
-	case "gt":
-		if cmd.Name() == "doctor" {
-			return jsonFields[doctorReport]()
-		}
-	case "attachment":
-		return jsonFields[services.IssueAttachment]()
-	case "artifact":
-		return jsonFields[services.Artifact]()
-	case "user":
-		if cmd.Parent().Parent() != nil && cmd.Parent().Parent().Name() == "admin" {
-			return jsonFields[services.AdminUser]()
-		}
-	case "webhook":
-		return jsonFields[services.Webhook]()
-	case "branch":
-		return jsonFields[services.Branch]()
-	case "team":
-		return jsonFields[services.Team]()
-	case "notification":
-		return jsonFields[services.Notification]()
-	case "org":
-		return jsonFields[services.Organization]()
-	case "member":
-		if cmd.Parent().Parent() != nil && cmd.Parent().Parent().Name() == "team" {
-			return jsonFields[services.TeamMember]()
-		}
-		return jsonFields[services.OrganizationMember]()
-	case "asset":
-		return jsonFields[services.ReleaseAsset]()
-	case "release":
-		if cmd.Name() == "upload" {
-			return jsonFields[services.ReleaseAsset]()
-		}
-		return jsonFields[services.Release]()
-	case "secret":
-		return jsonFields[services.ActionSecret]()
-	case "variable":
-		return jsonFields[services.ActionVariable]()
-	case "wiki":
-		if cmd.Name() == "revisions" {
-			return jsonFields[services.WikiRevision]()
-		}
-		return jsonFields[services.WikiPage]()
-	case "time":
-		return jsonFields[services.TrackedTime]()
-	case "ssh-key":
-		return jsonFields[services.SSHKey]()
-	case "comment":
-		return jsonFields[services.Comment]()
-	case "issue":
-		if cmd.Name() == "comment" {
-			return jsonFields[services.Comment]()
-		}
-		return jsonFields[services.Issue]()
-	case "review":
-		if cmd.Name() == "request" || cmd.Name() == "cancel-request" {
-			return jsonFields[services.Pull]()
-		}
-		if cmd.Name() == "comments" || cmd.Name() == "reply" {
-			return jsonFields[services.ReviewComment]()
-		}
-		return jsonFields[services.Review]()
-	case "pr":
-		switch cmd.Name() {
-		case "checkout":
-			return jsonFields[git.CheckoutResult]()
-		case "checks":
-			return jsonFields[services.Check]()
-		case "review":
-			return jsonFields[services.Review]()
-		case "clean":
-			return jsonFields[git.CleanResult]()
-		case "comment":
-			return jsonFields[services.Comment]()
-		}
-		return jsonFields[services.Pull]()
-	case "repo":
-		if cmd.Name() == "sync" {
-			return jsonFields[git.SyncResult]()
-		}
-		return jsonFields[services.Repository]()
-	case "label":
-		return jsonFields[services.Label]()
-	case "milestone":
-		return jsonFields[services.Milestone]()
-	case "workflow":
-		if cmd.Name() == "run" {
-			return jsonFields[services.DispatchResult]()
-		}
-		return jsonFields[services.Workflow]()
-	case "run":
-		if cmd.Name() == "jobs" {
-			return jsonFields[services.Job]()
-		}
-		return jsonFields[services.Run]()
 	}
 	return nil
 }

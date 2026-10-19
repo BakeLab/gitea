@@ -31,7 +31,7 @@ one or more, and comment on them. Gitea lists pull requests among issues, so mos
 commands also accept a pull request number.`}
 	group.AddCommand(a.issueListCommand(), a.issueViewCommand(), a.issueCreateCommand(), a.issueEditCommand(),
 		a.issueStateCommand("close"), a.issueStateCommand("reopen"), a.issueAttachmentCommand(issueRef), a.commentCommand(issueRef))
-	return group
+	return jsonOutput(group, jsonFields[services.Issue]())
 }
 
 func (a *application) issueListCommand() *cobra.Command {

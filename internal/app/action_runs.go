@@ -34,7 +34,7 @@ func (a *application) runCommand() *cobra.Command {
 	}
 	group.AddCommand(a.runListCommand(), a.runViewCommand(), a.runWatchCommand(), a.runCancelCommand(), a.runRerunCommand(), a.runDeleteCommand(),
 		a.runJobsCommand(), a.runLogsCommand(), a.runDownloadCommand(), a.artifactCommand())
-	return group
+	return jsonOutput(group, jsonFields[services.Run]())
 }
 
 func (a *application) runListCommand() *cobra.Command {

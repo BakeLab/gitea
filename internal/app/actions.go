@@ -30,7 +30,7 @@ func (a *application) workflowCommand() *cobra.Command {
 		Long:  "Work with the Actions workflows of a repository. Inspect their runs with gt run.",
 	}
 	group.AddCommand(a.workflowListCommand(), a.workflowViewCommand(), a.workflowRunCommand(), a.workflowStateCommand(true), a.workflowStateCommand(false))
-	return group
+	return jsonOutput(group, jsonFields[services.Workflow]())
 }
 
 func (a *application) workflowListCommand() *cobra.Command {
@@ -272,7 +272,7 @@ $ gt workflow run nightly --follow`,
 	cmd.ValidArgsFunction = firstArg(a.completeWorkflows())
 	_ = cmd.RegisterFlagCompletionFunc("ref", a.completeBranches())
 	_ = cmd.RegisterFlagCompletionFunc("field", a.completeWorkflowInputs())
-	return cmd
+	return jsonOutput(cmd, jsonFields[services.DispatchResult]())
 }
 
 // nextStep shows a next step under a done line, under the same conditions.

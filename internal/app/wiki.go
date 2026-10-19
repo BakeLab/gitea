@@ -23,7 +23,7 @@ func (a *application) wikiCommand() *cobra.Command {
 		Long:  "List, view, create, edit and delete the pages of a repository's wiki, and list their revisions.",
 	}
 	group.AddCommand(a.wikiListCommand(), a.wikiViewCommand(), a.wikiRevisionsCommand(), a.wikiCreateCommand(), a.wikiEditCommand(), a.wikiDeleteCommand())
-	return group
+	return jsonOutput(group, jsonFields[services.WikiPage]())
 }
 
 func (a *application) completeWikiPages() cobra.CompletionFunc {
@@ -141,7 +141,7 @@ func (a *application) wikiRevisionsCommand() *cobra.Command {
 	}
 	positiveIntVar(command, &page, "page", 1, math.MaxInt, "Revision page (server controls page size)")
 	command.ValidArgsFunction = a.completeWikiPages()
-	return command
+	return jsonOutput(command, jsonFields[services.WikiRevision]())
 }
 
 // wikiContent are the flags of wiki create and wiki edit.

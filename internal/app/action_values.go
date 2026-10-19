@@ -88,7 +88,10 @@ Note that the global --user flag selects the account gt acts as, not a scope.`, 
 	if !secret {
 		group.AddCommand(a.variableViewCommand(), a.variableGetCommand())
 	}
-	return group
+	if secret {
+		return jsonOutput(group, jsonFields[services.ActionSecret]())
+	}
+	return jsonOutput(group, jsonFields[services.ActionVariable]())
 }
 
 func (a *application) actionValueListCommand(secret bool, kind string) *cobra.Command {
