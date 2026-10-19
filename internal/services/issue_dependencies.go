@@ -37,7 +37,7 @@ func (s Issues) Dependencies(ctx context.Context, number int64) (IssueDependenci
 		return IssueDependencies{}, err
 	}
 	result := IssueDependencies{}
-	for _, list := range []struct {
+	lists := []struct {
 		fetch func(ctx context.Context, c *gitea.Client, opts gitea.ListOptions) ([]*gitea.Issue, *gitea.Response, error)
 		dest  *[]IssueReference
 	}{
@@ -47,20 +47,22 @@ func (s Issues) Dependencies(ctx context.Context, number int64) (IssueDependenci
 		{func(ctx context.Context, c *gitea.Client, opts gitea.ListOptions) ([]*gitea.Issue, *gitea.Response, error) {
 			return c.Issues.ListIssueBlocks(ctx, owner, repo, number, gitea.ListIssueBlocksOptions{ListOptions: opts})
 		}, &result.Blocks},
-	} {
+	}
+	err = concurrently(len(lists), func(i int) error {
 		items, err := listAll(func(page int) ([]IssueReference, error) {
 			issues, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Issue, *gitea.Response, error) {
-				return list.fetch(ctx, c, listOptions(50, page))
+				return lists[i].fetch(ctx, c, listOptions(50, page))
 			})
 			return convertAll(issues, issueReferenceFrom), err
 		})
-		if IsNotFound(err) {
-			return IssueDependencies{}, nil
-		}
-		if err != nil {
-			return IssueDependencies{}, err
-		}
-		*list.dest = items
+		*lists[i].dest = items
+		return err
+	})
+	if IsNotFound(err) {
+		return IssueDependencies{}, nil
+	}
+	if err != nil {
+		return IssueDependencies{}, err
 	}
 	return result, nil
 }

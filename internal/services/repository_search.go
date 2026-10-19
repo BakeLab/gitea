@@ -115,15 +115,14 @@ func (s Repositories) Search(ctx context.Context, opts RepositorySearchOptions) 
 		}
 		options.OwnerID = id
 	}
-	account, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
-		return c.Users.GetMyUserInfo(ctx)
-	})
-	if err != nil {
-		return Page[Repository]{}, err
-	}
 	// Gitea groups results by owner ahead of the requested sort, so an explicit sort cannot keep it.
+	// The account only orders the results, so a token that cannot read it still searches.
 	if opts.Sort == "" {
-		options.PrioritizedByOwnerID = account.ID
+		if account, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
+			return c.Users.GetMyUserInfo(ctx)
+		}); err == nil {
+			options.PrioritizedByOwnerID = account.ID
+		}
 	}
 	window, err := callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Repository, *gitea.Response, error) {
 		options.ListOptions = list

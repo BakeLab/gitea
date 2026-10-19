@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,8 +58,11 @@ func TestDiscussionViews(t *testing.T) {
 func TestIssueViewDependencies(t *testing.T) {
 	supported := true
 	var paths []string
+	var mu sync.Mutex
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		paths = append(paths, r.URL.Path)
+		mu.Unlock()
 		switch {
 		case r.URL.Path == "/api/v1/repos/alice/project/issues/3":
 			_, _ = w.Write([]byte(`{"number":3,"title":"Crash","html_url":"https://example.org/i/3","state":"open","user":{"login":"bob"},"created_at":"2026-01-03T00:00:00Z","due_date":"2026-12-24T23:59:59Z","ref":"main"}`))
@@ -89,7 +93,7 @@ func TestIssueViewDependencies(t *testing.T) {
 	supported, paths = false, nil
 	require.NoError(t, Execute(context.Background(), deps, args))
 	require.Contains(t, out.String(), "\nblocked by:\t\nblocks:\t\n")
-	require.Equal(t, []string{"/api/v1/repos/alice/project/issues/3", "/api/v1/repos/alice/project/issues/3/dependencies"}, paths)
+	require.ElementsMatch(t, []string{"/api/v1/repos/alice/project/issues/3", "/api/v1/repos/alice/project/issues/3/dependencies", "/api/v1/repos/alice/project/issues/3/blocks"}, paths)
 	out.Reset()
 	paths = nil
 	require.NoError(t, Execute(context.Background(), deps, append(args, "--json=number")))

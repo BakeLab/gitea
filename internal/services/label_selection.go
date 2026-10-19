@@ -80,8 +80,67 @@ func selectLabelNames(scope string, names []string, matches map[string][]int64) 
 	return ids, nil
 }
 
-// ResolveIssueNames includes labels shared by the repository's organization.
-// Duplicate names require an explicit scope to avoid choosing a different label.
+// labelKey indexes label IDs by scope ("repo", "org", or "" for either) and name.
+type labelKey struct{ scope, name string }
+
+// IssueLabelCatalog resolves the label names of issue flags against the repository's labels and
+// those its organization shares.
+type IssueLabelCatalog struct {
+	repository string
+	// folded indexes the names case-insensitively, for names without an exact match.
+	index, folded map[labelKey][]int64
+}
+
+// IssueCatalog loads the labels that issue label names can select.
+func (s Labels) IssueCatalog(ctx context.Context) (IssueLabelCatalog, error) {
+	catalog := IssueLabelCatalog{repository: s.Repository, index: map[labelKey][]int64{}, folded: map[labelKey][]int64{}}
+	scopes := []Labels{s}
+	owner, _, _ := strings.Cut(s.Repository, "/")
+	_, isOrg, err := organization(ctx, s.Client, owner)
+	if err != nil {
+		return catalog, err
+	}
+	if isOrg {
+		scopes = append(scopes, Labels{Client: s.Client, Organization: owner})
+	}
+	for _, scope := range scopes {
+		scopeName := "repo"
+		if scope.Organization != "" {
+			scopeName = "org"
+		}
+		labels, err := scope.All(ctx)
+		if err != nil {
+			return catalog, err
+		}
+		for _, label := range labels {
+			for _, key := range []labelKey{{scopeName, label.Name}, {"", label.Name}} {
+				catalog.index[key] = append(catalog.index[key], label.ID)
+				lower := labelKey{key.scope, strings.ToLower(key.name)}
+				catalog.folded[lower] = append(catalog.folded[lower], label.ID)
+			}
+		}
+	}
+	return catalog, nil
+}
+
+// Resolve maps names to label IDs. Duplicate names require an explicit repo: or org: scope to avoid
+// choosing a different label.
+func (c IssueLabelCatalog) Resolve(names []string) ([]int64, error) {
+	matches := map[string][]int64{}
+	for _, input := range names {
+		if strings.TrimSpace(input) == "" {
+			return nil, fmt.Errorf("label names cannot be empty")
+		}
+		scope, name := splitLabelScope(input)
+		matches[input] = c.index[labelKey{scope, name}]
+		if len(matches[input]) == 0 {
+			matches[input] = c.folded[labelKey{scope, strings.ToLower(name)}]
+		}
+	}
+	return selectLabelNames(c.repository, names, matches)
+}
+
+// ResolveIssueNames resolves names through the repository's IssueCatalog.
 func (s Labels) ResolveIssueNames(ctx context.Context, names []string) ([]int64, error) {
 	if len(names) == 0 {
 		return []int64{}, nil
@@ -91,44 +150,11 @@ func (s Labels) ResolveIssueNames(ctx context.Context, names []string) ([]int64,
 			return nil, fmt.Errorf("label names cannot be empty")
 		}
 	}
-	scopes := []Labels{s}
-	owner, _, _ := strings.Cut(s.Repository, "/")
-	_, isOrg, err := organization(ctx, s.Client, owner)
+	catalog, err := s.IssueCatalog(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if isOrg {
-		scopes = append(scopes, Labels{Client: s.Client, Organization: owner})
-	}
-	type labelKey struct{ scope, name string }
-	// folded indexes the names case-insensitively, for names without an exact match.
-	index, folded := map[labelKey][]int64{}, map[labelKey][]int64{}
-	for _, scope := range scopes {
-		scopeName := "repo"
-		if scope.Organization != "" {
-			scopeName = "org"
-		}
-		labels, err := scope.All(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, label := range labels {
-			for _, key := range []labelKey{{scopeName, label.Name}, {"", label.Name}} {
-				index[key] = append(index[key], label.ID)
-				lower := labelKey{key.scope, strings.ToLower(key.name)}
-				folded[lower] = append(folded[lower], label.ID)
-			}
-		}
-	}
-	matches := map[string][]int64{}
-	for _, input := range names {
-		scope, name := splitLabelScope(input)
-		matches[input] = index[labelKey{scope, name}]
-		if len(matches[input]) == 0 {
-			matches[input] = folded[labelKey{scope, strings.ToLower(name)}]
-		}
-	}
-	return selectLabelNames(s.Repository, names, matches)
+	return catalog.Resolve(names)
 }
 
 func splitLabelScope(input string) (scope, name string) {

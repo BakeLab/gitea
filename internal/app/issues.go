@@ -608,9 +608,23 @@ func (f *metadataFlags) resolve(cmd *cobra.Command, t target) (labels *[]int64, 
 	t.expandMeAll(f.setAssignees)
 	t.expandMeAll(f.addAssignees)
 	t.expandMeAll(f.removeAssignees)
-	resolver := services.Labels{Client: t.client, Repository: t.Repo}
+	// The repository's and its organization's labels are loaded once for all label flags.
+	var catalog *services.IssueLabelCatalog
+	resolveLabels := func(names []string) ([]int64, error) {
+		if len(names) == 0 {
+			return []int64{}, nil
+		}
+		if catalog == nil {
+			loaded, err := (services.Labels{Client: t.client, Repository: t.Repo}).IssueCatalog(cmd.Context())
+			if err != nil {
+				return nil, err
+			}
+			catalog = &loaded
+		}
+		return catalog.Resolve(names)
+	}
 	if cmd.Flags().Changed("set-labels") {
-		ids, err := resolver.ResolveIssueNames(cmd.Context(), f.setLabels)
+		ids, err := resolveLabels(f.setLabels)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -624,10 +638,10 @@ func (f *metadataFlags) resolve(cmd *cobra.Command, t target) (labels *[]int64, 
 		return labels, assignees, nil, nil
 	}
 	changes = &services.MetadataChanges{AddAssignees: f.addAssignees, RemoveAssignees: f.removeAssignees}
-	if changes.AddLabels, err = resolver.ResolveIssueNames(cmd.Context(), f.addLabels); err != nil {
+	if changes.AddLabels, err = resolveLabels(f.addLabels); err != nil {
 		return nil, nil, nil, err
 	}
-	if changes.RemoveLabels, err = resolver.ResolveIssueNames(cmd.Context(), f.removeLabels); err != nil {
+	if changes.RemoveLabels, err = resolveLabels(f.removeLabels); err != nil {
 		return nil, nil, nil, err
 	}
 	return labels, assignees, changes, nil
