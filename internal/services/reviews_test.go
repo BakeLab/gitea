@@ -44,8 +44,9 @@ func TestReviewCommentsContinueWhenServerCapsPageSize(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"id":2}]`))
 		}
 	}))
-	items, err := (Reviews{Client: client, Repository: "owner/repo"}).Comments(context.Background(), 3, 0, 1, 2)
+	result, err := (Reviews{Client: client, Repository: "owner/repo"}).Comments(context.Background(), 3, 0, 1, 2)
 	require.NoError(t, err)
+	items := result.Items
 	require.Len(t, items, 1)
 	require.EqualValues(t, 5, items[0].ID)
 	require.EqualValues(t, 4, items[0].Line)

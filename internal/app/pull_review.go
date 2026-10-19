@@ -510,18 +510,18 @@ func (a *application) pullReviewCommentsCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		items, err := (services.Reviews{Client: t.client, Repository: t.Repo}).Comments(cmd.Context(), n, reviewID, limit, page)
+		result, err := (services.Reviews{Client: t.client, Repository: t.Repo}).Comments(cmd.Context(), n, reviewID, limit, page)
 		if err != nil {
 			return err
 		}
 		ref := fmt.Sprintf("%s#%d", t.Repo, n)
-		return writeTable(a, cmd, items, listSpec[services.ReviewComment]{
+		return writeTable(a, cmd, result.Items, listSpec[services.ReviewComment]{
 			Columns: []terminal.Column{{Header: "ID"}, {Header: "File"}, {Header: "Author"}, {Header: "Resolved"}, {Header: "Body", Flex: true}},
 			Row: func(item services.ReviewComment) []terminal.Cell {
 				return []terminal.Cell{{Text: strconv.FormatInt(item.ID, 10), Link: item.URL}, {Text: item.Location()}, {Text: item.Author}, {Text: item.Resolver}, {Text: item.Body}}
 			},
 			Empty: "no inline review comments on " + ref, Context: "inline review comments on " + ref,
-		}, listPage{Number: page, More: len(items) == limit})
+		}, servicePage(result, page))
 	}}
 	pageFlags(cmd, &limit, &page)
 	cmd.Flags().Int64Var(&reviewID, "review", 0, "Limit comments to one review `ID`")
@@ -623,7 +623,7 @@ func (a *application) completeReviewArgs(inline bool) cobra.CompletionFunc {
 			service := services.Reviews{Client: t.client, Repository: t.Repo}
 			if inline {
 				items, err := service.Comments(ctx, n, 0, completionLimit, 1)
-				return describe(items, func(item services.ReviewComment) (string, string) {
+				return describe(items.Items, func(item services.ReviewComment) (string, string) {
 					return strconv.FormatInt(item.ID, 10), item.Author + " on " + item.Path + ": " + item.Body
 				}), err
 			}

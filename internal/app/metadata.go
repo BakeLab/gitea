@@ -51,11 +51,10 @@ $ gt milestone list --state all --json title,due_on,open_issues,closed_issues`, 
 			return err
 		}
 		slices.SortStableFunc(all, compareMilestones)
-		start := len(all)
-		if page-1 <= len(all)/limit {
-			start = min((page-1)*limit, len(all))
+		items, err := services.PageOf(all, limit, page)
+		if err != nil {
+			return err
 		}
-		items := services.Page[services.Milestone]{Items: all[start:min(start+limit, len(all))], More: start+limit < len(all), Total: len(all), Counted: true}
 		what := "milestones in " + t.Repo
 		if state != "all" {
 			what = state + " " + what

@@ -33,6 +33,12 @@ func pageOf[T any](items []T, limit, page int) ([]T, error) {
 	return items[start:min(start+limit, len(items))], nil
 }
 
+// PageOf returns one CLI page of a complete collection, counting the whole collection.
+func PageOf[T any](items []T, limit, page int) (Page[T], error) {
+	window, err := pageOf(items, limit, page)
+	return Page[T]{Items: window, More: page*limit < len(items), Total: len(items), Counted: true}, err
+}
+
 // loadTogether runs the loaders concurrently and returns their errors joined.
 func loadTogether(loaders ...func() error) error {
 	return concurrently(len(loaders), func(i int) error { return loaders[i]() })

@@ -83,3 +83,15 @@ func writeFirstPage(w http.ResponseWriter, r *http.Request, page string) {
 	}
 	_, _ = w.Write([]byte(page))
 }
+
+func TestPageOfCountsTheWholeCollection(t *testing.T) {
+	for _, tc := range []struct {
+		page int
+		want []int
+		more bool
+	}{{1, []int{1, 2}, true}, {2, []int{3, 4}, false}, {3, []int{}, false}} {
+		result, err := PageOf([]int{1, 2, 3, 4}, 2, tc.page)
+		require.NoError(t, err)
+		require.Equal(t, Page[int]{Items: tc.want, More: tc.more, Total: 4, Counted: true}, result)
+	}
+}

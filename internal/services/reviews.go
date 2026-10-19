@@ -240,20 +240,20 @@ func (s Reviews) Dismiss(ctx context.Context, n, id int64, dismiss bool, message
 }
 
 // Comments flattens the API's unpaginated per-review collections in ID order.
-func (s Reviews) Comments(ctx context.Context, n, reviewID int64, limit, page int) ([]ReviewComment, error) {
+func (s Reviews) Comments(ctx context.Context, n, reviewID int64, limit, page int) (Page[ReviewComment], error) {
 	reviews := []Review{{ID: reviewID}}
 	if reviewID == 0 {
 		var err error
 		reviews, err = listAll(func(page int) ([]Review, error) { return s.List(ctx, n, 100, page) })
 		if err != nil {
-			return nil, err
+			return Page[ReviewComment]{}, err
 		}
 	}
 	results, err := s.reviewComments(ctx, n, reviews, reviewID == 0)
 	if err != nil {
-		return nil, err
+		return Page[ReviewComment]{}, err
 	}
-	return pageOf(results, limit, page)
+	return PageOf(results, limit, page)
 }
 
 // All returns every review of a pull request, including requests for a review.
