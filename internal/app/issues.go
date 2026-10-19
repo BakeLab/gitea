@@ -188,19 +188,30 @@ $ gt issue view https://gitea.com/OWNER/REPO/issues/12 --web`, Annotations: map[
 		if web {
 			return a.openBrowser(cmd, item.URL)
 		}
-		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
+		if a.options.json != "" && !a.jsonSelects("blocked_by", "blocks") {
+			return a.writeJSON(cmd, issueDetails{Issue: item})
 		}
 		dependencies, err := service.Dependencies(cmd.Context(), n)
 		if err != nil {
 			return err
+		}
+		if a.options.json != "" {
+			return a.writeJSON(cmd, issueDetails{Issue: item, BlockedBy: dependencies.BlockedBy, Blocks: dependencies.Blocks})
 		}
 		return a.writeDiscussion(cmd, target, issueView(item, target.Repo, dependencies), comments)
 	}}
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the issue in the browser")
 	cmd.Flags().BoolVarP(&comments, "comments", "c", false, "View issue comments")
 	cmd.ValidArgsFunction = firstArg(a.completeIssues("open"))
-	return cmd
+	return jsonOutput(cmd, jsonFields[issueDetails]())
+}
+
+// issueDetails is the JSON of issue view: the issue with the issues it depends on and blocks,
+// which are read only when --json names blocked_by or blocks.
+type issueDetails struct {
+	services.Issue
+	BlockedBy []services.IssueReference `json:"blocked_by,omitzero"`
+	Blocks    []services.IssueReference `json:"blocks,omitzero"`
 }
 
 func (a *application) issueCreateCommand() *cobra.Command {

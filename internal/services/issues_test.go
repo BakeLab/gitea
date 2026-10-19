@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,7 +75,7 @@ func TestIssueDependenciesMapReferencesAndTreatMissingSupportAsNone(t *testing.T
 	missing = true
 	dependencies, err = service.Dependencies(context.Background(), 7)
 	require.NoError(t, err)
-	require.Equal(t, IssueDependencies{}, dependencies)
+	require.Equal(t, IssueDependencies{BlockedBy: []IssueReference{}, Blocks: []IssueReference{}}, dependencies)
 }
 
 func TestDiscussionsTellPullRequestsAndMergesApart(t *testing.T) {
@@ -115,4 +116,16 @@ func TestIssueCreateInMissingRepositoryReportsTheRepository(t *testing.T) {
 	}))
 	_, err := (Issues{Client: client, Repository: "alice/projetc"}).Create(context.Background(), IssueOptions{Title: "x"})
 	require.EqualError(t, err, "repository alice/projetc not found")
+}
+
+func TestIssueDependenciesReportAFailureBesideAMissingList(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/dependencies") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	_, err := (Issues{Client: client, Repository: "owner/repo"}).Dependencies(context.Background(), 7)
+	require.ErrorContains(t, err, "500")
 }

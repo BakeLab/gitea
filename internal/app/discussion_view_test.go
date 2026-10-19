@@ -98,6 +98,10 @@ func TestIssueViewDependencies(t *testing.T) {
 	paths = nil
 	require.NoError(t, Execute(context.Background(), deps, append(args, "--json=number")))
 	require.Equal(t, []string{"/api/v1/repos/alice/project/issues/3"}, paths)
+	out.Reset()
+	supported = true
+	require.NoError(t, Execute(context.Background(), deps, append(args, "--json=number,blocked_by,blocks")))
+	require.JSONEq(t, `{"number":3,"blocked_by":[{"repository":"alice/project","number":1},{"repository":"bob/lib","number":5},{"repository":"","number":0}],"blocks":[{"repository":"alice/project","number":9}]}`, out.String())
 }
 
 func TestPullViewCommentsIncludeReviews(t *testing.T) {

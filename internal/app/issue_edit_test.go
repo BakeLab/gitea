@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -246,4 +247,27 @@ func TestReopeningAMergedPullRequestLeavesNoComment(t *testing.T) {
 	err := Execute(context.Background(), deps, []string{"issue", "reopen", "14", "-R", "alice/project", "--no-input", "--comment", "again"})
 	require.ErrorContains(t, err, "pull request alice/project#14 (Merged one) is already merged; it cannot be reopened")
 	require.Empty(t, writes)
+}
+
+func TestIssueEditAddsAndRemovesDependencies(t *testing.T) {
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "POST /api/v1/repos/alice/project/issues/12/dependencies", "DELETE /api/v1/repos/alice/project/issues/12/dependencies":
+			var meta map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&meta))
+			requests = append(requests, fmt.Sprintf("%s %v/%v#%v", r.Method, meta["owner"], meta["repo"], meta["index"]))
+			_, _ = w.Write([]byte(`{"number":12}`))
+		case "GET /api/v1/repos/alice/project/issues/12":
+			_, _ = w.Write([]byte(`{"number":12,"title":"Crash"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "alice/project", "--add-blocked-by", "#9,3,bob/lib#5", "--remove-blocked-by", "4"}))
+	require.Equal(t, []string{"POST alice/project#9", "POST alice/project#3", "POST bob/lib#5", "DELETE alice/project#4"}, requests)
+	requireUsageBeforeRequests(t, "takes issues as N, #N or OWNER/REPO#N", "issue", "edit", "12", "--add-blocked-by", "lib#5")
+	requireUsageBeforeRequests(t, "#9 is both added and removed", "issue", "edit", "12", "--add-blocked-by", "9", "--remove-blocked-by", "9")
 }

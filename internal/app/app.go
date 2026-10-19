@@ -494,13 +494,22 @@ func commandOutputFields(cmd *cobra.Command) []string {
 
 // jsonFields lists the JSON names of T's fields, which --json can select, in alphabetical order.
 func jsonFields[T any]() []string {
-	t := reflect.TypeFor[T]()
-	fields := make([]string, 0, t.NumField())
+	fields := structJSONFields(reflect.TypeFor[T]())
+	slices.Sort(fields)
+	return fields
+}
+
+// structJSONFields lists the JSON names of t's fields, including those of embedded structs.
+func structJSONFields(t reflect.Type) []string {
+	var fields []string
 	for field := range t.Fields() {
-		if name, _, _ := strings.Cut(field.Tag.Get("json"), ","); name != "" && name != "-" {
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		switch {
+		case field.Anonymous && name == "":
+			fields = append(fields, structJSONFields(field.Type)...)
+		case name != "" && name != "-":
 			fields = append(fields, name)
 		}
 	}
-	slices.Sort(fields)
 	return fields
 }

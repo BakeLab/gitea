@@ -4,7 +4,9 @@
 package app
 
 import (
+	"cmp"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -20,11 +22,13 @@ func (a *application) issueEditCommand() *cobra.Command {
 	var title, body, file, deadline, ref, milestone string
 	var useEditor, removeMilestone bool
 	var metadata metadataFlags
+	var addBlockedBy, removeBlockedBy []string
 	cmd := &cobra.Command{Use: "edit {<number> | <url>}...", Short: "Edit issues: title, body, labels, assignees, milestone, deadline", Long: `Edit one or more issues. Without flags on a terminal, a form edits one issue at a time,
 starting from its current values. Label and assignee flags add to or remove from each issue's
 current values; the --set flags replace them.`, Example: `$ gt issue edit 12 --title "Crash on start" --add-label bug
 $ gt issue edit 12 13 --add-assignee @me --milestone v1.0
-$ gt issue edit 12 --remove-label wontfix --remove-milestone`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+$ gt issue edit 12 --remove-label wontfix --remove-milestone
+$ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var draft terminal.Draft
 		defer finishDraft(&draft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
@@ -72,7 +76,12 @@ $ gt issue edit 12 --remove-label wontfix --remove-milestone`, Annotations: map[
 		if err := metadata.validate(cmd); err != nil {
 			return err
 		}
-		if opts == (services.IssueEdit{}) && !useEditor && !metadata.changed(cmd) && milestone == "" {
+		blockers, err := dependencyChanges(addBlockedBy, removeBlockedBy)
+		if err != nil {
+			return err
+		}
+		editing := opts != (services.IssueEdit{}) || useEditor || metadata.changed(cmd) || milestone != ""
+		if !editing && len(addBlockedBy)+len(removeBlockedBy) == 0 {
 			return errNothingToEdit
 		}
 		target, numbers, err := a.resolveRefs(cmd, args, issueRef)
@@ -101,6 +110,15 @@ $ gt issue edit 12 --remove-label wontfix --remove-milestone`, Annotations: map[
 			opts.Body = &draft.Body
 		}
 		return batchDone(a, cmd, numbers, issueLabel, func(n int64) (services.Issue, error) {
+			for _, blocker := range blockers {
+				issue := services.IssueReference{Repository: cmp.Or(blocker.Repository, target.Repo), Number: blocker.Number}
+				if err := service.SetBlockedBy(cmd.Context(), n, issue, blocker.block); err != nil {
+					return services.Issue{}, itemError(err, target.Repo)
+				}
+			}
+			if !editing {
+				return service.View(cmd.Context(), n)
+			}
 			item, err := service.Edit(cmd.Context(), n, opts)
 			return item, itemError(err, target.Repo)
 		}, editedIssue(target))
@@ -115,6 +133,8 @@ $ gt issue edit 12 --remove-label wontfix --remove-milestone`, Annotations: map[
 	flags.BoolVar(&removeMilestone, "remove-milestone", false, "Remove the issue from its milestone")
 	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to; empty clears it")
 	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339, or Unix timestamp; empty clears it")
+	flags.StringSliceVar(&addBlockedBy, "add-blocked-by", nil, "Mark the issue as blocked by other `issues`: N, #N or OWNER/REPO#N")
+	flags.StringSliceVar(&removeBlockedBy, "remove-blocked-by", nil, "Lift the dependency on other `issues`: N, #N or OWNER/REPO#N")
 	a.completeMetadataFlags(cmd)
 	_ = cmd.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
 	_ = cmd.RegisterFlagCompletionFunc("ref", a.completeBranches())
@@ -176,4 +196,40 @@ func (a *application) editIssuesInteractively(cmd *cobra.Command, target target,
 		item, err = service.Edit(cmd.Context(), n, opts)
 		return item, itemError(err, target.Repo)
 	}, editedIssue(target))
+}
+
+// dependencyChange adds or removes the issue that blocks another; an issue without a repository
+// is one of the edited issue's repository.
+type dependencyChange struct {
+	services.IssueReference
+	block bool
+}
+
+// dependencyChanges parses --add-blocked-by and --remove-blocked-by, in that order; an issue cannot
+// be in both.
+func dependencyChanges(add, remove []string) ([]dependencyChange, error) {
+	var changes []dependencyChange
+	seen := map[services.IssueReference]bool{}
+	for _, list := range []struct {
+		flag   string
+		values []string
+		block  bool
+	}{{"add-blocked-by", add, true}, {"remove-blocked-by", remove, false}} {
+		for _, raw := range list.values {
+			parsed, err := parseRef(raw, issueRef)
+			if err != nil || parsed.Number < 1 || (parsed.Repo != "" && !strings.Contains(parsed.Repo, "/")) {
+				return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("--%s takes issues as N, #N or OWNER/REPO#N, not %q", list.flag, raw))
+			}
+			issue := services.IssueReference{Repository: parsed.Repo, Number: parsed.Number}
+			if block, ok := seen[issue]; ok {
+				if block != list.block {
+					return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("%s#%d is both added and removed as a blocker", issue.Repository, issue.Number))
+				}
+				continue
+			}
+			seen[issue] = list.block
+			changes = append(changes, dependencyChange{issue, list.block})
+		}
+	}
+	return changes, nil
 }
