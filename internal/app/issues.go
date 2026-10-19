@@ -217,7 +217,7 @@ type issueDetails struct {
 func (a *application) issueCreateCommand() *cobra.Command {
 	var title, body, bodyFile, deadline, templateName, ref, milestone string
 	var useEditor, web bool
-	var assignees, labelNames, attachmentPaths []string
+	var assignees, labelNames, attachmentPaths, projects []string
 	cmd := &cobra.Command{Use: "create", Aliases: []string{"new"}, Short: "Create an issue", Long: `Create an issue in a repository. Without flags on a terminal, a form asks for the title and
 body, then optionally for assignees, a milestone, labels and a due date.
 
@@ -244,6 +244,9 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 		if cmd.Flags().Changed("template") && strings.TrimSpace(templateName) == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--template cannot be empty"))
 		}
+		if err := requireNames("project", "", projects); err != nil {
+			return err
+		}
 		files, err := openRegularFiles(attachmentPaths)
 		defer closeFiles(files)
 		if err != nil {
@@ -257,7 +260,7 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 		}
 		if web {
 			// The new-issue page is prefilled with the title and body only.
-			for _, name := range []string{"label", "assignee", "milestone", "deadline", "ref", "attachment", "editor"} {
+			for _, name := range []string{"label", "assignee", "milestone", "deadline", "ref", "attachment", "project", "editor"} {
 				if cmd.Flags().Changed(name) {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --web; the browser only receives the title and body", name))
 				}
@@ -322,6 +325,11 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 		if err != nil {
 			return err
 		}
+		// Projects are resolved first, so that a missing one fails before the issue exists.
+		boards, err := loadProjectChanges(cmd.Context(), target, projects, nil, false)
+		if err != nil {
+			return err
+		}
 		target.expandMeAll(assignees)
 		item, err := service.Create(cmd.Context(), services.IssueOptions{Title: title, Body: body, Deadline: due, Ref: ref, Assignees: assignees, Milestone: milestoneValue, Labels: labelIDs})
 		if err != nil {
@@ -332,6 +340,9 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 			if _, err := service.UploadAttachment(cmd.Context(), item.Number, filepath.Base(file.Name()), file); err != nil {
 				failures = append(failures, fmt.Errorf("issue %d created; attachment %s upload failed: %w", item.Number, filepath.Base(file.Name()), err))
 			}
+		}
+		if err := boards.apply(cmd.Context(), item.ID); err != nil {
+			failures = append(failures, fmt.Errorf("issue %d created; %w", item.Number, err))
 		}
 		return errors.Join(append(failures, a.issueCreated(cmd, target, item))...)
 	}}
@@ -347,6 +358,7 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to")
 	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339, or Unix timestamp")
 	flags.StringArrayVar(&attachmentPaths, "attachment", nil, "`File` to attach after creation (repeatable)")
+	flags.StringArrayVarP(&projects, "project", "p", nil, "Add the issue to the project with this `title`, the repository's or its organization's (repeatable)")
 	flags.BoolVarP(&web, "web", "w", false, "Continue in the browser with the new-issue page")
 	_ = cmd.RegisterFlagCompletionFunc("label", a.completeLabels())
 	_ = cmd.RegisterFlagCompletionFunc("assignee", a.completeUsers())

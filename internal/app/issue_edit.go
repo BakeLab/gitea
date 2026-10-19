@@ -22,7 +22,7 @@ func (a *application) issueEditCommand() *cobra.Command {
 	var title, body, file, deadline, ref, milestone string
 	var useEditor, removeMilestone bool
 	var metadata metadataFlags
-	var addBlockedBy, removeBlockedBy []string
+	var addBlockedBy, removeBlockedBy, addProjects, removeProjects []string
 	cmd := &cobra.Command{Use: "edit {<number> | <url>}...", Short: "Edit issues: title, body, labels, assignees, milestone, deadline", Long: `Edit one or more issues. Without flags on a terminal, a form edits one issue at a time,
 starting from its current values. Label and assignee flags add to or remove from each issue's
 current values; the --set flags replace them.`, Example: `$ gt issue edit 12 --title "Crash on start" --add-label bug
@@ -80,8 +80,11 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 		if err != nil {
 			return err
 		}
+		if err := requireNames("project", "", addProjects, removeProjects); err != nil {
+			return err
+		}
 		editing := opts != (services.IssueEdit{}) || useEditor || metadata.changed(cmd) || milestone != ""
-		if !editing && len(addBlockedBy)+len(removeBlockedBy) == 0 {
+		if !editing && len(addBlockedBy)+len(removeBlockedBy)+len(addProjects)+len(removeProjects) == 0 {
 			return errNothingToEdit
 		}
 		target, numbers, err := a.resolveRefs(cmd, args, issueRef)
@@ -109,6 +112,10 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 			}
 			opts.Body = &draft.Body
 		}
+		boards, err := loadProjectChanges(cmd.Context(), target, addProjects, removeProjects, true)
+		if err != nil {
+			return err
+		}
 		return batchDone(a, cmd, numbers, issueLabel, func(n int64) (services.Issue, error) {
 			for _, blocker := range blockers {
 				issue := services.IssueReference{Repository: cmp.Or(blocker.Repository, target.Repo), Number: blocker.Number}
@@ -116,11 +123,16 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 					return services.Issue{}, itemError(err, target.Repo)
 				}
 			}
-			if !editing {
-				return service.View(cmd.Context(), n)
+			var item services.Issue
+			if editing {
+				item, err = service.Edit(cmd.Context(), n, opts)
+			} else {
+				item, err = service.View(cmd.Context(), n)
 			}
-			item, err := service.Edit(cmd.Context(), n, opts)
-			return item, itemError(err, target.Repo)
+			if err != nil {
+				return item, itemError(err, target.Repo)
+			}
+			return item, boards.apply(cmd.Context(), item.ID)
 		}, editedIssue(target))
 	}}
 	flags := cmd.Flags()
@@ -133,6 +145,8 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 	flags.BoolVar(&removeMilestone, "remove-milestone", false, "Remove the issue from its milestone")
 	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to; empty clears it")
 	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339, or Unix timestamp; empty clears it")
+	flags.StringArrayVar(&addProjects, "add-project", nil, "Add the issue to the project with this `title` (repeatable)")
+	flags.StringArrayVar(&removeProjects, "remove-project", nil, "Take the issue off the project with this `title` (repeatable)")
 	flags.StringSliceVar(&addBlockedBy, "add-blocked-by", nil, "Mark the issue as blocked by other `issues`: N, #N or OWNER/REPO#N")
 	flags.StringSliceVar(&removeBlockedBy, "remove-blocked-by", nil, "Lift the dependency on other `issues`: N, #N or OWNER/REPO#N")
 	a.completeMetadataFlags(cmd)

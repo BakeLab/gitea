@@ -19,6 +19,7 @@ func (a *application) pullEditCommand() *cobra.Command {
 	var draft, ready, maintainer, useEditor, removeMilestone bool
 	var metadata metadataFlags
 	var reviewers services.ReviewRequestChanges
+	var addProjects, removeProjects []string
 	cmd := &cobra.Command{Use: "edit [<number> | <url> | <branch>]", Short: "Edit a pull request", Long: `Edit the title, body, base branch, reviewers, labels, assignees, milestone or due date of a
 pull request, or mark it as a draft or ready for review.`, Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var editorDraft terminal.Draft
@@ -71,7 +72,10 @@ pull request, or mark it as a draft or ready for review.`, Annotations: pullArgu
 		if cmd.Flags().Changed("allow-maintainer-edit") {
 			opts.AllowMaintainerEdit = &maintainer
 		}
-		if opts == (services.PullEdit{}) && !useEditor && !draft && !ready && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone") && !removeMilestone {
+		if err := requireNames("project", "", addProjects, removeProjects); err != nil {
+			return err
+		}
+		if opts == (services.PullEdit{}) && !useEditor && !draft && !ready && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone") && !removeMilestone && len(addProjects)+len(removeProjects) == 0 {
 			return clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --title (see gt pr edit --help)"))
 		}
 		t, n, err := a.pullSelectorAny(cmd, args)
@@ -118,7 +122,20 @@ pull request, or mark it as a draft or ready for review.`, Annotations: pullArgu
 			}
 			opts.Body = &editorDraft.Body
 		}
-		item, err := service.Edit(cmd.Context(), n, opts)
+		boards, err := loadProjectChanges(cmd.Context(), t, addProjects, removeProjects, true)
+		if err != nil {
+			return err
+		}
+		if err := boards.applyToNumber(cmd.Context(), n); err != nil {
+			return err
+		}
+		var item services.Pull
+		if opts == (services.PullEdit{}) {
+			// Only project boards changed: there is nothing to send to the pull request itself.
+			item, err = service.View(cmd.Context(), n)
+		} else {
+			item, err = service.Edit(cmd.Context(), n, opts)
+		}
 		if err != nil {
 			return err
 		}
@@ -134,6 +151,8 @@ pull request, or mark it as a draft or ready for review.`, Annotations: pullArgu
 	cmd.Flags().BoolVar(&draft, "draft", false, "Mark the pull request as a draft (same as gt pr ready --undo)")
 	cmd.Flags().BoolVar(&ready, "ready", false, "Mark the pull request as ready for review (same as gt pr ready)")
 	cmd.Flags().BoolVar(&maintainer, "allow-maintainer-edit", false, "Allow maintainers to push to the head branch")
+	cmd.Flags().StringArrayVar(&addProjects, "add-project", nil, "Add the pull request to the project with this `title` (repeatable)")
+	cmd.Flags().StringArrayVar(&removeProjects, "remove-project", nil, "Take the pull request off the project with this `title` (repeatable)")
 	cmd.Flags().StringVarP(&milestone, "milestone", "m", "", "Milestone title or ID; 0 removes it")
 	cmd.Flags().BoolVar(&removeMilestone, "remove-milestone", false, "Remove the milestone")
 	metadata.register(cmd)

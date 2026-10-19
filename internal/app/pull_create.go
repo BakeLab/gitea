@@ -21,10 +21,10 @@ import (
 )
 
 type pullCreateFlags struct {
-	options                                                 services.PullOptions
-	bodyFile, deadline, milestone, topic                    string
-	labelNames, reviewers, reviewerTeams, attachments       []string
-	useEditor, draft, agit, allowMaintainerEdits, fill, web bool
+	options                                                     services.PullOptions
+	bodyFile, deadline, milestone, topic                        string
+	labelNames, reviewers, reviewerTeams, attachments, projects []string
+	useEditor, draft, agit, allowMaintainerEdits, fill, web     bool
 }
 
 func (a *application) pullCreateCommand() *cobra.Command {
@@ -55,6 +55,7 @@ is not on the remote yet is pushed first, with its upstream set.`, Args: argsExa
 	create.Flags().StringSliceVarP(&f.reviewers, "reviewer", "r", nil, "Request reviews from users; @me for yourself")
 	create.Flags().StringSliceVar(&f.reviewerTeams, "reviewer-team", nil, "Request reviews from teams within the repository's organization")
 	create.Flags().StringArrayVar(&f.attachments, "attachment", nil, "Attach a file to the pull request (repeatable)")
+	create.Flags().StringArrayVarP(&f.projects, "project", "p", nil, "Add the pull request to the project with this `title`, the repository's or its organization's (repeatable)")
 	create.Flags().StringVar(&f.topic, "topic", "", "AGit topic name (default: head branch); requires --agit")
 	_ = create.RegisterFlagCompletionFunc("assignee", a.completeUsers())
 	_ = create.RegisterFlagCompletionFunc("reviewer", a.completeUsers())
@@ -82,7 +83,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		if a.options.json != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--json/--jq cannot be combined with --agit; AGit creates the pull request through git push"))
 		}
-		for _, name := range []string{"assignee", "label", "milestone", "deadline", "reviewer", "reviewer-team", "attachment"} {
+		for _, name := range []string{"assignee", "label", "milestone", "deadline", "reviewer", "reviewer-team", "attachment", "project"} {
 			if cmd.Flags().Changed(name) {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --agit; AGit pushes carry only a title and body", name))
 			}
@@ -106,6 +107,9 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		if err := reviews.Validate(); err != nil {
 			return clierr.Wrap(clierr.Usage, err)
 		}
+	}
+	if err := requireNames("project", "", f.projects); err != nil {
+		return err
 	}
 	files, err := openRegularFiles(f.attachments)
 	defer closeFiles(files)
@@ -206,6 +210,11 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 			return err
 		}
 	}
+	// Projects are resolved first, so that a missing one fails before the pull request exists.
+	boards, err := loadProjectChanges(cmd.Context(), t, f.projects, nil, false)
+	if err != nil {
+		return err
+	}
 	if err := a.ensureHeadPublished(cmd, t, s, f.options.Head); err != nil {
 		return err
 	}
@@ -225,6 +234,9 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		if _, err := (services.Issues{Client: t.client, Repository: t.Repo}).UploadAttachment(cmd.Context(), item.Number, filepath.Base(file.Name()), file); err != nil {
 			failures = append(failures, fmt.Errorf("upload %s: %w", file.Name(), err))
 		}
+	}
+	if err := boards.applyToNumber(cmd.Context(), item.Number); err != nil {
+		failures = append(failures, err)
 	}
 	if err := a.reportCreatedPull(cmd, t, item); err != nil {
 		return err
