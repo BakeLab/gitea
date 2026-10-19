@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -333,16 +332,11 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 		if err != nil {
 			return err
 		}
-		var failures []error
-		for _, file := range files {
-			if _, err := service.UploadAttachment(cmd.Context(), item.Number, filepath.Base(file.Name()), file); err != nil {
-				failures = append(failures, fmt.Errorf("issue %d created; attachment %s upload failed: %w", item.Number, filepath.Base(file.Name()), err))
-			}
-		}
+		failures := uploadAttachments(cmd.Context(), files, item.Number, service.UploadAttachment, nil)
 		if err := boards.apply(cmd.Context(), item.ID); err != nil {
-			failures = append(failures, fmt.Errorf("issue %d created; %w", item.Number, err))
+			failures = append(failures, err)
 		}
-		return errors.Join(append(failures, a.issueCreated(cmd, target, item))...)
+		return errors.Join(followUpError(fmt.Sprintf("issue %d", item.Number), failures), a.issueCreated(cmd, target, item))
 	}}
 	flags := cmd.Flags()
 	flags.StringVarP(&title, "title", "t", "", "Issue title")

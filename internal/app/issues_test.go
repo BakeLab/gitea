@@ -122,7 +122,7 @@ func TestIssueCreateUploadsAttachmentsAndKeepsIssueOnFailure(t *testing.T) {
 	require.Empty(t, requests)
 	require.NoError(t, os.WriteFile(second, []byte("two"), 0o600))
 	err := Execute(context.Background(), deps, args)
-	require.ErrorContains(t, err, "issue 5 created; attachment second.txt upload failed")
+	require.ErrorContains(t, err, "issue 5 was created, but follow-up steps failed: attachment second.txt")
 	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 	require.JSONEq(t, `{"number":5,"title":"Crash"}`, out.String())
 	require.Equal(t, []string{"first.txt=one", "second.txt=two"}, uploaded)

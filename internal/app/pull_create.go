@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -228,21 +227,11 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 			item = updated
 		}
 	}
-	for _, file := range files {
-		if _, err := (services.Issues{Client: t.client, Repository: t.Repo}).UploadAttachment(cmd.Context(), item.Number, filepath.Base(file.Name()), file); err != nil {
-			failures = append(failures, fmt.Errorf("upload %s: %w", file.Name(), err))
-		}
-	}
+	failures = append(failures, uploadAttachments(cmd.Context(), files, item.Number, services.Issues{Client: t.client, Repository: t.Repo}.UploadAttachment, nil)...)
 	if err := boards.applyToNumber(cmd.Context(), item.Number); err != nil {
 		failures = append(failures, err)
 	}
-	if err := a.reportCreatedPull(cmd, t, item); err != nil {
-		return err
-	}
-	if len(failures) > 0 {
-		return fmt.Errorf("pull request #%d was created, but follow-up steps failed: %w", item.Number, errors.Join(failures...))
-	}
-	return nil
+	return errors.Join(followUpError(fmt.Sprintf("pull request #%d", item.Number), failures), a.reportCreatedPull(cmd, t, item))
 }
 
 // pushAgit creates a pull request by pushing the head branch to refs/for/<base>/<topic>.

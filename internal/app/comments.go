@@ -6,7 +6,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -150,14 +149,8 @@ func (a *application) commentOn(cmd *cobra.Command, t target, n int64, kind refK
 		return err
 	}
 	a.done(cmd, "Commented on %s", refLabel(t.Repo, n, item.Title))
-	var failures []error
-	for _, file := range files {
-		name := filepath.Base(file.Name())
-		if _, err := service.UploadAttachment(cmd.Context(), comment.ID, name, file); err != nil {
-			failures = append(failures, fmt.Errorf("comment created; attachment %s upload failed: %w", name, err))
-		}
-	}
-	return errors.Join(append(failures, a.created(cmd, comment, comment.URL))...)
+	failures := uploadAttachments(cmd.Context(), files, comment.ID, service.UploadAttachment, nil)
+	return errors.Join(followUpError("the comment", failures), a.created(cmd, comment, comment.URL))
 }
 
 func lastComment(cmd *cobra.Command, t target, n int64) (services.Comment, error) {

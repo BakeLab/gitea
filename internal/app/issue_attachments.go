@@ -4,8 +4,11 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -201,4 +204,29 @@ $ gt %[1]s attachment download %[2]s 9 -O - | less`, words.group, words.example)
 	destination.register(download)
 	group.AddCommand(list, view, upload, edit, remove, download)
 	return jsonOutput(group, jsonFields[services.IssueAttachment]())
+}
+
+// uploadAttachments attaches each file to the item id through upload, calls uploaded, when given,
+// for each attachment, and returns an error for each file that failed.
+func uploadAttachments[T any](ctx context.Context, files []*os.File, id int64, upload func(context.Context, int64, string, io.Reader) (T, error), uploaded func(T)) []error {
+	var failures []error
+	for _, file := range files {
+		name := filepath.Base(file.Name())
+		attachment, err := upload(ctx, id, name, file)
+		switch {
+		case err != nil:
+			failures = append(failures, fmt.Errorf("attachment %s: %w", name, err))
+		case uploaded != nil:
+			uploaded(attachment)
+		}
+	}
+	return failures
+}
+
+// followUpError reports the steps that failed after what was created, or nil when none did.
+func followUpError(what string, failures []error) error {
+	if len(failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s was created, but follow-up steps failed: %w", what, errors.Join(failures...))
 }

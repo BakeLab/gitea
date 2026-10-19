@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -299,18 +298,11 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 				kind = "draft release"
 			}
 			a.done(cmd, "Created %s %s in %s", kind, item.Tag, target.Repo)
-			var failures []error
-			for _, file := range files {
-				name := filepath.Base(file.Name())
-				asset, err := service.UploadAsset(cmd.Context(), item.ID, name, file)
-				if err != nil {
-					failures = append(failures, fmt.Errorf("release %s created; asset %s upload failed: %w", item.Tag, name, err))
-					continue
-				}
+			failures := uploadAttachments(cmd.Context(), files, item.ID, service.UploadAsset, func(asset services.ReleaseAsset) {
 				item.Assets = append(item.Assets, asset)
 				a.done(cmd, "Uploaded %s (%s)", asset.Name, terminal.Bytes(asset.Size))
-			}
-			return errors.Join(append(failures, a.created(cmd, item, item.URL))...)
+			})
+			return errors.Join(followUpError("release "+item.Tag, failures), a.created(cmd, item, item.URL))
 		},
 	}
 	fields.register(a, command)
