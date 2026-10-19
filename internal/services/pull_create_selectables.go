@@ -18,11 +18,6 @@ type CreateSelectables struct {
 	Labels     []Label
 }
 
-// CreateSelectables loads assignees/milestones/labels when the user can push.
-func (s Pulls) CreateSelectables(ctx context.Context) (CreateSelectables, error) {
-	return loadCreateSelectables(ctx, s.Client, s.Repository)
-}
-
 // PullCreateChoices seed the interactive create form: the repository, its pull request template
 // on the default branch, and the metadata selectables.
 type PullCreateChoices struct {

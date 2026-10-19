@@ -221,18 +221,6 @@ func (s Milestones) List(ctx context.Context, state string, limit, page int) ([]
 	return convertAll(milestones, milestoneFrom), nil
 }
 
-// ListPage is List with the number of milestones in state, as the server counts them.
-func (s Milestones) ListPage(ctx context.Context, state string, limit, page int) (Page[Milestone], error) {
-	owner, repo, err := splitRepository(s.Repository)
-	if err != nil {
-		return Page[Milestone]{}, err
-	}
-	milestones, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Milestone, *gitea.Response, error) {
-		return c.Repositories.ListMilestones(ctx, owner, repo, gitea.ListMilestoneOption{ListOptions: list, State: gitea.StateType(state)})
-	})
-	return convertPage(milestones, milestoneFrom), err
-}
-
 // Create creates one milestone.
 func (s Milestones) Create(ctx context.Context, opts MilestoneOptions) (Milestone, error) {
 	owner, repo, err := splitRepository(s.Repository)
@@ -291,19 +279,6 @@ func (s Milestones) Delete(ctx context.Context, id int64) error {
 	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
 		return c.Repositories.DeleteMilestone(ctx, owner, repo, id)
 	})
-}
-
-// View retrieves one repository milestone.
-func (s Milestones) View(ctx context.Context, id int64) (Milestone, error) {
-	owner, repo, err := splitRepository(s.Repository)
-	if err != nil {
-		return Milestone{}, err
-	}
-	milestone, err := s.get(ctx, owner, repo, id)
-	if err != nil {
-		return Milestone{}, err
-	}
-	return milestoneFrom(milestone), nil
 }
 
 func (s Milestones) get(ctx context.Context, owner, repo string, id int64) (*gitea.Milestone, error) {

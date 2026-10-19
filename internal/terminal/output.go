@@ -33,11 +33,6 @@ type JSONOutput struct {
 	Color bool
 }
 
-// WriteJSON projects explicit result fields and applies an in-process jq filter.
-func WriteJSON(w io.Writer, value any, fields, query string) error {
-	return JSONOutput{Fields: fields, Query: query}.Write(w, value)
-}
-
 // Write projects explicit result fields of value, applies the jq filter, and writes the results.
 func (o JSONOutput) Write(w io.Writer, value any) error {
 	data, err := json.Marshal(value)

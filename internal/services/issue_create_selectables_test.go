@@ -87,30 +87,20 @@ func TestCreateSelectablesLoadWriteFieldsOnlyWithPush(t *testing.T) {
 					w.WriteHeader(http.StatusNotFound)
 				}
 			}))
-			for _, load := range []func() (CreateSelectables, error){
-				func() (CreateSelectables, error) {
-					return (Pulls{Client: client, Repository: "alice/project"}).CreateSelectables(context.Background())
-				},
-				func() (CreateSelectables, error) {
-					result, err := (Issues{Client: client, Repository: "alice/project"}).CreateSelectables(context.Background())
-					require.Len(t, result.Templates, 1)
-					return result.CreateSelectables, err
-				},
-			} {
-				result, err := load()
-				require.NoError(t, err)
-				want := CreateSelectables{Assignees: []string{}, Milestones: []Milestone{}, Labels: []Label{}}
-				if push {
-					want = CreateSelectables{
-						CanPush:    true,
-						Assignees:  []string{"alice", "bob"},
-						Milestones: []Milestone{{ID: 1, Title: "v1"}, {ID: 2, Title: "v2"}},
-						Labels:     []Label{{ID: 3, Name: "bug"}, {ID: 4, Name: "docs"}},
-					}
+			loaded, err := (Issues{Client: client, Repository: "alice/project"}).CreateSelectables(context.Background())
+			require.NoError(t, err)
+			require.Len(t, loaded.Templates, 1)
+			want := CreateSelectables{Assignees: []string{}, Milestones: []Milestone{}, Labels: []Label{}}
+			if push {
+				want = CreateSelectables{
+					CanPush:    true,
+					Assignees:  []string{"alice", "bob"},
+					Milestones: []Milestone{{ID: 1, Title: "v1"}, {ID: 2, Title: "v2"}},
+					Labels:     []Label{{ID: 3, Name: "bug"}, {ID: 4, Name: "docs"}},
 				}
-				require.Equal(t, want, result)
 			}
-			require.Equal(t, 2, calls["/api/v1/repos/alice/project"])
+			require.Equal(t, want, loaded.CreateSelectables)
+			require.Equal(t, 1, calls["/api/v1/repos/alice/project"])
 			require.Equal(t, 1, calls["/api/v1/repos/alice/project/issue_templates"])
 			if !push {
 				require.Zero(t, calls["/api/v1/repos/alice/project/assignees"])
@@ -153,7 +143,7 @@ func TestCreateSelectablesIncludeOrganizationLabels(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	result, err := (Pulls{Client: client, Repository: "acme/service"}).CreateSelectables(context.Background())
+	result, err := loadCreateSelectables(context.Background(), client, "acme/service")
 	require.NoError(t, err)
 	require.Equal(t, []Label{{ID: 9, Name: "needs-triage"}}, result.Labels)
 }

@@ -13,12 +13,12 @@ import (
 func TestJSONFieldSelectionAndJQ(t *testing.T) {
 	var out bytes.Buffer
 	value := []map[string]any{{"number": 1, "title": "first"}, {"number": 2, "title": "second"}}
-	require.NoError(t, WriteJSON(&out, value, "title", ".[0].title"))
+	require.NoError(t, JSONOutput{Fields: "title", Query: ".[0].title"}.Write(&out, value))
 	require.Equal(t, "first\n", out.String())
 	out.Reset()
-	require.NoError(t, WriteJSON(&out, []map[string]any{}, "*", ""))
+	require.NoError(t, JSONOutput{Fields: "*"}.Write(&out, []map[string]any{}))
 	require.Equal(t, "[]\n", out.String())
-	require.Error(t, WriteJSON(&out, value, "unknown", ""))
+	require.Error(t, JSONOutput{Fields: "unknown"}.Write(&out, value))
 	require.NoError(t, ValidateOutput("number, title", "", []string{"number", "title"}))
 	require.EqualError(t, ValidateOutput("number, foo", "", []string{"number", "title"}), "unknown JSON field \"foo\"\navailable fields: number, title")
 	require.EqualError(t, ValidateOutput("number,,title", "", []string{"number", "title"}), "--json field names cannot be empty; use --json alone for every field")
@@ -58,6 +58,6 @@ func TestJSONOutputIsIndentedAndColoredForTerminals(t *testing.T) {
 	require.NoError(t, JSONOutput{Query: ".title", Pretty: true}.Write(&out, value[0]))
 	require.Equal(t, "a [31mb\n", out.String())
 	out.Reset()
-	require.NoError(t, WriteJSON(&out, value[0], "", ".title"))
+	require.NoError(t, JSONOutput{Query: ".title"}.Write(&out, value[0]))
 	require.Equal(t, "a \u202e\x1b[31mb\n", out.String())
 }

@@ -175,7 +175,6 @@ $ gt repo list --starred --json full_name,url`,
 	enumFlag(list, &opts.Kind, "type", "", "", "Only list repositories of this kind", "fork", "source", "mirror")
 	list.Flags().BoolVar(&opts.Starred, "starred", false, "List your starred repositories")
 	list.Flags().BoolVar(&opts.Watched, "watched", false, "List the repositories you watch")
-	_ = list.RegisterFlagCompletionFunc("owner", a.completeOrgs())
 	list.ValidArgsFunction = a.completeOrgs()
 	return list
 }

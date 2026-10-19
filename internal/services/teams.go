@@ -292,7 +292,6 @@ func (s Teams) Edit(ctx context.Context, id int64, opts TeamOptions) (Team, erro
 		}
 	}
 	var team gitea.Team
-	// TODO(sdk): EditTeamOption requires a name of at most 30 characters and a permission, and EditTeam should return the team.
 	if err := sendJSON(ctx, s.Client, http.MethodPatch, fmt.Sprintf("teams/%d", id), opts, &team); err != nil {
 		return Team{}, err
 	}

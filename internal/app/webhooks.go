@@ -372,7 +372,6 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 			opts.Type = kind
 			opts.Active = &active
 			opts.BranchFilter = &filter
-			opts.Config["http_method"] = "post"
 			if _, ok := opts.Config["content_type"]; !ok {
 				opts.Config["content_type"] = "json"
 			}
