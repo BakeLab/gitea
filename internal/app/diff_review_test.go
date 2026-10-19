@@ -36,6 +36,23 @@ func TestParseDiffCommentsMapsAddedAndRemovedLines(t *testing.T) {
 	require.Zero(t, comments[1].NewLine)
 }
 
+func TestParseDiffCommentsOnADeletedFileNameTheFile(t *testing.T) {
+	diff := `diff --git a/gone.go b/gone.go
+deleted file mode 100644
+--- a/gone.go
++++ /dev/null
+@@ -1,2 +0,0 @@
+-package gone
+# Why remove this?
+-func f() {}
+`
+	comments, err := parseDiffComments(strings.NewReader(diff))
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "gone.go", comments[0].Path)
+	require.EqualValues(t, 1, comments[0].OldLine)
+}
+
 func TestSaveDiffReviewIncludesHelpHeader(t *testing.T) {
 	path, err := saveDiffReview(t.TempDir(), 7, "owner/repo", strings.NewReader("diff --git a/x b/x\n"))
 	require.NoError(t, err)

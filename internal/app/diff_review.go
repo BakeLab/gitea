@@ -58,9 +58,12 @@ func parseDiffComments(r io.Reader) ([]terminal.ReviewCommentDraft, error) {
 	comments := make([]terminal.ReviewCommentDraft, 0)
 	for _, file := range changeset.Diffs {
 		for _, c := range file.LineComments {
-			comment := terminal.ReviewCommentDraft{Body: c.Text, Path: c.Anchor.Path}
-			comment.Path = strings.TrimPrefix(comment.Path, "a/")
-			comment.Path = strings.TrimPrefix(comment.Path, "b/")
+			// The destination of a deleted file is /dev/null; its comments belong to the source.
+			path := strings.TrimPrefix(c.Anchor.Path, "b/")
+			if c.Anchor.Path == "/dev/null" {
+				path = strings.TrimPrefix(c.Anchor.SrcPath, "a/")
+			}
+			comment := terminal.ReviewCommentDraft{Body: c.Text, Path: path}
 			switch c.Anchor.LineType {
 			case "ADDED":
 				comment.NewLine = c.Anchor.Line
