@@ -901,3 +901,16 @@ func TestLoginHeadersReachEveryRequestToTheInstance(t *testing.T) {
 		requireUsageBeforeRequests(t, "", "auth", "login", "--host", server.URL, "--with-token", "--header", header)
 	}
 }
+
+func TestLoginWithATokenThatCannotReadTheAccountNamesTheScope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"token does not have at least one of required scope(s): [read:user]"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := testDeps(t)
+	deps.Streams.In = strings.NewReader("a1b2c3\n")
+	err := Execute(context.Background(), deps, []string{"auth", "login", "--host", server.URL, "--with-token", "--credential-store", "file", "--no-input"})
+	require.ErrorContains(t, Explain(context.Background(), deps, err), "token does not have at least one of required scope(s): [read:user]; create a token with that scope")
+}

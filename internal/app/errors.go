@@ -64,6 +64,13 @@ func explainAPIError(deps Dependencies, err error, apiErr *transport.APIError) e
 		}
 		return explain(err, "authentication rejected by %s; run gt auth login", instance)
 	}
+	// Gitea names the scopes a token lacks, such as read:user, in the message of a 403.
+	if apiErr.Status == http.StatusForbidden && strings.Contains(apiErr.Message, "required scope") {
+		if deps.Getenv != nil && deps.Getenv("GITEA_TOKEN") != "" {
+			return explain(err, "%s; set GITEA_TOKEN to a token with that scope", apiErr.Message)
+		}
+		return explain(err, "%s; create a token with that scope and log in with it: gt auth login --with-token", apiErr.Message)
+	}
 	if conflict, ok := errors.AsType[*services.ConflictError](err); ok && conflict.Hint == "" {
 		if hint := conflictHint(apiErr, conflict); hint != "" {
 			return explain(err, "%s; %s", conflict.Error(), hint)
