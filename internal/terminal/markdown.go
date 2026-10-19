@@ -49,8 +49,9 @@ func dropControlReference(reference string) string {
 // glamourSequences matches the escape sequences glamour writes itself: colors and OSC 8 hyperlinks.
 var glamourSequences = regexp.MustCompile("\x1b\\[[0-9;]*m|\x1b\\]8;[^\x07\x1b]*(?:\x07|\x1b\\\\)")
 
-// stripControls removes every control character from rendered output except newlines and the
-// sequences glamour writes, which markdown cannot smuggle in after the input was sanitized.
+// stripControls removes every control and format character, such as bidirectional marks that
+// entities like &rlm; decode to, from rendered output except newlines and the sequences glamour
+// writes, which markdown cannot smuggle in after the input was sanitized.
 func stripControls(text string) string {
 	var b strings.Builder
 	for i := 0; i < len(text); {
@@ -60,7 +61,7 @@ func stripControls(text string) string {
 			continue
 		}
 		r, size := utf8.DecodeRuneInString(text[i:])
-		if r == '\n' || r == '\t' || !(r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0)) {
+		if r == '\n' || r == '\t' || !(r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || unicode.Is(unicode.Cf, r)) {
 			b.WriteString(text[i : i+size])
 		}
 		i += size
