@@ -253,8 +253,13 @@ func (a *application) signedLogin(cmd *cobra.Command, snapshot settings.Snapshot
 	case agentKey != "":
 		account = settings.Account{AuthMethod: settings.AuthHTTPSign, SSHAgent: true, SSHKeyFingerprint: agentKey}
 	default:
+		path, err := sshKeyPath(account.SSHKey)
+		if err != nil {
+			return account, "", err
+		}
+		account.SSHKey = path
 		if _, err := os.Stat(account.SSHKey + "-cert.pub"); err == nil {
-			account.AuthMethod, account.SSHCertPrincipal = settings.AuthSSH, "yes"
+			account.AuthMethod = settings.AuthSSH
 		} else if errors.Is(err, os.ErrNotExist) {
 			account.AuthMethod = settings.AuthHTTPSign
 		} else {
@@ -275,6 +280,11 @@ func (a *application) signedLogin(cmd *cobra.Command, snapshot settings.Snapshot
 		return account, "", clierr.Wrap(clierr.Usage, errors.New("authenticated account does not match --user or GITEA_CLI_USER"))
 	}
 	return account, user, nil
+}
+
+// sshKeyPath stores an SSH key path absolute, so that it names the same key from every directory.
+func sshKeyPath(path string) (string, error) {
+	return filepath.Abs(terminal.ExpandHome(path))
 }
 
 // suggestedHost returns the instance that other commands would select, to prefill a login.

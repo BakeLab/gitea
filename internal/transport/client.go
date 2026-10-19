@@ -123,8 +123,9 @@ func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return t.base.RoundTrip(req)
 }
 
-// New constructs an instance-scoped client with no redirects. Only connection setup and the wait
-// for response headers are bounded, so slow but progressing transfers are not cut off.
+// New constructs an instance-scoped client. Its HTTP client follows no redirects itself; API
+// requests follow only those within the instance API. Only connection setup and the wait for
+// response headers are bounded, so slow but progressing transfers are not cut off.
 func New(instance, token string, insecure bool) *Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext

@@ -186,13 +186,9 @@ func (s *Store) Load() (Snapshot, error) {
 		return snapshot, err
 	}
 	if err == nil {
-		var keys map[string]yaml.Node
-		if err := yaml.Unmarshal(data, &keys); err != nil {
-			return snapshot, fmt.Errorf("parse %s: %w", configPath, err)
-		}
-		version, ok := keys["version"]
-		if !ok || version.Value != Version {
-			return snapshot, fmt.Errorf("unsupported configuration version in %s", configPath)
+		keys, err := versionedKeys(configPath, data)
+		if err != nil {
+			return snapshot, err
 		}
 		for key := range keys {
 			snapshot.Configured[key] = true
@@ -207,16 +203,11 @@ func (s *Store) Load() (Snapshot, error) {
 		return snapshot, fmt.Errorf("read %s: %w", hostsPath, err)
 	}
 	if err == nil {
+		if _, err := versionedKeys(hostsPath, hostData); err != nil {
+			return snapshot, err
+		}
 		if err := decode(hostsPath, hostData, &snapshot.Hosts); err != nil {
 			return snapshot, err
-		}
-		var keys map[string]yaml.Node
-		if err := yaml.Unmarshal(hostData, &keys); err != nil {
-			return snapshot, err
-		}
-		version, ok := keys["version"]
-		if !ok || version.Value != Version {
-			return snapshot, errors.New("unsupported hosts.yml version")
 		}
 	}
 	if snapshot.Hosts.Hosts == nil {
@@ -397,4 +388,17 @@ func AtomicWrite(filename string, data []byte) error {
 		return err
 	}
 	return os.Rename(temp.Name(), filename)
+}
+
+// versionedKeys returns the top-level keys of the settings file at path, checking its version
+// first so that a file of another version is reported as such rather than by its unknown fields.
+func versionedKeys(path string, data []byte) (map[string]yaml.Node, error) {
+	var keys map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &keys); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if version, ok := keys["version"]; !ok || version.Value != Version {
+		return nil, fmt.Errorf("unsupported configuration version in %s", path)
+	}
+	return keys, nil
 }

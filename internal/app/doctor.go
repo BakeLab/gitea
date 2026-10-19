@@ -105,7 +105,9 @@ func (a *application) diagnose(ctx context.Context) doctorReport {
 		add(a.gitCheck(ctx, ""))
 		return report
 	}
-	authenticated, accountErr := a.resolveTarget(ctx, t.Repo != "", true)
+	resolveCtx, cancel := context.WithTimeout(ctx, doctorTimeout)
+	authenticated, accountErr := a.resolveTarget(resolveCtx, t.Repo != "", true)
+	cancel()
 	client := a.deps.Client(t.Host, "", t.host.Insecure)
 	if accountErr == nil {
 		client = authenticated.client

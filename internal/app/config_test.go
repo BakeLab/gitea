@@ -92,6 +92,13 @@ func TestAccountConfigOnlyChangesSelectedAccountMetadata(t *testing.T) {
 	after, err := os.ReadFile(filepath.Join(deps.Settings.Dir, "hosts.yml"))
 	require.NoError(t, err)
 	require.Equal(t, before, after)
+	// A relative key path is stored absolute, so that it names the same key from every directory.
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "ssh_key", "keys/id", "--host", instance, "--user", "bob"}))
+	loaded, err := deps.Settings.Load()
+	require.NoError(t, err)
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(wd, "keys", "id"), loaded.Hosts.Hosts[instance].Users["bob"].SSHKey)
 }
 
 func TestConfigHelpDocumentsSettingsAndEnvironment(t *testing.T) {
@@ -292,4 +299,12 @@ func TestPlatformCommandsComplete(t *testing.T) {
 		require.Equal(t, tc.want, candidates, tc.args)
 		require.NotZero(t, directive&cobra.ShellCompDirectiveNoFileComp, tc.args)
 	}
+}
+
+func TestConfigGetShowsTheEnvironmentOverridesOfTheTokenInstance(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	configureHost(t, deps, "https://example.org", settings.Host{SSHHost: "ssh.example.org"})
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "secret", "GITEA_CLI_HOST": "https://example.org", "GITEA_INSTANCE_SSH_HOST": "git.example.org:2222"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "ssh_host", "--show-source", "--json"}))
+	require.JSONEq(t, `{"ssh_host":{"value":"git.example.org:2222","source":"GITEA_INSTANCE_SSH_HOST"}}`, out.String())
 }

@@ -142,3 +142,12 @@ func TestTokenlessAccounts(t *testing.T) {
 		require.Equal(t, want, Account{AuthMethod: method}.Tokenless(), method)
 	}
 }
+
+func TestFilesOfAnotherVersionAreReportedByVersion(t *testing.T) {
+	for _, name := range []string{"config.yml", "hosts.yml"} {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("version: \"2\"\nnew_setting: true\n"), 0o600))
+		_, err := New(dir).Load()
+		require.EqualError(t, err, "unsupported configuration version in "+filepath.Join(dir, name))
+	}
+}

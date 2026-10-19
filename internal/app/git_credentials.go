@@ -39,7 +39,11 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 		if snapshot.Hosts.Hosts, err = a.environmentHosts(snapshot.Hosts.Hosts); err != nil {
 			return err
 		}
-		environmentHost := a.tokenInstance()
+		// Only a GITEA_TOKEN makes the environment's instance one the helper can answer for.
+		environmentHost := ""
+		if a.deps.Getenv("GITEA_TOKEN") != "" {
+			environmentHost = a.tokenInstance()
+		}
 		if resolved, err := settings.ResolveHost(environmentHost, snapshot.Hosts.Hosts); environmentHost != "" && err == nil {
 			environmentHost = resolved
 		}

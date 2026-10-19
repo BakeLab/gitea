@@ -112,7 +112,7 @@ func (s *Store) Save(instance, user, backend string, credential Credential) erro
 			return errNoKeyring
 		}
 		if err := s.Keyring.Set(keyringService, Identity(instance, user), string(data)); err != nil {
-			return errors.New("secure credential storage unavailable; use --credential-store file only if you accept private file storage")
+			return fmt.Errorf("secure credential storage unavailable; use --credential-store file only if you accept private file storage: %w", err)
 		}
 		return nil
 	case settings.StoreFile:
@@ -137,7 +137,7 @@ func (s *Store) Delete(instance, user, backend string) error {
 			return nil
 		}
 		if err != nil {
-			return errors.New("failed to remove credential from secure storage")
+			return fmt.Errorf("failed to remove credential from secure storage: %w", err)
 		}
 		return nil
 	case settings.StoreFile:

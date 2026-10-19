@@ -10,7 +10,7 @@ import (
 	"net/url"
 )
 
-// Download opens an instance-scoped file URL without following redirects.
+// Download opens an instance-scoped file URL, following redirects only within the instance API.
 func (c *Client) Download(ctx context.Context, raw string) (*http.Response, error) {
 	_, target, err := c.downloadTarget(raw)
 	if err != nil {

@@ -318,7 +318,7 @@ func TestAuthLoginSSHKeyCertificateUsesSSHAuthMethod(t *testing.T) {
 	require.NoError(t, err)
 	method = snapshot.Hosts.Hosts[server.URL].Users["alice"]
 	require.Equal(t, "ssh", method.AuthMethod)
-	require.Equal(t, "yes", method.SSHCertPrincipal)
+	require.Empty(t, method.SSHCertPrincipal)
 	require.Equal(t, keyPath, method.SSHKey)
 }
 

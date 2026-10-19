@@ -137,6 +137,17 @@ func (a *application) settingValues(snapshot settings.Snapshot) (map[string]any,
 		values[key] = value
 		sources[key] = "hosts.yml " + preferences.DefaultHost
 	}
+	overridden, err := a.environmentHosts(snapshot.Hosts.Hosts)
+	if err != nil {
+		return nil, nil, err
+	}
+	env := overridden[preferences.DefaultHost]
+	if env.SSHHost != host.SSHHost {
+		values["ssh_host"], sources["ssh_host"] = env.SSHHost, "GITEA_INSTANCE_SSH_HOST"
+	}
+	if env.Insecure != host.Insecure {
+		values["insecure"], sources["insecure"] = env.Insecure, "GITEA_INSTANCE_INSECURE"
+	}
 	if a.options.user != "" {
 		user, exists := findAccountKey(host.Users, a.options.user)
 		if !exists {
@@ -407,7 +418,9 @@ func (a *application) setInstanceSetting(key, value string) (string, error) {
 			account := host.Users[user]
 			switch key {
 			case "ssh_key":
-				account.SSHKey = value
+				if account.SSHKey, err = sshKeyPath(value); err != nil {
+					return err
+				}
 			case "ssh_agent":
 				if value != "true" && value != "false" {
 					return clierr.Wrap(clierr.Usage, errors.New("ssh_agent must be true or false"))
