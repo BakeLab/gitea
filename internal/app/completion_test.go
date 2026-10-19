@@ -158,7 +158,7 @@ func TestCompletionOffersPathsOnlyWherePathsAreExpected(t *testing.T) {
 		}
 		path := strings.Fields(cmd.CommandPath())[1:]
 		_, directive := complete(t, deps, out, append(path, "")...)
-		takesFile := cmd.CommandPath() == "gt label import" || cmd.CommandPath() == "gt ssh-key create"
+		takesFile := slices.Contains([]string{"gt label import", "gt ssh-key create", "gt repo deploy-key add"}, cmd.CommandPath())
 		require.Equal(t, takesFile, directive == cobra.ShellCompDirectiveDefault, "%s <TAB>: %d", cmd.CommandPath(), directive)
 		for _, flags := range []*pflag.FlagSet{cmd.LocalNonPersistentFlags(), cmd.PersistentFlags()} {
 			flags.VisitAll(func(flag *pflag.Flag) {

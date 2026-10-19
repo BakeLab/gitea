@@ -5,6 +5,7 @@ package app
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -190,14 +191,9 @@ $ cat key.pub | gt ssh-key add`,
 			if err != nil {
 				return err
 			}
-			if !cmd.Flags().Changed("title") {
-				title = comment
-				if title == "" {
-					title, _ = os.Hostname()
-				}
-			}
-			if strings.TrimSpace(title) == "" {
-				return clierr.Wrap(clierr.Usage, errors.New("key title cannot be empty; pass --title"))
+			hostname, _ := os.Hostname()
+			if title, err = keyTitle(cmd, title, comment, hostname); err != nil {
+				return err
 			}
 			target, err := a.resolve(cmd.Context(), false)
 			if err != nil {
@@ -206,11 +202,7 @@ $ cat key.pub | gt ssh-key add`,
 			service := services.SSHKeys{Client: target.client}
 			created, err := service.Create(cmd.Context(), title, strings.TrimSpace(string(data)))
 			if err != nil {
-				if conflict, ok := errors.AsType[*services.ConflictError](err); ok && conflict.Reason == services.ReasonExists {
-					conflict.Hint = fmt.Sprintf("another SSH key is titled %q; pass a different --title", title)
-					return conflict
-				}
-				return a.registeredKey(cmd.Context(), service, key, err)
+				return a.registeredKey(cmd.Context(), service, key, titleTaken(err, "SSH key", title))
 			}
 			a.done(cmd, "Added %s", sshKeyLabel(created))
 			return a.jsonResult(cmd, created)
@@ -262,4 +254,25 @@ $ gt ssh-key delete 2 --yes`,
 			return a.deleteConfirmed(cmd, sshKeyLabel(key), func() error { return service.Delete(cmd.Context(), id) })
 		},
 	}
+}
+
+// keyTitle returns the title of a key that is added: --title when given, else the key's comment,
+// else fallback.
+func keyTitle(cmd *cobra.Command, title, comment, fallback string) (string, error) {
+	if !cmd.Flags().Changed("title") {
+		title = cmp.Or(comment, fallback)
+	}
+	if strings.TrimSpace(title) == "" {
+		return "", clierr.Wrap(clierr.Usage, errors.New("key title cannot be empty; pass --title"))
+	}
+	return title, nil
+}
+
+// titleTaken explains a key that was refused because another key of kind has its title.
+func titleTaken(err error, kind, title string) error {
+	if conflict, ok := errors.AsType[*services.ConflictError](err); ok && conflict.Reason == services.ReasonExists {
+		conflict.Hint = fmt.Sprintf("another %s is titled %q; pass a different --title", kind, title)
+		return conflict
+	}
+	return err
 }

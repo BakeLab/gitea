@@ -15,7 +15,7 @@ import (
 
 func (a *application) addRepositoryMutations(group *cobra.Command) {
 	group.AddCommand(a.repoCreateCommand(), a.repoMigrateCommand(), a.repoForkCommand(), a.repoCloneCommand(), a.repoEditCommand())
-	group.AddCommand(a.repoArchiveCommand(true), a.repoArchiveCommand(false), a.repoRenameCommand(), a.repoDeleteCommand())
+	group.AddCommand(a.repoArchiveCommand(true), a.repoArchiveCommand(false), a.repoRenameCommand(), a.repoDeleteCommand(), a.deployKeyCommand())
 }
 
 // cloneArguments documents the <repository> argument of repo clone, which is required.
