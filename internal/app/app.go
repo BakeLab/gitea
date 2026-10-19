@@ -172,7 +172,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 		}
 		return a.policy(snapshot).Validate(a.deps.Streams)
 	}
-	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.labelCommand(), a.milestoneCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false))
+	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.labelCommand(), a.milestoneCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.packageCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false))
 	root.AddCommand(a.manCommand())
 	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Example: "$ gt version", Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), version.Format())
