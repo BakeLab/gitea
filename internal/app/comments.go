@@ -6,6 +6,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -69,14 +70,20 @@ func commentName(t target, comment services.Comment) string {
 }
 
 type commentFlags struct {
-	body, file string
-	useEditor  bool
+	body, file  string
+	useEditor   bool
+	attachments []string
 }
 
 func (f *commentFlags) register(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&f.body, "body", "b", "", "Comment `text`")
 	cmd.Flags().StringVarP(&f.file, "body-file", "F", "", "Read the comment from `file`, or - for stdin")
 	cmd.Flags().BoolVarP(&f.useEditor, "editor", "e", false, "Write the comment in the configured editor")
+}
+
+// registerAttachments adds --attachment to a command that creates comments.
+func (f *commentFlags) registerAttachments(cmd *cobra.Command) {
+	cmd.Flags().StringArrayVar(&f.attachments, "attachment", nil, "`File` to attach to the comment (repeatable)")
 }
 
 // validate rejects conflicting or empty comment sources before any request.
@@ -123,6 +130,11 @@ func (a *application) promptComment(cmd *cobra.Command, initial string) (string,
 
 // commentOn creates a comment on n, reporting it like gh: its URL on stdout, or JSON.
 func (a *application) commentOn(cmd *cobra.Command, t target, n int64, kind refKind, f commentFlags) (runErr error) {
+	files, err := openRegularFiles(f.attachments)
+	defer closeFiles(files)
+	if err != nil {
+		return err
+	}
 	item, err := discussion(cmd, t, n, kind)
 	if err != nil {
 		return err
@@ -132,12 +144,20 @@ func (a *application) commentOn(cmd *cobra.Command, t target, n int64, kind refK
 	if err != nil {
 		return err
 	}
-	comment, err := (services.Comments{Client: t.client, Repository: t.Repo}).Create(cmd.Context(), n, body)
+	service := services.Comments{Client: t.client, Repository: t.Repo}
+	comment, err := service.Create(cmd.Context(), n, body)
 	if err != nil {
 		return err
 	}
 	a.done(cmd, "Commented on %s", refLabel(t.Repo, n, item.Title))
-	return a.created(cmd, comment, comment.URL)
+	var failures []error
+	for _, file := range files {
+		name := filepath.Base(file.Name())
+		if _, err := service.UploadAttachment(cmd.Context(), comment.ID, name, file); err != nil {
+			failures = append(failures, fmt.Errorf("comment created; attachment %s upload failed: %w", name, err))
+		}
+	}
+	return errors.Join(append(failures, a.created(cmd, comment, comment.URL))...)
 }
 
 func lastComment(cmd *cobra.Command, t target, n int64) (services.Comment, error) {
@@ -292,6 +312,9 @@ $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[st
 		if deleteLast && (cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") || flags.useEditor) {
 			return clierr.Wrap(clierr.Usage, errors.New("--delete-last takes no comment text"))
 		}
+		if (editLast || deleteLast) && len(flags.attachments) > 0 {
+			return clierr.Wrap(clierr.Usage, errors.New("--attachment only attaches files to a new comment"))
+		}
 		if deleteLast && a.options.json != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("comment deletion does not return a resource; --json and --jq are not supported"))
 		}
@@ -316,6 +339,7 @@ $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[st
 	}}
 	group.SuggestionsMinimumDistance = 2
 	flags.register(group)
+	flags.registerAttachments(group)
 	group.Flags().BoolVar(&editLast, "edit-last", false, "Edit your last comment instead of adding one")
 	group.Flags().BoolVar(&deleteLast, "delete-last", false, "Delete your last comment")
 	group.ValidArgsFunction = a.completeDiscussions(kind)
@@ -365,6 +389,7 @@ $ gt %[1]s comment add %[2]s --editor`, words.group, words.example), Annotations
 		return a.commentOn(cmd, t, n, kind, createFlags)
 	}}
 	createFlags.register(create)
+	createFlags.registerAttachments(create)
 	create.ValidArgsFunction = a.completeDiscussions(kind)
 
 	var editFlags commentFlags

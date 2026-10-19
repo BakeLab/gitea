@@ -6,6 +6,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -107,6 +108,12 @@ func (s Comments) Edit(ctx context.Context, id int64, body string) (Comment, err
 		return c.Issues.EditIssueComment(ctx, owner, repo, id, gitea.EditIssueCommentOption{Body: body})
 	})
 	return item, Classify(err, "comment", strconv.FormatInt(id, 10), s.Repository)
+}
+
+// UploadAttachment streams a file to comment id.
+func (s Comments) UploadAttachment(ctx context.Context, id int64, name string, input io.Reader) (IssueAttachment, error) {
+	asset, err := uploadAttachment(ctx, s.Client, fmt.Sprintf("repos/%s/issues/comments/%d/assets", s.Repository, id), name, input)
+	return IssueAttachment(asset), err
 }
 
 // Delete removes a repository comment.

@@ -5,7 +5,10 @@ package app
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -221,4 +224,35 @@ func TestCommentEditAndDeleteReachInlineReviewComments(t *testing.T) {
 	require.Contains(t, calls, "DELETE /api/v1/repos/alice/project/issues/comments/40")
 	// Viewing still explains why an inline review comment cannot be shown.
 	require.ErrorContains(t, run("view", "40"), "not a plain comment")
+}
+
+func TestCommentCreateAttachesFiles(t *testing.T) {
+	var uploaded []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/issues/12":
+			_, _ = w.Write([]byte(`{"number":12,"title":"Crash"}`))
+		case "POST /api/v1/repos/alice/project/issues/12/comments":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":7,"body":"Log attached","html_url":"https://example.org/c/7"}`))
+		case "POST /api/v1/repos/alice/project/issues/comments/7/assets":
+			file, header, err := r.FormFile("attachment")
+			require.NoError(t, err)
+			data, err := io.ReadAll(file)
+			require.NoError(t, err)
+			uploaded = append(uploaded, header.Filename+"="+string(data))
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1,"name":"crash.log"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	file := filepath.Join(t.TempDir(), "crash.log")
+	require.NoError(t, os.WriteFile(file, []byte("panic"), 0o600))
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "comment", "create", "12", "-R", "alice/project", "--body", "Log attached", "--attachment", file}))
+	require.Equal(t, []string{"crash.log=panic"}, uploaded)
+	require.Equal(t, "https://example.org/c/7\n", out.String())
+	requireUsageBeforeRequests(t, "--attachment only attaches files to a new comment", "issue", "comment", "12", "--edit-last", "--body", "x", "--attachment", file)
 }
