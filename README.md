@@ -32,11 +32,31 @@ environment credentials are never persisted.
 
 There are different ways to get `gt`:
 
-1. Use the prebuilt binaries from [dl.gitea.com](https://dl.gitea.com/gitea-cli/)
+1. Run the install script. It downloads the binary for your system from dl.gitea.com, verifies its
+   checksum and installs `gt`; `GITEA_CLI_VERSION` and `GITEA_CLI_INSTALL_DIR` choose another
+   version or directory, and the version `nightly` installs the latest build of the main branch.
 
-2. Docker: [gitea-cli at docker hub](https://hub.docker.com/r/gitea/gitea-cli)
+   On Linux, macOS or FreeBSD:
 
-3. Install from source: [see *Compilation*](#compilation)
+   ```sh
+   curl -fsSL https://gitea.com/gitea/cli/raw/branch/main/scripts/install.sh | sh
+   # the latest nightly build
+   curl -fsSL https://gitea.com/gitea/cli/raw/branch/main/scripts/install.sh | sh -s -- --nightly
+   ```
+
+   On Windows, in PowerShell, which also adds `gt` to your PATH:
+
+   ```powershell
+   irm https://gitea.com/gitea/cli/raw/branch/main/scripts/install.ps1 | iex
+   # the latest nightly build
+   $env:GITEA_CLI_VERSION = "nightly"; irm https://gitea.com/gitea/cli/raw/branch/main/scripts/install.ps1 | iex
+   ```
+
+2. Use the prebuilt binaries from [dl.gitea.com](https://dl.gitea.com/gitea-cli/)
+
+3. Docker: [gitea-cli at docker hub](https://hub.docker.com/r/gitea/gitea-cli)
+
+4. Install from source: [see *Compilation*](#compilation)
 
 ### Log in to Gitea from gt
 
