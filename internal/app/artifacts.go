@@ -261,32 +261,41 @@ func extractZip(ctx context.Context, body io.Reader, dir string, clobber, skipEx
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("%s already exists; pass --clobber to replace it or --skip-existing to keep it", filepath.Join(dir, name)))
 		}
 	}
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		return err
+	}
+	// The root keeps every write inside dir, also through symbolic links already in it.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	for _, entry := range reader.File {
-		path := filepath.Join(dir, filepath.FromSlash(entry.Name))
+		name := filepath.FromSlash(entry.Name)
 		if entry.Mode().IsDir() {
-			if err := os.MkdirAll(path, 0o777); err != nil {
+			if err := root.MkdirAll(name, 0o777); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := extractFile(entry, path, clobber, skipExisting); err != nil {
+		if err := extractFile(root, entry, name, clobber, skipExisting); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// extractFile writes one archive entry to path with its permission bits, such as an executable's,
-// as far as the umask allows; special bits such as setuid are dropped.
-func extractFile(entry *zip.File, path string, clobber, skipExisting bool) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o777); err != nil {
+// extractFile writes one archive entry to name in root with its permission bits, such as an
+// executable's, as far as the umask allows; special bits such as setuid are dropped.
+func extractFile(root *os.Root, entry *zip.File, name string, clobber, skipExisting bool) error {
+	if err := root.MkdirAll(filepath.Dir(name), 0o777); err != nil {
 		return err
 	}
 	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
 	if clobber {
 		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
 	}
-	file, err := os.OpenFile(path, flags, cmp.Or(entry.Mode().Perm(), 0o666))
+	file, err := root.OpenFile(name, flags, cmp.Or(entry.Mode().Perm(), 0o666))
 	if errors.Is(err, os.ErrExist) && skipExisting {
 		return nil
 	}

@@ -163,6 +163,25 @@ func TestRunDownloadExtractsArtifactsByName(t *testing.T) {
 	})
 }
 
+func TestExtractZipStaysInsideTheDestinationThroughLinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symbolic links needs privileges on Windows")
+	}
+	outside, dir := t.TempDir(), t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "victim"), []byte("mine"), 0o600))
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, "linked")))
+	require.NoError(t, os.Symlink(filepath.Join(outside, "victim"), filepath.Join(dir, "file")))
+	for _, name := range []string{"linked/victim", "linked/new", "file"} {
+		archive := bytes.NewReader([]byte(zipOf(t, map[string]string{name: "x"})))
+		require.Error(t, extractZip(context.Background(), archive, dir, true, false), name)
+	}
+	data, err := os.ReadFile(filepath.Join(outside, "victim"))
+	require.NoError(t, err)
+	require.Equal(t, "mine", string(data))
+	_, err = os.Stat(filepath.Join(outside, "new"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestExtractZipKeepsPermissionBits(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows has no permission bits")
