@@ -371,7 +371,7 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 			if err != nil {
 				return err
 			}
-			owner, _, _ := strings.Cut(t.Repo, "/")
+			owner := t.owner()
 			if strings.EqualFold(owner, cmp.Or(opts.Organization, t.User)) {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("cannot fork %s into %s: it already owns it; pass --org to fork it into an organization", t.Repo, owner))
 			}
@@ -659,7 +659,7 @@ $ gt repo rename new-name -R alice/old-name`,
 			if err != nil {
 				return err
 			}
-			owner, current, _ := strings.Cut(t.Repo, "/")
+			owner, current := t.ownerName()
 			if current == name {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is already named %s", t.Repo, name))
 			}

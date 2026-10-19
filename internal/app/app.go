@@ -378,7 +378,7 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 	}
 	root.SetArgs(args)
 	err := root.ExecuteContext(ctx)
-	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == 401 {
+	if services.IsUnauthorized(err) {
 		return clierr.Wrap(clierr.Authentication, err)
 	}
 	return err

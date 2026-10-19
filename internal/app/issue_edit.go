@@ -144,7 +144,7 @@ func (a *application) editIssuesInteractively(cmd *cobra.Command, target target,
 			Heading: "Editing " + refLabel(target.Repo, n, current.Title),
 			Title:   current.Title, Body: current.Body, Assignees: current.Assignees,
 			CanPush: selectables.CanPush, AvailableAssignees: selectables.Assignees, Milestones: milestones, AvailableLabels: labels,
-			EditBody: a.bodyEditor(cmd),
+			EditBody: a.bodyEditor(cmd, terminal.BodyTitle),
 		}
 		if current.Milestone != nil {
 			choices.Milestone = &terminal.IssueMilestoneChoice{Title: current.Milestone.Title, ID: current.Milestone.ID}

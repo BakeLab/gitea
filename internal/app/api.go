@@ -215,8 +215,8 @@ func (a *application) apiCommand() *cobra.Command {
 			return err
 		}
 		if requireRepo {
-			pieces := strings.SplitN(target.Repo, "/", 2)
-			endpoint = strings.NewReplacer("{owner}", url.PathEscape(pieces[0]), "{repo}", url.PathEscape(pieces[1])).Replace(endpoint)
+			owner, name := target.ownerName()
+			endpoint = strings.NewReplacer("{owner}", url.PathEscape(owner), "{repo}", url.PathEscape(name)).Replace(endpoint)
 		}
 		if len(fields) > 0 {
 			if method == http.MethodGet || method == http.MethodHead {

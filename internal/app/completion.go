@@ -375,8 +375,7 @@ func (a *application) completeLabels() cobra.CompletionFunc {
 		if err != nil {
 			return nil, err
 		}
-		owner, _, _ := strings.Cut(t.Repo, "/")
-		if orgLabels, err := (services.Labels{Client: t.client, Organization: owner}).List(ctx, completionLimit, 1); err == nil {
+		if orgLabels, err := (services.Labels{Client: t.client, Organization: t.owner()}).List(ctx, completionLimit, 1); err == nil {
 			labels = append(labels, orgLabels...)
 		}
 		return describe(labels, func(label services.Label) (string, string) { return label.Name, label.Description }), nil

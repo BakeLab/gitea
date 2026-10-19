@@ -210,6 +210,12 @@ func IsNotFound(err error) bool {
 	return ok && failure.Status == http.StatusNotFound
 }
 
+// IsUnauthorized reports whether err is a 401 response.
+func IsUnauthorized(err error) bool {
+	failure, ok := errors.AsType[*transport.APIError](err)
+	return ok && failure.Status == http.StatusUnauthorized
+}
+
 // IsForbidden reports whether err is a 403 response.
 func IsForbidden(err error) bool {
 	failure, ok := errors.AsType[*transport.APIError](err)

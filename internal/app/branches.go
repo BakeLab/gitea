@@ -303,7 +303,7 @@ $ gt branch protect --pattern 'release/*' --allow-push acme/release`,
 			if err != nil {
 				return err
 			}
-			owner, _, _ := strings.Cut(target.Repo, "/")
+			owner := target.owner()
 			for _, pusher := range pushers {
 				if org, team, ok := strings.Cut(pusher, "/"); ok {
 					// Gitea only looks teams up in the organization that owns the repository.

@@ -75,14 +75,17 @@ func (a *application) editDraft(cmd *cobra.Command, body string) (terminal.Draft
 	return editor.Edit(cmd.Context(), command, body)
 }
 
-// bodyEditor collects the body of an interactive form after the form ran. The editor is resolved
-// first: without one, the body is typed into an inline multi-line field instead, so the input
-// already given is never lost to a missing editor.
-func (a *application) bodyEditor(cmd *cobra.Command) terminal.BodyEditor {
+// errMissingBody names the flags that supply a body when there is no terminal to ask for one.
+var errMissingBody = clierr.Wrap(clierr.Usage, errors.New("missing required input: supply --body, --body-file or --editor"))
+
+// bodyEditor collects a body, such as that of an interactive form after the form ran. The editor
+// is resolved first: without one, the body is typed into an inline multi-line field with title
+// instead, so the input already given is never lost to a missing editor.
+func (a *application) bodyEditor(cmd *cobra.Command, title string) terminal.BodyEditor {
 	preferences, err := a.preferences()
 	if err == nil && preferences.Editor == "" {
 		return func(ctx context.Context, initial string) (terminal.Draft, error) {
-			body, err := a.deps.Prompter.AskText(ctx, terminal.BodyTitle, initial)
+			body, err := a.deps.Prompter.AskText(ctx, title, initial)
 			if err != nil {
 				return terminal.Draft{Body: body}, err
 			}
@@ -167,4 +170,17 @@ func validateTextSources(cmd *cobra.Command, textFlag, fileFlag string) error {
 		}
 	}
 	return nil
+}
+
+// keepDraft saves typed text that a canceled or failed command did not submit, so that finishDraft
+// reports where it is. Empty text, or text that cannot be saved, has no draft.
+func keepDraft(body string) terminal.Draft {
+	if strings.TrimSpace(body) == "" {
+		return terminal.Draft{}
+	}
+	path, err := terminal.SaveDraft("", "gt-draft-*.md", body)
+	if err != nil {
+		return terminal.Draft{}
+	}
+	return terminal.Draft{Path: path, Body: body}
 }

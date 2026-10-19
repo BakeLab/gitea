@@ -39,31 +39,21 @@ func (e SystemEditor) Edit(ctx context.Context, command, body string) (Draft, er
 	if err := ctx.Err(); err != nil {
 		return Draft{}, err
 	}
-	file, err := os.CreateTemp(e.Directory, "gt-draft-*.md")
+	path, err := SaveDraft(e.Directory, "gt-draft-*.md", body)
 	if err != nil {
 		return Draft{}, errors.New("cannot create a private editor draft")
 	}
-	draft := Draft{Path: file.Name(), Body: body}
-	_, writeErr := file.WriteString(body)
-	closeErr := file.Close()
-	if err := errors.Join(writeErr, closeErr); err != nil {
-		return draft, errors.New("cannot write editor draft")
-	}
+	draft := Draft{Path: path, Body: body}
 	runErr := e.EditPath(ctx, command, draft.Path)
 	info, err := os.Lstat(draft.Path)
 	if err != nil || !info.Mode().IsRegular() {
 		// A failed editor can remove its buffer or replace it with a non-file.
 		// Recover the original input separately without following that replacement.
-		recovery, recoveryErr := os.CreateTemp(e.Directory, "gt-draft-recovery-*.md")
-		if recoveryErr != nil {
+		path, err := SaveDraft(e.Directory, "gt-draft-recovery-*.md", body)
+		if err != nil {
 			return Draft{Body: body}, errors.Join(ctx.Err(), errors.New("editor draft is unavailable and original input could not be saved"))
 		}
-		draft.Path = recovery.Name()
-		_, writeErr := recovery.WriteString(body)
-		closeErr := recovery.Close()
-		if errors.Join(writeErr, closeErr) != nil {
-			return draft, errors.Join(ctx.Err(), errors.New("cannot save original editor input"))
-		}
+		draft.Path = path
 		return draft, errors.Join(ctx.Err(), errors.New("editor draft is unavailable; original input was saved separately"))
 	}
 	// Editors may replace the file rather than writing it in place, even on failure.
@@ -122,4 +112,19 @@ func commandArgs(command string) ([]string, bool) {
 	}
 	args, err := shellquote.Split(command)
 	return args, err == nil && len(args) > 0 && args[0] != ""
+}
+
+// SaveDraft writes body to a new private file named after pattern in dir, or in the temporary
+// directory when dir is empty, and returns its path. A file that cannot be written is removed.
+func SaveDraft(dir, pattern, body string) (string, error) {
+	file, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return "", err
+	}
+	_, writeErr := file.WriteString(body)
+	if err := errors.Join(writeErr, file.Close()); err != nil {
+		_ = os.Remove(file.Name())
+		return "", err
+	}
+	return file.Name(), nil
 }

@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -155,7 +154,7 @@ func (a *application) instanceCheck(ctx context.Context, t target, client *trans
 	version, err := services.ServerVersion(ctx, client)
 	where := t.Host + " (" + describeSource(t.HostSource) + ")"
 	latency := max(time.Since(start).Milliseconds(), 1)
-	if refused, ok := errors.AsType[*transport.APIError](err); ok && (refused.Status == http.StatusUnauthorized || refused.Status == http.StatusForbidden) {
+	if services.IsUnauthorized(err) || services.IsForbidden(err) {
 		// The instance answers; the account check reports why the credential is refused.
 		return doctorCheck{"Instance", checkPassed, fmt.Sprintf("%s · answers signed-in requests only · %dms", where, latency), ""}
 	}

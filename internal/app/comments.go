@@ -115,19 +115,10 @@ func (a *application) readComment(cmd *cobra.Command, f commentFlags, initial st
 // promptComment asks for a comment in the configured editor, or in a multi-line field without one.
 func (a *application) promptComment(cmd *cobra.Command, initial string) (string, terminal.Draft, error) {
 	if !a.canPrompt() {
-		return "", terminal.Draft{}, clierr.Wrap(clierr.Usage, errors.New("missing required input: supply --body, --body-file or --editor"))
+		return "", terminal.Draft{}, errMissingBody
 	}
-	if preferences, err := a.preferences(); err == nil && preferences.Editor != "" {
-		draft, err := a.editDraft(cmd, initial)
-		return draft.Body, draft, err
-	}
-	body, err := a.deps.Prompter.AskText(cmd.Context(), commentTitle, initial)
-	if err != nil {
-		return body, terminal.Draft{}, err
-	}
-	draft := keepDraft(body)
-	draft.Body = body
-	return body, draft, nil
+	draft, err := a.bodyEditor(cmd, commentTitle)(cmd.Context(), initial)
+	return draft.Body, draft, err
 }
 
 // commentOn creates a comment on n, reporting it like gh: its URL on stdout, or JSON.

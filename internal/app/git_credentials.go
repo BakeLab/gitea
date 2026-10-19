@@ -62,7 +62,7 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 			return nil
 		}
 		// Account keys retain the canonical login returned at authentication time.
-		if configured, ok := matchAccount(host.Users, user); ok {
+		if configured, ok := findAccountKey(host.Users, user); ok {
 			user = configured
 		}
 		credential := auth.Credential{}

@@ -359,7 +359,7 @@ func (a *application) createIssueInteractively(cmd *cobra.Command, templateName 
 	choices := terminal.IssueFormChoices{CanPush: selectables.CanPush, Assignees: selectables.Assignees}
 	// Without an editor the body is a field of the form, asked for right after the title.
 	if preferences, err := a.preferences(); err != nil || preferences.Editor != "" {
-		choices.EditBody = a.bodyEditor(cmd)
+		choices.EditBody = a.bodyEditor(cmd, terminal.BodyTitle)
 	}
 	for _, template := range selectables.Templates {
 		choices.Templates = append(choices.Templates, terminal.IssueTemplateChoice{Name: template.Name, About: template.About, Title: template.Title, Body: issueTemplateBody(template)})

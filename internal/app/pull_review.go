@@ -203,7 +203,7 @@ func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
 		case useEditor:
 			draft, err = a.editDraft(cmd, "")
 		case needsBody && !explicit:
-			draft, err = a.bodyEditor(cmd)(cmd.Context(), "")
+			draft, err = a.bodyEditor(cmd, terminal.BodyTitle)(cmd.Context(), "")
 		default:
 			draft.Body = body
 		}
@@ -342,24 +342,6 @@ func (a *application) reviewInteractively(cmd *cobra.Command, args []string) err
 		_ = os.Remove(diffPath)
 	}
 	return a.reportReview(cmd, t, pull, item)
-}
-
-// keepDraft saves typed text that a canceled or failed command did not submit, so that finishDraft
-// reports where it is. Empty text, or text that cannot be saved, has no draft.
-func keepDraft(body string) terminal.Draft {
-	if strings.TrimSpace(body) == "" {
-		return terminal.Draft{}
-	}
-	file, err := os.CreateTemp("", "gt-draft-*.md")
-	if err != nil {
-		return terminal.Draft{}
-	}
-	_, writeErr := file.WriteString(body)
-	if err := errors.Join(writeErr, file.Close()); err != nil {
-		_ = os.Remove(file.Name())
-		return terminal.Draft{}
-	}
-	return terminal.Draft{Path: file.Name(), Body: body}
 }
 
 // pullHead names the head branch of a pull request, as OWNER:BRANCH when it is in a fork of repo.
@@ -599,7 +581,7 @@ func (a *application) pullReviewReplyCommand() *cobra.Command {
 			if !a.canPrompt() {
 				return clierr.Wrap(clierr.Usage, errors.New("a reply needs a body; pass --body, --body-file or --editor"))
 			}
-			if draft, err = a.bodyEditor(cmd)(cmd.Context(), ""); err != nil {
+			if draft, err = a.bodyEditor(cmd, terminal.BodyTitle)(cmd.Context(), ""); err != nil {
 				return err
 			}
 			body = draft.Body

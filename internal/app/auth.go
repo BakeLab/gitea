@@ -72,7 +72,7 @@ func (a *application) instanceTarget(ctx context.Context) (target, error) {
 	if a.options.host == "" {
 		if t, err := a.resolveTarget(ctx, true, false); err == nil && len(t.host.Users) > 0 {
 			user, _ := a.selectedUser()
-			if _, ok := matchAccount(t.host.Users, user); user == "" || ok {
+			if _, ok := findAccountKey(t.host.Users, user); user == "" || ok {
 				return t, nil
 			}
 		}
@@ -325,7 +325,7 @@ func (a *application) confirmReplace(cmd *cobra.Command, instance, user string) 
 	if err != nil {
 		return false, err
 	}
-	configured, exists := matchAccount(snapshot.Hosts.Hosts[instance].Users, user)
+	configured, exists := findAccountKey(snapshot.Hosts.Hosts[instance].Users, user)
 	if !exists {
 		return false, nil
 	}
@@ -670,7 +670,7 @@ asks which one on a terminal.`,
 			var user string
 			switch {
 			case requested != "":
-				matched, ok := matchAccount(users, requested)
+				matched, ok := findAccountKey(users, requested)
 				if !ok {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("account %q is not logged in on %s (accounts: %s)", requested, t.Host, accountNames(users)))
 				}

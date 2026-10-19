@@ -333,7 +333,7 @@ func TestBodyEditorTypesInlineWithoutAnEditor(t *testing.T) {
 	prompt := &scriptedPrompter{}
 	deps.Prompter = prompt
 	a, cmd := outputApplication(deps, "")
-	draft, err := a.bodyEditor(cmd)(context.Background(), "## Steps")
+	draft, err := a.bodyEditor(cmd, terminal.BodyTitle)(context.Background(), "## Steps")
 	require.NoError(t, err)
 	require.Equal(t, "typed body", draft.Body)
 	require.Equal(t, []string{terminal.BodyTitle + " ## Steps"}, prompt.texts)
@@ -352,7 +352,7 @@ func TestBodyEditorTypesInlineWithoutAnEditor(t *testing.T) {
 	deps.Editor = editor
 	deps.Getenv = envFunc(map[string]string{"EDITOR": "vi"})
 	a, cmd = outputApplication(deps, "")
-	draft, err = a.bodyEditor(cmd)(context.Background(), "## Steps")
+	draft, err = a.bodyEditor(cmd, terminal.BodyTitle)(context.Background(), "## Steps")
 	require.NoError(t, err)
 	require.Equal(t, terminal.Draft{Path: path, Body: "edited body"}, draft)
 	require.Equal(t, "## Steps", editor.initial)

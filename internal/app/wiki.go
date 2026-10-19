@@ -225,9 +225,9 @@ func (a *application) wikiBody(cmd *cobra.Command, editor bool, initial string) 
 		return a.editDraft(cmd, initial)
 	}
 	if !a.canPrompt() {
-		return terminal.Draft{}, clierr.Wrap(clierr.Usage, errors.New("missing required input: supply --body, --body-file or --editor"))
+		return terminal.Draft{}, errMissingBody
 	}
-	return a.bodyEditor(cmd)(cmd.Context(), initial)
+	return a.bodyEditor(cmd, terminal.BodyTitle)(cmd.Context(), initial)
 }
 
 func (a *application) wikiEditCommand() *cobra.Command {

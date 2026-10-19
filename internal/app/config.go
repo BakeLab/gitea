@@ -138,7 +138,7 @@ func (a *application) settingValues(snapshot settings.Snapshot) (map[string]any,
 		sources[key] = "hosts.yml " + preferences.DefaultHost
 	}
 	if a.options.user != "" {
-		user, exists := matchAccount(host.Users, a.options.user)
+		user, exists := findAccountKey(host.Users, a.options.user)
 		if !exists {
 			return nil, nil, clierr.Wrap(clierr.Usage, fmt.Errorf("account %q is not logged in on %s (accounts: %s)", a.options.user, preferences.DefaultHost, accountNames(host.Users)))
 		}
@@ -400,7 +400,7 @@ func (a *application) setInstanceSetting(key, value string) (string, error) {
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("instance %s is not configured; run gt auth login --host %s", instance, instance))
 		}
 		if a.options.user != "" {
-			user, exists := matchAccount(host.Users, a.options.user)
+			user, exists := findAccountKey(host.Users, a.options.user)
 			if !exists {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("account %q is not logged in on %s (accounts: %s)", a.options.user, instance, accountNames(host.Users)))
 			}

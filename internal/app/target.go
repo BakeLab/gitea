@@ -37,6 +37,18 @@ type target struct {
 	gitProtocol string
 }
 
+// ownerName splits the selected OWNER/REPO repository.
+func (t target) ownerName() (owner, name string) {
+	owner, name, _ = strings.Cut(t.Repo, "/")
+	return owner, name
+}
+
+// owner returns the owner of the selected repository.
+func (t target) owner() string {
+	owner, _ := t.ownerName()
+	return owner
+}
+
 var errRepositoryRequired = errors.New("repository required: use --repo owner/name")
 
 // errEnvironmentAccount must not reveal which account the GITEA_TOKEN belongs to.
@@ -412,7 +424,7 @@ func (a *application) defaultHost(t *target, s settings.Snapshot) error {
 func (a *application) selectAccount(ctx context.Context, t *target, s settings.Snapshot, authenticate bool) error {
 	users := t.host.Users
 	t.User, t.UserSource = a.selectedUser()
-	if matched, ok := matchAccount(users, t.User); ok {
+	if matched, ok := findAccountKey(users, t.User); ok {
 		t.User = matched
 	}
 	if t.User == "" {
@@ -434,7 +446,7 @@ func (a *application) selectAccount(ctx context.Context, t *target, s settings.S
 	if err != nil {
 		return err
 	}
-	matched, ok := matchAccount(users, strings.TrimSpace(selected))
+	matched, ok := findAccountKey(users, strings.TrimSpace(selected))
 	if !ok {
 		return clierr.Wrap(clierr.Usage, t.accountError(strings.TrimSpace(selected)))
 	}
@@ -489,7 +501,8 @@ func (a *application) selectedUser() (string, string) {
 	return a.deps.Getenv("GITEA_CLI_USER"), "GITEA_CLI_USER"
 }
 
-func matchAccount(users map[string]settings.Account, selected string) (string, bool) {
+// findAccountKey returns the configured account name that matches selected, ignoring case.
+func findAccountKey(users map[string]settings.Account, selected string) (string, bool) {
 	if selected == "" {
 		return "", false
 	}

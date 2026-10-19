@@ -103,7 +103,7 @@ is not on the remote yet is pushed first, with its upstream set.`, Args: argsExa
 				return clierr.Wrap(clierr.Usage, errors.New("supply --head outside a branch checkout"))
 			}
 			options.Head = branch
-			if baseOwner, _, _ := strings.Cut(t.Repo, "/"); !agit && owner != "" && !strings.EqualFold(owner, baseOwner) {
+			if !agit && owner != "" && !strings.EqualFold(owner, t.owner()) {
 				options.Head = owner + ":" + branch
 			}
 		}
@@ -329,7 +329,7 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 		return err
 	}
 	repo, selectables := loaded.Repository, loaded.CreateSelectables
-	baseOwner, _, _ := strings.Cut(target.Repo, "/")
+	baseOwner := target.owner()
 	headOwner, headBranch := a.defaultPullHead(cmd.Context())
 	title, body, _ := a.singleCommitMessage(cmd.Context(), repo.DefaultBranch, headBranch)
 	if loaded.Template != "" {
@@ -338,7 +338,7 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 	choices := terminal.PullFormChoices{
 		Repo: target.Repo, BaseOwner: baseOwner, Base: repo.DefaultBranch, HeadOwner: headOwner, HeadBranch: headBranch, Title: title, Body: body,
 		AllowMaintainerEdits: true, CanPush: selectables.CanPush, Assignees: selectables.Assignees,
-		EditBody: a.bodyEditor(cmd),
+		EditBody: a.bodyEditor(cmd, terminal.BodyTitle),
 	}
 	choices.Milestones, choices.Labels = milestoneChoices(selectables.Milestones), labelChoices(selectables.Labels)
 	values, err := a.deps.PullForm.CreatePull(cmd.Context(), choices)
