@@ -26,11 +26,15 @@ func validateRepositoryName(name string) error {
 	return nil
 }
 
+type repoCreateFlags struct {
+	opts                                     services.RepositoryOptions
+	templateOpts                             services.RepositoryTemplateOptions
+	org, template, team, localSource, remote string
+	clone, public, push                      bool
+}
+
 func (a *application) repoCreateCommand() *cobra.Command {
-	var opts services.RepositoryOptions
-	var templateOpts services.RepositoryTemplateOptions
-	var org, template, team, localSource, remote string
-	var clone, public, push bool
+	var f repoCreateFlags
 	command := &cobra.Command{
 		Use:     "create [<name>]",
 		Aliases: []string{"new"},
@@ -50,151 +54,155 @@ $ gt repo create acme/service --template acme/service-template
 $ gt repo create project --source . --push`,
 		Args: usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				opts.Name = args[0]
-			}
-			if err := a.rejectRepoFlag(cmd, func(owner string) string { return "gt repo create " + owner + "/" + cmp.Or(opts.Name, "NAME") }); err != nil {
-				return err
-			}
-			if owner, name, ok := strings.Cut(opts.Name, "/"); ok {
-				if cmd.Flags().Changed("org") {
-					return clierr.Wrap(clierr.Usage, errors.New("supply the owner as OWNER/NAME or --org, not both"))
-				}
-				org, opts.Name = owner, name
-			}
-			if err := validateCreateFlags(cmd, opts, org, team, template, localSource, clone); err != nil {
-				return err
-			}
-			if public {
-				if cmd.Flags().Changed("private") {
-					return clierr.Wrap(clierr.Usage, errors.New("--public and --private cannot be combined"))
-				}
-				opts.Private = false
-			}
-			if localSource != "" {
-				if !filepath.IsAbs(localSource) {
-					localSource = filepath.Join(a.options.cwd, localSource)
-				}
-				if err := a.checkPublishSource(cmd.Context(), localSource, remote); err != nil {
-					return err
-				}
-			}
-			prompted, err := a.requireInput(cmd, &opts.Name, "name", "Repository name", validateRepositoryName)
-			if err != nil {
-				return err
-			}
-			if err := validateRepositoryName(opts.Name); err != nil {
-				return err
-			}
-			selected := &application{deps: a.deps, options: a.options}
-			selected.options.repo = template
-			target, err := selected.resolve(cmd.Context(), false)
-			if err != nil {
-				return err
-			}
-			if !cmd.Flags().Changed("org") && strings.EqualFold(org, target.User) {
-				if team != "" {
-					return clierr.Wrap(clierr.Usage, errors.New("--team requires a repository owned by an organization"))
-				}
-				org = ""
-			}
-			service := services.Repositories{Client: target.client}
-			if err := validateTemplates(cmd.Context(), service, &opts); err != nil {
-				return err
-			}
-			if prompted {
-				visibility := "public"
-				if opts.Private {
-					visibility = "private"
-				}
-				owner := cmp.Or(org, target.User)
-				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Create %s repository %s/%s on %s?", visibility, owner, opts.Name, target.Host), DefaultYes: true}); err != nil {
-					return err
-				}
-			}
-			var teamID int64
-			if team != "" {
-				teams, err := (services.Teams{Client: target.client}).ByName(cmd.Context(), org)
-				if err != nil {
-					return err
-				}
-				match, ok := teams[strings.ToLower(team)]
-				if !ok {
-					return clierr.Wrap(clierr.Usage, fmt.Errorf("team %q not found in organization %s", team, org))
-				}
-				teamID = match.ID
-			}
-			var item services.Repository
-			if template != "" {
-				templateOpts.Name, templateOpts.Owner, templateOpts.Description = opts.Name, org, opts.Description
-				templateOpts.Private, templateOpts.DefaultBranch = opts.Private, opts.DefaultBranch
-				item, err = service.Generate(cmd.Context(), target.Repo, templateOpts)
-			} else {
-				item, err = service.Create(cmd.Context(), org, opts)
-			}
-			if err != nil {
-				return err
-			}
-			a.done(cmd, "Created repository %s", item.FullName)
-			if teamID != 0 {
-				if err := (services.Teams{Client: target.client}).SetRepository(cmd.Context(), teamID, item.FullName, true); err != nil {
-					return fmt.Errorf("created %s, but could not grant team %q access: %w", item.FullName, team, err)
-				}
-				a.done(cmd, "Granted team %s access to %s", team, item.FullName)
-			}
-			target.Repo = item.FullName
-			switch {
-			case clone:
-				// Record the new repository first so a failed clone does not hide that it exists.
-				if err := a.created(cmd, item, item.URL); err != nil {
-					return err
-				}
-				if _, err := a.cloneRepository(cmd, target, item, cloneOptions{upstream: "upstream"}); err != nil {
-					return fmt.Errorf("created %s, but could not clone it: %w", item.FullName, err)
-				}
-				return nil
-			case localSource != "":
-				err = a.publishRepository(cmd, target, item, localSource, remote, push)
-			}
-			if err != nil {
-				return err
-			}
-			return a.created(cmd, item, item.URL)
+			return a.runRepoCreate(cmd, args, &f)
 		},
 	}
 	flags := command.Flags()
-	flags.StringVar(&org, "org", "", "Create the repository in this organization")
-	flags.StringVar(&team, "team", "", "Grant this organization team access")
-	flags.BoolVar(&clone, "clone", false, "Clone the new repository into the current directory")
-	flags.StringVarP(&opts.Description, "description", "d", "", "Repository description")
-	flags.BoolVar(&opts.Private, "private", false, "Make the repository private")
-	flags.BoolVar(&public, "public", false, "Make the repository public (the default)")
-	flags.BoolVar(&opts.AutoInit, "auto-init", false, "Add a first commit with a README")
-	flags.StringVar(&opts.DefaultBranch, "default-branch", "", "Name of the default branch")
-	flags.StringVar(&opts.Labels, "label-template", "", "Add the labels of this label set")
-	flags.StringVarP(&opts.Gitignores, "gitignores", "g", "", "Comma-separated .gitignore templates (requires --auto-init)")
-	flags.StringVarP(&opts.License, "license", "l", "", "License template (requires --auto-init)")
-	flags.StringVar(&opts.Readme, "readme", "", "README template (requires --auto-init)")
-	flags.BoolVar(&opts.Template, "as-template", false, "Make the new repository a template")
-	enumFlag(command, &opts.TrustModel, "trust-model", "", "", "Signature trust model", "default", "collaborator", "committer", "collaboratorcommitter")
-	enumFlag(command, &opts.ObjectFormat, "object-format", "", "", "Git object format", "sha1", "sha256")
-	flags.StringVar(&template, "template", "", "Copy this template repository (OWNER/REPO or URL)")
-	flags.BoolVar(&templateOpts.Content, "copy-content", true, "Copy the template's Git content")
-	flags.BoolVar(&templateOpts.GitHooks, "copy-git-hooks", true, "Copy the template's Git hooks")
-	flags.BoolVar(&templateOpts.Avatar, "copy-avatar", true, "Copy the template's avatar")
-	flags.BoolVar(&templateOpts.Labels, "copy-labels", true, "Copy the template's labels")
-	flags.BoolVar(&templateOpts.Topics, "copy-topics", true, "Copy the template's topics")
-	flags.BoolVar(&templateOpts.Webhooks, "copy-webhooks", false, "Copy the template's webhooks")
-	flags.StringVar(&localSource, "source", "", "Publish the local Git repository in this directory")
+	flags.StringVar(&f.org, "org", "", "Create the repository in this organization")
+	flags.StringVar(&f.team, "team", "", "Grant this organization team access")
+	flags.BoolVar(&f.clone, "clone", false, "Clone the new repository into the current directory")
+	flags.StringVarP(&f.opts.Description, "description", "d", "", "Repository description")
+	flags.BoolVar(&f.opts.Private, "private", false, "Make the repository private")
+	flags.BoolVar(&f.public, "public", false, "Make the repository public (the default)")
+	flags.BoolVar(&f.opts.AutoInit, "auto-init", false, "Add a first commit with a README")
+	flags.StringVar(&f.opts.DefaultBranch, "default-branch", "", "Name of the default branch")
+	flags.StringVar(&f.opts.Labels, "label-template", "", "Add the labels of this label set")
+	flags.StringVarP(&f.opts.Gitignores, "gitignores", "g", "", "Comma-separated .gitignore templates (requires --auto-init)")
+	flags.StringVarP(&f.opts.License, "license", "l", "", "License template (requires --auto-init)")
+	flags.StringVar(&f.opts.Readme, "readme", "", "README template (requires --auto-init)")
+	flags.BoolVar(&f.opts.Template, "as-template", false, "Make the new repository a template")
+	enumFlag(command, &f.opts.TrustModel, "trust-model", "", "", "Signature trust model", "default", "collaborator", "committer", "collaboratorcommitter")
+	enumFlag(command, &f.opts.ObjectFormat, "object-format", "", "", "Git object format", "sha1", "sha256")
+	flags.StringVar(&f.template, "template", "", "Copy this template repository (OWNER/REPO or URL)")
+	flags.BoolVar(&f.templateOpts.Content, "copy-content", true, "Copy the template's Git content")
+	flags.BoolVar(&f.templateOpts.GitHooks, "copy-git-hooks", true, "Copy the template's Git hooks")
+	flags.BoolVar(&f.templateOpts.Avatar, "copy-avatar", true, "Copy the template's avatar")
+	flags.BoolVar(&f.templateOpts.Labels, "copy-labels", true, "Copy the template's labels")
+	flags.BoolVar(&f.templateOpts.Topics, "copy-topics", true, "Copy the template's topics")
+	flags.BoolVar(&f.templateOpts.Webhooks, "copy-webhooks", false, "Copy the template's webhooks")
+	flags.StringVar(&f.localSource, "source", "", "Publish the local Git repository in this directory")
 	_ = command.MarkFlagDirname("source")
-	flags.StringVar(&remote, "remote-name", "origin", "Name of the new repository's remote in --source")
-	flags.BoolVar(&push, "push", false, "Push the current branch of --source")
+	flags.StringVar(&f.remote, "remote-name", "origin", "Name of the new repository's remote in --source")
+	flags.BoolVar(&f.push, "push", false, "Push the current branch of --source")
 	_ = command.RegisterFlagCompletionFunc("org", a.completeOrgs())
 	_ = command.RegisterFlagCompletionFunc("template", a.completeRepos())
 	_ = command.RegisterFlagCompletionFunc("license", a.completeTemplates(services.Repositories.Licenses))
 	_ = command.RegisterFlagCompletionFunc("gitignores", commaSeparated(a.completeTemplates(services.Repositories.Gitignores)))
 	_ = command.RegisterFlagCompletionFunc("label-template", a.completeTemplates(services.Repositories.LabelTemplates))
 	return command
+}
+
+func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCreateFlags) error {
+	if len(args) > 0 {
+		f.opts.Name = args[0]
+	}
+	if err := a.rejectRepoFlag(cmd, func(owner string) string { return "gt repo create " + owner + "/" + cmp.Or(f.opts.Name, "NAME") }); err != nil {
+		return err
+	}
+	if owner, name, ok := strings.Cut(f.opts.Name, "/"); ok {
+		if cmd.Flags().Changed("org") {
+			return clierr.Wrap(clierr.Usage, errors.New("supply the owner as OWNER/NAME or --org, not both"))
+		}
+		f.org, f.opts.Name = owner, name
+	}
+	if err := validateCreateFlags(cmd, f.opts, f.org, f.team, f.template, f.localSource, f.clone); err != nil {
+		return err
+	}
+	if f.public {
+		if cmd.Flags().Changed("private") {
+			return clierr.Wrap(clierr.Usage, errors.New("--public and --private cannot be combined"))
+		}
+		f.opts.Private = false
+	}
+	if f.localSource != "" {
+		if !filepath.IsAbs(f.localSource) {
+			f.localSource = filepath.Join(a.options.cwd, f.localSource)
+		}
+		if err := a.checkPublishSource(cmd.Context(), f.localSource, f.remote); err != nil {
+			return err
+		}
+	}
+	prompted, err := a.requireInput(cmd, &f.opts.Name, "name", "Repository name", validateRepositoryName)
+	if err != nil {
+		return err
+	}
+	if err := validateRepositoryName(f.opts.Name); err != nil {
+		return err
+	}
+	selected := &application{deps: a.deps, options: a.options}
+	selected.options.repo = f.template
+	target, err := selected.resolve(cmd.Context(), false)
+	if err != nil {
+		return err
+	}
+	if !cmd.Flags().Changed("org") && strings.EqualFold(f.org, target.User) {
+		if f.team != "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--team requires a repository owned by an organization"))
+		}
+		f.org = ""
+	}
+	service := services.Repositories{Client: target.client}
+	if err := validateTemplates(cmd.Context(), service, &f.opts); err != nil {
+		return err
+	}
+	if prompted {
+		visibility := "public"
+		if f.opts.Private {
+			visibility = "private"
+		}
+		owner := cmp.Or(f.org, target.User)
+		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Create %s repository %s/%s on %s?", visibility, owner, f.opts.Name, target.Host), DefaultYes: true}); err != nil {
+			return err
+		}
+	}
+	var teamID int64
+	if f.team != "" {
+		teams, err := (services.Teams{Client: target.client}).ByName(cmd.Context(), f.org)
+		if err != nil {
+			return err
+		}
+		match, ok := teams[strings.ToLower(f.team)]
+		if !ok {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("team %q not found in organization %s", f.team, f.org))
+		}
+		teamID = match.ID
+	}
+	var item services.Repository
+	if f.template != "" {
+		f.templateOpts.Name, f.templateOpts.Owner, f.templateOpts.Description = f.opts.Name, f.org, f.opts.Description
+		f.templateOpts.Private, f.templateOpts.DefaultBranch = f.opts.Private, f.opts.DefaultBranch
+		item, err = service.Generate(cmd.Context(), target.Repo, f.templateOpts)
+	} else {
+		item, err = service.Create(cmd.Context(), f.org, f.opts)
+	}
+	if err != nil {
+		return err
+	}
+	a.done(cmd, "Created repository %s", item.FullName)
+	if teamID != 0 {
+		if err := (services.Teams{Client: target.client}).SetRepository(cmd.Context(), teamID, item.FullName, true); err != nil {
+			return fmt.Errorf("created %s, but could not grant team %q access: %w", item.FullName, f.team, err)
+		}
+		a.done(cmd, "Granted team %s access to %s", f.team, item.FullName)
+	}
+	target.Repo = item.FullName
+	switch {
+	case f.clone:
+		// Record the new repository first so a failed clone does not hide that it exists.
+		if err := a.created(cmd, item, item.URL); err != nil {
+			return err
+		}
+		if _, err := a.cloneRepository(cmd, target, item, cloneOptions{upstream: "upstream"}); err != nil {
+			return fmt.Errorf("created %s, but could not clone it: %w", item.FullName, err)
+		}
+		return nil
+	case f.localSource != "":
+		err = a.publishRepository(cmd, target, item, f.localSource, f.remote, f.push)
+	}
+	if err != nil {
+		return err
+	}
+	return a.created(cmd, item, item.URL)
 }
 
 // validateCreateFlags rejects combinations of repo create flags that cannot work, before any request.

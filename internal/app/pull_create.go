@@ -20,197 +20,42 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type pullCreateFlags struct {
+	options                                                 services.PullOptions
+	bodyFile, deadline, milestone, topic                    string
+	labelNames, reviewers, reviewerTeams, attachments       []string
+	useEditor, draft, agit, allowMaintainerEdits, fill, web bool
+}
+
 func (a *application) pullCreateCommand() *cobra.Command {
-	var options services.PullOptions
-	var bodyFile, deadline, milestone, topic string
-	var labelNames, reviewers, reviewerTeams, attachments []string
-	var useEditor, draft, agit, allowMaintainerEdits, fill, web bool
+	var f pullCreateFlags
 	create := &cobra.Command{Use: "create", Aliases: []string{"new"}, Short: "Create a pull request", Long: `Create a pull request from the current branch, or from --head.
 
 On a terminal without flags, gt asks for the title and body, then what to do next: submit,
 submit as a draft, add metadata or change the branches. --fill skips the questions and uses
 the commit message of a single-commit branch, or the branch name, as the title. A branch that
-is not on the remote yet is pushed first, with its upstream set.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
-		var editorDraft terminal.Draft
-		defer finishDraft(&editorDraft, &runErr)
-		if err := validateBodySources(cmd); err != nil {
-			return err
-		}
-		if agit {
-			if a.options.json != "" {
-				return clierr.Wrap(clierr.Usage, errors.New("--json/--jq cannot be combined with --agit; AGit creates the pull request through git push"))
-			}
-			for _, name := range []string{"assignee", "label", "milestone", "deadline", "reviewer", "reviewer-team", "attachment"} {
-				if cmd.Flags().Changed(name) {
-					return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --agit; AGit pushes carry only a title and body", name))
-				}
-			}
-		} else if topic != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--topic requires --agit"))
-		}
-		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 0 {
-			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
-		}
-		if err := requireNames("label", "", labelNames); err != nil {
-			return err
-		}
-		if err := requireNames("assignee", "", options.Assignees); err != nil {
-			return err
-		}
-		trimNames(reviewers, reviewerTeams)
-		reviews := services.ReviewRequestChanges{Add: services.ReviewRequestInput{Users: reviewers, Teams: reviewerTeams}}
-		requestReviews := len(reviewers)+len(reviewerTeams) > 0
-		if requestReviews {
-			if err := reviews.Validate(); err != nil {
-				return clierr.Wrap(clierr.Usage, err)
-			}
-		}
-		files, err := openRegularFiles(attachments)
-		defer closeFiles(files)
-		if err != nil {
-			return err
-		}
-		if cmd.Flags().Changed("deadline") {
-			if options.Deadline, err = parseDeadline(deadline); err != nil {
-				return err
-			}
-		}
-		s, err := a.settings()
-		if err != nil {
-			return err
-		}
-		if !localFlagsChanged(cmd) && a.policy(s).CanPrompt(a.deps.Streams) && a.deps.PullForm != nil {
-			return a.createPullInteractively(cmd, s)
-		}
-		t, err := a.resolve(cmd.Context(), true)
-		if err != nil {
-			return err
-		}
-		options.Labels, err = (services.Labels{Client: t.client, Repository: t.Repo}).ResolveIssueNames(cmd.Context(), labelNames)
-		if err != nil {
-			return err
-		}
-		if milestone != "" && milestone != "0" {
-			if options.Milestone, err = milestoneID(cmd, t, milestone); err != nil {
-				return err
-			}
-		}
-		t.expandMeAll(options.Assignees)
-		t.expandMeAll(reviewers)
-		if options.Head == "" {
-			owner, branch := a.defaultPullHead(cmd.Context())
-			if branch == "" {
-				return clierr.Wrap(clierr.Usage, errors.New("supply --head outside a branch checkout"))
-			}
-			options.Head = branch
-			if !agit && owner != "" && !strings.EqualFold(owner, t.owner()) {
-				options.Head = owner + ":" + branch
-			}
-		}
-		if options.Base == "" {
-			repo, err := (services.Repositories{Client: t.client}).View(cmd.Context(), t.Repo)
-			if err != nil {
-				return err
-			}
-			if options.Base = repo.DefaultBranch; options.Base == "" {
-				return clierr.Wrap(clierr.Usage, errors.New("supply --base; repository has no default branch"))
-			}
-		}
-		if web {
-			return a.openBrowser(cmd, repositoryURL(t)+"/compare/"+compareRef(options.Base)+"..."+compareRef(options.Head))
-		}
-		if !agit {
-			if err := refuseSameBranch(options.Head, options.Base); err != nil {
-				return err
-			}
-		}
-		var commitBody string
-		if options.Title == "" {
-			if subject, body, ok := a.singleCommitMessage(cmd.Context(), options.Base, options.Head); ok {
-				options.Title, commitBody = subject, body
-			} else if options.Title = terminal.DefaultPullTitle(options.Head); options.Title == "" {
-				return clierr.Wrap(clierr.Usage, errors.New("supply --title"))
-			}
-		}
-		service := services.Pulls{Client: t.client, Repository: t.Repo}
-		if useEditor {
-			var seed string
-			if seed, err = service.Template(cmd.Context(), options.Base); err != nil {
-				return err
-			}
-			if seed == "" {
-				seed = commitBody
-			}
-			editorDraft, err = a.editDraft(cmd, seed)
-			options.Body = editorDraft.Body
-		} else if !cmd.Flags().Changed("body") && !cmd.Flags().Changed("body-file") {
-			options.Body = commitBody
-		} else {
-			options.Body, err = a.readBody(cmd, options.Body, bodyFile)
-		}
-		if err != nil {
-			return err
-		}
-		if draft {
-			options.Title = services.AddDraftPrefix(options.Title)
-		}
-		if agit {
-			return a.pushAgit(cmd, t, s, git.AgitOptions{Remote: a.options.remote, Head: options.Head, Base: options.Base, Topic: topic, Title: options.Title, Body: options.Body})
-		}
-		options.AllowMaintainerEdit = &allowMaintainerEdits
-		reviewService := services.Reviews{Client: t.client, Repository: t.Repo}
-		if len(reviewerTeams) > 0 {
-			if err := reviewService.CheckRequestTeams(cmd.Context(), reviewerTeams); err != nil {
-				return err
-			}
-		}
-		if err := a.ensureHeadPublished(cmd, t, s, options.Head); err != nil {
-			return err
-		}
-		item, err := service.Create(cmd.Context(), options)
-		if err != nil {
-			return err
-		}
-		var failures []error
-		if requestReviews {
-			if updated, err := reviewService.ChangeRequests(cmd.Context(), item.Number, reviews); err != nil {
-				failures = append(failures, fmt.Errorf("request reviews: %w", err))
-			} else {
-				item = updated
-			}
-		}
-		for _, file := range files {
-			if _, err := (services.Issues{Client: t.client, Repository: t.Repo}).UploadAttachment(cmd.Context(), item.Number, filepath.Base(file.Name()), file); err != nil {
-				failures = append(failures, fmt.Errorf("upload %s: %w", file.Name(), err))
-			}
-		}
-		if err := a.reportCreatedPull(cmd, t, item); err != nil {
-			return err
-		}
-		if len(failures) > 0 {
-			return fmt.Errorf("pull request #%d was created, but follow-up steps failed: %w", item.Number, errors.Join(failures...))
-		}
-		return nil
+is not on the remote yet is pushed first, with its upstream set.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+		return a.runPullCreate(cmd, &f)
 	}}
-	create.Flags().StringSliceVarP(&options.Assignees, "assignee", "a", nil, "Assign users by username; @me for yourself")
-	create.Flags().StringSliceVarP(&labelNames, "label", "l", nil, "Apply labels by name; repo: or org: picks between same-named labels")
-	create.Flags().StringVarP(&milestone, "milestone", "m", "", "Milestone title or ID")
-	create.Flags().StringVarP(&options.Title, "title", "t", "", "Pull request title (default: the commit message of a single-commit branch, or the branch name)")
-	create.Flags().StringVar(&deadline, "deadline", "", "Due date: YYYY-MM-DD, RFC3339, or Unix timestamp")
-	create.Flags().StringVarP(&options.Body, "body", "b", "", "Pull request body")
-	create.Flags().StringVarP(&bodyFile, "body-file", "F", "", "Read the body from `file`, or - for stdin")
-	create.Flags().BoolVarP(&useEditor, "editor", "e", false, "Write the body in your editor, starting from the repository's template")
-	create.Flags().StringVarP(&options.Head, "head", "H", "", "Head branch, or OWNER:BRANCH for a fork (default: the current branch)")
-	create.Flags().StringVarP(&options.Base, "base", "B", "", "Base branch (default: the repository's default branch)")
-	create.Flags().BoolVarP(&draft, "draft", "d", false, "Create a draft pull request")
-	create.Flags().BoolVarP(&fill, "fill", "f", false, "Skip the questions and take the title and body from the commits")
-	create.Flags().BoolVarP(&web, "web", "w", false, "Open the comparison page in the browser to create the pull request there")
-	create.Flags().BoolVar(&allowMaintainerEdits, "allow-maintainer-edits", true, "Allow maintainers to push to the head branch")
-	create.Flags().BoolVar(&agit, "agit", false, "Create the pull request through AGit push (refs/for)")
-	create.Flags().StringSliceVarP(&reviewers, "reviewer", "r", nil, "Request reviews from users; @me for yourself")
-	create.Flags().StringSliceVar(&reviewerTeams, "reviewer-team", nil, "Request reviews from teams within the repository's organization")
-	create.Flags().StringArrayVar(&attachments, "attachment", nil, "Attach a file to the pull request (repeatable)")
-	create.Flags().StringVar(&topic, "topic", "", "AGit topic name (default: head branch); requires --agit")
+	create.Flags().StringSliceVarP(&f.options.Assignees, "assignee", "a", nil, "Assign users by username; @me for yourself")
+	create.Flags().StringSliceVarP(&f.labelNames, "label", "l", nil, "Apply labels by name; repo: or org: picks between same-named labels")
+	create.Flags().StringVarP(&f.milestone, "milestone", "m", "", "Milestone title or ID")
+	create.Flags().StringVarP(&f.options.Title, "title", "t", "", "Pull request title (default: the commit message of a single-commit branch, or the branch name)")
+	create.Flags().StringVar(&f.deadline, "deadline", "", "Due date: YYYY-MM-DD, RFC3339, or Unix timestamp")
+	create.Flags().StringVarP(&f.options.Body, "body", "b", "", "Pull request body")
+	create.Flags().StringVarP(&f.bodyFile, "body-file", "F", "", "Read the body from `file`, or - for stdin")
+	create.Flags().BoolVarP(&f.useEditor, "editor", "e", false, "Write the body in your editor, starting from the repository's template")
+	create.Flags().StringVarP(&f.options.Head, "head", "H", "", "Head branch, or OWNER:BRANCH for a fork (default: the current branch)")
+	create.Flags().StringVarP(&f.options.Base, "base", "B", "", "Base branch (default: the repository's default branch)")
+	create.Flags().BoolVarP(&f.draft, "draft", "d", false, "Create a draft pull request")
+	create.Flags().BoolVarP(&f.fill, "fill", "f", false, "Skip the questions and take the title and body from the commits")
+	create.Flags().BoolVarP(&f.web, "web", "w", false, "Open the comparison page in the browser to create the pull request there")
+	create.Flags().BoolVar(&f.allowMaintainerEdits, "allow-maintainer-edits", true, "Allow maintainers to push to the head branch")
+	create.Flags().BoolVar(&f.agit, "agit", false, "Create the pull request through AGit push (refs/for)")
+	create.Flags().StringSliceVarP(&f.reviewers, "reviewer", "r", nil, "Request reviews from users; @me for yourself")
+	create.Flags().StringSliceVar(&f.reviewerTeams, "reviewer-team", nil, "Request reviews from teams within the repository's organization")
+	create.Flags().StringArrayVar(&f.attachments, "attachment", nil, "Attach a file to the pull request (repeatable)")
+	create.Flags().StringVar(&f.topic, "topic", "", "AGit topic name (default: head branch); requires --agit")
 	_ = create.RegisterFlagCompletionFunc("assignee", a.completeUsers())
 	_ = create.RegisterFlagCompletionFunc("reviewer", a.completeUsers())
 	_ = create.RegisterFlagCompletionFunc("label", a.completeLabels())
@@ -225,6 +70,169 @@ $ gt pr create --fill
 
 $ gt pr create -t "Add login" -b "Closes #1" -B develop -r carol -l enhancement`
 	return create
+}
+
+func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (runErr error) {
+	var editorDraft terminal.Draft
+	defer finishDraft(&editorDraft, &runErr)
+	if err := validateBodySources(cmd); err != nil {
+		return err
+	}
+	if f.agit {
+		if a.options.json != "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--json/--jq cannot be combined with --agit; AGit creates the pull request through git push"))
+		}
+		for _, name := range []string{"assignee", "label", "milestone", "deadline", "reviewer", "reviewer-team", "attachment"} {
+			if cmd.Flags().Changed(name) {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --agit; AGit pushes carry only a title and body", name))
+			}
+		}
+	} else if f.topic != "" {
+		return clierr.Wrap(clierr.Usage, errors.New("--topic requires --agit"))
+	}
+	if id, err := strconv.ParseInt(f.milestone, 10, 64); err == nil && id < 0 {
+		return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
+	}
+	if err := requireNames("label", "", f.labelNames); err != nil {
+		return err
+	}
+	if err := requireNames("assignee", "", f.options.Assignees); err != nil {
+		return err
+	}
+	trimNames(f.reviewers, f.reviewerTeams)
+	reviews := services.ReviewRequestChanges{Add: services.ReviewRequestInput{Users: f.reviewers, Teams: f.reviewerTeams}}
+	requestReviews := len(f.reviewers)+len(f.reviewerTeams) > 0
+	if requestReviews {
+		if err := reviews.Validate(); err != nil {
+			return clierr.Wrap(clierr.Usage, err)
+		}
+	}
+	files, err := openRegularFiles(f.attachments)
+	defer closeFiles(files)
+	if err != nil {
+		return err
+	}
+	if cmd.Flags().Changed("deadline") {
+		if f.options.Deadline, err = parseDeadline(f.deadline); err != nil {
+			return err
+		}
+	}
+	s, err := a.settings()
+	if err != nil {
+		return err
+	}
+	if !localFlagsChanged(cmd) && a.policy(s).CanPrompt(a.deps.Streams) && a.deps.PullForm != nil {
+		return a.createPullInteractively(cmd, s)
+	}
+	t, err := a.resolve(cmd.Context(), true)
+	if err != nil {
+		return err
+	}
+	f.options.Labels, err = (services.Labels{Client: t.client, Repository: t.Repo}).ResolveIssueNames(cmd.Context(), f.labelNames)
+	if err != nil {
+		return err
+	}
+	if f.milestone != "" && f.milestone != "0" {
+		if f.options.Milestone, err = milestoneID(cmd, t, f.milestone); err != nil {
+			return err
+		}
+	}
+	t.expandMeAll(f.options.Assignees)
+	t.expandMeAll(f.reviewers)
+	if f.options.Head == "" {
+		owner, branch := a.defaultPullHead(cmd.Context())
+		if branch == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("supply --head outside a branch checkout"))
+		}
+		f.options.Head = branch
+		if !f.agit && owner != "" && !strings.EqualFold(owner, t.owner()) {
+			f.options.Head = owner + ":" + branch
+		}
+	}
+	if f.options.Base == "" {
+		repo, err := (services.Repositories{Client: t.client}).View(cmd.Context(), t.Repo)
+		if err != nil {
+			return err
+		}
+		if f.options.Base = repo.DefaultBranch; f.options.Base == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("supply --base; repository has no default branch"))
+		}
+	}
+	if f.web {
+		return a.openBrowser(cmd, repositoryURL(t)+"/compare/"+compareRef(f.options.Base)+"..."+compareRef(f.options.Head))
+	}
+	if !f.agit {
+		if err := refuseSameBranch(f.options.Head, f.options.Base); err != nil {
+			return err
+		}
+	}
+	var commitBody string
+	if f.options.Title == "" {
+		if subject, body, ok := a.singleCommitMessage(cmd.Context(), f.options.Base, f.options.Head); ok {
+			f.options.Title, commitBody = subject, body
+		} else if f.options.Title = terminal.DefaultPullTitle(f.options.Head); f.options.Title == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("supply --title"))
+		}
+	}
+	service := services.Pulls{Client: t.client, Repository: t.Repo}
+	if f.useEditor {
+		var seed string
+		if seed, err = service.Template(cmd.Context(), f.options.Base); err != nil {
+			return err
+		}
+		if seed == "" {
+			seed = commitBody
+		}
+		editorDraft, err = a.editDraft(cmd, seed)
+		f.options.Body = editorDraft.Body
+	} else if !cmd.Flags().Changed("body") && !cmd.Flags().Changed("body-file") {
+		f.options.Body = commitBody
+	} else {
+		f.options.Body, err = a.readBody(cmd, f.options.Body, f.bodyFile)
+	}
+	if err != nil {
+		return err
+	}
+	if f.draft {
+		f.options.Title = services.AddDraftPrefix(f.options.Title)
+	}
+	if f.agit {
+		return a.pushAgit(cmd, t, s, git.AgitOptions{Remote: a.options.remote, Head: f.options.Head, Base: f.options.Base, Topic: f.topic, Title: f.options.Title, Body: f.options.Body})
+	}
+	f.options.AllowMaintainerEdit = &f.allowMaintainerEdits
+	reviewService := services.Reviews{Client: t.client, Repository: t.Repo}
+	if len(f.reviewerTeams) > 0 {
+		if err := reviewService.CheckRequestTeams(cmd.Context(), f.reviewerTeams); err != nil {
+			return err
+		}
+	}
+	if err := a.ensureHeadPublished(cmd, t, s, f.options.Head); err != nil {
+		return err
+	}
+	item, err := service.Create(cmd.Context(), f.options)
+	if err != nil {
+		return err
+	}
+	var failures []error
+	if requestReviews {
+		if updated, err := reviewService.ChangeRequests(cmd.Context(), item.Number, reviews); err != nil {
+			failures = append(failures, fmt.Errorf("request reviews: %w", err))
+		} else {
+			item = updated
+		}
+	}
+	for _, file := range files {
+		if _, err := (services.Issues{Client: t.client, Repository: t.Repo}).UploadAttachment(cmd.Context(), item.Number, filepath.Base(file.Name()), file); err != nil {
+			failures = append(failures, fmt.Errorf("upload %s: %w", file.Name(), err))
+		}
+	}
+	if err := a.reportCreatedPull(cmd, t, item); err != nil {
+		return err
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("pull request #%d was created, but follow-up steps failed: %w", item.Number, errors.Join(failures...))
+	}
+	return nil
 }
 
 // pushAgit creates a pull request by pushing the head branch to refs/for/<base>/<topic>.

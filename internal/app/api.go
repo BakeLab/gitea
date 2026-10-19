@@ -142,151 +142,159 @@ $ gt api user/repos --paginate --jq '.[].full_name'`
 // apiMethods are the HTTP methods the Gitea API serves.
 var apiMethods = []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions}
 
+type apiFlags struct {
+	method, input, output              string
+	raw, typed, headerValues           []string
+	include, verbose, paginate, silent bool
+	maxPages                           int
+}
+
 func (a *application) apiCommand() *cobra.Command {
-	var method, input, output string
-	var raw, typed, headerValues []string
-	var include, verbose, paginate, silent bool
-	var maxPages int
+	var f apiFlags
 	cmd := &cobra.Command{Use: "api <endpoint>", Short: "Make an authenticated Gitea API request", Long: apiLong, Example: apiExamples, Annotations: map[string]string{"gt.text": "api returns raw responses", "gt.rawjson": "true"}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		usage := func(err error) error { return clierr.Wrap(clierr.Usage, err) }
-		if silent && a.options.jq != "" {
-			return usage(errors.New("--silent and --jq are mutually exclusive"))
+		return a.runAPI(cmd, args, &f)
+	}}
+	cmd.Flags().StringVarP(&f.method, "method", "X", "GET", "HTTP `method`")
+	cmd.Flags().StringVar(&f.input, "input", "", "Read the request body from a `file`, or stdin with -")
+	cmd.Flags().StringArrayVarP(&f.headerValues, "header", "H", nil, "Add an HTTP request header in `name:value` format")
+	cmd.Flags().StringArrayVarP(&f.raw, "raw-field", "f", nil, "Add a string parameter in `key=value` format")
+	cmd.Flags().StringArrayVarP(&f.typed, "field", "F", nil, "Add a typed parameter in `key=value` format; @FILE or @- reads a file or stdin")
+	cmd.Flags().StringVar(&f.output, "output-file", "", "Write the complete response to a new `file`")
+	cmd.Flags().BoolVarP(&f.include, "include", "i", false, "Print the response status and headers to stderr")
+	cmd.Flags().BoolVar(&f.verbose, "verbose", false, "Print the request and the response status and headers to stderr")
+	cmd.Flags().BoolVar(&f.silent, "silent", false, "Do not print the response body")
+	cmd.Flags().BoolVar(&f.paginate, "paginate", false, "Follow next-page links and print every page")
+	cmd.Flags().IntVar(&f.maxPages, "max-pages", 1000, "Stop --paginate after this many pages")
+	return cmd
+}
+
+func (a *application) runAPI(cmd *cobra.Command, args []string, f *apiFlags) error {
+	usage := func(err error) error { return clierr.Wrap(clierr.Usage, err) }
+	if f.silent && a.options.jq != "" {
+		return usage(errors.New("--silent and --jq are mutually exclusive"))
+	}
+	headers, err := apiHeaders(f.headerValues)
+	if err != nil {
+		return usage(err)
+	}
+	fields, err := apiFields(f.raw, f.typed)
+	if err != nil {
+		return usage(err)
+	}
+	if cmd.Flags().Changed("input") && f.input == "" {
+		return usage(errors.New("--input requires a file path or -"))
+	}
+	if f.input != "" && len(fields) > 0 {
+		return usage(errors.New("--input conflicts with API fields"))
+	}
+	if !cmd.Flags().Changed("method") && (f.input != "" || len(fields) > 0) {
+		f.method = http.MethodPost
+	}
+	f.method = strings.ToUpper(f.method)
+	if !slices.Contains(apiMethods, f.method) {
+		return usage(fmt.Errorf("invalid HTTP method %q; use one of %s", f.method, strings.Join(apiMethods, ", ")))
+	}
+	if f.paginate && (f.method != http.MethodGet || f.input != "") {
+		return usage(errors.New("--paginate requires a body-free GET request"))
+	}
+	if f.maxPages < 1 {
+		return usage(errors.New("--max-pages must be positive"))
+	}
+	if f.output != "" {
+		if err := validateDownloadDestination(f.output); err != nil {
+			return err
 		}
-		headers, err := apiHeaders(headerValues)
+	}
+	if err := apiFieldFiles(fields, f.typed, a.deps.Streams.In); err != nil {
+		return usage(err)
+	}
+	var body io.Reader
+	if f.input == "-" {
+		body = a.deps.Streams.In
+	} else if f.input != "" {
+		file, err := os.Open(f.input)
 		if err != nil {
-			return usage(err)
+			return err
 		}
-		fields, err := apiFields(raw, typed)
-		if err != nil {
-			return usage(err)
+		defer file.Close()
+		body = file
+	}
+	endpoint := args[0]
+	if strings.ContainsAny(strings.NewReplacer("{owner}", "owner", "{repo}", "repo", "{branch}", "branch").Replace(endpoint), "{}") {
+		return usage(errors.New("unsupported API placeholder; use {owner}, {repo}, and {branch}"))
+	}
+	if strings.Contains(endpoint, "{branch}") {
+		branch, err := a.currentBranch(cmd.Context())
+		if err != nil || branch == "" {
+			return usage(errors.New("{branch} requires a checked-out Git branch"))
 		}
-		if cmd.Flags().Changed("input") && input == "" {
-			return usage(errors.New("--input requires a file path or -"))
-		}
-		if input != "" && len(fields) > 0 {
-			return usage(errors.New("--input conflicts with API fields"))
-		}
-		if !cmd.Flags().Changed("method") && (input != "" || len(fields) > 0) {
-			method = http.MethodPost
-		}
-		method = strings.ToUpper(method)
-		if !slices.Contains(apiMethods, method) {
-			return usage(fmt.Errorf("invalid HTTP method %q; use one of %s", method, strings.Join(apiMethods, ", ")))
-		}
-		if paginate && (method != http.MethodGet || input != "") {
-			return usage(errors.New("--paginate requires a body-free GET request"))
-		}
-		if maxPages < 1 {
-			return usage(errors.New("--max-pages must be positive"))
-		}
-		if output != "" {
-			if err := validateDownloadDestination(output); err != nil {
-				return err
+		endpoint = strings.ReplaceAll(endpoint, "{branch}", url.PathEscape(branch))
+	}
+	requireRepo := strings.Contains(endpoint, "{owner}") || strings.Contains(endpoint, "{repo}")
+	target, err := a.resolve(cmd.Context(), requireRepo)
+	if err != nil {
+		return err
+	}
+	if requireRepo {
+		owner, name := target.ownerName()
+		endpoint = strings.NewReplacer("{owner}", url.PathEscape(owner), "{repo}", url.PathEscape(name)).Replace(endpoint)
+	}
+	if len(fields) > 0 {
+		if f.method == http.MethodGet || f.method == http.MethodHead {
+			parsed, err := url.Parse(endpoint)
+			if err != nil {
+				return usage(errors.New("invalid API endpoint"))
 			}
-		}
-		if err := apiFieldFiles(fields, typed, a.deps.Streams.In); err != nil {
-			return usage(err)
-		}
-		var body io.Reader
-		if input == "-" {
-			body = a.deps.Streams.In
-		} else if input != "" {
-			file, err := os.Open(input)
+			query := parsed.Query()
+			for key, value := range fields {
+				if text, ok := value.(string); ok {
+					query.Set(key, text)
+				} else {
+					data, err := json.Marshal(value)
+					if err != nil {
+						return err
+					}
+					query.Set(key, string(data))
+				}
+			}
+			parsed.RawQuery = query.Encode()
+			endpoint = parsed.String()
+		} else {
+			data, err := json.Marshal(fields)
 			if err != nil {
 				return err
 			}
-			defer file.Close()
-			body = file
+			body = bytes.NewReader(data)
 		}
-		endpoint := args[0]
-		if strings.ContainsAny(strings.NewReplacer("{owner}", "owner", "{repo}", "repo", "{branch}", "branch").Replace(endpoint), "{}") {
-			return usage(errors.New("unsupported API placeholder; use {owner}, {repo}, and {branch}"))
+	}
+	return writeOutput(cmd, f.output, func(destination io.Writer) error {
+		response := apiResponse{paginate: f.paginate, query: a.options.jq}
+		if f.output == "" || f.output == "-" {
+			response.tty = a.deps.Streams.OutTTY
+			response.color = response.tty && a.colorEnabled()
 		}
-		if strings.Contains(endpoint, "{branch}") {
-			branch, err := a.currentBranch(cmd.Context())
-			if err != nil || branch == "" {
-				return usage(errors.New("{branch} requires a checked-out Git branch"))
-			}
-			endpoint = strings.ReplaceAll(endpoint, "{branch}", url.PathEscape(branch))
-		}
-		requireRepo := strings.Contains(endpoint, "{owner}") || strings.Contains(endpoint, "{repo}")
-		target, err := a.resolve(cmd.Context(), requireRepo)
-		if err != nil {
-			return err
-		}
-		if requireRepo {
-			owner, name := target.ownerName()
-			endpoint = strings.NewReplacer("{owner}", url.PathEscape(owner), "{repo}", url.PathEscape(name)).Replace(endpoint)
-		}
-		if len(fields) > 0 {
-			if method == http.MethodGet || method == http.MethodHead {
-				parsed, err := url.Parse(endpoint)
-				if err != nil {
-					return usage(errors.New("invalid API endpoint"))
-				}
-				query := parsed.Query()
-				for key, value := range fields {
-					if text, ok := value.(string); ok {
-						query.Set(key, text)
-					} else {
-						data, err := json.Marshal(value)
-						if err != nil {
-							return err
-						}
-						query.Set(key, string(data))
-					}
-				}
-				parsed.RawQuery = query.Encode()
-				endpoint = parsed.String()
-			} else {
-				data, err := json.Marshal(fields)
-				if err != nil {
+		err = (services.API{Client: target.client}).Visit(cmd.Context(), services.APIOptions{Endpoint: endpoint, Method: f.method, Body: body, Headers: headers, Paginate: f.paginate, MaxPages: f.maxPages}, func(r *http.Response) error {
+			if f.verbose {
+				if err := writeRequestHead(cmd.ErrOrStderr(), r.Request); err != nil {
 					return err
 				}
-				body = bytes.NewReader(data)
 			}
-		}
-		return writeOutput(cmd, output, func(destination io.Writer) error {
-			response := apiResponse{paginate: paginate, query: a.options.jq}
-			if output == "" || output == "-" {
-				response.tty = a.deps.Streams.OutTTY
-				response.color = response.tty && a.colorEnabled()
-			}
-			err = (services.API{Client: target.client}).Visit(cmd.Context(), services.APIOptions{Endpoint: endpoint, Method: method, Body: body, Headers: headers, Paginate: paginate, MaxPages: maxPages}, func(r *http.Response) error {
-				if verbose {
-					if err := writeRequestHead(cmd.ErrOrStderr(), r.Request); err != nil {
-						return err
-					}
-				}
-				if include || verbose {
-					if err := writeResponseHead(cmd.ErrOrStderr(), r, verbose); err != nil {
-						return err
-					}
-				}
-				if silent {
-					_, err := io.Copy(io.Discard, r.Body)
+			if f.include || f.verbose {
+				if err := writeResponseHead(cmd.ErrOrStderr(), r, f.verbose); err != nil {
 					return err
 				}
-				return response.write(destination, r)
-			})
-			if errors.Is(err, services.ErrMaxPages) {
-				return errors.New("API pagination exceeded --max-pages")
 			}
-			return err
+			if f.silent {
+				_, err := io.Copy(io.Discard, r.Body)
+				return err
+			}
+			return response.write(destination, r)
 		})
-	}}
-	cmd.Flags().StringVarP(&method, "method", "X", "GET", "HTTP `method`")
-	cmd.Flags().StringVar(&input, "input", "", "Read the request body from a `file`, or stdin with -")
-	cmd.Flags().StringArrayVarP(&headerValues, "header", "H", nil, "Add an HTTP request header in `name:value` format")
-	cmd.Flags().StringArrayVarP(&raw, "raw-field", "f", nil, "Add a string parameter in `key=value` format")
-	cmd.Flags().StringArrayVarP(&typed, "field", "F", nil, "Add a typed parameter in `key=value` format; @FILE or @- reads a file or stdin")
-	cmd.Flags().StringVar(&output, "output-file", "", "Write the complete response to a new `file`")
-	cmd.Flags().BoolVarP(&include, "include", "i", false, "Print the response status and headers to stderr")
-	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print the request and the response status and headers to stderr")
-	cmd.Flags().BoolVar(&silent, "silent", false, "Do not print the response body")
-	cmd.Flags().BoolVar(&paginate, "paginate", false, "Follow next-page links and print every page")
-	cmd.Flags().IntVar(&maxPages, "max-pages", 1000, "Stop --paginate after this many pages")
-	return cmd
+		if errors.Is(err, services.ErrMaxPages) {
+			return errors.New("API pagination exceeded --max-pages")
+		}
+		return err
+	})
 }
 
 // apiResponse writes response bodies for gt api: filtered by --jq, indented and colored JSON on a
