@@ -65,9 +65,7 @@ repository with --repo. Words of the query match titles and bodies.`, nouns), Ex
 			}
 		} else if len(labels)+len(milestones) > 0 {
 			opts.Labels, opts.Milestones = strings.Join(labels, ","), strings.Join(milestones, ",")
-			if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "warning: instance-wide search ignores --label and --milestone values that match nothing; pass --repo to check them"); err != nil {
-				return err
-			}
+			a.warn(cmd, "Instance-wide search ignores --label and --milestone values that match nothing; pass --repo to check them")
 		}
 		opts.Query = strings.Join(args, " ")
 		page, err := (services.Issues{Client: target.client, Repository: target.Repo}).SearchPage(cmd.Context(), opts)

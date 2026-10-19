@@ -435,6 +435,10 @@ func TestMilestoneEditFormStartsFromTheMilestone(t *testing.T) {
 	require.Equal(t, "2026-12-31", current.Deadline.Format(time.DateOnly))
 	require.Equal(t, "v1.0.0", edited["title"])
 	require.Equal(t, "First", edited["description"])
+	// --by-name only says how to read the argument, so the form still opens.
+	heading = ""
+	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "edit", "v1.0", "--by-name", "-R", "alice/project"}))
+	require.NotEmpty(t, heading)
 }
 
 type milestoneFormEditor func(string, terminal.MilestoneFormValues) terminal.MilestoneFormValues

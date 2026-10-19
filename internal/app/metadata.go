@@ -292,8 +292,8 @@ $ gt milestone edit 3 --editor`, Annotations: map[string]string{"gt.arguments": 
 		if err := validateTextSources(cmd, "description", "description-file"); err != nil {
 			return err
 		}
-		form := !localFlagsChanged(cmd) && a.canPrompt() && a.deps.MilestoneForm != nil
-		if !form && !localFlagsChanged(cmd) {
+		form := !localFlagsChanged(cmd, "by-name") && a.canPrompt() && a.deps.MilestoneForm != nil
+		if !form && !localFlagsChanged(cmd, "by-name") {
 			return errNothingToEdit
 		}
 		var opts services.MilestoneOptions
