@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -84,8 +85,12 @@ type Host struct {
 	OAuthClientID string `yaml:"oauth_client_id,omitempty" json:"oauth_client_id,omitempty"`
 	// Headers are sent with every request to the instance, such as those of an access proxy in
 	// front of it. A value of $NAME is read from the environment variable NAME when sent.
-	Headers map[string]string  `yaml:"headers,omitempty" json:"headers,omitempty"`
-	Users   map[string]Account `yaml:"users" json:"users"`
+	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	// ClientCert and ClientKey name the PEM files of a TLS client certificate for instances that
+	// require one; without ClientKey, the key is read from ClientCert.
+	ClientCert string             `yaml:"client_cert,omitempty" json:"client_cert,omitempty"`
+	ClientKey  string             `yaml:"client_key,omitempty" json:"client_key,omitempty"`
+	Users      map[string]Account `yaml:"users" json:"users"`
 }
 
 // Hosts stores instances keyed by their normalized installation URLs.
@@ -219,6 +224,9 @@ func (s *Store) Load() (Snapshot, error) {
 		if err := decode(hostsPath, hostData, &snapshot.Hosts); err != nil {
 			return snapshot, err
 		}
+		if err := canonicalHeaders(snapshot.Hosts.Hosts); err != nil {
+			return snapshot, err
+		}
 	}
 	if snapshot.Hosts.Hosts == nil {
 		snapshot.Hosts.Hosts = map[string]Host{}
@@ -271,6 +279,9 @@ func (s Snapshot) Validate() error {
 		}
 		if host.GitProtocol != "" && host.GitProtocol != "https" && host.GitProtocol != "ssh" {
 			return fmt.Errorf("invalid git_protocol for %s", instance)
+		}
+		if strings.ContainsAny(host.ClientCert+host.ClientKey, "\x00\r\n") {
+			return fmt.Errorf("client certificate paths of %s cannot contain NUL or line breaks", instance)
 		}
 		for name, value := range host.Headers {
 			if err := ValidateHeader(name, value); err != nil {
@@ -428,6 +439,50 @@ func ParseTimeout(value string) (time.Duration, error) {
 		return 0, errors.New("http_timeout must be a duration such as 30s or 5m, or 0 for none")
 	}
 	return timeout, nil
+}
+
+// WithHeaders returns h with headers added, replacing those of the same name; an empty value
+// removes the header. Names are in canonical form, as ParseHeader and Load leave them.
+func (h Host) WithHeaders(headers map[string]string) Host {
+	if len(headers) == 0 {
+		return h
+	}
+	h.Headers = maps.Clone(h.Headers)
+	if h.Headers == nil {
+		h.Headers = map[string]string{}
+	}
+	for name, value := range headers {
+		if value == "" {
+			delete(h.Headers, name)
+		} else {
+			h.Headers[name] = value
+		}
+	}
+	if len(h.Headers) == 0 {
+		h.Headers = nil
+	}
+	return h
+}
+
+// canonicalHeaders writes the header names of every host in canonical form, so that a hand-edited
+// hosts.yml cannot hold one header twice.
+func canonicalHeaders(hosts map[string]Host) error {
+	for instance, host := range hosts {
+		if len(host.Headers) == 0 {
+			continue
+		}
+		canonical := map[string]string{}
+		for name, value := range host.Headers {
+			key := http.CanonicalHeaderKey(name)
+			if _, duplicate := canonical[key]; duplicate {
+				return fmt.Errorf("hosts.yml sets the header %s of %s twice", key, instance)
+			}
+			canonical[key] = value
+		}
+		host.Headers = canonical
+		hosts[instance] = host
+	}
+	return nil
 }
 
 // headerName is the token form of an HTTP header name.

@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -167,6 +168,57 @@ func (c *Client) WithHeaders(headers http.Header) *Client {
 	httpClient.Transport = headerTransport{base: cmp.Or[http.RoundTripper](c.HTTP.Transport, http.DefaultTransport), host: base.Host, headers: headers}
 	clone.HTTP = &httpClient
 	return &clone
+}
+
+// WithClientCertificate returns a client that presents the PEM certificate and key in certFile and
+// keyFile, or in certFile alone, when the instance asks for one in the TLS handshake; other hosts
+// never see it. The files are read at the first handshake, so an unreadable pair fails the request
+// that needs it.
+func (c *Client) WithClientCertificate(certFile, keyFile string) *Client {
+	agent, ok := c.HTTP.Transport.(userAgentTransport)
+	tr, isHTTP := agent.base.(*http.Transport)
+	if !ok || !isHTTP || certFile == "" {
+		return c
+	}
+	load := sync.OnceValues(func() (*tls.Certificate, error) { return LoadClientCertificate(certFile, keyFile) })
+	base, err := url.Parse(c.BaseURL)
+	if err != nil {
+		return c
+	}
+	instance := tr.Clone()
+	instance.TLSClientConfig = instance.TLSClientConfig.Clone()
+	instance.TLSClientConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return load() }
+	clone := *c
+	httpClient := *c.HTTP
+	httpClient.Transport = userAgentTransport{hostTransport{host: base.Host, instance: instance, other: tr}}
+	clone.HTTP = &httpClient
+	return &clone
+}
+
+// LoadClientCertificate loads the PEM certificate in certFile with the key in keyFile, or in
+// certFile when keyFile is empty.
+func LoadClientCertificate(certFile, keyFile string) (*tls.Certificate, error) {
+	keyFile = cmp.Or(keyFile, certFile)
+	certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("cannot load the client certificate %s with key %s: %w", certFile, keyFile, err)
+	}
+	return &certificate, nil
+}
+
+// hostTransport sends the requests to the instance's host through instance and all others, such as
+// to the storage a download redirects to, through other, so that only the instance sees what
+// instance presents, such as a client certificate.
+type hostTransport struct {
+	host            string
+	instance, other http.RoundTripper
+}
+
+func (t hostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host == t.host {
+		return t.instance.RoundTrip(req)
+	}
+	return t.other.RoundTrip(req)
 }
 
 // WithTimeout returns an independent HTTP policy while sharing the connection transport.

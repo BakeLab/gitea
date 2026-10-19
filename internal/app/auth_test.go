@@ -896,6 +896,7 @@ func TestLoginHeadersReachEveryRequestToTheInstance(t *testing.T) {
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "headers", "--host", server.URL, "--json"}))
 	require.JSONEq(t, `{"headers":{"Cf-Access-Client-Id":"client"}}`, out.String())
+	requireUsageBeforeRequests(t, "--client-key requires --client-cert", "auth", "login", "--host", server.URL, "--with-token", "--client-key", "key.pem")
 	for _, header := range []string{"Authorization: token other", "Bad Name: x", "missing colon"} {
 		requireUsageBeforeRequests(t, "", "auth", "login", "--host", server.URL, "--with-token", "--header", header)
 	}

@@ -244,16 +244,14 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 
 // instanceClient builds a client for instance with the TLS setting and headers of its host settings.
 func (a *application) instanceClient(instance, token string, host settings.Host) *transport.Client {
-	return a.deps.Client(instance, token, host.Insecure).WithHeaders(a.instanceHeaders(host))
+	return a.deps.Client(instance, token, host.Insecure).WithClientCertificate(host.ClientCert, host.ClientKey).WithHeaders(a.instanceHeaders(host))
 }
 
 // instanceHeaders returns the configured headers of host, reading a $NAME value from the
-// environment variable NAME; a header whose value is empty is not sent. Of names that differ only
-// in case, as a hand-edited hosts.yml may hold, the last in sorted order wins.
+// environment variable NAME; a header whose value is empty is not sent.
 func (a *application) instanceHeaders(host settings.Host) http.Header {
 	headers := http.Header{}
-	for _, name := range slices.Sorted(maps.Keys(host.Headers)) {
-		value := host.Headers[name]
+	for name, value := range host.Headers {
 		if variable, ok := strings.CutPrefix(value, "$"); ok {
 			value = a.deps.Getenv(variable)
 		}

@@ -150,7 +150,7 @@ func TestConfigNamesValidSettings(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"config", "get", "nope"}, `unknown setting "nope"; settings: browser, color, default_host, editor, git_protocol, headers, http_timeout, hyperlinks, insecure, markdown,`},
+		{[]string{"config", "get", "nope"}, `unknown setting "nope"; settings: browser, client_cert, client_key, color, default_host, editor, git_protocol, headers, http_timeout, hyperlinks, insecure, markdown,`},
 		{[]string{"config", "get", "user"}, "user is an instance setting; select a configured instance with --host URL"},
 		{[]string{"config", "get", "ssh_key"}, "ssh_key is an account setting; select the account with --host URL --user NAME"},
 		{[]string{"config", "set", "nope", "1"}, `unknown setting "nope"; preferences: browser, color, default_host,`},

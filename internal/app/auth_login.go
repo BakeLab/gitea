@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,7 +34,7 @@ var oauthScopes = func() []string {
 
 func (a *application) loginCommand() *cobra.Command {
 	var withToken, oauth, insecure bool
-	var backend, clientID, sshKey, sshAgentPrincipal, sshAgentKey string
+	var backend, clientID, sshKey, sshAgentPrincipal, sshAgentKey, clientCert, clientKey string
 	var scopes, headerArgs []string
 	login := &cobra.Command{
 		Use: "login", Short: "Log in to a Gitea instance", Args: argsExact(0),
@@ -50,6 +49,17 @@ $ gt auth login --host gitea.com --with-token < token.txt
 $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user
 $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client-Id: $CF_ID' --header 'CF-Access-Client-Secret: $CF_SECRET'`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if clientKey != "" && clientCert == "" {
+				return clierr.Wrap(clierr.Usage, errors.New("--client-key requires --client-cert"))
+			}
+			for _, path := range []*string{&clientCert, &clientKey} {
+				if *path != "" {
+					var err error
+					if *path, err = settingPath(*path); err != nil {
+						return err
+					}
+				}
+			}
 			headers := map[string]string{}
 			for _, raw := range headerArgs {
 				name, value, err := settings.ParseHeader(raw)
@@ -120,14 +130,8 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 			}
 			instance = answers.Host
 			host := snapshot.Hosts.Hosts[instance]
-			insecure = insecure || host.Insecure
-			loginHost := settings.Host{Insecure: insecure, Headers: maps.Clone(host.Headers)}
-			if len(headers) > 0 {
-				if loginHost.Headers == nil {
-					loginHost.Headers = map[string]string{}
-				}
-				maps.Copy(loginHost.Headers, headers)
-			}
+			hostOptions := auth.HostOptions{Insecure: insecure, Headers: headers, ClientCert: clientCert, ClientKey: clientKey, Replace: true}
+			loginHost := hostOptions.Apply(host)
 			replacing := false
 			if selectedUser, _ := a.selectedUser(); selectedUser != "" {
 				if replacing, err = a.confirmReplace(cmd, instance, selectedUser); err != nil {
@@ -148,7 +152,7 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 						return err
 					}
 				}
-				if err := manager.RegisterHTTPSign(instance, user, account, auth.HostOptions{Insecure: insecure, Headers: headers, Replace: true}); err != nil {
+				if err := manager.RegisterHTTPSign(instance, user, account, hostOptions); err != nil {
 					return err
 				}
 				a.done(cmd, "Logged in to %s as %s (%s)", instance, user, credentialLabel(account))
@@ -210,7 +214,8 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 				}
 			}
 			account := settings.Account{AuthMethod: method, CredentialStore: answers.Store}
-			if err := manager.Register(instance, user, answers.Store, method, auth.HostOptions{OAuthClientID: clientID, Insecure: insecure, Headers: headers, Replace: true}, credential); err != nil {
+			hostOptions.OAuthClientID = clientID
+			if err := manager.Register(instance, user, answers.Store, method, hostOptions, credential); err != nil {
 				return err
 			}
 			a.done(cmd, "Logged in to %s as %s (%s)", instance, user, credentialLabel(account))
@@ -226,6 +231,8 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 	login.Flags().StringVar(&clientID, "client-id", "", "OAuth application `ID` registered on the instance (default: the instance's stored ID, then gt's)")
 	login.Flags().StringSliceVar(&scopes, "scopes", nil, "OAuth token `scopes`, such as read:repository (default: write access to everything but administration)")
 	login.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification for this instance")
+	login.Flags().StringVar(&clientCert, "client-cert", "", "Present the PEM TLS client certificate in `file` to an instance that requires one; convert a PKCS#12 file with: openssl pkcs12 -in cert.p12 -clcerts -nokeys -out cert.pem")
+	login.Flags().StringVar(&clientKey, "client-key", "", "Unencrypted PEM private key `file` of --client-cert (default: the key in the --client-cert file); convert a PKCS#12 file with: openssl pkcs12 -in cert.p12 -nocerts -nodes -out key.pem")
 	login.Flags().StringArrayVar(&headerArgs, "header", nil, "Send the `\"Name: value\"` header with every request to this instance, such as an access proxy needs; a value of $NAME is read from that environment variable (repeatable)")
 	login.Flags().BoolVar(&withToken, "with-token", false, "Read an access token from stdin, or ask for it on a terminal")
 	login.Flags().StringVar(&sshKey, "ssh-key", "", "Sign requests with the SSH private key in `file`")
@@ -271,7 +278,7 @@ func (a *application) signedLogin(cmd *cobra.Command, snapshot settings.Snapshot
 	case agentKey != "":
 		account = settings.Account{AuthMethod: settings.AuthHTTPSign, SSHAgent: true, SSHKeyFingerprint: agentKey}
 	default:
-		path, err := sshKeyPath(account.SSHKey)
+		path, err := settingPath(account.SSHKey)
 		if err != nil {
 			return account, "", err
 		}
@@ -300,8 +307,9 @@ func (a *application) signedLogin(cmd *cobra.Command, snapshot settings.Snapshot
 	return account, user, nil
 }
 
-// sshKeyPath stores an SSH key path absolute, so that it names the same key from every directory.
-func sshKeyPath(path string) (string, error) {
+// settingPath stores a file path, such as an SSH key's, absolute so that it names the same file
+// from every directory.
+func settingPath(path string) (string, error) {
 	return filepath.Abs(terminal.ExpandHome(path))
 }
 

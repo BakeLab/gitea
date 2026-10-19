@@ -6,10 +6,21 @@ package transport
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -231,4 +242,74 @@ func TestDebugStripsControlsFromTheStatusLine(t *testing.T) {
 	require.NotContains(t, log.String(), "\x1b")
 	require.NotContains(t, log.String(), "\x07")
 	require.Contains(t, log.String(), "-> 200 OK")
+}
+
+func TestClientCertificatesAreLoadedForInstancesThatRequireThem(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "gt"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	require.NoError(t, err)
+	dir := t.TempDir()
+	certFile, keyFile := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600))
+	combined := filepath.Join(dir, "both.pem")
+	require.NoError(t, os.WriteFile(combined, append(must(os.ReadFile(certFile)), must(os.ReadFile(keyFile))...), 0o600))
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(r.TLS.PeerCertificates[0].Subject.CommonName))
+	}))
+	pool := x509.NewCertPool()
+	pool.AddCert(must(x509.ParseCertificate(der)))
+	server.TLS = &tls.Config{ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool}
+	server.StartTLS()
+	defer server.Close()
+
+	get := func(client *Client) (string, error) {
+		response, err := client.Send(context.Background(), http.MethodGet, "version", nil, nil)
+		if err != nil {
+			return "", err
+		}
+		defer response.Body.Close()
+		data, err := io.ReadAll(response.Body)
+		return string(data), err
+	}
+	_, err = get(New(server.URL, "", true))
+	require.Error(t, err)
+	for _, client := range []*Client{New(server.URL, "", true).WithClientCertificate(certFile, keyFile), New(server.URL, "", true).WithClientCertificate(combined, "")} {
+		name, err := get(client)
+		require.NoError(t, err)
+		require.Equal(t, "gt", name)
+	}
+	_, err = get(New(server.URL, "", true).WithClientCertificate(filepath.Join(dir, "missing.pem"), ""))
+	require.ErrorContains(t, err, "cannot load the client certificate")
+
+	// A host that a download redirects to never sees the certificate.
+	presented := true
+	storage := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		presented = len(r.TLS.PeerCertificates) > 0
+	}))
+	storage.TLS = &tls.Config{ClientAuth: tls.RequestClientCert}
+	storage.StartTLS()
+	defer storage.Close()
+	redirecting := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, storage.URL+"/signed", http.StatusFound)
+	}))
+	redirecting.TLS = &tls.Config{ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool}
+	redirecting.StartTLS()
+	defer redirecting.Close()
+	response, err := New(redirecting.URL, "", true).WithClientCertificate(certFile, keyFile).DownloadSigned(context.Background(), redirecting.URL+"/attachments/x")
+	require.NoError(t, err)
+	_ = response.Body.Close()
+	require.False(t, presented)
+}
+
+func must[T any](value T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return value
 }

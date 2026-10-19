@@ -151,3 +151,17 @@ func TestFilesOfAnotherVersionAreReportedByVersion(t *testing.T) {
 		require.EqualError(t, err, "unsupported configuration version in "+filepath.Join(dir, name))
 	}
 }
+
+func TestHeaderNamesAreReadInCanonicalForm(t *testing.T) {
+	dir := t.TempDir()
+	write := func(headers string) error {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "hosts.yml"), []byte("version: \"1\"\nhosts:\n  https://example.org:\n    users: {}\n    headers:\n"+headers), 0o600))
+		_, err := New(dir).Load()
+		return err
+	}
+	require.NoError(t, write("      x-api-key: a\n"))
+	snapshot, err := New(dir).Load()
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"X-Api-Key": "a"}, snapshot.Hosts.Hosts["https://example.org"].Headers)
+	require.EqualError(t, write("      x-api-key: a\n      X-Api-Key: b\n"), "hosts.yml sets the header X-Api-Key of https://example.org twice")
+}

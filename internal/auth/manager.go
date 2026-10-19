@@ -4,8 +4,8 @@
 package auth
 
 import (
+	"cmp"
 	"errors"
-	"maps"
 
 	"gitea.dev/cli/internal/settings"
 )
@@ -33,9 +33,22 @@ type HostOptions struct {
 	Insecure      bool
 	// Headers are added to the instance's headers, replacing those of the same name.
 	Headers map[string]string
+	// ClientCert and ClientKey replace the instance's TLS client certificate when set.
+	ClientCert, ClientKey string
 	// Replace lets a registration replace the metadata and stored credential of an account that is
 	// already configured, as when logging in again with a new token.
 	Replace bool
+}
+
+// Apply returns host with the settings of options: those it sets replace host's, and headers are
+// added to host's.
+func (options HostOptions) Apply(host settings.Host) settings.Host {
+	host.OAuthClientID = cmp.Or(options.OAuthClientID, host.OAuthClientID)
+	host.Insecure = host.Insecure || options.Insecure
+	if options.ClientCert != "" {
+		host.ClientCert, host.ClientKey = options.ClientCert, options.ClientKey
+	}
+	return host.WithHeaders(options.Headers)
 }
 
 // ErrAccountExists rejects a registration of a configured account without HostOptions.Replace.
@@ -96,18 +109,9 @@ func (m Manager) register(instance, user string, account settings.Account, optio
 			kept.AuthMethod, kept.CredentialStore = account.AuthMethod, account.CredentialStore
 			account = kept
 		}
+		host = options.Apply(host)
 		host.Users[user] = account
 		host.User = user
-		if options.OAuthClientID != "" {
-			host.OAuthClientID = options.OAuthClientID
-		}
-		host.Insecure = host.Insecure || options.Insecure
-		if len(options.Headers) > 0 {
-			if host.Headers == nil {
-				host.Headers = map[string]string{}
-			}
-			maps.Copy(host.Headers, options.Headers)
-		}
 		s.Hosts.Hosts[instance] = host
 		return rollback, nil
 	})

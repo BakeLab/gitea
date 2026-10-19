@@ -277,7 +277,7 @@ func (a *application) completeConfig(cmd *cobra.Command, args []string, toComple
 		return a.completeHosts(cmd, args, toComplete)
 	case args[0] == "remote":
 		return a.completeRemotes(cmd, args, toComplete)
-	case args[0] == "ssh_key":
+	case args[0] == "ssh_key" || args[0] == "client_cert" || args[0] == "client_key":
 		return completeFiles(cmd, args, toComplete)
 	}
 	return matching(configValues[args[0]], toComplete), cobra.ShellCompDirectiveNoFileComp
@@ -537,7 +537,7 @@ func inRepository(scope services.ActionScope) bool {
 }
 
 // pathFlags take local file paths, like every flag whose name ends in -file.
-var pathFlags = []string{"asset", "attachment", "file", "input", "output", "ssh-key"}
+var pathFlags = []string{"asset", "attachment", "client-cert", "client-key", "file", "input", "output", "ssh-key"}
 
 // completeDefaults completes paths only where a command takes them: path flags and flags marked
 // with MarkFlagFilename. Everything else without a completer completes nothing, by the root's

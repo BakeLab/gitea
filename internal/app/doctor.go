@@ -105,6 +105,9 @@ func (a *application) diagnose(ctx context.Context) doctorReport {
 		add(a.gitCheck(ctx, ""))
 		return report
 	}
+	if t.host.ClientCert != "" {
+		add(clientCertificateCheck(t.host))
+	}
 	resolveCtx, cancel := context.WithTimeout(ctx, doctorTimeout)
 	authenticated, accountErr := a.resolveTarget(resolveCtx, t.Repo != "", true)
 	cancel()
@@ -253,4 +256,12 @@ func doctorTable(checks []doctorCheck, d terminal.Display) string {
 		}
 	}
 	return terminal.Table([]terminal.Column{{TTYOnly: true}, {PipedOnly: true}, {}, {}, {PipedOnly: true}}, rows, d)
+}
+
+// clientCertificateCheck checks that the instance's TLS client certificate and key can be loaded.
+func clientCertificateCheck(host settings.Host) doctorCheck {
+	if _, err := transport.LoadClientCertificate(host.ClientCert, host.ClientKey); err != nil {
+		return doctorCheck{"Client certificate", checkFailed, err.Error(), "use an unencrypted PEM certificate and key: gt config set client_cert FILE --host URL"}
+	}
+	return doctorCheck{"Client certificate", checkPassed, host.ClientCert, ""}
 }
