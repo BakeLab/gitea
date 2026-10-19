@@ -266,6 +266,8 @@ func TestAPIFiltersAndFormatsJSONResponses(t *testing.T) {
 	}
 	requireUsageBeforeRequests(t, "--silent and --jq are mutually exclusive", "api", "version", "--silent", "--jq", ".")
 	requireUsageBeforeRequests(t, "api returns raw responses; --json is not supported", "api", "version", "--json")
+	requireUsageBeforeRequests(t, `invalid HTTP method "FOO"`, "api", "version", "-X", "foo")
+	requireUsageBeforeRequests(t, `invalid HTTP method ""`, "api", "version", "-X", "")
 }
 
 func TestAPIVerboseShowsRequestAndResponseWithoutCredentials(t *testing.T) {

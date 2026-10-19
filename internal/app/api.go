@@ -139,6 +139,9 @@ const apiExamples = `$ gt api user --jq .login
 $ gt api repos/{owner}/{repo}/issues -f title="Crash on start" -F labels='[3]'
 $ gt api user/repos --paginate --jq '.[].full_name'`
 
+// apiMethods are the HTTP methods the Gitea API serves.
+var apiMethods = []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions}
+
 func (a *application) apiCommand() *cobra.Command {
 	var method, input, output string
 	var raw, typed, headerValues []string
@@ -167,8 +170,8 @@ func (a *application) apiCommand() *cobra.Command {
 			method = http.MethodPost
 		}
 		method = strings.ToUpper(method)
-		if _, err := http.NewRequest(method, "http://localhost", nil); err != nil || method == "" {
-			return usage(errors.New("invalid HTTP method"))
+		if !slices.Contains(apiMethods, method) {
+			return usage(fmt.Errorf("invalid HTTP method %q; use one of %s", method, strings.Join(apiMethods, ", ")))
 		}
 		if paginate && (method != http.MethodGet || input != "") {
 			return usage(errors.New("--paginate requires a body-free GET request"))
