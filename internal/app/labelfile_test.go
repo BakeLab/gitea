@@ -104,3 +104,11 @@ func TestLabelImportJSONIsAnArrayForOneRow(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "import", file, "-R", "alice/project", "--json=id,name"}))
 	require.JSONEq(t, `[{"id":1,"name":"bug"}]`, out.String())
 }
+
+func TestLabelRowsWithoutFlagsClearThem(t *testing.T) {
+	label, ok, err := parseLabelRow("#ee0701 bug ;Broken", 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.False(t, *label.Exclusive)
+	require.False(t, *label.Archived)
+}

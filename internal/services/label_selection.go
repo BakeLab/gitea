@@ -101,7 +101,8 @@ func (s Labels) ResolveIssueNames(ctx context.Context, names []string) ([]int64,
 		scopes = append(scopes, Labels{Client: s.Client, Organization: owner})
 	}
 	type labelKey struct{ scope, name string }
-	index := map[labelKey][]int64{}
+	// folded indexes the names case-insensitively, for names without an exact match.
+	index, folded := map[labelKey][]int64{}, map[labelKey][]int64{}
 	for _, scope := range scopes {
 		scopeName := "repo"
 		if scope.Organization != "" {
@@ -114,6 +115,8 @@ func (s Labels) ResolveIssueNames(ctx context.Context, names []string) ([]int64,
 		for _, label := range labels {
 			for _, key := range []labelKey{{scopeName, label.Name}, {"", label.Name}} {
 				index[key] = append(index[key], label.ID)
+				lower := labelKey{key.scope, strings.ToLower(key.name)}
+				folded[lower] = append(folded[lower], label.ID)
 			}
 		}
 	}
@@ -121,6 +124,9 @@ func (s Labels) ResolveIssueNames(ctx context.Context, names []string) ([]int64,
 	for _, input := range names {
 		scope, name := splitLabelScope(input)
 		matches[input] = index[labelKey{scope, name}]
+		if len(matches[input]) == 0 {
+			matches[input] = folded[labelKey{scope, strings.ToLower(name)}]
+		}
 	}
 	return selectLabelNames(s.Repository, names, matches)
 }

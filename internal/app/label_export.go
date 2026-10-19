@@ -33,7 +33,8 @@ $ gt label export -R alice/old | gt label import - -R alice/new`, Args: argsExac
 				return err
 			}
 			if a.options.json != "" {
-				return terminal.JSONOutput{Fields: a.options.json, Query: a.options.jq, Safe: output == "" && a.deps.Streams.OutTTY}.Write(destination, items)
+				toStdout := output == "" || output == "-"
+				return terminal.JSONOutput{Fields: a.options.json, Allowed: commandOutputFields(cmd), Query: a.options.jq, Safe: toStdout && a.deps.Streams.OutTTY}.Write(destination, items)
 			}
 			var text strings.Builder
 			for _, item := range items {

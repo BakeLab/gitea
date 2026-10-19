@@ -104,4 +104,7 @@ func TestLabelExportStripsEscapesOnATerminalOnly(t *testing.T) {
 	deps.Streams.OutTTY = true
 	require.NoError(t, Execute(context.Background(), deps, args))
 	require.NotContains(t, out.String(), "\x1b")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, append(args, "-O", "-", "--json", "--jq", ".[0].name")))
+	require.NotContains(t, out.String(), "\x1b")
 }

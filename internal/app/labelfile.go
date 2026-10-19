@@ -66,14 +66,8 @@ func parseLabelRow(text string, line int) (services.LabelOptions, bool, error) {
 	if !labelColor.MatchString(color) {
 		return services.LabelOptions{}, false, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid color on row %d", line))
 	}
-	label := services.LabelOptions{Name: &name, Color: &color, Description: &description}
-	if exclusive {
-		label.Exclusive = &exclusive
-	}
-	if archived {
-		label.Archived = &archived
-	}
-	return label, true, nil
+	// Both flags are always sent, so that importing a row without them clears them with --force.
+	return services.LabelOptions{Name: &name, Color: &color, Description: &description, Exclusive: &exclusive, Archived: &archived}, true, nil
 }
 
 // labelFlags parses the flags field of a label row, such as "exclusive,archived".
@@ -108,7 +102,7 @@ func formatLabel(label services.Label) (string, error) {
 	}
 	parsed, ok, err := parseLabelRow(row, 1)
 	if err != nil || !ok || strings.ContainsAny(row, "\r\n") || *parsed.Name != label.Name || *parsed.Color != color ||
-		*parsed.Description != label.Description || (parsed.Exclusive != nil) != label.Exclusive || (parsed.Archived != nil) != label.Archived {
+		*parsed.Description != label.Description || *parsed.Exclusive != label.Exclusive || *parsed.Archived != label.Archived {
 		return "", errors.New("label cannot be represented in the import format; use label export --json to preserve its text")
 	}
 	return row + "\n", nil

@@ -157,6 +157,7 @@ $ gt label create bug -c ee0701 --force`, Args: usageArgs(cobra.MaximumNArgs(1))
 		if err != nil {
 			return err
 		}
+		fields.name = strings.TrimSpace(fields.name)
 		opts.Name = &fields.name
 		if prompted {
 			if err := a.askLabelDetails(cmd, &opts); err != nil {

@@ -70,6 +70,10 @@ func TestIssueLabelsCombineScopesWithoutSilentlyChoosingDuplicates(t *testing.T)
 	ids, err := service.ResolveIssueNames(context.Background(), []string{"org:bug", "repo:bug", "shared", "shared"})
 	require.NoError(t, err)
 	require.Equal(t, []int64{2, 1, 3}, ids)
+	// Names without an exact match fall back to the case-insensitive one, as label edit does.
+	ids, err = service.ResolveIssueNames(context.Background(), []string{"Shared", "org:BUG"})
+	require.NoError(t, err)
+	require.Equal(t, []int64{3, 2}, ids)
 }
 
 func TestScopedLabelNamesDoNotCollideWithLiteralPrefixes(t *testing.T) {
