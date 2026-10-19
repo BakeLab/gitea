@@ -37,10 +37,8 @@ pull request, or mark it as a draft or ready for review.`, Annotations: pullArgu
 		}
 		opts := services.PullEdit{}
 		var err error
-		if cmd.Flags().Changed("deadline") {
-			if opts.Deadline, opts.RemoveDeadline, err = parseDeadline(deadline); err != nil {
-				return err
-			}
+		if opts.Deadline, opts.RemoveDeadline, err = editDeadline(cmd, deadline); err != nil {
+			return err
 		}
 		if cmd.Flags().Changed("add-reviewer") || cmd.Flags().Changed("remove-reviewer") || cmd.Flags().Changed("add-reviewer-team") || cmd.Flags().Changed("remove-reviewer-team") {
 			trimNames(reviewers.Add.Users, reviewers.Remove.Users, reviewers.Add.Teams, reviewers.Remove.Teams)

@@ -71,7 +71,7 @@ is not on the remote yet is pushed first, with its upstream set.`, Args: argsExa
 			return err
 		}
 		if cmd.Flags().Changed("deadline") {
-			if options.Deadline, _, err = parseDeadline(deadline); err != nil {
+			if options.Deadline, err = parseDeadline(deadline); err != nil {
 				return err
 			}
 		}

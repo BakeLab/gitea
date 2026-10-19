@@ -196,7 +196,7 @@ func (a *application) milestoneOptions(cmd *cobra.Command, f *milestoneFields) (
 	if cmd.Flags().Changed("deadline") {
 		date := time.Time{}
 		if f.deadline != "" {
-			parsed, _, err := parseDeadline(f.deadline)
+			parsed, err := parseDeadline(f.deadline)
 			if err != nil {
 				return opts, err
 			}

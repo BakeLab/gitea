@@ -235,7 +235,7 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 		}
 		var due *time.Time
 		if cmd.Flags().Changed("deadline") {
-			if due, _, err = parseDeadline(deadline); err != nil {
+			if due, err = parseDeadline(deadline); err != nil {
 				return err
 			}
 		}

@@ -54,10 +54,8 @@ $ gt issue edit 12 --remove-label wontfix --remove-milestone`, Annotations: map[
 		if cmd.Flags().Changed("ref") {
 			opts.Ref = &ref
 		}
-		if cmd.Flags().Changed("deadline") {
-			if opts.Deadline, opts.RemoveDeadline, err = parseDeadline(deadline); err != nil {
-				return err
-			}
+		if opts.Deadline, opts.RemoveDeadline, err = editDeadline(cmd, deadline); err != nil {
+			return err
 		}
 		if cmd.Flags().Changed("title") {
 			if strings.TrimSpace(title) == "" {

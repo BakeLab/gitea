@@ -57,3 +57,9 @@ func TestInvalidDeadlineBeforeInputCollectionOrNetwork(t *testing.T) {
 		}
 	}
 }
+
+func TestEmptyDeadlineIsRejectedOnCreate(t *testing.T) {
+	for _, command := range [][]string{{"issue", "create", "--title", "x"}, {"pr", "create", "--title", "x"}} {
+		requireUsageBeforeRequests(t, "--deadline cannot be empty", append(command, "--deadline=")...)
+	}
+}
