@@ -427,6 +427,9 @@ func (s Pulls) Files(ctx context.Context, n int64) ([]string, error) {
 type MergeOptions struct {
 	Method, Title, Message string
 	DeleteBranch, Auto     bool
+	// HeadSHA is the head commit the user chose to merge; Gitea refuses the merge once the head
+	// moved past it. Empty merges the current head.
+	HeadSHA string
 }
 
 // MergeSettings are the merge styles a repository allows, in Gitea's order, and its merge defaults.
@@ -466,9 +469,9 @@ func (s Pulls) MergeSettings(ctx context.Context) (MergeSettings, error) {
 	return settings, nil
 }
 
-// Merge merges the pull request's current head with the selected strategy; Gitea refuses the
-// merge if the head moves meanwhile. When Gitea refuses the merge, the error names the reason
-// derived from the pull request, since Gitea reports conflicts only as "try again later".
+// Merge merges the pull request's head opts.HeadSHA, else its current head, with the selected
+// strategy. When Gitea refuses the merge, the error names the reason derived from the pull
+// request, since Gitea reports conflicts only as "try again later".
 func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 	pull, err := s.get(ctx, n)
 	if err != nil {
@@ -478,7 +481,7 @@ func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 		Style: gitea.MergeStyle(opts.Method), Title: opts.Title, Message: opts.Message, DeleteBranchAfterMerge: &opts.DeleteBranch,
 		MergeWhenChecksSucceed: opts.Auto,
 	}
-	if pull.Head != nil {
+	if option.HeadCommitId = opts.HeadSHA; option.HeadCommitId == "" && pull.Head != nil {
 		option.HeadCommitId = pull.Head.Sha
 	}
 	err = repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {

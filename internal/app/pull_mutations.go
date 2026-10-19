@@ -348,7 +348,7 @@ the base branch.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.co
 			}
 			message = editorDraft.Body
 		}
-		if err := service.Merge(cmd.Context(), n, services.MergeOptions{Method: method, Title: title, Message: message, DeleteBranch: deleteBranch, Auto: auto}); err != nil {
+		if err := service.Merge(cmd.Context(), n, services.MergeOptions{Method: method, Title: title, Message: message, DeleteBranch: deleteBranch, Auto: auto, HeadSHA: item.HeadSHA}); err != nil {
 			return err
 		}
 		merged, err := service.View(cmd.Context(), n)

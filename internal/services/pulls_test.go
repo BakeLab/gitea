@@ -247,6 +247,11 @@ func TestPullMergeSubmitsTheCurrentHead(t *testing.T) {
 	require.Equal(t, "Squashed", merged["MergeTitleField"])
 	require.Equal(t, "abc123", merged["head_commit_id"])
 	require.Equal(t, false, merged["delete_branch_after_merge"])
+
+	// A head that moved after the user confirmed is not merged: Gitea compares it with the confirmed one.
+	err = (Pulls{Client: client, Repository: "owner/repo"}).Merge(context.Background(), 3, MergeOptions{Method: "merge", HeadSHA: "confirmed"})
+	require.NoError(t, err)
+	require.Equal(t, "confirmed", merged["head_commit_id"])
 }
 
 func TestPullMergeStopsWhenThePullIsUnreadable(t *testing.T) {
