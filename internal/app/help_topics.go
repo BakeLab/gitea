@@ -302,19 +302,19 @@ default_host, or the only configured instance.
 
 Environment variables:
 
-  GITEA_CLI_CONFIG_DIR                  configuration directory; gt config path prints the files
-  GITEA_CLI_HOST, GITEA_INSTANCE_URL    instance URL, overriding default_host
-  GITEA_TOKEN                     access token for that instance instead of stored credentials
-  GITEA_INSTANCE_INSECURE         with GITEA_TOKEN, skip TLS verification when true
-  GITEA_INSTANCE_SSH_HOST         with GITEA_TOKEN, SSH host that identifies the instance's remotes
-  GITEA_CLI_USER                        account on the selected instance, like --user
-  GITEA_CLI_REPO                        repository as OWNER/REPO or URL, like --repo
-  GITEA_CLI_EDITOR                      editor, overriding config.yml
-  GITEA_CLI_PAGER                       pager, overriding config.yml
-  GITEA_CLI_COLOR                       color preference: auto, always or never
-  GITEA_CLI_HTTP_TIMEOUT                longest wait for one API request, overriding config.yml
-  NO_COLOR                        disables automatic color when set
-  VISUAL, EDITOR, PAGER, BROWSER  editor (VISUAL first), pager and browser when config.yml sets none
+  GITEA_CLI_CONFIG_DIR                configuration directory; gt config path prints the files
+  GITEA_CLI_HOST, GITEA_INSTANCE_URL  instance URL, overriding default_host
+  GITEA_TOKEN                         access token for that instance instead of stored credentials
+  GITEA_INSTANCE_INSECURE             with GITEA_TOKEN, skip TLS verification when true
+  GITEA_INSTANCE_SSH_HOST             with GITEA_TOKEN, SSH host that identifies the instance's remotes
+  GITEA_CLI_USER                      account on the selected instance, like --user
+  GITEA_CLI_REPO                      repository as OWNER/REPO or URL, like --repo
+  GITEA_CLI_EDITOR                    editor, overriding config.yml
+  GITEA_CLI_PAGER                     pager, overriding config.yml
+  GITEA_CLI_COLOR                     color preference: auto, always or never
+  GITEA_CLI_HTTP_TIMEOUT              longest wait for one API request, overriding config.yml
+  NO_COLOR                            disables automatic color when set
+  VISUAL, EDITOR, PAGER, BROWSER      editor (VISUAL first), pager and browser when config.yml sets none
 
 Preferences in config.yml are described in gt config --help.`},
 		{Use: "exit-codes", Short: "Exit codes used by gt", Long: `gt exits with one of these codes:
