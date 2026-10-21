@@ -51,10 +51,15 @@ func TestIssueTemplatesNullBecomesEmpty(t *testing.T) {
 	require.NotNil(t, templates)
 }
 
-func TestCreateSelectablesLoadWriteFieldsOnlyWithPush(t *testing.T) {
+func TestIssueSelectablesLoadMetadataWithoutPush(t *testing.T) {
 	pages := map[string]map[string]string{
 		"/api/v1/repos/alice/project/milestones": {"1": `[{"id":1,"title":"v1"}]`, "2": `[{"id":2,"title":"v2"}]`},
 		"/api/v1/repos/alice/project/labels":     {"1": `[{"id":3,"name":"bug"}]`, "2": `[{"id":4,"name":"docs"}]`},
+	}
+	lists := CreateSelectables{
+		Assignees:  []string{"alice", "bob"},
+		Milestones: []Milestone{{ID: 1, Title: "v1"}, {ID: 2, Title: "v2"}},
+		Labels:     []Label{{ID: 3, Name: "bug"}, {ID: 4, Name: "docs"}},
 	}
 	for _, push := range []bool{false, true} {
 		t.Run(fmt.Sprintf("push=%t", push), func(t *testing.T) {
@@ -87,24 +92,22 @@ func TestCreateSelectablesLoadWriteFieldsOnlyWithPush(t *testing.T) {
 					w.WriteHeader(http.StatusNotFound)
 				}
 			}))
-			loaded, err := (Issues{Client: client, Repository: "alice/project"}).CreateSelectables(context.Background())
+			service := Issues{Client: client, Repository: "alice/project"}
+			// People who can write to the issues set metadata without push access, which the
+			// permissions of the repository cannot tell, so create and edit offer it to everyone.
+			loaded, err := service.CreateSelectables(context.Background())
 			require.NoError(t, err)
 			require.Len(t, loaded.Templates, 1)
-			want := CreateSelectables{Assignees: []string{}, Milestones: []Milestone{}, Labels: []Label{}}
-			if push {
-				want = CreateSelectables{
-					CanPush:    true,
-					Assignees:  []string{"alice", "bob"},
-					Milestones: []Milestone{{ID: 1, Title: "v1"}, {ID: 2, Title: "v2"}},
-					Labels:     []Label{{ID: 3, Name: "bug"}, {ID: 4, Name: "docs"}},
-				}
-			}
-			require.Equal(t, want, loaded.CreateSelectables)
-			require.Equal(t, 1, calls["/api/v1/repos/alice/project"])
+			require.Equal(t, lists, loaded.CreateSelectables)
+			require.Zero(t, calls["/api/v1/repos/alice/project"])
 			require.Equal(t, 1, calls["/api/v1/repos/alice/project/issue_templates"])
-			if !push {
-				require.Zero(t, calls["/api/v1/repos/alice/project/assignees"])
-			}
+
+			clear(calls)
+			edit, err := service.EditSelectables(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, lists, edit)
+			require.Zero(t, calls["/api/v1/repos/alice/project"])
+			require.Zero(t, calls["/api/v1/repos/alice/project/issue_templates"])
 		})
 	}
 }
@@ -121,7 +124,7 @@ func TestViewPermissionsKeepsRepositorySchemaSeparate(t *testing.T) {
 	require.Equal(t, RepositoryPermissions{Admin: true, Push: true, Pull: true}, permissions)
 }
 
-func TestCreateSelectablesIncludeOrganizationLabels(t *testing.T) {
+func TestEditSelectablesIncludeOrganizationLabels(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/repos/acme/service":
@@ -143,7 +146,7 @@ func TestCreateSelectablesIncludeOrganizationLabels(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	result, err := loadCreateSelectables(context.Background(), client, "acme/service")
+	result, err := (Issues{Client: client, Repository: "acme/service"}).EditSelectables(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []Label{{ID: 9, Name: "needs-triage"}}, result.Labels)
 }

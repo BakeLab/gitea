@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -60,7 +62,7 @@ func (s Releases) endpoint() string { return "repos/" + s.Repository + "/release
 
 // ListPage lists a page of releases, with whether more follow and how many there are.
 func (s Releases) ListPage(ctx context.Context, limit, page int) (Page[Release], error) {
-	window, err := listPage(limit, page, func(limit, page int) ([]*gitea.Release, http.Header, error) {
+	window, err := instancePage(ctx, s.Client, limit, page, func(limit, page int) ([]*gitea.Release, http.Header, error) {
 		var headers http.Header
 		releases, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.Release, *gitea.Response, error) {
 			releases, resp, err := c.Releases.ListReleases(ctx, owner, repo, gitea.ListReleasesOptions{ListOptions: listOptions(limit, page)})
@@ -70,7 +72,7 @@ func (s Releases) ListPage(ctx context.Context, limit, page int) (Page[Release],
 		return releases, headers, err
 	})
 	if err != nil {
-		return Page[Release]{}, err
+		return Page[Release]{}, Classify(err, "repository", s.Repository, "")
 	}
 	return convertPage(window, releaseFrom), nil
 }
@@ -80,7 +82,7 @@ func (s Releases) View(ctx context.Context, tag string) (Release, error) {
 	item, err := repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
 		return c.Releases.GetReleaseByTag(ctx, owner, repo, tag)
 	})
-	return item, Classify(err, "release", tag, s.Repository)
+	return item, repositoryItemError(ctx, s.Client, s.Repository, err, "release", tag)
 }
 
 // Latest retrieves the most recent release that is neither a draft nor a prerelease.
@@ -88,18 +90,34 @@ func (s Releases) Latest(ctx context.Context) (Release, error) {
 	release, err := repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
 		return c.Releases.GetLatestRelease(ctx, owner, repo)
 	})
-	return release, Classify(err, "latest release", "", s.Repository)
+	return release, repositoryItemError(ctx, s.Client, s.Repository, err, "latest release", "")
 }
 
 // Archive opens the source archive of the repository at ref; format is zip or tar.gz.
+// TODO(sdk): GetArchiveReader cannot follow the redirect to object storage that serves archives
+// directly.
 func (s Releases) Archive(ctx context.Context, ref, format string) (io.ReadCloser, error) {
-	return repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (io.ReadCloser, *gitea.Response, error) {
-		return c.Repositories.GetArchiveReader(ctx, owner, repo, ref, gitea.ArchiveType("."+format))
-	})
+	owner, repo, err := splitRepository(s.Repository)
+	if err != nil {
+		return nil, err
+	}
+	segments := strings.Split(ref, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
+	}
+	body, err := downloadAPI(ctx, s.Client, fmt.Sprintf("repos/%s/%s/archive/%s.%s", url.PathEscape(owner), url.PathEscape(repo), strings.Join(segments, "/"), url.PathEscape(format)))
+	// Gitea answers "unrecognized repository reference" for a ref that does not exist.
+	return body, Classify(err, "ref", ref, s.Repository)
 }
 
 // Create creates a release and lets Gitea create a missing tag at the supplied target.
 func (s Releases) Create(ctx context.Context, opts ReleaseOptions) (Release, error) {
+	// Gitea resolves the target only when it creates the tag, which it does not for a draft.
+	if target := deref(opts.Target); target != "" && deref(opts.Draft) {
+		if err := s.requireTarget(ctx, target); err != nil {
+			return Release{}, err
+		}
+	}
 	item, err := repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
 		return c.Releases.CreateRelease(ctx, owner, repo, gitea.CreateReleaseOption{
 			TagName: deref(opts.Tag), Target: deref(opts.Target), Title: deref(opts.Title), Note: deref(opts.Body),
@@ -109,6 +127,10 @@ func (s Releases) Create(ctx context.Context, opts ReleaseOptions) (Release, err
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusNotFound && strings.Contains(apiErr.Message, "target") {
 		// The release does not exist yet, so a 404 here names the unresolvable target, not the release.
 		return item, &NotFoundError{Kind: "target", Key: strconv.Quote(deref(opts.Target)), Scope: s.Repository, Err: err}
+	}
+	if IsNotFound(err) {
+		// Any other 404 means the repository is missing or invisible.
+		return item, Classify(err, "repository", s.Repository, "")
 	}
 	return item, Classify(err, "release", deref(opts.Tag), s.Repository)
 }
@@ -126,12 +148,48 @@ func (s Releases) TagExists(ctx context.Context, tag string) (bool, error) {
 
 // Edit changes only supplied release fields; Gitea ignores empty text fields.
 func (s Releases) Edit(ctx context.Context, id int64, opts ReleaseOptions) (Release, error) {
-	return repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
+	if target := deref(opts.Target); target != "" {
+		if err := s.requireTarget(ctx, target); err != nil {
+			return Release{}, err
+		}
+	}
+	item, err := repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
 		return c.Releases.EditRelease(ctx, owner, repo, id, gitea.EditReleaseOption{
 			TagName: deref(opts.Tag), Target: deref(opts.Target), Title: deref(opts.Title), Note: deref(opts.Body),
 			IsDraft: opts.Draft, IsPrerelease: opts.Prerelease,
 		})
 	})
+	// Publishing a draft whose target does not exist fails with HTTP 500.
+	if missing := s.missingTarget(err); missing != nil {
+		return item, missing
+	}
+	return item, err
+}
+
+// missingObject matches Gitea's error for a branch, tag or commit that does not exist.
+var missingObject = regexp.MustCompile(`object does not exist \[id: ([^,\]]*)`)
+
+// requireTarget fails when target names no branch, tag or commit of the repository.
+func (s Releases) requireTarget(ctx context.Context, target string) error {
+	_, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.Commit, *gitea.Response, error) {
+		return c.Repositories.ListRepoCommits(ctx, owner, repo, gitea.ListCommitOptions{ListOptions: gitea.ListOptions{Page: 1, PageSize: 1}, SHA: target})
+	})
+	if missing := s.missingTarget(err); missing != nil {
+		return missing
+	}
+	return Classify(err, "repository", s.Repository, "")
+}
+
+// missingTarget returns the target that err says does not exist as a *NotFoundError, or nil.
+func (s Releases) missingTarget(err error) error {
+	apiErr, ok := errors.AsType[*transport.APIError](err)
+	if !ok {
+		return nil
+	}
+	if match := missingObject.FindStringSubmatch(apiErr.Message); match != nil {
+		return &NotFoundError{Kind: "target", Key: strconv.Quote(match[1]), Scope: s.Repository, Err: err}
+	}
+	return nil
 }
 
 // Delete removes a release and optionally its tag; partial failures identify the completed step.

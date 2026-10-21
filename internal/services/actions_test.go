@@ -356,3 +356,15 @@ func TestDispatchFallsBackToATagRef(t *testing.T) {
 	require.Equal(t, "ref", missing.Kind)
 	require.Equal(t, []string{"v1.0", "refs/tags/v1.0", "nope", "refs/tags/nope"}, refs)
 }
+
+func TestRunAndWorkflowListsNameAMissingRepository(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"not found"}`))
+	}))
+	service := Actions{Client: client, Repository: "alice/missing"}
+	_, err := service.Runs(context.Background(), RunListOptions{Limit: 30, Page: 1})
+	require.EqualError(t, err, "repository alice/missing not found")
+	_, err = service.Workflows(context.Background())
+	require.EqualError(t, err, "repository alice/missing not found")
+}

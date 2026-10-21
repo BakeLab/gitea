@@ -1,7 +1,7 @@
 DIST := dist
 GO ?= go
 
-export PATH := $($(GO) env GOPATH)/bin:$(PATH)
+export PATH := $(shell $(GO) env GOPATH)/bin:$(PATH)
 
 GOFILES := $(shell find . -name "*.go" -type f)
 
@@ -9,11 +9,11 @@ GOFILES := $(shell find . -name "*.go" -type f)
 GOFUMPT_PACKAGE ?= mvdan.cc/gofumpt@v0.12.0
 GOLANGCI_LINT_PACKAGE ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 
-GITEA_CLI_VERSION ?= $(shell git describe --tags --match 'v*' --always | sed 's/-/+/' | sed 's/^v//')
-GITEA_CLI_VERSION_TAG ?= $(subst +,_,$(GITEA_CLI_VERSION))
+BUILD_VERSION ?= $(shell git describe --tags --match 'v*' --always | sed 's/-/+/' | sed 's/^v//')
+BUILD_VERSION_TAG ?= $(subst +,_,$(BUILD_VERSION))
 
 TAGS ?=
-LDFLAGS := -X "gitea.dev/cli/internal/version.Version=$(GITEA_CLI_VERSION)" -X "gitea.dev/cli/internal/version.Tags=$(TAGS)" -s -w
+LDFLAGS := -X "gitea.dev/cli/internal/version.Version=$(BUILD_VERSION)" -X "gitea.dev/cli/internal/version.Tags=$(TAGS)" -s -w
 
 # override to allow passing additional goflags via make CLI
 override GOFLAGS := $(GOFLAGS) -tags '$(TAGS)' -ldflags '$(LDFLAGS)'
@@ -81,7 +81,7 @@ docs:
 # Versioned docs archive for release uploads (references, man pages, completions).
 # Keep the artifact outside dist/: goreleaser requires dist/ empty after before hooks.
 # The .tar.xz suffix matches existing release/publisher/checksum ./**.xz globs.
-DOCS_ARCHIVE ?= gitea-cli-$(GITEA_CLI_VERSION_TAG)-docs.tar.xz
+DOCS_ARCHIVE ?= gitea-cli-$(BUILD_VERSION_TAG)-docs.tar.xz
 
 .PHONY: docs-archive
 docs-archive: docs
@@ -150,4 +150,4 @@ $(EXECUTABLE): $(SOURCES)
 
 .PHONY: build-image
 build-image:
-	docker build -t gitea/gitea-cli:$(GITEA_CLI_VERSION_TAG) .
+	docker build -t gitea/gitea-cli:$(BUILD_VERSION_TAG) .

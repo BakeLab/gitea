@@ -25,8 +25,10 @@ func main() {
 		<-ctx.Done()
 		stop()
 	}()
-	code := run(ctx, app.System(), os.Args[1:])
+	deps := app.System()
+	code := run(ctx, deps, os.Args[1:])
 	stop()
+	deps.Streams.Restore()
 	os.Exit(code)
 }
 

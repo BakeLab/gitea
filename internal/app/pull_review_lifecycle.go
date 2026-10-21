@@ -66,25 +66,41 @@ func (a *application) pullReviewSubmitCommand() *cobra.Command {
 				return err
 			}
 		}
-		if useEditor || (supplied == nil && state == "REQUEST_CHANGES") {
+		// pending is the review as it was, read when a body replaces its own, to check and report that.
+		var pending *services.Review
+		if useEditor || supplied != nil || state == "REQUEST_CHANGES" {
 			current, err := service.View(cmd.Context(), n, id)
 			if err != nil {
 				return err
 			}
-			supplied = &current.Body
-			if useEditor {
+			switch {
+			case useEditor:
 				if draft, err = a.editDraft(cmd, current.Body); err != nil {
 					return err
 				}
+				dropEmptyDraft(&draft)
 				supplied = &draft.Body
+				if state == "COMMENT" && clearsPendingBody(&current, draft.Body) {
+					return fmt.Errorf("the editor left the body empty, which would clear the body of pending review %d and leave it empty; keep its body to submit it", id)
+				}
+			case supplied != nil:
+				pending = &current
+			default:
+				supplied = &current.Body
 			}
 		}
 		if state == "REQUEST_CHANGES" && strings.TrimSpace(*supplied) == "" {
 			return missingBody
 		}
+		if state == "COMMENT" && pending != nil && clearsPendingBody(pending, *supplied) {
+			return errClearedPendingBody(cmd, id, *supplied)
+		}
 		item, err := service.Submit(cmd.Context(), n, id, services.ReviewSubmitOptions{Event: state, Body: supplied})
 		if err != nil {
 			return err
+		}
+		if pending != nil {
+			a.warnReplacedPendingBody(cmd, pending, *supplied)
 		}
 		return a.reportReview(cmd, t, pull, item)
 	}}
@@ -159,6 +175,7 @@ func (a *application) pullReviewDismissCommand(dismiss bool) *cobra.Command {
 			switch {
 			case useEditor:
 				draft, err = a.editDraft(cmd, "")
+				dropEmptyDraft(&draft)
 				body = draft.Body
 			case cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file"):
 				body, err = a.readBody(cmd, body, file)

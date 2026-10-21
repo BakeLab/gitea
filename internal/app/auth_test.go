@@ -182,7 +182,7 @@ func TestAuthStatusFiltersBeforeReadingCredentials(t *testing.T) {
 	}
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--host", "https://EXAMPLE.org/base/", "--user", "BOB", "--json"}))
 	require.Equal(t, []string{auth.Identity("https://example.org/base", "bob")}, keyring.reads)
-	require.JSONEq(t, `[{"host":"https://example.org/base","user":"bob","active":false,"method":"token","credential_store":"keyring","credential_available":true,"expires_at":null,"verified":null,"error":""}]`, out.String())
+	require.JSONEq(t, `[{"host":"https://example.org/base","user":"bob","active":false,"method":"token","credential_store":"keyring","credential_available":true,"expires_at":null,"verified":null,"scopes":null,"error":""}]`, out.String())
 	out.Reset()
 	keyring.reads = nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--host", "https://unconfigured.example.org", "--json"}))
@@ -371,8 +371,9 @@ func TestAuthLoginMethodFlagsAreMutuallyExclusive(t *testing.T) {
 func TestAuthLoginValidatesMethodBeforePromptingForHost(t *testing.T) {
 	for args, want := range map[string]string{
 		"auth login --with-token --oauth":       "select one of",
-		"auth login --with-token --client-id x": "--client-id requires --oauth",
-		"auth login --with-token --scopes all":  "--scopes requires --oauth",
+		"auth login --with-token --client-id x": "--client-id cannot be combined with --with-token",
+		"auth login --with-token --scopes all":  "--scopes cannot be combined with --with-token",
+		"auth login --ssh-key k --scopes all":   "--scopes cannot be combined with --ssh-key",
 		"auth login --oauth --scopes nope":      "--scopes must be all, read:activitypub",
 	} {
 		t.Run(args, func(t *testing.T) {
@@ -384,6 +385,22 @@ func TestAuthLoginValidatesMethodBeforePromptingForHost(t *testing.T) {
 			require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 			require.ErrorContains(t, err, want)
 			require.Empty(t, prompt.asked)
+			require.Empty(t, out.String())
+		})
+	}
+}
+
+func TestAuthLoginOAuthFlagsChooseOAuth(t *testing.T) {
+	for _, flag := range []string{"--client-id=custom", "--scopes=read:user"} {
+		t.Run(flag, func(t *testing.T) {
+			deps, out, _ := testDeps(t)
+			prompt := &loginPrompter{}
+			deps.Prompter = prompt
+			deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+			err := Execute(context.Background(), deps, []string{"auth", "login", "--host", "https://example.org", flag, "--no-input"})
+			require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+			require.ErrorContains(t, err, "OAuth authorization requires interaction")
+			require.Zero(t, prompt.questions)
 			require.Empty(t, out.String())
 		})
 	}
@@ -538,48 +555,56 @@ func TestOAuthLoginOpensAuthorizationURLInBrowser(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	browser := &channelBrowser{opened: opened}
-	deps, _, diagnostics := testDeps(t)
-	deps.Browser = browser
-	deps.Credentials = &auth.Store{Dir: deps.Settings.Dir, Keyring: &statusKeyring{}}
-	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
-	deps.Client = func(instance, token string, insecure bool) *transport.Client {
-		client := transport.New(instance, token, insecure)
-		client.HTTP = server.Client()
-		return client
+	for _, tty := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stdout terminal %t", tty), func(t *testing.T) {
+			browser := &channelBrowser{opened: opened}
+			deps, _, diagnostics := testDeps(t)
+			deps.Browser = browser
+			deps.Credentials = &auth.Store{Dir: deps.Settings.Dir, Keyring: &statusKeyring{}}
+			deps.Streams.InTTY, deps.Streams.ErrTTY, deps.Streams.OutTTY = true, true, tty
+			deps.Client = func(instance, token string, insecure bool) *transport.Client {
+				client := transport.New(instance, token, insecure)
+				client.HTTP = server.Client()
+				return client
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				done <- Execute(ctx, deps, []string{"auth", "login", "--host", server.URL, "--oauth", "--client-id", "test-client", "--credential-store", "file", "--yes"})
+			}()
+			var resource string
+			select {
+			case resource = <-opened:
+			case <-time.After(3 * time.Second):
+				t.Fatal("browser was not opened")
+			}
+			u, err := url.Parse(resource)
+			require.NoError(t, err)
+			require.Equal(t, "/login/oauth/authorize", u.Path)
+			require.Equal(t, "test-client", u.Query().Get("client_id"))
+			redirect := u.Query().Get("redirect_uri")
+			state := u.Query().Get("state")
+			require.NotEmpty(t, redirect)
+			require.NotEmpty(t, state)
+			callback, err := http.Get(redirect + "?code=valid-code&state=" + url.QueryEscape(state))
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, callback.StatusCode)
+			_ = callback.Body.Close()
+			require.NoError(t, <-done)
+			if tty {
+				require.Contains(t, diagnostics.String(), "Opening "+resource+" in your browser.", "the whole URL, which people can copy")
+			} else {
+				require.Contains(t, diagnostics.String(), "Open this URL to authorize gt: "+resource)
+			}
+			require.Equal(t, 1, strings.Count(diagnostics.String(), resource), "the URL is printed once")
+			snapshot, err := deps.Settings.Load()
+			require.NoError(t, err)
+			normalized, err := settings.NormalizeHost(server.URL)
+			require.NoError(t, err)
+			require.Contains(t, snapshot.Hosts.Hosts[normalized].Users, "alice")
+		})
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		done <- Execute(ctx, deps, []string{"auth", "login", "--host", server.URL, "--oauth", "--client-id", "test-client", "--credential-store", "file", "--yes"})
-	}()
-	var resource string
-	select {
-	case resource = <-opened:
-	case <-time.After(3 * time.Second):
-		t.Fatal("browser was not opened")
-	}
-	u, err := url.Parse(resource)
-	require.NoError(t, err)
-	require.Equal(t, "/login/oauth/authorize", u.Path)
-	require.Equal(t, "test-client", u.Query().Get("client_id"))
-	redirect := u.Query().Get("redirect_uri")
-	state := u.Query().Get("state")
-	require.NotEmpty(t, redirect)
-	require.NotEmpty(t, state)
-	callback, err := http.Get(redirect + "?code=valid-code&state=" + url.QueryEscape(state))
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, callback.StatusCode)
-	_ = callback.Body.Close()
-	require.NoError(t, <-done)
-	require.Contains(t, diagnostics.String(), "Open this URL to authorize gt:")
-	require.Contains(t, diagnostics.String(), resource)
-	snapshot, err := deps.Settings.Load()
-	require.NoError(t, err)
-	normalized, err := settings.NormalizeHost(server.URL)
-	require.NoError(t, err)
-	require.Contains(t, snapshot.Hosts.Hosts[normalized].Users, "alice")
 }
 
 // loginPrompter answers the interactive login and account choices, recording what it was asked.
@@ -732,6 +757,7 @@ func TestAuthSwitchSelectsInstanceAndAccount(t *testing.T) {
 	configureAccounts(t, deps, instance, "alice", "alice")
 	err := Execute(context.Background(), deps, []string{"auth", "switch"})
 	require.EqualError(t, err, "alice is the only account on "+instance+"; log in to another with gt auth login --host "+instance)
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	configureAccounts(t, deps, instance, "alice", "alice", "bob")
 	active := func() string {
 		s, err := deps.Settings.Load()
@@ -900,6 +926,29 @@ func TestLoginHeadersReachEveryRequestToTheInstance(t *testing.T) {
 	for _, header := range []string{"Authorization: token other", "Bad Name: x", "missing colon"} {
 		requireUsageBeforeRequests(t, "", "auth", "login", "--host", server.URL, "--with-token", "--header", header)
 	}
+}
+
+func TestHeaderValuesNameVariablesAsDollarNameOrBraced(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("X-Braced"))
+		_, _ = w.Write([]byte(`{"login":"alice"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := testDeps(t)
+	deps.Getenv = envFunc(map[string]string{"BRACED_SECRET": "from-env"})
+	deps.Streams.In = strings.NewReader("token\n")
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "login", "--host", server.URL, "--with-token", "--credential-store", "file", "--no-input", "--header", "X-Braced: ${BRACED_SECRET}"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user", "--host", server.URL}))
+	require.Equal(t, []string{"from-env", "from-env"}, seen)
+
+	for _, value := range []string{"$NOT-A-VAR name", "${UNCLOSED", "$", "${}", "$1ST"} {
+		err := Execute(context.Background(), deps, []string{"config", "set", "headers", "X-Bad: " + value, "--host", server.URL})
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%q: %v", value, err)
+		require.EqualError(t, err, fmt.Sprintf("header X-Bad must name an environment variable as $NAME or ${NAME}, not %q", value))
+		requireUsageBeforeRequests(t, "header X-Bad must name an environment variable", "auth", "login", "--host", server.URL, "--with-token", "--header", "X-Bad: "+value)
+	}
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "headers", "X-Good: ${_GOOD_1}", "--host", server.URL}))
 }
 
 func TestLoginWithATokenThatCannotReadTheAccountNamesTheScope(t *testing.T) {

@@ -87,8 +87,8 @@ $ gt repo set-default --unset`,
 			saved, _ := a.gitProbe().Output(ctx, a.options.cwd, false, "config", "--local", "--get", "gt.repository")
 			switch {
 			case view && saved == "":
-				_, err := fmt.Fprintln(cmd.ErrOrStderr(), "no default repository is set for this clone")
-				return err
+				a.warn(cmd, "No default repository is set for this clone; set one with gt repo set-default OWNER/REPO")
+				return nil
 			case view:
 				_, err := fmt.Fprintln(cmd.OutOrStdout(), terminal.SafeLine(saved))
 				return err
@@ -253,8 +253,14 @@ $ gt repo view alice/project --web`,
 			if err != nil {
 				return err
 			}
-			if web {
+			if web && branch == "" {
 				return a.openBrowser(cmd, item.URL)
+			}
+			if web {
+				if _, err := (services.Branches{Client: target.client}).View(cmd.Context(), target.Repo, branch); err != nil {
+					return err
+				}
+				return a.openBrowser(cmd, branchURL(item, branch))
 			}
 			readme := ""
 			if a.options.json == "" && !item.Empty {
@@ -265,7 +271,7 @@ $ gt repo view alice/project --web`,
 			return writeView(a, cmd, item, func(item services.Repository) terminal.View { return a.repositoryView(item, readme) })
 		},
 	}
-	view.Flags().BoolVarP(&web, "web", "w", false, "Open the repository in the browser")
+	view.Flags().BoolVarP(&web, "web", "w", false, "Open the repository, or with --branch that branch, in the browser")
 	view.Flags().StringVarP(&branch, "branch", "b", "", "Show the README of this branch (default: the default branch)")
 	_ = view.RegisterFlagCompletionFunc("branch", a.completeArgumentBranches())
 	view.ValidArgsFunction = a.completeRepos()

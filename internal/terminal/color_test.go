@@ -24,6 +24,29 @@ func TestColorEnabledRespectsPreferenceAndEnvironment(t *testing.T) {
 	require.False(t, ColorEnabled("auto", true, env(map[string]string{"TERM": "dumb"})))
 }
 
+func TestColorEnabledHonorsCLICOLOR(t *testing.T) {
+	for _, tc := range []struct {
+		preference string
+		tty        bool
+		env        map[string]string
+		want       bool
+	}{
+		{"auto", false, map[string]string{"CLICOLOR_FORCE": "1"}, true},
+		{"", false, map[string]string{"CLICOLOR_FORCE": "yes"}, true},
+		{"auto", true, map[string]string{"CLICOLOR_FORCE": "1", "TERM": "dumb"}, true},
+		{"auto", false, map[string]string{"CLICOLOR_FORCE": "0"}, false},
+		{"auto", false, map[string]string{"CLICOLOR_FORCE": ""}, false},
+		{"auto", true, map[string]string{"CLICOLOR_FORCE": "1", "NO_COLOR": "1"}, false},
+		{"auto", true, map[string]string{"CLICOLOR": "0"}, false},
+		{"auto", true, map[string]string{"CLICOLOR": "1"}, true},
+		{"auto", false, map[string]string{"CLICOLOR": "0", "CLICOLOR_FORCE": "1"}, true},
+		{"never", true, map[string]string{"CLICOLOR_FORCE": "1"}, false},
+		{"always", false, map[string]string{"CLICOLOR": "0"}, true},
+	} {
+		require.Equal(t, tc.want, ColorEnabled(tc.preference, tc.tty, env(tc.env)), "%+v", tc)
+	}
+}
+
 func TestHyperlinksEnabledIgnoresColorPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		preference string

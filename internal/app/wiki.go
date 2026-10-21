@@ -6,9 +6,12 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
@@ -60,7 +63,10 @@ func (a *application) wikiListCommand() *cobra.Command {
 		},
 	}
 	pageFlags(command, &limit, &page)
-	return command
+	// Gitea lists pages without their content.
+	return jsonOutput(command, slices.DeleteFunc(jsonFields[services.WikiPage](), func(field string) bool {
+		return slices.Contains([]string{"body", "commit_count", "footer", "sidebar"}, field)
+	}))
 }
 
 func (a *application) wikiViewCommand() *cobra.Command {
@@ -104,7 +110,7 @@ func (a *application) wikiView(item services.WikiPage) terminal.View {
 	}
 	return terminal.View{
 		Title: item.Title, Meta: strings.Join(meta, " · "), Body: item.Body, Kind: "wiki page", URL: item.URL,
-		Fields: []terminal.Field{{Label: "Author", Value: item.Author, PipedOnly: true}, {Label: "Updated", Value: item.UpdatedAt, PipedOnly: true}},
+		Fields: []terminal.Field{{Label: "Author", Value: item.Author, PipedOnly: true}, {Label: "Updated", Value: pipedTime(item.UpdatedAt), PipedOnly: true}},
 	}
 }
 
@@ -207,6 +213,9 @@ $ gt wiki create Home --editor`,
 				return clierr.Wrap(clierr.Usage, errors.New("wiki content cannot be empty"))
 			}
 			item, err := (services.Wiki{Client: target.client, Repository: target.Repo}).Create(cmd.Context(), services.WikiOptions{Title: content.title, Body: body, Message: content.message})
+			if conflict, ok := errors.AsType[*services.ConflictError](err); ok && conflict.Reason == services.ReasonExists && conflict.Hint == "" {
+				conflict.Hint = "edit it with: " + content.editCommand(cmd, &draft, body, a.suggestedRepo(target))
+			}
 			if err != nil {
 				return err
 			}
@@ -216,6 +225,76 @@ $ gt wiki create Home --editor`,
 	}
 	content.register(command)
 	return command
+}
+
+// editCommand returns the wiki edit command that writes body, the content of a wiki create, with
+// repo, the -R flag that names the repository, if any. Content that the command cannot carry, such
+// as standard input or a long or multi-line body, goes to a draft, which the error then keeps.
+func (c *wikiContent) editCommand(cmd *cobra.Command, draft *terminal.Draft, body, repo string) string {
+	command := "gt wiki edit"
+	// Gitea matches the trimmed title; one that starts with - goes after --, which ends the flags.
+	title := argumentQuote(strings.TrimSpace(c.title))
+	dashed := strings.HasPrefix(strings.TrimSpace(c.title), "-")
+	if !dashed {
+		command += " " + title
+	}
+	if draft.Path == "" && !(cmd.Flags().Changed("body-file") && c.file != "-") && !(cmd.Flags().Changed("body") && fitsWikiHint(c.body)) {
+		*draft = keepDraft(body)
+	}
+	switch {
+	case cmd.Flags().Changed("body-file") && c.file != "-":
+		command += " -F " + argumentQuote(c.file)
+	case cmd.Flags().Changed("body") && fitsWikiHint(c.body):
+		command += " -b " + argumentQuote(c.body)
+	case draft.Path != "":
+		command += " -F " + argumentQuote(draft.Path)
+	default:
+		command += " --editor"
+	}
+	if c.message != "" {
+		command += " -m " + argumentQuote(c.message)
+	}
+	command += repo
+	if dashed {
+		command += " -- " + title
+	}
+	return command
+}
+
+// fitsWikiHint reports whether body is short and plain enough to suggest as a -b flag.
+func fitsWikiHint(body string) bool {
+	return len(body) <= 80 && !strings.ContainsFunc(body, unicode.IsControl)
+}
+
+// argumentQuote quotes s as one argument of a suggested command line: in single quotes, or as
+// $'...' with escapes when s holds control characters, such as a tab, which a terminal would not
+// copy as they are.
+func argumentQuote(s string) string {
+	if !strings.ContainsFunc(s, unicode.IsControl) {
+		return shellQuote(s)
+	}
+	var b strings.Builder
+	b.WriteString("$'")
+	for _, r := range s {
+		switch {
+		case r == '\\' || r == '\'':
+			b.WriteString(`\` + string(r))
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r < 0x80 && unicode.IsControl(r):
+			fmt.Fprintf(&b, `\x%02x`, r)
+		case unicode.IsControl(r):
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteString("'")
+	return b.String()
 }
 
 // wikiBody collects page content: in the editor with --editor, else in the editor or an inline

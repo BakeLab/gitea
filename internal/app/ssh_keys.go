@@ -111,12 +111,12 @@ $ gt ssh-key view 2 --jq .key`,
 }
 
 // publicKey reads one SSH public key from data, which came from source, and returns it with its
-// comment. It recognizes a private key and points to its public half.
-func publicKey(data []byte, source string) (ssh.PublicKey, string, error) {
+// comment. It recognizes a private key and points to its public half, to add with command.
+func publicKey(data []byte, source, command string) (ssh.PublicKey, string, error) {
 	if bytes.Contains(data, []byte("PRIVATE KEY-----")) {
 		hint := "pipe the public key (.pub) instead"
 		if source != "-" {
-			hint = "add its public key instead: gt ssh-key add " + source + ".pub"
+			hint = "add its public key instead: " + command + " " + source + ".pub"
 		}
 		return nil, "", clierr.Wrap(clierr.Usage, fmt.Errorf("%s holds a private key; %s", sshKeySource(source), hint))
 	}
@@ -187,7 +187,7 @@ $ cat key.pub | gt ssh-key add`,
 			if err != nil {
 				return fmt.Errorf("read public key: %w", err)
 			}
-			key, comment, err := publicKey(data, source)
+			key, comment, err := publicKey(data, source, cmd.CommandPath())
 			if err != nil {
 				return err
 			}
@@ -218,12 +218,12 @@ func (a *application) registeredKey(ctx context.Context, service services.SSHKey
 	if !ok || conflict.Reason != services.ReasonKeyInUse {
 		return err
 	}
-	keys, listErr := service.List(ctx, maxLimit, 1)
+	keys, listErr := service.All(ctx)
 	if listErr != nil {
 		return conflict
 	}
 	fingerprint := ssh.FingerprintSHA256(key)
-	for _, registered := range keys.Items {
+	for _, registered := range keys {
 		if registered.Fingerprint == fingerprint {
 			conflict.Hint = fmt.Sprintf("it is your SSH key %q (ID %d)", registered.Title, registered.ID)
 		}

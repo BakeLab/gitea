@@ -142,6 +142,27 @@ func TestRunDownloadExtractsArtifactsByName(t *testing.T) {
 			require.Empty(t, entries)
 		}
 	})
+	t.Run("names that differ only in case", func(t *testing.T) {
+		server, requests := actionsAPI(t, map[string]string{"GET actions/runs/29/artifacts": `{"total_count":2,"artifacts":[{"id":1,"name":"OUT"},{"id":2,"name":"out"}]}`})
+		for _, args := range [][]string{nil, {"-n", "OUT", "-n", "out", "--clobber"}, {"--zip"}} {
+			*requests = nil
+			dir := t.TempDir()
+			deps, _, _ := actionsDeps(t, server.URL, false)
+			err := Execute(context.Background(), deps, append([]string{"run", "download", "29", "-R", "alice/project", "-D", dir}, args...))
+			require.Equal(t, clierr.Usage, clierr.ExitCode(err), args)
+			require.EqualError(t, err, "artifacts OUT and out differ only in case and would overwrite each other; download one at a time with --name and --dir")
+			require.Equal(t, []string{"GET actions/runs/29/artifacts"}, *requests, "nothing is downloaded before the clash is reported")
+			entries, err := os.ReadDir(dir)
+			require.NoError(t, err)
+			require.Empty(t, entries)
+		}
+	})
+	t.Run("a name given twice", func(t *testing.T) {
+		dir := t.TempDir()
+		deps, _, diagnostics := actionsDeps(t, server.URL, true)
+		require.NoError(t, Execute(context.Background(), deps, []string{"run", "download", "29", "-R", "alice/project", "-D", dir, "--zip", "-n", "build", "-n", "build"}))
+		require.Equal(t, "✓ Downloaded artifact build to "+filepath.Join(dir, "build.zip")+"\n", diagnostics.String())
+	})
 	t.Run("existing files and unsafe paths", func(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "cover.out"), []byte("mine"), 0o600))

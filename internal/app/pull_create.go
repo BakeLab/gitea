@@ -31,16 +31,23 @@ func (a *application) pullCreateCommand() *cobra.Command {
 	create := &cobra.Command{Use: "create", Aliases: []string{"new"}, Short: "Create a pull request", Long: `Create a pull request from the current branch, or from --head.
 
 On a terminal without flags, gt asks for the title and body, then what to do next: submit,
-submit as a draft, add metadata or change the branches. --fill skips the questions and uses
-the commit message of a single-commit branch, or the branch name, as the title. A branch that
-is not on the remote yet is pushed first, with its upstream set.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+submit as a draft, add metadata or change the branches. Any flag of this command, such as
+--fill, --head or --base (but not global flags such as --repo), skips the questions: the
+title is then --title, else the commit message of a single-commit branch, else the branch
+name.
+
+A branch that is not on the remote yet is pushed first, with its upstream set, after a
+confirmation; without a terminal, pass --yes to push it. A branch that
+does not track a branch of the same name yet goes to the fork when origin is a fork of the
+repository, or, when origin is not the repository itself, to the only remote of your own
+fork; otherwise it goes to the repository's remote.`, Annotations: map[string]string{"gt.confirm": "true"}, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		return a.runPullCreate(cmd, &f)
 	}}
 	create.Flags().StringSliceVarP(&f.options.Assignees, "assignee", "a", nil, "Assign users by username; @me for yourself")
 	create.Flags().StringSliceVarP(&f.labelNames, "label", "l", nil, "Apply labels by name; repo: or org: picks between same-named labels")
 	create.Flags().StringVarP(&f.milestone, "milestone", "m", "", "Milestone title or ID")
 	create.Flags().StringVarP(&f.options.Title, "title", "t", "", "Pull request title (default: the commit message of a single-commit branch, or the branch name)")
-	create.Flags().StringVar(&f.deadline, "deadline", "", "Due date: YYYY-MM-DD, RFC3339, or Unix timestamp")
+	create.Flags().StringVar(&f.deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339 or Unix timestamp; only the date counts, as the end of that day in UTC")
 	create.Flags().StringVarP(&f.options.Body, "body", "b", "", "Pull request body")
 	create.Flags().StringVarP(&f.bodyFile, "body-file", "F", "", "Read the body from `file`, or - for stdin")
 	create.Flags().BoolVarP(&f.useEditor, "editor", "e", false, "Write the body in your editor, starting from the repository's template")
@@ -68,6 +75,9 @@ $ gt pr create
 # Take the title and body from the commits, without questions
 $ gt pr create --fill
 
+# In a script, also push the branch without asking
+$ gt pr create --fill --yes
+
 $ gt pr create -t "Add login" -b "Closes #1" -B develop -r carol -l enhancement`
 	return create
 }
@@ -82,7 +92,10 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		if a.options.json != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--json/--jq cannot be combined with --agit; AGit creates the pull request through git push"))
 		}
-		if err := onlyFlagsWith(cmd, "agit", "AGit pushes carry only a title and body", "title", "body", "body-file", "editor", "head", "base", "draft", "fill", "web", "allow-maintainer-edits", "topic"); err != nil {
+		if f.web {
+			return clierr.Wrap(clierr.Usage, errors.New("--web cannot be combined with --agit; AGit creates the pull request through git push, without a branch to compare"))
+		}
+		if err := onlyFlagsWith(cmd, "agit", "AGit pushes carry only a title and body", "title", "body", "body-file", "editor", "head", "base", "draft", "fill", "allow-maintainer-edits", "topic"); err != nil {
 			return err
 		}
 	} else if f.topic != "" {
@@ -159,13 +172,20 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 			return clierr.Wrap(clierr.Usage, errors.New("supply --base; repository has no default branch"))
 		}
 	}
-	if f.web {
-		return a.openBrowser(cmd, repositoryURL(t)+"/compare/"+compareRef(f.options.Base)+"..."+compareRef(f.options.Head))
-	}
 	if !f.agit {
 		if err := refuseSameBranch(f.options.Head, f.options.Base); err != nil {
 			return err
 		}
+		if err := a.refuseEmptyPull(cmd.Context(), t, f.options.Base, f.options.Head); err != nil {
+			return err
+		}
+	}
+	if f.web {
+		// The comparison page needs the head on Gitea, as OWNER:BRANCH when it went to a fork.
+		if f.options.Head, err = a.ensureHeadPublished(cmd, t, s, f.options.Head); err != nil {
+			return err
+		}
+		return a.openBrowser(cmd, repositoryURL(t)+"/compare/"+compareRef(f.options.Base)+"..."+compareRef(f.options.Head))
 	}
 	var commitBody string
 	if f.options.Title == "" {
@@ -202,6 +222,10 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	}
 	f.options.AllowMaintainerEdit = &f.allowMaintainerEdits
 	reviewService := services.Reviews{Client: t.client, Repository: t.Repo}
+	// Unknown assignees and reviewers fail before the head is pushed and the pull request exists.
+	if err := service.CheckUsers(cmd.Context(), f.options.Assignees, f.reviewers); err != nil {
+		return err
+	}
 	if len(f.reviewerTeams) > 0 {
 		if err := reviewService.CheckRequestTeams(cmd.Context(), f.reviewerTeams); err != nil {
 			return err
@@ -212,7 +236,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	if err != nil {
 		return err
 	}
-	if err := a.ensureHeadPublished(cmd, t, s, f.options.Head); err != nil {
+	if f.options.Head, err = a.ensureHeadPublished(cmd, t, s, f.options.Head); err != nil {
 		return err
 	}
 	item, err := service.Create(cmd.Context(), f.options)
@@ -228,10 +252,10 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		}
 	}
 	failures = append(failures, uploadAttachments(cmd.Context(), files, item.Number, services.Issues{Client: t.client, Repository: t.Repo}.UploadAttachment, nil)...)
-	if err := boards.applyToNumber(cmd.Context(), item.Number); err != nil {
+	if _, err := boards.applyToNumber(cmd.Context(), item.Number); err != nil {
 		failures = append(failures, err)
 	}
-	return errors.Join(followUpError(fmt.Sprintf("pull request #%d", item.Number), failures), a.reportCreatedPull(cmd, t, item))
+	return errors.Join(followUpError(fmt.Sprintf("pull request #%d", item.Number), "created", failures), a.reportCreatedPull(cmd, t, item))
 }
 
 // pushAgit creates a pull request by pushing the head branch to refs/for/<base>/<topic>.
@@ -253,7 +277,40 @@ func (a *application) pushAgit(cmd *cobra.Command, t target, s settings.Snapshot
 		return err
 	}
 	opts.Directory, opts.Prompt = a.options.cwd, a.policy(s).CanPrompt(a.deps.Streams)
-	return git.PushAgitPR(cmd.Context(), a.deps.Git, opts)
+	if err := git.PushAgitPR(cmd.Context(), a.deps.Git, opts); err != nil {
+		return err
+	}
+	if pull, ok := a.recordAgitPull(cmd.Context(), t, opts); ok {
+		return a.reportCreatedPull(cmd, t, pull)
+	}
+	return nil
+}
+
+// recordAgitPull records the AGit pull request just pushed from the head branch in that branch's
+// configuration, like pr checkout does: an AGit pull request has no head branch, so this is how
+// pr commands on the branch, and pr clean --ignore-sha, find it. It returns that pull request, so
+// that its URL is printed like for other created pull requests. It is best effort: it looks for an
+// open AGit pull request at the branch's commit among the most recent ones.
+func (a *application) recordAgitPull(ctx context.Context, t target, opts git.AgitOptions) (services.Pull, bool) {
+	if strings.HasPrefix(opts.Head, "refs/") {
+		return services.Pull{}, false
+	}
+	probe := a.gitProbe()
+	sha, err := probe.Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "refs/heads/"+opts.Head+"^{commit}")
+	if err != nil {
+		return services.Pull{}, false
+	}
+	pulls, _, err := (services.Pulls{Client: t.client, Repository: t.Repo}).List(ctx, services.PullListOptions{State: "open", Limit: 50})
+	if err != nil {
+		return services.Pull{}, false
+	}
+	for _, pull := range pulls {
+		if pull.Head == "" && pull.HeadSHA == sha && pull.Base == opts.Base {
+			_ = git.RecordPull(ctx, probe, a.options.cwd, opts.Head, pull.Number, opts.Remote)
+			return pull, true
+		}
+	}
+	return services.Pull{}, false
 }
 
 func (a *application) defaultPullHead(ctx context.Context) (owner, branch string) {
@@ -325,6 +382,37 @@ func refuseSameBranch(head, base string) error {
 	return nil
 }
 
+// refuseEmptyPull rejects a local head branch without commits ahead of the base branch, before
+// anything is pushed, since Gitea would open a pull request without changes. It compares with the
+// remote-tracking base branch of the base repository and lets the head pass when Git cannot.
+func (a *application) refuseEmptyPull(ctx context.Context, t target, base, head string) error {
+	if _, branch, ok := strings.Cut(head, ":"); ok {
+		head = branch
+	}
+	if base == "" || head == "" || strings.HasPrefix(base, "-") || strings.HasPrefix(head, "-") {
+		return nil
+	}
+	probe := a.gitProbe()
+	names, err := probe.Output(ctx, a.options.cwd, false, "remote")
+	if err != nil {
+		return nil
+	}
+	for remote := range strings.FieldsSeq(names) {
+		if !a.remoteOwns(ctx, t, remote) {
+			continue
+		}
+		count, err := probe.Output(ctx, a.options.cwd, false, "rev-list", "--count", "refs/remotes/"+remote+"/"+base+"..refs/heads/"+head)
+		if err != nil {
+			continue
+		}
+		if count == "0" {
+			return fmt.Errorf("no commits between %s and %s; commit your changes to %s first", base, head, head)
+		}
+		return nil
+	}
+	return nil
+}
+
 func (a *application) createPullInteractively(cmd *cobra.Command, snapshot settings.Snapshot) (runErr error) {
 	target, err := a.resolve(cmd.Context(), true)
 	if err != nil {
@@ -365,6 +453,10 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 	if values.Agit {
 		return a.pushAgit(cmd, target, snapshot, git.AgitOptions{Remote: a.options.remote, Head: values.Head, Base: values.Base, Topic: values.Topic, Title: values.Title, Body: values.Body})
 	}
+	if values.Deadline != nil {
+		due := endOfDay(*values.Deadline)
+		values.Deadline = &due
+	}
 	options := services.PullOptions{
 		Title: values.Title, Body: values.Body, Assignees: values.Assignees, Milestone: values.Milestone,
 		Labels: values.Labels, Deadline: values.Deadline, Base: values.Base, Head: values.Head,
@@ -373,7 +465,10 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 	if err := refuseSameBranch(options.Head, options.Base); err != nil {
 		return err
 	}
-	if err := a.ensureHeadPublished(cmd, target, snapshot, options.Head); err != nil {
+	if err := a.refuseEmptyPull(cmd.Context(), target, options.Base, options.Head); err != nil {
+		return err
+	}
+	if options.Head, err = a.ensureHeadPublished(cmd, target, snapshot, options.Head); err != nil {
 		return err
 	}
 	item, err := service.Create(cmd.Context(), options)

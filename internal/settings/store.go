@@ -84,7 +84,7 @@ type Host struct {
 	GitProtocol   string `yaml:"git_protocol,omitempty" json:"git_protocol,omitempty"`
 	OAuthClientID string `yaml:"oauth_client_id,omitempty" json:"oauth_client_id,omitempty"`
 	// Headers are sent with every request to the instance, such as those of an access proxy in
-	// front of it. A value of $NAME is read from the environment variable NAME when sent.
+	// front of it. A value of $NAME or ${NAME} is read from the environment variable NAME when sent.
 	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 	// ClientCert and ClientKey name the PEM files of a TLS client certificate for instances that
 	// require one; without ClientKey, the key is read from ClientCert.

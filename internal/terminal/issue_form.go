@@ -13,9 +13,11 @@ import (
 	"charm.land/huh/v2"
 )
 
-// IssueTemplateChoice seeds title/body when selected in an interactive create form.
+// IssueTemplateChoice seeds title/body when selected in an interactive create form. Its labels are
+// returned as IssueFormValues.TemplateLabels for the caller to add.
 type IssueTemplateChoice struct {
 	Name, About, Title, Body string
+	Labels                   []string
 }
 
 // IssueMilestoneChoice identifies an open milestone for interactive selection.
@@ -37,12 +39,11 @@ type BodyEditor func(context.Context, string) (Draft, error)
 // IssueFormChoices supplies options for an interactive issue create form.
 type IssueFormChoices struct {
 	Templates []IssueTemplateChoice
-	// Template, when set, is used instead of asking: the form starts with its body and an empty title.
+	// Template, when set, is used instead of asking: the form starts with its title and body.
 	Template   *IssueTemplateChoice
 	Assignees  []string
 	Milestones []IssueMilestoneChoice
 	Labels     []IssueLabelChoice
-	CanPush    bool
 	EditBody   BodyEditor
 	// AskNext asks "What's next?" after the title and body, offering metadata only on request.
 	AskNext bool
@@ -56,6 +57,8 @@ type IssueFormValues struct {
 	Labels      []int64
 	Deadline    *time.Time
 	Draft       Draft
+	// TemplateLabels are the label names of the chosen template, which the caller adds to Labels.
+	TemplateLabels []string
 }
 
 // IssueForm collects interactive issue create input.
@@ -65,9 +68,9 @@ type IssueForm interface {
 
 // CreateIssue runs the interactive issue create form on stderr.
 func (p *FormPrompter) CreateIssue(ctx context.Context, choices IssueFormChoices) (IssueFormValues, error) {
-	title, body := "", ""
+	seed := &IssueTemplateChoice{}
 	if choices.Template != nil {
-		body = choices.Template.Body
+		seed = choices.Template
 	} else if len(choices.Templates) > 0 {
 		options := []huh.Option[int]{huh.NewOption("[none]", -1)}
 		for i, template := range choices.Templates {
@@ -90,11 +93,13 @@ func (p *FormPrompter) CreateIssue(ctx context.Context, choices IssueFormChoices
 			return IssueFormValues{}, err
 		}
 		if selected >= 0 {
-			title, body = choices.Templates[selected].Title, choices.Templates[selected].Body
+			seed = &choices.Templates[selected]
 		}
 	}
 	choices.AskNext = true
-	return p.collectIssueProperties(ctx, title, body, choices)
+	values, err := p.collectIssueProperties(ctx, seed.Title, seed.Body, choices)
+	values.TemplateLabels = seed.Labels
+	return values, err
 }
 
 // issueFields holds the shared issue form inputs that create and edit bind to.
@@ -107,8 +112,8 @@ type issueFields struct {
 
 // groups builds the content group, titled heading, and the metadata groups. The labels name no
 // resource, as issues and pull requests share them.
-func (f *issueFields) groups(heading string, editBody BodyEditor, canPush bool, assignees []string, milestones []IssueMilestoneChoice, labels []IssueLabelChoice) []*huh.Group {
-	return append([]*huh.Group{f.content(heading, editBody)}, f.metadata(canPush, assignees, milestones, labels)...)
+func (f *issueFields) groups(heading string, editBody BodyEditor, assignees []string, milestones []IssueMilestoneChoice, labels []IssueLabelChoice) []*huh.Group {
+	return append([]*huh.Group{f.content(heading, editBody)}, f.metadata(assignees, milestones, labels)...)
 }
 
 // content asks for the title and, without editBody, the body.
@@ -120,13 +125,19 @@ func (f *issueFields) content(heading string, editBody BodyEditor) *huh.Group {
 	return huh.NewGroup(fields...).Title(SafeLine(heading))
 }
 
-// metadata asks for assignees, a milestone, labels and a due date, which only people who can push
-// may set.
-func (f *issueFields) metadata(canPush bool, assignees []string, milestones []IssueMilestoneChoice, labels []IssueLabelChoice) []*huh.Group {
-	var groups []*huh.Group
-	if !canPush {
-		return groups
+// bodyResult is the body after the form: with the inline field of content, what fieldResult makes
+// of the answer to a field seeded with seed.
+func (f *issueFields) bodyResult(seed string, editBody BodyEditor) string {
+	if editBody != nil {
+		return f.body
 	}
+	return fieldResult(seed, f.body)
+}
+
+// metadata asks for assignees, a milestone, labels and a due date. They need no push access:
+// people who can write to the issues set them too.
+func (f *issueFields) metadata(assignees []string, milestones []IssueMilestoneChoice, labels []IssueLabelChoice) []*huh.Group {
+	var groups []*huh.Group
 	if len(assignees) > 0 {
 		groups = append(groups, huh.NewGroup(multiSelect("Assignees:", huh.NewOptions(assignees...), &f.assignees)))
 	}
@@ -159,11 +170,16 @@ func editBody(ctx context.Context, edit BodyEditor, body string) (string, Draft,
 	return draft.Body, draft, nil
 }
 
-func dueDateInput(title string, value *string) *huh.Input {
-	return huh.NewInput().Title(title).Placeholder("YYYY-MM-DD").Value(value).Validate(func(s string) error {
+// dueDateInput asks for a date. Its character limit, a date's length, also keeps the input at
+// least zero columns wide on a terminal narrower than its frame, where the placeholder would
+// otherwise panic.
+func dueDateInput(title string, value *string) *lineInput {
+	field := lineField(title, value, true).Validate(func(s string) error {
 		_, err := parseDueDate(s)
 		return err
 	})
+	field.Placeholder("YYYY-MM-DD").CharLimit(len(time.DateOnly))
+	return field
 }
 
 // parseDueDate returns nil for an empty value.
@@ -191,7 +207,7 @@ const (
 // collects the body once the form is submitted.
 func (p *FormPrompter) collectIssueProperties(ctx context.Context, title, body string, choices IssueFormChoices) (IssueFormValues, error) {
 	fields := issueFields{title: title, body: body}
-	metadata := fields.metadata(choices.CanPush, choices.Assignees, choices.Milestones, choices.Labels)
+	metadata := fields.metadata(choices.Assignees, choices.Milestones, choices.Labels)
 	content := fields.content("", choices.EditBody)
 	values := IssueFormValues{}
 	var err error
@@ -199,10 +215,12 @@ func (p *FormPrompter) collectIssueProperties(ctx context.Context, title, body s
 		if err := p.runForm(ctx, huh.NewForm(append([]*huh.Group{content}, metadata...)...)); err != nil {
 			return IssueFormValues{}, err
 		}
+		fields.body = fields.bodyResult(body, choices.EditBody)
 	} else {
 		if err := p.runForm(ctx, huh.NewForm(content)); err != nil {
 			return IssueFormValues{}, err
 		}
+		fields.body = fields.bodyResult(body, choices.EditBody)
 		// The body comes before "What's next?", so canceling still reports the draft.
 		if values.Body, values.Draft, err = editBody(ctx, choices.EditBody, fields.body); err != nil {
 			return values, err

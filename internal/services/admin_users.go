@@ -130,7 +130,8 @@ func (s AdminUsers) Create(ctx context.Context, username string, opts AdminUserO
 		})
 	})
 	if err != nil {
-		return AdminUser{}, err
+		// A refusal such as a taken name is about the new user.
+		return AdminUser{}, Classify(err, "user", strconv.Quote(username), "")
 	}
 	if opts.Admin == nil && opts.Restricted == nil && opts.ProhibitLogin == nil {
 		return adminUserFrom(created), nil

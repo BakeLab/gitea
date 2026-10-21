@@ -109,6 +109,9 @@ $ gt run download 34 --zip`,
 		Args:        usageArgs(cobra.MaximumNArgs(1)),
 		Annotations: map[string]string{"gt.arguments": runArguments, "gt.text": "run download writes files"},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := destination.validate(); err != nil {
+				return err
+			}
 			if destination.output != "" && (!asZip || len(names) != 1) {
 				return clierr.Wrap(clierr.Usage, errors.New("--output saves one archive; combine it with --zip and a single --name, or use --dir"))
 			}
@@ -127,6 +130,9 @@ $ gt run download 34 --zip`,
 			}
 			if !slices.ContainsFunc(selected, func(artifact services.Artifact) bool { return !artifact.Expired }) {
 				return fmt.Errorf("the artifacts of run %d have expired", run)
+			}
+			if err := refuseCaseClashes(selected); err != nil {
+				return err
 			}
 			for _, artifact := range selected {
 				if artifact.Expired {
@@ -180,6 +186,9 @@ func selectArtifacts(artifacts []services.Artifact, names []string, run int64) (
 	}
 	selected := make([]services.Artifact, 0, len(names))
 	for _, name := range names {
+		if slices.ContainsFunc(selected, func(artifact services.Artifact) bool { return artifact.Name == name }) {
+			continue
+		}
 		index := slices.IndexFunc(artifacts, func(artifact services.Artifact) bool { return artifact.Name == name })
 		if index < 0 {
 			available := make([]string, len(artifacts))
@@ -191,6 +200,24 @@ func selectArtifacts(artifacts []services.Artifact, names []string, run int64) (
 		selected = append(selected, artifacts[index])
 	}
 	return selected, nil
+}
+
+// refuseCaseClashes refuses artifacts whose names differ only in case before anything is
+// downloaded: on a case-insensitive filesystem, such as the default ones of macOS and Windows,
+// their directories or archives are the same, and the second would replace the first.
+func refuseCaseClashes(artifacts []services.Artifact) error {
+	seen := map[string]string{}
+	for _, artifact := range artifacts {
+		if artifact.Expired {
+			continue
+		}
+		key := strings.ToLower(artifact.Name)
+		if first, clash := seen[key]; clash {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("artifacts %s and %s differ only in case and would overwrite each other; download one at a time with --name and --dir", terminal.SafeLine(first), terminal.SafeLine(artifact.Name)))
+		}
+		seen[key] = artifact.Name
+	}
+	return nil
 }
 
 // downloadArtifact saves an artifact as a ZIP archive, or extracts it into the destination

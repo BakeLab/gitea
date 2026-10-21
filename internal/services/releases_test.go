@@ -89,6 +89,27 @@ func TestReleaseAssetDownloadFollowsObjectStorageRedirect(t *testing.T) {
 	require.Equal(t, "asset bytes", string(data))
 }
 
+func TestReleaseArchiveFollowsObjectStorageRedirect(t *testing.T) {
+	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte("archive bytes"))
+	}))
+	defer storage.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/repos/alice/project/archive/release/v1%231.tar.gz", r.URL.EscapedPath())
+		assert.Equal(t, "token secret", r.Header.Get("Authorization"))
+		http.Redirect(w, r, storage.URL+"/bucket/archive?X-Amz-Signature=value", http.StatusFound)
+	}))
+	defer server.Close()
+	service := Releases{Client: transport.New(server.URL, "secret", false), Repository: "alice/project"}
+	body, err := service.Archive(context.Background(), "release/v1#1", "tar.gz")
+	require.NoError(t, err)
+	defer body.Close()
+	data, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.Equal(t, "archive bytes", string(data))
+}
+
 func TestReleaseAssetDownloadRejectsUnsafeIdentifiers(t *testing.T) {
 	for _, uuid := range []string{"", "../secret", "a/b", `a\b`, "a.b"} {
 		t.Run(uuid, func(t *testing.T) {
@@ -252,4 +273,78 @@ func TestReleaseTagExistsDistinguishesMissingFromFailing(t *testing.T) {
 	status = http.StatusInternalServerError
 	_, err = service.TagExists(context.Background(), "v1")
 	require.Error(t, err)
+}
+
+func TestReleaseCreateInAMissingRepositoryNamesTheRepository(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"not found"}`))
+	}))
+	tag := "v9"
+	_, err := Releases{Client: client, Repository: "alice/missing"}.Create(context.Background(), ReleaseOptions{Tag: &tag, Title: &tag})
+	require.EqualError(t, err, "repository alice/missing not found")
+}
+
+func TestReleaseListNamesAMissingRepository(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"not found"}`))
+	}))
+	_, err := Releases{Client: client, Repository: "alice/missing"}.ListPage(context.Background(), 30, 1)
+	require.EqualError(t, err, "repository alice/missing not found")
+}
+
+func TestReleaseLookupsTellAMissingRepositoryFromAMissingRelease(t *testing.T) {
+	var requests []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		if r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"id":1,"full_name":"alice/project"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"not found"}`))
+	}))
+	missing := Releases{Client: client, Repository: "alice/missing"}
+	_, err := missing.View(context.Background(), "v9")
+	require.EqualError(t, err, "repository alice/missing not found")
+	_, err = missing.Latest(context.Background())
+	require.EqualError(t, err, "repository alice/missing not found")
+	requests = nil
+	_, err = Releases{Client: client, Repository: "alice/project"}.View(context.Background(), "v9")
+	require.EqualError(t, err, "release v9 not found in alice/project")
+	require.Equal(t, []string{"/api/v1/repos/alice/project/releases/tags/v9", "/api/v1/repos/alice/project"}, requests)
+}
+
+func TestReleaseDraftsRequireAnExistingTarget(t *testing.T) {
+	var requests []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.URL.Path == "/api/v1/repos/alice/project/commits" && r.URL.Query().Get("sha") == "release/1.1":
+			assert.Equal(t, "1", r.URL.Query().Get("limit"))
+			_, _ = w.Write([]byte(`[{"sha":"abc"}]`))
+		case r.URL.Path == "/api/v1/repos/alice/project/commits":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"object does not exist [id: nosuch, rel_path: ]"}`))
+		case r.Method == http.MethodPatch:
+			// Publishing a draft whose target does not exist.
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"message":"object does not exist [id: gone, rel_path: ]"}`))
+		default:
+			_, _ = w.Write([]byte(`{"id":7,"tag_name":"v1","name":"v1","draft":true}`))
+		}
+	}))
+	service := Releases{Client: client, Repository: "alice/project"}
+	tag, yes, missing, branch := "v1", true, "nosuch", "release/1.1"
+	_, err := service.Create(context.Background(), ReleaseOptions{Tag: &tag, Title: &tag, Draft: &yes, Target: &missing})
+	require.EqualError(t, err, `target "nosuch" not found in alice/project`)
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/commits"}, requests, "no draft is created")
+	_, err = service.Create(context.Background(), ReleaseOptions{Tag: &tag, Title: &tag, Draft: &yes, Target: &branch})
+	require.NoError(t, err)
+	_, err = service.Edit(context.Background(), 7, ReleaseOptions{Target: &missing})
+	require.EqualError(t, err, `target "nosuch" not found in alice/project`)
+	no := false
+	_, err = service.Edit(context.Background(), 7, ReleaseOptions{Draft: &no})
+	require.EqualError(t, err, `target "gone" not found in alice/project`)
 }

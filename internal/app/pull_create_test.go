@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -92,6 +93,36 @@ func TestPullCreateAgitPushesToMatchingRemoteWithoutRemoteFlag(t *testing.T) {
 	require.ErrorContains(t, err, "select --remote")
 }
 
+func TestPullCreateAgitRecordsThePullRequestOfTheBranch(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls" {
+			_, _ = w.Write([]byte(`[{"number":6,"head":{"ref":"refs/pull/6/head","label":"","sha":"othersha"},"base":{"ref":"main"}},
+				{"number":5,"title":"Title","html_url":"https://example.test/alice/project/pulls/5","head":{"ref":"refs/pull/5/head","label":"","sha":"localsha"},"base":{"ref":"main"}}]`))
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	pushKey := credentialCall(t, deps, server.URL, "alice", "push", "-o", "title=Title", "--", "origin", "refs/heads/feature:refs/for/main/feature")
+	runner := &fakeGit{results: map[string]string{
+		"remote":                          "origin",
+		"remote get-url origin":           server.URL + "/alice/project.git",
+		"rev-parse --is-inside-work-tree": "true",
+		"rev-parse --verify refs/heads/feature^{commit}":     "localsha",
+		"config branch.feature.gitea-cli-pr 5":               "",
+		"config branch.feature.gitea-cli-base-remote origin": "",
+		pushKey: "",
+	}}
+	deps.Git = runner
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "--agit", "-R", "alice/project", "--title", "Title", "--head", "feature", "--base", "main", "--no-input"}))
+	require.Contains(t, runner.calls, pushKey)
+	require.Contains(t, runner.calls, "config branch.feature.gitea-cli-pr 5")
+	require.Contains(t, runner.calls, "config branch.feature.gitea-cli-base-remote origin")
+	require.Equal(t, "https://example.test/alice/project/pulls/5\n", out.String(), "the URL is printed like for other created pull requests")
+}
+
 func TestPullCreateSkipsPushWhenHeadAlreadyPublished(t *testing.T) {
 	creates := 0
 	deps, runner, pushKey := publishCreateEnv(t, &creates)
@@ -104,12 +135,162 @@ func TestPullCreateSkipsPushWhenHeadAlreadyPublished(t *testing.T) {
 	}
 }
 
+func TestPullCreateHelpListsYesForThePush(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "--help"}))
+	require.Contains(t, out.String(), "-y, --yes ")
+	require.Contains(t, out.String(), "pass --yes to push it")
+}
+
 func TestPullCreatePushesWithYesWhenHeadUnpublished(t *testing.T) {
 	creates := 0
 	deps, runner, pushKey := publishCreateEnv(t, &creates)
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--head", "feature", "--base", "main", "--json=number", "--no-input", "--yes"}))
 	require.Equal(t, 1, creates)
 	require.Contains(t, runner.calls, pushKey)
+}
+
+func TestPullCreatePushesANewBranchToTheForkInAForkClone(t *testing.T) {
+	for _, test := range []struct {
+		name, fork, remote, merge, want string
+		readOnly                        bool
+	}{
+		{name: "without upstream", fork: "alice", want: "alice:feature"},
+		{name: "started from the base branch", fork: "alice", remote: "upstream", merge: "refs/heads/main", want: "alice:feature"},
+		{name: "tracking the fork", fork: "alice", remote: "origin", merge: "refs/heads/feature", want: "alice:feature"},
+		{name: "fork of an organization", fork: "team", want: "team:feature"},
+		{name: "tracking the base", fork: "alice", remote: "upstream", merge: "refs/heads/feature", want: "feature"},
+		{name: "fork without push access", fork: "bob", readOnly: true, want: "feature"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var head any
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/"+test.fork+"/project":
+					_, _ = w.Write([]byte(`{"full_name":"` + test.fork + `/project","fork":true,"parent":{"full_name":"acme/project"},"permissions":{"push":` + strconv.FormatBool(!test.readOnly) + `}}`))
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/acme/project/pulls":
+					var payload map[string]any
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+					head = payload["head"]
+					_, _ = w.Write([]byte(`{"number":7,"title":"PR","html_url":"https://example.test/pulls/7"}`))
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			remote := "origin"
+			if !strings.Contains(test.want, ":") {
+				remote = "upstream"
+			}
+			pushKey := credentialCall(t, deps, server.URL, "alice", "push", "--set-upstream", "--quiet", "--", remote, "refs/heads/feature")
+			runner := &fakeGit{results: map[string]string{
+				"rev-parse --is-inside-work-tree":                "true",
+				"rev-parse --verify refs/heads/feature^{commit}": "localsha",
+				"remote":                  "origin upstream",
+				"remote get-url origin":   server.URL + "/" + test.fork + "/project.git",
+				"remote get-url upstream": server.URL + "/acme/project.git",
+				pushKey:                   "",
+			}}
+			if test.remote != "" {
+				runner.results["config --get branch.feature.remote"] = test.remote
+				runner.results["config --get branch.feature.merge"] = test.merge
+			}
+			deps.Git = runner
+			require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "--title", "PR", "--head", "feature", "--base", "main", "--json=number", "--no-input", "--yes"}))
+			require.Contains(t, runner.calls, pushKey)
+			require.Equal(t, test.want, head)
+		})
+	}
+}
+
+func TestPullCreatePushesANewBranchToAForkRemoteOnlyOutsideACloneOfTheBase(t *testing.T) {
+	for _, test := range []struct {
+		name, origin, remote, want string
+	}{
+		{name: "clone of the base with a fork remote", origin: "/acme/project.git", remote: "origin", want: "feature"},
+		{name: "origin elsewhere with a fork remote", origin: "https://elsewhere.test/acme/project.git", remote: "fork", want: "alice:feature"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var head any
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project":
+					_, _ = w.Write([]byte(`{"full_name":"alice/project","fork":true,"parent":{"full_name":"acme/project"},"permissions":{"push":true}}`))
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/acme/project/pulls":
+					var payload map[string]any
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+					head = payload["head"]
+					_, _ = w.Write([]byte(`{"number":7,"title":"PR","html_url":"https://example.test/pulls/7"}`))
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			origin := test.origin
+			if strings.HasPrefix(origin, "/") {
+				origin = server.URL + origin
+			}
+			pushKey := credentialCall(t, deps, server.URL, "alice", "push", "--set-upstream", "--quiet", "--", test.remote, "refs/heads/feature")
+			runner := &fakeGit{results: map[string]string{
+				"rev-parse --is-inside-work-tree":                "true",
+				"rev-parse --verify refs/heads/feature^{commit}": "localsha",
+				"remote":                "origin fork",
+				"remote get-url origin": origin,
+				"remote get-url fork":   server.URL + "/alice/project.git",
+				pushKey:                 "",
+			}}
+			deps.Git = runner
+			require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "acme/project", "--title", "PR", "--head", "feature", "--base", "main", "--json=number", "--no-input", "--yes"}))
+			require.Contains(t, runner.calls, pushKey)
+			require.Equal(t, test.want, head)
+		})
+	}
+}
+
+func TestPullCreateWebPublishesTheHeadBeforeOpeningTheComparison(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","fork":true,"parent":{"full_name":"acme/project"},"permissions":{"push":true}}`))
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	browser := &recordingBrowser{}
+	deps.Browser = browser
+	pushKey := credentialCall(t, deps, server.URL, "alice", "push", "--set-upstream", "--quiet", "--", "origin", "refs/heads/feature")
+	runner := &fakeGit{results: map[string]string{
+		"rev-parse --is-inside-work-tree":                "true",
+		"rev-parse --verify refs/heads/feature^{commit}": "localsha",
+		"remote":                  "origin upstream",
+		"remote get-url origin":   server.URL + "/alice/project.git",
+		"remote get-url upstream": server.URL + "/acme/project.git",
+		pushKey:                   "",
+	}}
+	deps.Git = runner
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "acme/project", "--head", "feature", "--base", "main", "--web", "--no-input", "--yes"}))
+	require.Contains(t, runner.calls, pushKey)
+	require.True(t, strings.HasSuffix(browser.resource, "/acme/project/compare/main...alice:feature"), browser.resource)
+}
+
+func TestPullCreateRefusesAHeadWithoutCommitsBeforePushing(t *testing.T) {
+	creates := 0
+	deps, runner, pushKey := publishCreateEnv(t, &creates)
+	runner.results["rev-list --count refs/remotes/origin/main..refs/heads/feature"] = "0"
+	err := Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--fill", "--head", "feature", "--base", "main", "--no-input", "--yes"})
+	require.EqualError(t, err, "no commits between main and feature; commit your changes to feature first")
+	require.Zero(t, creates)
+	require.NotContains(t, runner.calls, pushKey)
+
+	runner.results["rev-list --count refs/remotes/origin/main..refs/heads/feature"] = "2"
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--fill", "--head", "feature", "--base", "main", "--json=number", "--no-input", "--yes"}))
+	require.Equal(t, 1, creates)
 }
 
 func TestPullCreateRequiresYesWhenHeadUnpublishedWithoutInput(t *testing.T) {
@@ -171,6 +352,8 @@ func TestPullCreateRequestsReviewsAndUploadsAttachments(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"id":2,"name":"core"}]`))
 		case r.URL.Path == "/api/v1/orgs/alice/teams":
 			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/users/"):
+			_, _ = w.Write([]byte(`{"login":"` + strings.TrimPrefix(r.URL.Path, "/api/v1/users/") + `"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls":
 			_, _ = w.Write([]byte(`{"number":7,"title":"PR","html_url":"https://example.test/pulls/7"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls/7/requested_reviewers":
@@ -226,6 +409,45 @@ func TestPullCreateRejectsUnknownReviewerTeamBeforeCreating(t *testing.T) {
 	deps, _, _ := serverDeps(t, server.URL)
 	err := Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--head", "feature", "--base", "main", "--no-input", "--reviewer-team", "ghost"})
 	require.ErrorContains(t, err, `team "ghost" is unavailable`)
+}
+
+func TestPullCreateRejectsUnknownUsersBeforePushing(t *testing.T) {
+	// Gitea looks a reviewer up by email, but takes assignees by name only.
+	for _, tc := range []struct{ flag, ghost string }{{"--reviewer", "ghost"}, {"--assignee", "ghost"}, {"--assignee", "ghost@example.test"}} {
+		t.Run(tc.flag+" "+tc.ghost, func(t *testing.T) {
+			creates := 0
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/users/bob":
+					_, _ = w.Write([]byte(`{"login":"bob"}`))
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/users/"+tc.ghost:
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = w.Write([]byte(`{"message":"user redirect does not exist [name: ` + tc.ghost + `]"}`))
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls":
+					creates++
+					_, _ = w.Write([]byte(`{"number":7,"title":"PR"}`))
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			pushKey := credentialCall(t, deps, server.URL, "alice", "push", "--set-upstream", "--quiet", "--", "origin", "refs/heads/feature")
+			runner := &fakeGit{results: map[string]string{
+				"rev-parse --is-inside-work-tree":                "true",
+				"rev-parse --verify refs/heads/feature^{commit}": "localsha",
+				"remote":                "origin",
+				"remote get-url origin": server.URL + "/alice/project.git",
+				pushKey:                 "",
+			}}
+			deps.Git = runner
+			err := Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--head", "feature", "--base", "main", "--no-input", "--yes", tc.flag, "bob," + tc.ghost})
+			require.ErrorContains(t, err, `user "`+tc.ghost+`" not found`)
+			require.NotContains(t, runner.calls, pushKey)
+			require.Zero(t, creates)
+		})
+	}
 }
 
 func TestPullCreateDerivesTitleAndBodyFromSingleCommit(t *testing.T) {
@@ -306,6 +528,26 @@ func TestPullCreateHelpListsDefaultsOnce(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "--help"}))
 	require.Contains(t, out.String(), "(default true)")
 	require.NotContains(t, out.String(), "(default true) (default true)")
+}
+
+func TestPullCreateBranchFlagsSkipTheFormOnATerminal(t *testing.T) {
+	var payload map[string]any
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/repos/alice/project/pulls", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		_, _ = w.Write([]byte(`{"number":7}`))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	form := &recordingPullForm{}
+	deps.PullForm = form
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--head", "w3", "--base", "main", "--json=number"}))
+	require.Zero(t, form.calls)
+	require.Equal(t, "W3", payload["title"])
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "--help"}))
+	require.Contains(t, strings.Join(strings.Fields(out.String()), " "), "Any flag of this command, such as --fill, --head or --base (but not global flags such as --repo), skips the questions")
 }
 
 func TestCompareRefEscapesBranchNames(t *testing.T) {
@@ -401,7 +643,7 @@ func TestPullCreateImplicitInteractiveForm(t *testing.T) {
 	require.Equal(t, []any{"alice"}, createPayload["assignees"])
 	require.Equal(t, float64(4), createPayload["milestone"])
 	require.Equal(t, []any{float64(2)}, createPayload["labels"])
-	require.Equal(t, "2028-01-15T00:00:00Z", createPayload["due_date"])
+	require.Equal(t, "2028-01-15T23:59:59Z", createPayload["due_date"])
 	require.JSONEq(t, `{"number":9,"url":"https://example.org/alice/project/pulls/9"}`, out.String())
 	require.Empty(t, diagnostics.String())
 }
@@ -440,4 +682,55 @@ func testPullCreateDefaultsFromForkBranch(t *testing.T, remote string) {
 	require.Equal(t, "Über Fix", payload["title"])
 	require.Equal(t, "bob:über-fix", payload["head"])
 	require.Equal(t, "main", payload["base"])
+}
+
+func TestPullCreatePushesAForkBranchThatTracksItsNamesake(t *testing.T) {
+	for _, test := range []struct {
+		name, head, want string
+		push             bool
+	}{
+		{name: "current branch of a fork clone", want: "bob:feature", push: true},
+		{name: "explicit OWNER:BRANCH it tracks", head: "bob:feature", want: "bob:feature", push: true},
+		{name: "OWNER:BRANCH of another owner", head: "carol:feature", want: "carol:feature"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var head any
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls" {
+					var payload map[string]any
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+					head = payload["head"]
+					_, _ = w.Write([]byte(`{"number":7,"title":"PR","html_url":"https://example.test/pulls/7"}`))
+					return
+				}
+				t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+			}))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			pushKey := credentialCall(t, deps, server.URL, "alice", "push", "--set-upstream", "--quiet", "--", "origin", "refs/heads/feature")
+			runner := &fakeGit{results: map[string]string{
+				"symbolic-ref --quiet HEAD":                                       "refs/heads/feature",
+				"rev-parse --is-inside-work-tree":                                 "true",
+				"rev-parse --verify refs/heads/feature^{commit}":                  "localsha",
+				"config --get branch.feature.remote":                              "origin",
+				"config --get branch.feature.merge":                               "refs/heads/feature",
+				"remote get-url origin":                                           server.URL + "/bob/project.git",
+				"for-each-ref --format=%(objectname) refs/remotes/origin/feature": "oldsha",
+				pushKey: "",
+			}}
+			deps.Git = runner
+			args := []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--base", "main", "--json=number", "--no-input", "--yes"}
+			if test.head != "" {
+				args = append(args, "--head", test.head)
+			}
+			require.NoError(t, Execute(context.Background(), deps, args))
+			if test.push {
+				require.Contains(t, runner.calls, pushKey)
+			} else {
+				require.NotContains(t, runner.calls, pushKey)
+			}
+			require.Equal(t, test.want, head)
+		})
+	}
 }

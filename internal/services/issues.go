@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -36,7 +37,7 @@ type Issue struct {
 // Kinds of Issue: Gitea lists pull requests among issues.
 const (
 	KindIssue = "issue"
-	KindPull  = "pr"
+	KindPull  = "pull"
 )
 
 // discussionFrom converts an issue or a pull request listed among issues; the state of a merged
@@ -130,7 +131,8 @@ func (s Issues) ListPage(ctx context.Context, opts ListOptions) (Page[Issue], er
 			return c.Issues.ListRepoIssues(ctx, owner, repo, query)
 		})
 		if err != nil {
-			return Page[Issue]{}, err
+			// A 404 here can only mean the repository is missing or invisible.
+			return Page[Issue]{}, Classify(err, "repository", s.Repository, "")
 		}
 		return convertPage(issues, discussionFrom), nil
 	}
@@ -153,7 +155,38 @@ func (s Issues) View(ctx context.Context, number int64) (Issue, error) {
 	item, err := repoConvert(ctx, s.Client, s.Repository, discussionFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Issue, *gitea.Response, error) {
 		return c.Issues.GetIssue(ctx, owner, repo, number)
 	})
-	return item, Classify(err, "issue", "#"+strconv.FormatInt(number, 10), s.Repository)
+	return item, s.issueError(ctx, err, number)
+}
+
+// issueError names issue number in the failure of a request about it, or its repository when
+// that is what is missing. Some endpoints, such as the timeline, answer a missing issue with
+// HTTP 500 "issue does not exist".
+func (s Issues) issueError(ctx context.Context, err error, number int64) error {
+	key := "#" + strconv.FormatInt(number, 10)
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && strings.Contains(strings.ToLower(apiErr.Message), "issue does not exist") {
+		return &NotFoundError{Kind: "issue", Key: key, Scope: s.Repository, Err: err}
+	}
+	return repositoryItemError(ctx, s.Client, s.Repository, err, "issue", key)
+}
+
+// repositoryItemError names kind key in the failure of a request about it, or repository when
+// that is what is missing: Gitea answers both with the same 404.
+func repositoryItemError(ctx context.Context, client *transport.Client, repository string, err error, kind, key string) error {
+	if IsNotFound(err) {
+		if repoErr := missingRepository(ctx, client, repository); repoErr != nil {
+			return repoErr
+		}
+	}
+	return Classify(err, kind, key, repository)
+}
+
+// missingRepository returns the not-found error of repository when it is missing or invisible,
+// and nil otherwise, also when the lookup fails another way.
+func missingRepository(ctx context.Context, client *transport.Client, repository string) error {
+	if _, err := (Repositories{Client: client}).get(ctx, repository); IsNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 // Create opens an issue.
@@ -178,5 +211,5 @@ func (s Issues) edit(ctx context.Context, number int64, opts gitea.EditIssueOpti
 	item, err := repoConvert(ctx, s.Client, s.Repository, discussionFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Issue, *gitea.Response, error) {
 		return c.Issues.EditIssue(ctx, owner, repo, number, opts)
 	})
-	return item, Classify(err, "issue", "#"+strconv.FormatInt(number, 10), s.Repository)
+	return item, s.issueError(ctx, err, number)
 }

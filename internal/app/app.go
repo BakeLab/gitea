@@ -50,6 +50,7 @@ type Dependencies struct {
 	MergeForm     terminal.MergeForm
 	MilestoneForm terminal.MilestoneForm
 	Getenv        func(string) string
+	LookupEnv     func(string) (string, bool)
 	Client        func(string, string, bool) *transport.Client
 }
 
@@ -58,7 +59,7 @@ func System() Dependencies {
 	streams := terminal.System()
 	store := settings.New(os.Getenv("GITEA_CLI_CONFIG_DIR"))
 	prompter := &terminal.FormPrompter{Streams: streams}
-	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: streams.ErrOut}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, Getenv: os.Getenv, Client: transport.New}
+	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: streams.ErrOut}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, Getenv: os.Getenv, LookupEnv: os.LookupEnv, Client: transport.New}
 }
 
 type options struct {
@@ -112,7 +113,19 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	if deps.Editor == nil {
 		deps.Editor = terminal.SystemEditor{Streams: deps.Streams}
 	}
+	if deps.LookupEnv == nil && deps.Getenv != nil {
+		// Without LookupEnv, a variable is set when Getenv reads a value for it.
+		getenv := deps.Getenv
+		deps.LookupEnv = func(key string) (string, bool) {
+			value := getenv(key)
+			return value, value != ""
+		}
+	}
 	a := &application{deps: deps}
+	if prompter, ok := deps.Prompter.(*terminal.FormPrompter); ok {
+		// Forms draw on stderr, so they follow the color settings for stderr.
+		prompter.Color = a.errColorEnabled
+	}
 	if client := deps.Client; client != nil {
 		a.deps.Client = func(instance, token string, insecure bool) *transport.Client {
 			if a.options.debug {
@@ -151,6 +164,9 @@ func NewRoot(deps Dependencies) *cobra.Command {
 			return err
 		}
 		if err := validateEnums(cmd); err != nil {
+			return err
+		}
+		if _, err := a.colorEnvironment(); err != nil {
 			return err
 		}
 		if cmd.Flags().Changed("sudo") {
@@ -387,7 +403,7 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 var jsonFieldList = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(,[A-Za-z][A-Za-z0-9_]*)*$`)
 
 // joinJSONFields accepts `--json number,title` like `--json=number,title`. The word stays a positional
-// argument only when the command neither outputs those fields nor rejects the argument, so a
+// argument only when the command neither outputs any of those fields nor rejects the argument, so a
 // misspelled field lists the available fields. Unknown commands, such as unexpanded aliases, are joined.
 func joinJSONFields(root *cobra.Command, args []string) []string {
 	for i := 0; i < len(args); i++ {
@@ -402,12 +418,18 @@ func joinJSONFields(root *cobra.Command, args []string) []string {
 			continue
 		}
 		cmd, _, err := root.Find(slices.Concat(args[:i+1], args[i+2:]))
-		if err == nil && terminal.ValidateOutput(args[i+1], "", commandOutputFields(cmd)) != nil && acceptsArgs(args) {
+		if fields := commandOutputFields(cmd); err == nil && terminal.ValidateOutput(args[i+1], "", fields) != nil && !namesField(args[i+1], fields) && acceptsArgs(args) {
 			continue
 		}
 		args = slices.Concat(args[:i], []string{"--json=" + args[i+1]}, args[i+2:])
 	}
 	return args
+}
+
+// namesField reports whether list names a field of fields, so it is a field list even when another
+// of its names is misspelled, as in "number,titel".
+func namesField(list string, fields []string) bool {
+	return slices.ContainsFunc(strings.Split(list, ","), func(name string) bool { return slices.Contains(fields, name) })
 }
 
 // acceptsArgs reports whether the command that args select accepts their positional arguments. It

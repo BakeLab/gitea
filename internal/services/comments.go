@@ -48,7 +48,8 @@ func (s Comments) List(ctx context.Context, n int64) ([]Comment, error) {
 		return c.Issues.ListIssueComments(ctx, owner, repo, n, gitea.ListIssueCommentOptions{Page: -1})
 	})
 	if err != nil {
-		return nil, err
+		// Gitea answers a missing issue here with HTTP 500 "issue does not exist".
+		return nil, Issues{Client: s.Client, Repository: s.Repository}.issueError(ctx, err, n)
 	}
 	return convertAll(comments, commentFrom), nil
 }
@@ -91,7 +92,7 @@ func (s Comments) View(ctx context.Context, id int64) (Comment, error) {
 		// Gitea answers without a body for the comments that are not plain ones, such as inline review comments.
 		return Comment{}, NotPlainCommentError{ID: id, Repository: s.Repository}
 	}
-	return item, Classify(err, "comment", strconv.FormatInt(id, 10), s.Repository)
+	return item, repositoryItemError(ctx, s.Client, s.Repository, err, "comment", strconv.FormatInt(id, 10))
 }
 
 // Create adds a comment to an issue or pull request.
@@ -99,7 +100,7 @@ func (s Comments) Create(ctx context.Context, n int64, body string) (Comment, er
 	item, err := repoConvert(ctx, s.Client, s.Repository, commentFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Comment, *gitea.Response, error) {
 		return c.Issues.CreateIssueComment(ctx, owner, repo, n, gitea.CreateIssueCommentOption{Body: body})
 	})
-	return item, Classify(err, "issue", "#"+strconv.FormatInt(n, 10), s.Repository)
+	return item, Issues{Client: s.Client, Repository: s.Repository}.issueError(ctx, err, n)
 }
 
 // Edit replaces the body of a repository comment.
@@ -107,7 +108,7 @@ func (s Comments) Edit(ctx context.Context, id int64, body string) (Comment, err
 	item, err := repoConvert(ctx, s.Client, s.Repository, commentFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Comment, *gitea.Response, error) {
 		return c.Issues.EditIssueComment(ctx, owner, repo, id, gitea.EditIssueCommentOption{Body: body})
 	})
-	return item, Classify(err, "comment", strconv.FormatInt(id, 10), s.Repository)
+	return item, repositoryItemError(ctx, s.Client, s.Repository, err, "comment", strconv.FormatInt(id, 10))
 }
 
 // UploadAttachment streams a file to comment id.
@@ -121,5 +122,5 @@ func (s Comments) Delete(ctx context.Context, id int64) error {
 	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
 		return c.Issues.DeleteIssueComment(ctx, owner, repo, id)
 	})
-	return Classify(err, "comment", strconv.FormatInt(id, 10), s.Repository)
+	return repositoryItemError(ctx, s.Client, s.Repository, err, "comment", strconv.FormatInt(id, 10))
 }

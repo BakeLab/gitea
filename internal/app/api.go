@@ -21,6 +21,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+	"gitea.dev/cli/internal/transport"
 	"github.com/spf13/cobra"
 )
 
@@ -127,7 +128,8 @@ otherwise:
   -F, --field name=value       a typed value: true, false, null, numbers, arrays and
                                objects are JSON, @FILE reads a file and @- stdin
 
---paginate follows the next-page links of a GET request and prints every page on its
+--paginate follows the next-page links of a GET request, or asks for the next page of
+a list that Gitea counts in X-Total-Count without links, and prints every page on its
 own line. --jq filters each JSON response with a jq expression and prints strings
 without quotes; jq does not need to be installed.
 
@@ -164,7 +166,7 @@ func (a *application) apiCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&f.verbose, "verbose", false, "Print the request and the response status and headers to stderr")
 	cmd.Flags().BoolVar(&f.silent, "silent", false, "Do not print the response body")
 	cmd.Flags().BoolVar(&f.paginate, "paginate", false, "Follow next-page links and print every page")
-	cmd.Flags().IntVar(&f.maxPages, "max-pages", 1000, "Stop --paginate after this many pages")
+	cmd.Flags().IntVar(&f.maxPages, "max-pages", 1000, "Stop --paginate after this many pages; reaching the default fails")
 	return cmd
 }
 
@@ -217,7 +219,7 @@ func (a *application) runAPI(cmd *cobra.Command, args []string, f *apiFlags) err
 			return err
 		}
 		defer file.Close()
-		body = file
+		body = inputBody(file)
 	}
 	endpoint := args[0]
 	if strings.ContainsAny(strings.NewReplacer("{owner}", "owner", "{repo}", "repo", "{branch}", "branch").Replace(endpoint), "{}") {
@@ -238,6 +240,16 @@ func (a *application) runAPI(cmd *cobra.Command, args []string, f *apiFlags) err
 	if requireRepo {
 		owner, name := target.ownerName()
 		endpoint = strings.NewReplacer("{owner}", url.PathEscape(owner), "{repo}", url.PathEscape(name)).Replace(endpoint)
+	}
+	// An endpoint outside the instance's API, such as a URL of another instance, is a usage error.
+	if _, err := target.client.URL(endpoint); err != nil {
+		return usage(err)
+	}
+	if f.verbose {
+		// The request lists the headers it sends; say which configured ones it leaves out.
+		for _, name := range a.unsentHeaders(target.host) {
+			a.warn(cmd, "%s", a.unsentHeader(target.host, name))
+		}
 	}
 	if len(fields) > 0 {
 		if f.method == http.MethodGet || f.method == http.MethodHead {
@@ -291,10 +303,27 @@ func (a *application) runAPI(cmd *cobra.Command, args []string, f *apiFlags) err
 			return response.write(destination, r)
 		})
 		if errors.Is(err, services.ErrMaxPages) {
-			return errors.New("API pagination exceeded --max-pages")
+			if !cmd.Flags().Changed("max-pages") {
+				// The default limit only guards against a server that never ends, so its pages are not every page.
+				return fmt.Errorf("--paginate stopped after %s and more pages exist; raise --max-pages", terminal.Plural(f.maxPages, "page"))
+			}
+			// --max-pages asks to stop, so the pages it allows are a complete answer.
+			a.warn(cmd, "Stopped after %s as --max-pages asks; more pages exist", terminal.Plural(f.maxPages, "page"))
+			return nil
 		}
 		return err
 	})
+}
+
+// inputBody returns the request body of an --input file. A regular file can be read again from the
+// start, so that signing it for an SSH key account hashes it as it is read instead of holding it in
+// memory.
+func inputBody(file *os.File) io.Reader {
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return file
+	}
+	return transport.Replayable(func() io.Reader { return io.NewSectionReader(file, 0, info.Size()) })
 }
 
 // apiResponse writes response bodies for gt api: filtered by --jq, indented and colored JSON on a
@@ -354,20 +383,27 @@ func (l *lastByte) Write(p []byte) (int, error) {
 }
 
 // writeResponseHead prints the status line and the sorted headers of r, then a blank line; verbose
-// marks each line with "< " like curl.
+// marks each line with "< " like curl. URLs in headers, such as a redirect to signed storage, are
+// printed with their credentials and signatures redacted.
 func writeResponseHead(w io.Writer, r *http.Response, verbose bool) error {
 	prefix := ""
 	if verbose {
 		prefix = "< "
 	}
-	return writeHead(w, prefix, r.Proto+" "+r.Status, r.Header)
+	headers := http.Header{}
+	for name, values := range r.Header {
+		for _, value := range values {
+			headers.Add(name, transport.RedactHeader(name, value))
+		}
+	}
+	return writeHead(w, prefix, r.Proto+" "+r.Status, headers)
 }
 
 // writeRequestHead prints the method, URL without query and headers of r marked with "> ", hiding
-// credentials.
+// credentials and the values of the instance's configured headers.
 func writeRequestHead(w io.Writer, r *http.Request) error {
 	headers := r.Header.Clone()
-	for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie"} {
+	for _, name := range append([]string{"Authorization", "Proxy-Authorization", "Cookie", "Signature", "Sudo"}, transport.ConfiguredHeaders(r)...) {
 		if headers.Get(name) != "" {
 			headers.Set(name, "(hidden)")
 		}

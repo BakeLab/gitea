@@ -45,6 +45,39 @@ func TestRepositoryWebUsesInjectedBrowserAndConfigPrecedence(t *testing.T) {
 	require.Empty(t, diagnostics.String())
 }
 
+func TestBranchWebPagesCheckTheBranch(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project":
+			_, _ = fmt.Fprint(w, `{"full_name":"alice/project","html_url":"https://example.org/alice/project"}`)
+		case "/api/v1/repos/alice/project/branches/release/1.0":
+			_, _ = fmt.Fprint(w, `{"name":"release/1.0"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	for _, args := range [][]string{
+		{"repo", "view", "--repo", "alice/project", "--web", "--branch", "release/1.0"},
+		{"branch", "view", "release/1.0", "--repo", "alice/project", "--web"},
+	} {
+		browser := &recordingBrowser{}
+		deps.Browser = browser
+		require.NoError(t, Execute(context.Background(), deps, append(args, "--no-input")))
+		require.Equal(t, "https://example.org/alice/project/src/branch/release/1.0", browser.resource)
+	}
+	for _, args := range [][]string{
+		{"repo", "view", "--repo", "alice/project", "--web", "--branch", "nope"},
+		{"branch", "view", "nope", "--repo", "alice/project", "--web"},
+	} {
+		browser := &recordingBrowser{}
+		deps.Browser = browser
+		require.EqualError(t, Execute(context.Background(), deps, append(args, "--no-input")), `branch "nope" not found in alice/project`)
+		require.Empty(t, browser.resource)
+	}
+}
+
 func TestDiscussionViewsShareBrowserContract(t *testing.T) {
 	for _, group := range []string{"issue", "pr"} {
 		t.Run(group, func(t *testing.T) {

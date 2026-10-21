@@ -248,7 +248,7 @@ func withoutCredentials(raw string) string {
 func (a *application) completeLocalBranches(cmd *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 	ctx, cancel := completionContext(cmd)
 	defer cancel()
-	out, err := a.gitProbe().Output(ctx, a.options.cwd, false, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	out, err := a.gitProbe().Output(ctx, a.options.cwd, false, "for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads")
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

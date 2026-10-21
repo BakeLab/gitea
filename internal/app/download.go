@@ -39,20 +39,33 @@ func (f *downloadFlags) register(cmd *cobra.Command) {
 	flags.BoolVar(&f.skipExisting, "skip-existing", false, "Keep an existing file and skip the download")
 }
 
+// validate rejects combinations of the download flags that cannot work.
+func (f downloadFlags) validate() error {
+	switch {
+	case f.output != "" && f.dir != "":
+		return clierr.Wrap(clierr.Usage, errors.New("--output and --dir cannot be combined"))
+	case f.clobber && f.skipExisting:
+		return clierr.Wrap(clierr.Usage, errors.New("--clobber and --skip-existing cannot be combined"))
+	case f.output == "-" && f.clobber:
+		return clierr.Wrap(clierr.Usage, errors.New("--clobber cannot be combined with --output -"))
+	case f.output == "-" && f.skipExisting:
+		return clierr.Wrap(clierr.Usage, errors.New("--skip-existing cannot be combined with --output -"))
+	}
+	return nil
+}
+
 // destination returns where a download named name goes, or "-" for standard output. It fails
 // before anything is downloaded when the file exists without --clobber or --skip-existing.
 func (f downloadFlags) destination(name string) (path string, skip bool, err error) {
-	switch {
-	case f.output != "" && f.dir != "":
-		return "", false, clierr.Wrap(clierr.Usage, errors.New("--output and --dir cannot be combined"))
-	case f.clobber && f.skipExisting:
-		return "", false, clierr.Wrap(clierr.Usage, errors.New("--clobber and --skip-existing cannot be combined"))
-	case f.output == "-":
+	if err := f.validate(); err != nil {
+		return "", false, err
+	}
+	if f.output == "-" {
 		return "-", false, nil
 	}
 	path = f.output
 	if path == "" || isDirectory(path) {
-		if !filepath.IsLocal(name) || strings.ContainsAny(name, `/\`) || strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
+		if !isFileName(name) {
 			return "", false, clierr.Wrap(clierr.Usage, fmt.Errorf("cannot use %q as a file name; pass --output", name))
 		}
 		path = filepath.Join(cmp.Or(path, f.dir, "."), name)
@@ -71,6 +84,13 @@ func (f downloadFlags) destination(name string) (path string, skip bool, err err
 		return "", false, err
 	}
 	return path, false, nil
+}
+
+// isFileName reports whether name can be saved under its own name in a directory: a single
+// path element other than "." or "..", without control or invisible format characters.
+func isFileName(name string) bool {
+	return name != "." && filepath.IsLocal(name) && !strings.ContainsAny(name, `/\`) &&
+		!strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) })
 }
 
 func isDirectory(path string) bool {

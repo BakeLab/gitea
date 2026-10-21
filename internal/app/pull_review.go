@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+	"gitea.dev/cli/internal/transport"
 	"github.com/spf13/cobra"
 )
 
@@ -56,7 +58,7 @@ func (r *reviewType) register(cmd *cobra.Command, pending bool) {
 	flags := cmd.Flags()
 	flags.BoolVarP(&r.approve, "approve", "a", false, "Approve the pull request")
 	flags.BoolVarP(&r.requestChanges, "request-changes", "r", false, "Request changes (requires a body)")
-	flags.BoolVarP(&r.comment, "comment", "c", false, "Comment without approving (requires a body or inline comments)")
+	flags.BoolVarP(&r.comment, "comment", "c", false, "Comment without approving (requires a body or inline comments, which can be those of the pending review it publishes; an empty --body clears that review's body when it has inline comments, and is refused otherwise)")
 	if pending {
 		flags.BoolVar(&r.pending, "pending", false, "Save the review as pending, to submit later with gt pr review submit")
 	}
@@ -140,7 +142,11 @@ func (a *application) pullReviewCommand() *cobra.Command {
 	review.Long = `Submit a review on a pull request, or manage existing reviews with the commands below.
 
 Choose the review type with --approve, --request-changes or --comment. On a terminal, leaving
-the type out opens an interactive review that also offers to annotate the diff in your editor.`
+the type out opens an interactive review that also offers to annotate the diff in your editor.
+
+Gitea adds a review to your pending review on the pull request, if you have one, which publishes
+the pending review's inline comments; gt asks first, and without a terminal needs --yes. A body
+you give replaces the pending review's body, which gt warns about; without one, it is kept.`
 	review.Example = reviewExamples
 	review.SuggestionsMinimumDistance = 2
 	create := a.reviewCreateCommand("create [<number> | <url> | <branch>]", `Submit a review (same as "gt pr review")`)
@@ -159,7 +165,7 @@ func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
 	var kind reviewType
 	var body, file, commentsFile, commit string
 	var useEditor bool
-	cmd := &cobra.Command{Use: use, Short: short, Annotations: pullArgumentsAnnotation(nil), Args: reviewArgs, RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+	cmd := &cobra.Command{Use: use, Short: short, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: reviewArgs, RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var draft terminal.Draft
 		defer finishDraft(&draft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
@@ -179,14 +185,19 @@ func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
 			}
 			return a.reviewInteractively(cmd, args)
 		}
-		// A comment needs a body or inline comments, and a change request a body.
+		// A comment needs a body or inline comments, and a change request a body. The inline
+		// comments can be those of the pending review that a comment publishes, looked up below.
 		needsBody := state == "REQUEST_CHANGES" || (state != "APPROVED" && len(comments) == 0)
 		missingBody := clierr.Wrap(clierr.Usage, fmt.Errorf("a %s needs a body; pass --body, --body-file or --editor", reviewNouns[state]))
 		explicit := cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file")
 		if body, err = a.readBody(cmd, body, file); err != nil {
 			return err
 		}
-		if needsBody && strings.TrimSpace(body) == "" && (explicit || (!useEditor && !a.canPrompt())) {
+		noBody := func() bool {
+			return needsBody && strings.TrimSpace(body) == "" && (explicit || (!useEditor && !a.canPrompt()))
+		}
+		// A comment without a body can publish a pending review, looked up below.
+		if noBody() && state != "COMMENT" {
 			return missingBody
 		}
 		t, n, err := a.pullSelector(cmd, args)
@@ -200,6 +211,26 @@ func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
 		if err := ownReview(pull, t, state); err != nil {
 			return err
 		}
+		// The diff of another commit than the head is not at hand, so Gitea checks those comments.
+		if len(comments) > 0 && commit == "" {
+			if err := checkInlineComments(cmd.Context(), t, n, comments); err != nil {
+				return err
+			}
+		}
+		service := services.Reviews{Client: t.client, Repository: t.Repo}
+		pending, err := pendingReview(cmd, service, t, n)
+		if err != nil {
+			return err
+		}
+		if state == "COMMENT" && pendingContent(pending, explicit) {
+			needsBody = false
+		}
+		if needsBody && state == "COMMENT" && explicit && clearsPendingBody(pending, body) {
+			return errClearedPendingBody(cmd, pending.ID, body)
+		}
+		if noBody() {
+			return missingBody
+		}
 		switch {
 		case useEditor:
 			draft, err = a.editDraft(cmd, "")
@@ -211,35 +242,122 @@ func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if body = draft.Body; needsBody && strings.TrimSpace(body) == "" {
-			return missingBody
-		}
-		service := services.Reviews{Client: t.client, Repository: t.Repo}
-		if strings.TrimSpace(body) == "" && !explicit && !useEditor {
-			// Gitea adds a new review to the caller's oldest pending review and replaces its body,
-			// so keep the pending body when none was given, as gt pr review submit does.
-			pending, err := service.Pending(cmd.Context(), n, t.login())
-			if err != nil {
-				return err
-			}
-			if len(pending) > 0 {
-				body = pending[0].Body
+		if body = draft.Body; strings.TrimSpace(body) == "" {
+			dropEmptyDraft(&draft)
+			switch {
+			case needsBody && useEditor:
+				return fmt.Errorf("a %s needs a body, and the editor left it empty", reviewNouns[state])
+			case needsBody:
+				return missingBody
 			}
 		}
-		item, err := service.Create(cmd.Context(), n, services.ReviewOptions{Event: state, Body: body, Commit: commit, Comments: comments})
+		if err := a.foldPendingReview(cmd, t, n, state, pending); err != nil {
+			return err
+		}
+		if !explicit {
+			// An empty editor draft gives no body either.
+			body = pendingBody(pending, body)
+		}
+		item, err := submitReview(cmd.Context(), service, n, pending, services.ReviewOptions{Event: state, Body: body, Commit: commit, Comments: comments})
+		// Gitea fails with an empty server error when the commit to approve or reject is unknown.
+		if apiErr, ok := errors.AsType[*transport.APIError](err); ok && commit != "" && apiErr.Status == http.StatusInternalServerError {
+			return explain(err, "commit %s not found in pull request #%d", commit, n)
+		}
 		if err != nil {
 			return err
 		}
+		a.warnReplacedPendingBody(cmd, pending, body)
 		return a.reportReview(cmd, t, pull, item)
 	}}
 	kind.register(cmd, true)
 	cmd.Flags().StringVarP(&body, "body", "b", "", "Review body")
 	cmd.Flags().StringVarP(&file, "body-file", "F", "", "Read the body from `file`, or - for stdin")
 	cmd.Flags().BoolVarP(&useEditor, "editor", "e", false, "Write the body in your editor")
-	cmd.Flags().StringVar(&commentsFile, "comments-file", "", "Read inline comments from a JSON `file`: an array of path, body, and new_position or old_position")
+	cmd.Flags().StringVar(&commentsFile, "comments-file", "", "Read inline comments from a JSON `file`: an array of path, body, and new_position or old_position on a line of the diff")
 	cmd.Flags().StringVar(&commit, "commit", "", "Commit `sha` to review (default: the head of the pull request)")
 	cmd.ValidArgsFunction = firstArg(a.completePulls("open"))
 	return cmd
+}
+
+// pendingReview returns the account's pending review on pull request n, or nil: Gitea adds a new
+// review to the oldest pending one.
+func pendingReview(cmd *cobra.Command, service services.Reviews, t target, n int64) (*services.Review, error) {
+	pending, err := service.Pending(cmd.Context(), n, t.login())
+	if err != nil || len(pending) == 0 {
+		return nil, err
+	}
+	return &pending[0], nil
+}
+
+// submitReview creates a review with opts on pull request n. A comment with neither a body nor
+// inline comments of its own publishes pending, the pending review it is added to, instead: Gitea
+// refuses to create such a comment even when the pending review has inline comments.
+func submitReview(ctx context.Context, service services.Reviews, n int64, pending *services.Review, opts services.ReviewOptions) (services.Review, error) {
+	if opts.Event == "COMMENT" && pending != nil && strings.TrimSpace(opts.Body) == "" && len(opts.Comments) == 0 {
+		return service.Submit(ctx, n, pending.ID, services.ReviewSubmitOptions{Event: opts.Event, Body: &opts.Body})
+	}
+	return service.Create(ctx, n, opts)
+}
+
+// pendingContent reports whether pending, the pending review a comment would publish, has a body
+// or inline comments, which the comment then needs no more. The body counts only when it is kept,
+// not replaced by an explicit empty body.
+func pendingContent(pending *services.Review, replaced bool) bool {
+	return pending != nil && ((!replaced && strings.TrimSpace(pending.Body) != "") || pending.CommentsCount > 0)
+}
+
+// clearsPendingBody reports whether a comment with body, which publishes pending, the pending
+// review it is added to, would leave pending empty: it clears the body of a pending review that
+// has no inline comments.
+func clearsPendingBody(pending *services.Review, body string) bool {
+	return pending != nil && pending.CommentsCount == 0 && strings.TrimSpace(pending.Body) != "" && strings.TrimSpace(body) == ""
+}
+
+// dropEmptyDraft removes the editor draft when its body is blank: an empty draft holds nothing to
+// keep.
+func dropEmptyDraft(draft *terminal.Draft) {
+	if strings.TrimSpace(draft.Body) == "" && draft.Path != "" {
+		_ = os.Remove(draft.Path)
+		draft.Path = ""
+	}
+}
+
+// errClearedPendingBody refuses body, the empty or blank body given with --body or --body-file, of
+// a comment that would publish pending review id with its body cleared and nothing else: Gitea
+// refuses an empty review.
+func errClearedPendingBody(cmd *cobra.Command, id int64, body string) error {
+	given, flag := `-b ""`, "--body"
+	switch {
+	case cmd.Flags().Changed("body-file") && body == "":
+		given, flag = "an empty --body-file", "--body-file"
+	case cmd.Flags().Changed("body-file"):
+		given, flag = "a blank --body-file", "--body-file"
+	case body != "":
+		given = "a blank --body"
+	}
+	return clierr.Wrap(clierr.Usage, fmt.Errorf("%s would clear the body of pending review %d and leave it empty; leave out %s to keep its body", given, id, flag))
+}
+
+// foldPendingReview asks to fold review, the account's pending review on pull request n, if any,
+// into the review about to be submitted with state: Gitea adds the new review to it, which
+// publishes the pending review's inline comments and replaces its body. A new pending review just
+// adds to the pending one, without asking.
+func (a *application) foldPendingReview(cmd *cobra.Command, t target, n int64, state string, review *services.Review) error {
+	if review == nil || state == "PENDING" {
+		return nil
+	}
+	comments := ""
+	switch {
+	case review.CommentsCount == 1:
+		comments = " and its inline comment"
+	case review.CommentsCount > 1:
+		comments = fmt.Sprintf(" and its %d inline comments", review.CommentsCount)
+	}
+	confirmation := terminal.Confirmation{
+		Prompt: fmt.Sprintf("Your pending review %d on #%d becomes part of this %s, which publishes it%s. Continue?", review.ID, n, reviewNouns[state], comments),
+		NonTTY: fmt.Sprintf("publish your pending review %d on %s#%d%s with this %s (or submit it with gt pr review submit %d)", review.ID, t.Repo, n, comments, reviewNouns[state], n),
+	}
+	return a.confirmAction(cmd, confirmation)
 }
 
 // ownReview refuses to approve or request changes on one's own pull request before any body is
@@ -292,6 +410,43 @@ func readInlineComments(path string) ([]services.InlineComment, error) {
 	return comments, nil
 }
 
+// checkInlineComments refuses inline comments that are not on a line of the diff of pull request n,
+// which Gitea would store without showing them in the diff.
+func checkInlineComments(ctx context.Context, t target, n int64, comments []services.InlineComment) error {
+	diff, err := (services.Pulls{Client: t.client, Repository: t.Repo}).Diff(ctx, n)
+	if err != nil {
+		return err
+	}
+	defer diff.Close()
+	data, err := io.ReadAll(diff)
+	if err != nil {
+		return err
+	}
+	return checkDiffComments(string(data), n, comments)
+}
+
+// checkDiffComments refuses inline comments that are not on a line of diff, the diff of pull request n.
+func checkDiffComments(diff string, n int64, comments []services.InlineComment) error {
+	lines := diffLines(diff)
+	files := map[string]bool{}
+	for line := range lines {
+		files[line.path] = true
+	}
+	for _, comment := range comments {
+		side, line := "new_position", comment.NewLine
+		if comment.OldLine != 0 {
+			side, line = "old_position", comment.OldLine
+		}
+		switch {
+		case !files[comment.Path]:
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("inline comment on %q: pull request #%d does not change that file", comment.Path, n))
+		case !lines[diffLine{comment.Path, comment.OldLine != 0, line}]:
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("inline comment on %q: %s %d is not a line of the diff of pull request #%d", comment.Path, side, line, n))
+		}
+	}
+	return nil
+}
+
 func (a *application) reviewInteractively(cmd *cobra.Command, args []string) error {
 	t, n, err := a.pullSelector(cmd, args)
 	if err != nil {
@@ -305,10 +460,16 @@ func (a *application) reviewInteractively(cmd *cobra.Command, args []string) err
 	if err != nil {
 		return err
 	}
+	service := services.Reviews{Client: t.client, Repository: t.Repo}
+	pending, err := pendingReview(cmd, service, t, n)
+	if err != nil {
+		return err
+	}
 	choices := terminal.ReviewFormChoices{
-		Header: fmt.Sprintf("Reviewing #%d %q (%s → %s) in %s", n, pull.Title, pullHead(pull, t.Repo), pull.Base, t.Repo),
-		Author: t.login() != "" && strings.EqualFold(pull.Author, t.login()),
-		Editor: preferences.Editor,
+		Header:  fmt.Sprintf("Reviewing #%d %q (%s → %s) in %s", n, pull.Title, pullHead(pull, t.Repo), pull.Base, t.Repo),
+		Author:  t.login() != "" && strings.EqualFold(pull.Author, t.login()),
+		Editor:  preferences.Editor,
+		Pending: pendingContent(pending, false),
 	}
 	// The annotated diff stays until the review is created, so declining or a failure loses no comment.
 	var diffPath string
@@ -325,11 +486,16 @@ func (a *application) reviewInteractively(cmd *cobra.Command, args []string) err
 	}
 	var item services.Review
 	if err == nil {
-		opts := services.ReviewOptions{Event: values.Event, Body: values.Body}
+		err = a.foldPendingReview(cmd, t, n, values.Event, pending)
+	}
+	body := values.Body
+	if err == nil {
+		body = pendingBody(pending, body)
+		opts := services.ReviewOptions{Event: values.Event, Body: body}
 		for _, comment := range values.Comments {
 			opts.Comments = append(opts.Comments, services.InlineComment(comment))
 		}
-		item, err = (services.Reviews{Client: t.client, Repository: t.Repo}).Create(cmd.Context(), n, opts)
+		item, err = submitReview(cmd.Context(), service, n, pending, opts)
 	}
 	if err != nil {
 		draft := keepDraft(values.Body)
@@ -342,7 +508,26 @@ func (a *application) reviewInteractively(cmd *cobra.Command, args []string) err
 	if diffPath != "" {
 		_ = os.Remove(diffPath)
 	}
+	a.warnReplacedPendingBody(cmd, pending, body)
 	return a.reportReview(cmd, t, pull, item)
+}
+
+// pendingBody returns body, or when it is blank the body of pending, the pending review that the
+// new review is added to: Gitea replaces the pending review's body, so keep it when none was
+// given, as gt pr review submit does.
+func pendingBody(pending *services.Review, body string) string {
+	if pending != nil && strings.TrimSpace(body) == "" {
+		return pending.Body
+	}
+	return body
+}
+
+// warnReplacedPendingBody warns that body replaced the body of pending, the pending review that
+// Gitea added a review to.
+func (a *application) warnReplacedPendingBody(cmd *cobra.Command, pending *services.Review, body string) {
+	if pending != nil && strings.TrimSpace(pending.Body) != "" && body != pending.Body {
+		a.warn(cmd, "Replaced the earlier body of your pending review %d", pending.ID)
+	}
 }
 
 // pullHead names the head branch of a pull request, as OWNER:BRANCH when it is in a fork of repo.
@@ -374,20 +559,25 @@ func (a *application) collectDiffReviewComments(cmd *cobra.Command, t target, n 
 		return nil, "", err
 	}
 	loaded.Wait()
-	defer diff.Close()
-	path, err := saveDiffReview("", n, t.Repo, diff, existing)
+	data, err := io.ReadAll(diff)
+	diff.Close()
 	if err != nil {
 		return nil, "", err
 	}
-	comments, err := a.reviewDiffFile(cmd, path)
+	path, annotated, err := saveDiffReview("", n, t.Repo, strings.NewReader(string(data)), existing)
+	if err != nil {
+		return nil, "", err
+	}
+	comments, err := a.reviewDiffFile(cmd, path, annotated, string(data), n)
 	if err != nil {
 		return nil, "", fmt.Errorf("%w; the annotated diff is kept at %s", err, path)
 	}
 	return comments, path, nil
 }
 
-// reviewDiffFile lets the user annotate the diff at path and returns the validated comments.
-func (a *application) reviewDiffFile(cmd *cobra.Command, path string) ([]terminal.ReviewCommentDraft, error) {
+// reviewDiffFile lets the user annotate diff, the diff of pull request n saved at path as annotated,
+// and returns the comments once they are checked against diff.
+func (a *application) reviewDiffFile(cmd *cobra.Command, path, annotated, diff string, n int64) ([]terminal.ReviewCommentDraft, error) {
 	if err := a.editPath(cmd, path); err != nil {
 		return nil, err
 	}
@@ -396,14 +586,19 @@ func (a *application) reviewDiffFile(cmd *cobra.Command, path string) ([]termina
 		return nil, fmt.Errorf("couldn't load diff: %w", err)
 	}
 	defer file.Close()
-	comments, err := parseDiffComments(file)
+	comments, err := parseDiffComments(annotated, file)
 	if err != nil {
 		return nil, err
 	}
+	inline := make([]services.InlineComment, 0, len(comments))
 	for _, comment := range comments {
 		if err := services.InlineComment(comment).Validate(); err != nil {
 			return nil, err
 		}
+		inline = append(inline, services.InlineComment(comment))
+	}
+	if err := checkDiffComments(diff, n, inline); err != nil {
+		return nil, err
 	}
 	return comments, nil
 }

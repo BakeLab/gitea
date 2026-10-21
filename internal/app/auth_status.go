@@ -32,7 +32,7 @@ type authStatusRow struct {
 	Available bool       `json:"credential_available"`
 	ExpiresAt *time.Time `json:"expires_at"`
 	Verified  *bool      `json:"verified"`
-	Scopes    []string   `json:"scopes,omitempty"`
+	Scopes    []string   `json:"scopes"`
 	Error     string     `json:"error"`
 	account   settings.Account
 }

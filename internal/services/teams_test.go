@@ -83,7 +83,7 @@ func TestTeamCreateSendsPermissionAndUnits(t *testing.T) {
 		Name: &name, Permission: &permission, CanCreateRepo: &createRepo, AllRepositories: &allRepos, Units: map[string]string{"repo.code": "write"},
 	})
 	require.NoError(t, err)
-	require.Equal(t, Team{ID: 3, Name: "Developers", Organization: "acme", Permission: "write", CanCreateRepo: true, Units: map[string]string{"repo.code": "write"}}, item)
+	require.Equal(t, Team{ID: 3, Name: "Developers", Organization: "acme", Permission: "write", Access: "write", CanCreateRepo: true, Units: map[string]string{"repo.code": "write"}}, item)
 }
 
 func TestTeamAccessRequests(t *testing.T) {
@@ -116,7 +116,7 @@ func TestTeamAccessRequests(t *testing.T) {
 
 func TestTeamFromKeepsAbsentValuesEmpty(t *testing.T) {
 	item := teamFrom(decode[gitea.Team](t, `{"id":1,"name":"Owners","permission":"owner","organization":null,"units_map":null}`))
-	require.Equal(t, Team{ID: 1, Name: "Owners", Permission: "owner", Units: map[string]string{}}, item)
+	require.Equal(t, Team{ID: 1, Name: "Owners", Permission: "owner", Access: "owner", Units: map[string]string{}}, item)
 }
 
 func TestTeamUnitLevelAppliesThePermissionToEveryUnit(t *testing.T) {
@@ -147,7 +147,7 @@ func TestTeamAccessSummarizesUnits(t *testing.T) {
 		{"write", map[string]string{"repo.wiki": "read"}, "write"},
 		{"read", map[string]string{"repo.code": "write"}, "custom"},
 	} {
-		require.Equal(t, tc.want, Team{Permission: tc.permission, Units: tc.units}.Access(), "%v", tc.units)
+		require.Equal(t, tc.want, Team{Permission: tc.permission, Units: tc.units}.EffectiveAccess(), "%v", tc.units)
 	}
 }
 
@@ -169,7 +169,7 @@ func TestTeamFindSearchesTheOrganization(t *testing.T) {
 	service := Teams{Client: client}
 	team, err := service.Find(context.Background(), "acme", "devops")
 	require.NoError(t, err)
-	require.Equal(t, Team{ID: 4, Name: "devops", Organization: "acme", Units: map[string]string{}}, team)
+	require.Equal(t, Team{ID: 4, Name: "devops", Organization: "acme", Access: "none", Units: map[string]string{}}, team)
 	team, err = service.Find(context.Background(), "acme", "3")
 	require.NoError(t, err)
 	require.Equal(t, "Dev", team.Name)

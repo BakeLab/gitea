@@ -5,6 +5,7 @@ package terminal
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,14 +43,30 @@ func TestJSONOutputSafeStripsControlsAndStaysOnOneLine(t *testing.T) {
 	require.Equal(t, "a]0;xb\n", out.String())
 	out.Reset()
 	require.NoError(t, JSONOutput{Safe: true}.Write(&out, value))
-	require.Equal(t, "{\"title\":\"a\\u001b]0;x\\u0007b\"}\n", out.String())
+	require.Equal(t, "{\"title\":\"a\\u001b]0;x\\u0007b\\u202e\"}\n", out.String())
+}
+
+func TestTerminalJSONEscapesFormatCharactersInsteadOfDroppingThem(t *testing.T) {
+	// Bidirectional overrides, zero-width characters, DEL, C1 controls and format characters outside
+	// the basic plane decode back to the same data.
+	value := map[string]any{"title": "bidi\u202egnp.exe|zw\u200b\u200dj|del\x7f|c1\u009b|tag\U000e0041"}
+	var out bytes.Buffer
+	require.NoError(t, JSONOutput{Pretty: true}.Write(&out, value))
+	require.Equal(t, "{\n  \"title\": \"bidi\\u202egnp.exe|zw\\u200b\\u200dj|del\\u007f|c1\\u009b|tag\\udb40\\udc41\"\n}\n", out.String())
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(out.Bytes(), &decoded))
+	require.Equal(t, value, decoded)
+
+	indented, err := IndentJSON([]byte("{\"title\":\"a\u202eb\x7f\"}"), false)
+	require.NoError(t, err)
+	require.Equal(t, "{\n  \"title\": \"a\\u202eb\\u007f\"\n}\n", indented)
 }
 
 func TestJSONOutputIsIndentedAndColoredForTerminals(t *testing.T) {
 	var out bytes.Buffer
 	value := []map[string]any{{"title": "a \u202e\x1b[31mb", "done": true, "due": nil, "number": 1}}
 	require.NoError(t, JSONOutput{Fields: "number,title", Pretty: true}.Write(&out, value))
-	require.Equal(t, "[\n  {\n    \"number\": 1,\n    \"title\": \"a \\u001b[31mb\"\n  }\n]\n", out.String())
+	require.Equal(t, "[\n  {\n    \"number\": 1,\n    \"title\": \"a \\u202e\\u001b[31mb\"\n  }\n]\n", out.String())
 	out.Reset()
 	require.NoError(t, JSONOutput{Pretty: true, Color: true}.Write(&out, map[string]any{"done": true, "due": nil, "title": "x: \"y\""}))
 	require.Equal(t, "{\n  \x1b[1;34m\"done\"\x1b[0m: \x1b[33mtrue\x1b[0m,\n  \x1b[1;34m\"due\"\x1b[0m: \x1b[36mnull\x1b[0m,\n  \x1b[1;34m\"title\"\x1b[0m: \x1b[32m\"x: \\\"y\\\"\"\x1b[0m\n}\n", out.String())

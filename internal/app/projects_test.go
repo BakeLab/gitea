@@ -59,3 +59,33 @@ func TestIssueEditAddsToAndRemovesFromProjects(t *testing.T) {
 	requireUsageBeforeRequests(t, "project names cannot be empty", "issue", "create", "--title", "x", "--project", " ")
 	requireUsageBeforeRequests(t, "--project cannot be combined with --web", "issue", "create", "--title", "x", "--project", "Board", "--web")
 }
+
+func TestPullEditChangesProjectsOnlyOnceTheEditSucceeded(t *testing.T) {
+	var mutations []string
+	projects, rejectEdit := projectServer(t, &mutations), true
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/acme/app/pulls/12" && rejectEdit:
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"invalid title"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/acme/app/pulls/12":
+			_, _ = w.Write([]byte(`{"number":12,"title":"Fix"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/acme/app/pulls/12":
+			_, _ = w.Write([]byte(`{"number":12,"title":"Crash"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs/acme/projects/3/columns/11/issues/70" && !rejectEdit:
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			projects.ServeHTTP(w, r)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"pr", "edit", "12", "-R", "acme/app", "--title", "Fix", "--add-project", "Board"})
+	require.ErrorContains(t, err, "invalid title")
+	require.Empty(t, mutations)
+	// A project that cannot be changed after the edit is reported as a follow-up failure.
+	rejectEdit = false
+	err = Execute(context.Background(), deps, []string{"pr", "edit", "12", "-R", "acme/app", "--title", "Fix", "--add-project", "Board", "--json", "title"})
+	require.ErrorContains(t, err, `pull request #12 was edited, but follow-up steps failed: add to project "Board"`)
+	require.JSONEq(t, `{"title":"Fix"}`, out.String())
+}

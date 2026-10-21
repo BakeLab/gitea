@@ -91,8 +91,8 @@ func (s Times) ListPage(ctx context.Context, opts TimeOptions) (Page[TrackedTime
 
 // Find returns the tracked time record id on issue n.
 func (s Times) Find(ctx context.Context, n, id int64) (TrackedTime, error) {
-	records, err := listAll(func(page int) ([]TrackedTime, error) {
-		return s.List(ctx, TimeOptions{Issue: n, Limit: 50, Page: page})
+	records, err := listEvery(50, func(limit, page int) (Page[TrackedTime], error) {
+		return s.ListPage(ctx, TimeOptions{Issue: n, Limit: limit, Page: page})
 	})
 	if err != nil {
 		return TrackedTime{}, err
@@ -111,7 +111,7 @@ func (s Times) Create(ctx context.Context, n, seconds int64) (TrackedTime, error
 		return c.Issues.AddTime(ctx, owner, repo, n, gitea.AddTimeOption{Time: seconds})
 	})
 	if err != nil {
-		return TrackedTime{}, err
+		return TrackedTime{}, (Issues{Client: s.Client, Repository: s.Repository}).issueError(ctx, err, n)
 	}
 	result := trackedTimeFrom(record, s.Repository)
 	result.IssueNumber = n

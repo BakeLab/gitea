@@ -117,6 +117,9 @@ func TestJoinJSONFields(t *testing.T) {
 		{[]string{"run", "list", "--json", "workflow", "--limit", "5"}, []string{"run", "list", "--json=workflow", "--limit", "5"}},
 		{[]string{"issue", "view", "--json", "titel"}, []string{"issue", "view", "--json", "titel"}},
 		{[]string{"issue", "view", "5", "--json", "titel"}, []string{"issue", "view", "5", "--json=titel"}},
+		// A list that names a field is a field list, even where the command takes an argument.
+		{[]string{"issue", "view", "--json", "number,titel"}, []string{"issue", "view", "--json=number,titel"}},
+		{[]string{"search", "repo", "--json", "name,urll"}, []string{"search", "repo", "--json=name,urll"}},
 	} {
 		deps, _, _ := testDeps(t)
 		require.Equal(t, tc.want, joinJSONFields(NewRoot(deps), tc.args), tc.args)

@@ -18,6 +18,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+	"github.com/mattn/go-runewidth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -96,6 +97,45 @@ func TestRunTimeBoundsUseOneClockReading(t *testing.T) {
 	err := Execute(context.Background(), deps, []string{"run", "list", "--since=1h", "--until=2h"})
 	require.ErrorContains(t, err, "--since must not be later than --until")
 	require.Equal(t, 1, reads)
+}
+
+func TestRunListResolvesAShortCommitInTheClone(t *testing.T) {
+	full := "f0c151dde0c0ef6c" + strings.Repeat("0", 24)
+	var commits []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		commits = append(commits, r.URL.Query().Get("head_sha"))
+		_, _ = w.Write([]byte(`{"total_count":0,"workflow_runs":[]}`))
+	}))
+	defer server.Close()
+	deps, _, _ := actionsDeps(t, server.URL, false)
+	deps.Git = &fakeGit{results: map[string]string{"rev-parse --verify --quiet --end-of-options f0c151d^{commit}": full}}
+	for _, commit := range []string{"f0c151d", strings.ToUpper(full)} {
+		require.NoError(t, Execute(context.Background(), deps, []string{"run", "list", "-R", "alice/project", "--commit", commit}))
+	}
+	require.Equal(t, []string{full, full}, commits)
+	// Outside a clone that knows it, a short SHA would match no run.
+	deps.Git = &fakeGit{}
+	err := Execute(context.Background(), deps, []string{"run", "list", "-R", "alice/project", "--commit", "f0c151d"})
+	require.EqualError(t, err, `--commit requires a full commit SHA, or a revision of the local clone; "f0c151d" is neither`)
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.Len(t, commits, 2)
+}
+
+func TestRunListDoesNotOfferJobs(t *testing.T) {
+	// Only gt run view and gt run watch fetch the jobs of a run.
+	for _, args := range [][]string{{"list"}, {"cancel", "1"}, {"rerun", "1"}} {
+		requireUsageBeforeRequests(t, `unknown JSON field "jobs"`, append(append([]string{"run"}, args...), "--json", "jobs")...)
+	}
+	deps, _, _ := testDeps(t)
+	for _, command := range []string{"view", "watch"} {
+		cmd, _, err := NewRoot(deps).Find([]string{"run", command})
+		require.NoError(t, err)
+		require.Contains(t, commandOutputFields(cmd), "jobs", command)
+	}
+	server, _ := actionsAPI(t, map[string]string{"GET actions/runs": `{"total_count":1,"workflow_runs":[` + queuedRunFixture + `]}`, "GET actions/workflows": workflowsFixture})
+	deps, out, _ := actionsDeps(t, server.URL, false)
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "list", "-R", "alice/project", "--json"}))
+	require.NotContains(t, out.String(), `"jobs"`)
 }
 
 func TestRunListShowsStatusWorkflowAndTiming(t *testing.T) {
@@ -226,6 +266,44 @@ View this run on Gitea: https://gitea.test/alice/project/actions/runs/29
 	}
 }
 
+func TestRunViewFitsStepsToTheTerminalWidth(t *testing.T) {
+	run := services.Run{ID: 5, Status: "completed", Conclusion: "success", Jobs: []services.Job{{
+		ID: 6, Name: "build", Status: "completed", Conclusion: "success",
+		Steps: []services.Step{{Name: "Run for i in 1 2 3; do echo $i; sleep 1; done && make test", Status: "completed", Conclusion: "success"}},
+	}}}
+	text := renderRun(run, terminal.Display{TTY: true, Width: 40, Now: actionsNow}, nil)
+	_, jobs, _ := strings.Cut(text, "JOBS\n")
+	require.Equal(t, "✓  build               success    (ID 6)\n     ✓ Run for i in …\n", jobs)
+	for line := range strings.Lines(jobs) {
+		require.LessOrEqual(t, runewidth.StringWidth(strings.TrimSuffix(line, "\n")), 40, line)
+	}
+}
+
+func TestRunViewFitsItsHeadingAndFactsToTheTerminalWidth(t *testing.T) {
+	run := services.Run{
+		ID: 1, RunNumber: 3, Workflow: "integration", Title: "Make every command fit an eighty-column terminal, including the run view",
+		Status: "completed", Conclusion: "failure", Branch: "main", Commit: "991205e0c0ef6c", Actor: "integration", Event: "push",
+		CreatedAt: "2028-01-01T06:00:00Z", StartedAt: new("2028-01-01T06:00:00Z"), CompletedAt: new("2028-01-01T06:00:03Z"),
+	}
+	text := renderRun(run, terminal.Display{TTY: true, Width: 80, Now: actionsNow}, nil)
+	require.Equal(t, `X Make every command fit an eighty-column terminal, incl… integration #3 · run 1
+failure • main • 991205e • integration triggered it via push about 6 hours ago
+took 3s
+`, text)
+	// A fact or a workflow wider than the terminal is cut too.
+	run.Branch = strings.Repeat("b", 50)
+	run.Workflow = strings.Repeat("w", 50)
+	text = renderRun(run, terminal.Display{TTY: true, Width: 40, Now: actionsNow}, nil)
+	for line := range strings.Lines(text) {
+		require.LessOrEqual(t, runewidth.StringWidth(strings.TrimSuffix(line, "\n")), 40, line)
+	}
+	require.Contains(t, text, "X Make ev… "+strings.Repeat("w", 17)+"… #3 · run 1\n")
+	// Without a width, nothing is cut or wrapped.
+	text = renderRun(run, terminal.Display{TTY: true, Now: actionsNow}, nil)
+	require.Contains(t, text, run.Title+" "+run.Workflow+" #3 · run 1\n")
+	require.Contains(t, text, " • took 3s\n")
+}
+
 // choosingPrompter answers selections with the choice at index choose.
 type choosingPrompter struct {
 	scriptedPrompter
@@ -343,10 +421,27 @@ func TestRunWatchRedrawsOnATerminalAndSummarizes(t *testing.T) {
 		"GET actions/runs/7/jobs": `{"jobs":[]}`,
 	})
 	deps, out, diagnostics := actionsDeps(t, server.URL, true)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"TERM": "xterm", "GITEA_CLI_COLOR": "never"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"run", "watch", "7", "-R", "alice/project", "--interval=2s"}))
 	frame := "✓ Ship it CI · run 7\nsuccess • triggered about 1 minute ago • took 30s\n"
 	require.Equal(t, "\x1b[?1049h\x1b[H\x1b[JRefreshing run status every 2s. Press Ctrl+C to quit.\n\n"+frame+"\x1b[?1049l"+frame, out.String())
 	require.Equal(t, "✓ Run 7 (CI) completed with success in 30s\n", diagnostics.String())
+
+	// A dumb terminal, or a console that does not interpret escape sequences, gets the progress
+	// lines instead of a redraw.
+	for _, plain := range []func(*Dependencies){
+		func(deps *Dependencies) { deps.Getenv = serverEnv(server.URL, map[string]string{"TERM": "dumb"}) },
+		func(deps *Dependencies) {
+			deps.Getenv = serverEnv(server.URL, map[string]string{"TERM": "xterm"})
+			deps.Streams.OutPlain = true
+		},
+	} {
+		deps, out, diagnostics := actionsDeps(t, server.URL, true)
+		plain(&deps)
+		require.NoError(t, Execute(context.Background(), deps, []string{"run", "watch", "7", "-R", "alice/project", "--interval=2s"}))
+		require.NotContains(t, out.String(), "\x1b[")
+		require.Contains(t, diagnostics.String(), "run 7: success\n")
+	}
 }
 
 func TestRunMutationsReportWhatHappened(t *testing.T) {
@@ -375,10 +470,10 @@ func TestRunMutationsReportWhatHappened(t *testing.T) {
 		},
 		{
 			"cancel with fields the server may leave empty",
-			[]string{"run", "cancel", "47", "--json", "id,jobs,attempt,event"},
+			[]string{"run", "cancel", "47", "--json", "id,attempt,event"},
 			map[string]string{"POST actions/runs/47/cancel": `{"id":47}`, "GET actions/workflows": workflowsFixture},
 			[]string{"POST actions/runs/47/cancel", "GET actions/workflows"},
-			`{"id":47,"jobs":null,"attempt":0,"event":""}`, "", nil,
+			`{"id":47,"attempt":0,"event":""}`, "", nil,
 		},
 		{
 			"rerun",

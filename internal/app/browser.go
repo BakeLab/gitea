@@ -14,12 +14,18 @@ import (
 
 // openBrowser opens resource in the configured browser, telling people on a terminal what opens.
 func (a *application) openBrowser(command *cobra.Command, resource string) error {
+	return a.openBrowserShowing(command, resource, displayURL(resource))
+}
+
+// openBrowserShowing is openBrowser naming resource as shown, such as the whole URL when people
+// may have to copy it.
+func (a *application) openBrowserShowing(command *cobra.Command, resource, shown string) error {
 	preferences, err := a.preferences()
 	if err != nil {
 		return err
 	}
 	if a.deps.Streams.OutTTY {
-		fmt.Fprintf(command.ErrOrStderr(), "Opening %s in your browser.\n", displayURL(resource))
+		fmt.Fprintf(command.ErrOrStderr(), "Opening %s in your browser.\n", shown)
 	}
 	return a.deps.Browser.Open(command.Context(), resource, preferences.Browser)
 }

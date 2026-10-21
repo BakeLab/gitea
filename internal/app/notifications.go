@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
@@ -27,7 +26,8 @@ type notificationScope struct {
 
 func (a *application) notificationCommand() *cobra.Command {
 	group := &cobra.Command{Use: "notification", Short: "Read and triage your notifications", Long: `Read and triage the notifications of your account, across your whole inbox unless -R or
---this-repo selects a repository. IDs identify notification threads, not issue numbers.`}
+--this-repo selects a repository. IDs identify notification threads, not issue numbers. The
+type of a notification is issue, pull, commit or repository, as --type selects them.`}
 	var thisRepo bool
 	group.PersistentFlags().BoolVar(&thisRepo, "this-repo", false, "Only notifications of the repository in the current directory")
 	scope := func(cmd *cobra.Command) (notificationScope, error) {
@@ -90,7 +90,12 @@ func (a *application) notificationCommand() *cobra.Command {
 				}
 				if !all {
 					return batchDone(a, cmd, ids, func(id int64) string { return fmt.Sprintf("notification %d", id) }, func(id int64) (services.Notification, error) {
-						return s.Mark(cmd.Context(), id, mark.status)
+						item, err := s.Mark(cmd.Context(), id, mark.status)
+						// The batch names the notification already.
+						if services.IsNotFound(err) {
+							return item, explain(err, "not found %s", s.where)
+						}
+						return item, err
 					}, func(item services.Notification) string { return fmt.Sprintf(mark.done, notificationLabel(item)) })
 				}
 				what := notificationsWith(filters)
@@ -190,7 +195,8 @@ func (a *application) notificationWatchCommand(scope func(*cobra.Command) (notif
 		Use: "watch", Short: "Print notifications as they arrive", Args: argsExact(0),
 		Long: `Print notifications as they arrive or change, until Ctrl-C or --timeout. On a terminal
 it runs until stopped; otherwise it stops after a minute unless --timeout says otherwise.
-With --json it prints one JSON object per line.`,
+With --json it prints one JSON object per line. It polls on through an outage of the instance
+of up to 5 minutes.`,
 		Example: "$ gt notification watch\n# Stream pull request notifications to a script, starting with the current ones\n$ gt notification watch --type pull --json id,repository,title --timeout 0 | ./notify.sh",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			listed, err := a.notificationOptions(opts, updated)
@@ -241,7 +247,7 @@ With --json it prints one JSON object per line.`,
 				}
 				return nil
 			})
-			if errors.Is(err, context.DeadlineExceeded) && cmd.Context().Err() == nil {
+			if expired(err) && cmd.Context().Err() == nil {
 				return nil
 			}
 			return err
@@ -310,7 +316,7 @@ var notificationColumns = []terminal.Column{
 func notificationRow(item services.Notification) []terminal.Cell {
 	return []terminal.Cell{
 		{Text: strconv.FormatInt(item.ID, 10), Link: item.URL},
-		{Text: strings.ToLower(item.Type)},
+		{Text: item.Type},
 		{Text: item.Repository},
 		{Text: notificationSubject(item), Bold: item.Unread, Muted: !item.Unread && !item.Pinned},
 		{Text: item.State, Color: stateColors[item.State]},
@@ -370,7 +376,7 @@ func subjectRef(item services.Notification) string {
 }
 
 // notificationKinds names the subject types in a view footer.
-var notificationKinds = map[string]string{"Issue": "issue", "Pull": "pull request", "Commit": "commit", "Repository": "repository"}
+var notificationKinds = map[string]string{"issue": "issue", "pull": "pull request", "commit": "commit", "repository": "repository"}
 
 // notificationView shows a notification with the latest comment on its subject as the body.
 func notificationView(item services.Notification, comment *services.Comment, d terminal.Display) terminal.View {
@@ -413,7 +419,7 @@ func watchLine(item services.Notification, d terminal.Display) string {
 		when = d.Now
 	}
 	subject := subjectRef(item)
-	details := terminal.SafeLine(strings.ToLower(item.Type))
+	details := terminal.SafeLine(item.Type)
 	if item.State != "" {
 		details += " · " + terminal.Colorize(stateColors[item.State], terminal.SafeLine(item.State), d.Color)
 	}

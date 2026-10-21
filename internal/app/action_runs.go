@@ -18,6 +18,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +35,13 @@ func (a *application) runCommand() *cobra.Command {
 	}
 	group.AddCommand(a.runListCommand(), a.runViewCommand(), a.runWatchCommand(), a.runCancelCommand(), a.runRerunCommand(), a.runDeleteCommand(),
 		a.runJobsCommand(), a.runLogsCommand(), a.runDownloadCommand(), a.artifactCommand())
-	return jsonOutput(group, jsonFields[services.Run]())
+	// Only gt run view and gt run watch fetch the jobs of a run.
+	return jsonOutput(group, runFieldsWithoutJobs())
+}
+
+// runFieldsWithoutJobs are the JSON fields of a run for the commands that do not fetch its jobs.
+func runFieldsWithoutJobs() []string {
+	return slices.DeleteFunc(jsonFields[services.Run](), func(field string) bool { return field == "jobs" })
 }
 
 func (a *application) runListCommand() *cobra.Command {
@@ -60,6 +67,9 @@ $ gt run list --since 24h --json id,status,conclusion,workflow`,
 			}
 			if err := filters.Validate(); err != nil {
 				return clierr.Wrap(clierr.Usage, err)
+			}
+			if filters.Commit, err = a.fullCommitSHA(cmd.Context(), filters.Commit); err != nil {
+				return err
 			}
 			t, err := a.resolve(cmd.Context(), true)
 			if err != nil {
@@ -102,7 +112,7 @@ $ gt run list --since 24h --json id,status,conclusion,workflow`,
 	cmd.Flags().StringVarP(&filters.Branch, "branch", "b", "", "Filter by branch")
 	cmd.Flags().StringVarP(&filters.Event, "event", "e", "", "Filter by the event that triggered the run, such as push")
 	cmd.Flags().StringVarP(&filters.Actor, "actor", "u", "", "Filter by the user who triggered the run (@me for yourself)")
-	cmd.Flags().StringVarP(&filters.Commit, "commit", "c", "", "Filter by the SHA of the commit that triggered the run")
+	cmd.Flags().StringVarP(&filters.Commit, "commit", "c", "", "Filter by the commit that triggered the run: its full SHA, or a revision of the local clone")
 	cmd.Flags().StringSliceVarP(&filters.Statuses, "status", "s", nil, "Filter by status or conclusion")
 	enumValues(cmd, "status", services.RunStatuses...)
 	_ = cmd.RegisterFlagCompletionFunc("workflow", a.completeWorkflows())
@@ -110,6 +120,24 @@ $ gt run list --since 24h --json id,status,conclusion,workflow`,
 	_ = cmd.RegisterFlagCompletionFunc("event", completeValues(runEvents...))
 	_ = cmd.RegisterFlagCompletionFunc("actor", a.completeUsers())
 	return cmd
+}
+
+// fullCommitSHA returns the full SHA of commit for --commit, which Gitea matches only in full: a
+// shorter SHA or another revision is resolved in the local clone.
+func (a *application) fullCommitSHA(ctx context.Context, commit string) (string, error) {
+	if commit == "" || isFullSHA(strings.ToLower(commit)) {
+		return strings.ToLower(commit), nil
+	}
+	full, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "--quiet", "--end-of-options", commit+"^{commit}")
+	if err != nil || !isFullSHA(full) {
+		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("--commit requires a full commit SHA, or a revision of the local clone; %q is neither", commit))
+	}
+	return full, nil
+}
+
+// isFullSHA reports whether s is a full SHA-1 or SHA-256 commit ID in lowercase hex.
+func isFullSHA(s string) bool {
+	return (len(s) == 40 || len(s) == 64) && strings.Trim(s, "0123456789abcdef") == ""
 }
 
 // runEvents are the events that commonly trigger runs, for completion.
@@ -234,7 +262,7 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the run in the browser")
 	cmd.Flags().BoolVar(&log, "log", false, "Print the logs of every job instead, like gt run logs")
 	cmd.ValidArgsFunction = firstArg(a.completeRuns())
-	return cmd
+	return jsonOutput(cmd, jsonFields[services.Run]())
 }
 
 // isWorkflowFile tells a workflow file name, which the server resolves itself, from a workflow name.
@@ -290,19 +318,23 @@ func renderRun(run services.Run, d terminal.Display, hints []string) string {
 	style := func(cell terminal.Cell) string { return cell.Render(d) }
 	muted := func(text string) string { return style(terminal.Cell{Text: text, Muted: true}) }
 	var b strings.Builder
-	heading := run.Workflow
+	suffix := fmt.Sprintf(" · run %d", run.ID)
 	if run.RunNumber > 0 {
-		heading += fmt.Sprintf(" #%d", run.RunNumber)
+		suffix = fmt.Sprintf(" #%d", run.RunNumber) + suffix
 	}
 	icon := terminal.StatusIcon(run.Status, run.Conclusion)
-	b.WriteString(style(icon) + " " + style(terminal.Cell{Text: run.Title, Bold: true}) + " " + muted(fmt.Sprintf("%s · run %d", heading, run.ID)) + "\n")
+	title, workflow := terminal.SafeLine(run.Title), terminal.SafeLine(run.Workflow)
+	if d.Width > 0 {
+		title, workflow = fitHeading(d.Width-runewidth.StringWidth(icon.Text+"  "+suffix), title, workflow)
+	}
+	b.WriteString(style(icon) + " " + style(terminal.Cell{Text: title, Bold: true}) + " " + muted(workflow+suffix) + "\n")
 
-	facts := []string{style(runStateCell(run.Status, run.Conclusion))}
+	facts := []terminal.Cell{runStateCell(run.Status, run.Conclusion)}
 	if run.Branch != "" {
-		facts = append(facts, terminal.SafeLine(run.Branch))
+		facts = append(facts, terminal.Cell{Text: run.Branch})
 	}
 	if len(run.Commit) >= 7 {
-		facts = append(facts, run.Commit[:7])
+		facts = append(facts, terminal.Cell{Text: run.Commit[:7]})
 	}
 	trigger := "triggered"
 	if run.Actor != "" {
@@ -314,22 +346,22 @@ func renderRun(run services.Run, d terminal.Display, hints []string) string {
 	if created := terminal.ParseTime(run.CreatedAt); !created.IsZero() {
 		trigger += " " + terminal.RelativeTime(now, created)
 	}
-	facts = append(facts, muted(trigger))
+	facts = append(facts, terminal.Cell{Text: trigger, Muted: true})
 	if d, ok := runElapsed(run.StartedAt, run.CompletedAt, now); ok {
 		if run.Completed() {
-			facts = append(facts, muted("took "+terminal.Duration(d)))
+			facts = append(facts, terminal.Cell{Text: "took " + terminal.Duration(d), Muted: true})
 		} else {
-			facts = append(facts, muted("running for "+terminal.Duration(d)))
+			facts = append(facts, terminal.Cell{Text: "running for " + terminal.Duration(d), Muted: true})
 		}
 	}
 	if run.Attempt > 1 {
-		facts = append(facts, muted(fmt.Sprintf("attempt %d", run.Attempt)))
+		facts = append(facts, terminal.Cell{Text: fmt.Sprintf("attempt %d", run.Attempt), Muted: true})
 	}
-	b.WriteString(strings.Join(facts, " • ") + "\n")
+	b.WriteString(joinFacts(facts, d))
 
 	if len(run.Jobs) > 0 {
 		b.WriteString("\n" + style(terminal.Cell{Text: "JOBS", Bold: true}) + "\n")
-		b.WriteString(terminal.Table(nil, jobLines(run.Jobs, now), d))
+		b.WriteString(terminal.Table(jobLineColumns, jobLines(run.Jobs, now), d))
 	}
 	if waiting := waitingForRunner(run); waiting != "" {
 		b.WriteString("\n" + muted(waiting) + "\n")
@@ -345,6 +377,52 @@ func renderRun(run services.Run, d terminal.Display, hints []string) string {
 	}
 	return b.String()
 }
+
+// fitHeading cuts the run's title, then its workflow, with "…" until both fit in room cells; the
+// title keeps at least eight cells.
+func fitHeading(room int, title, workflow string) (string, string) {
+	over := runewidth.StringWidth(title) + runewidth.StringWidth(workflow) - room
+	if width := runewidth.StringWidth(title); over > 0 && width > 8 {
+		cut := min(over, width-8)
+		title = runewidth.Truncate(title, width-cut, "…")
+		over -= cut
+	}
+	if width := runewidth.StringWidth(workflow); over > 0 && width > 0 {
+		workflow = runewidth.Truncate(workflow, max(width-over, 1), "…")
+	}
+	return title, workflow
+}
+
+// joinFacts joins the facts of the run view with " • ", starting a new line instead before a fact
+// that would pass the display width, and cutting a fact wider than the whole line with "…".
+func joinFacts(facts []terminal.Cell, d terminal.Display) string {
+	const separator = " • "
+	var b strings.Builder
+	used := 0
+	for i, fact := range facts {
+		fact.Text = terminal.SafeLine(fact.Text)
+		if d.Width > 0 {
+			fact.Text = runewidth.Truncate(fact.Text, d.Width, "…")
+		}
+		width := runewidth.StringWidth(fact.Text)
+		switch {
+		case i == 0:
+		case d.Width > 0 && used+runewidth.StringWidth(separator)+width > d.Width:
+			b.WriteByte('\n')
+			used = 0
+		default:
+			b.WriteString(separator)
+			used += runewidth.StringWidth(separator)
+		}
+		b.WriteString(fact.Render(d))
+		used += width
+	}
+	return b.String() + "\n"
+}
+
+// jobLineColumns fit the job and step names of the run view to the terminal: Gitea names a run: step
+// after its whole script, "Run <script>".
+var jobLineColumns = []terminal.Column{{}, {Flex: true}}
 
 // jobLines lists jobs, each followed by its steps, for the run view.
 func jobLines(jobs []services.Job, now time.Time) [][]terminal.Cell {
@@ -484,7 +562,8 @@ func (a *application) runWatchCommand() *cobra.Command {
 		Short: "Watch a run until it completes",
 		Long: `Watch a run until it completes, refreshing its jobs and steps on a terminal.
 
-The command fails when the run completes without success.`,
+The command fails when the run completes without success. It polls on through an outage of the
+instance of up to 5 minutes.`,
 		Example: `# watch a run
 $ gt run watch 34
 # pick one of the runs in progress
@@ -507,7 +586,7 @@ $ gt run watch 34 --timeout 10m && echo deployed`,
 	cmd.Flags().DurationVarP(&interval, "interval", "i", 3*time.Second, "Refresh interval")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "Maximum time to wait")
 	cmd.ValidArgsFunction = firstArg(a.completeRuns())
-	return cmd
+	return jsonOutput(cmd, jsonFields[services.Run]())
 }
 
 // watchRun polls run id until it completes, redrawing the run view on the alternate screen of a
@@ -516,7 +595,7 @@ func (a *application) watchRun(cmd *cobra.Command, t target, id int64, interval,
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
 	out := cmd.OutOrStdout()
-	live := a.deps.Streams.OutTTY && a.options.json == ""
+	live := a.liveRedraw()
 	if live {
 		fmt.Fprint(out, "\x1b[?1049h")
 	}
@@ -544,7 +623,7 @@ func (a *application) watchRun(cmd *cobra.Command, t target, id int64, interval,
 	})
 	leave()
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) && run.ID != 0 {
+		if expired(err) && run.ID != 0 {
 			if a.options.json == "" {
 				// Not through the pager, which would stop the command at its end.
 				_, _ = io.WriteString(out, renderRun(run, a.display(), nil))
@@ -560,16 +639,24 @@ func (a *application) watchRun(cmd *cobra.Command, t target, id int64, interval,
 	} else if _, err := io.WriteString(out, renderRun(run, a.display(), nil)); err != nil {
 		return err
 	}
-	conclusion := terminal.SafeLine(cmp.Or(run.Conclusion, run.Status))
-	if !services.SuccessfulRun(run) {
-		return fmt.Errorf("run %d (%s) completed with %s", run.ID, terminal.SafeLine(run.Workflow), conclusion)
+	if err := runFailure(run); err != nil {
+		return err
 	}
+	conclusion := terminal.SafeLine(cmp.Or(run.Conclusion, run.Status))
 	took := ""
 	if d, ok := runElapsed(run.StartedAt, run.CompletedAt, a.deps.Now()); ok {
 		took = " in " + terminal.Duration(d)
 	}
 	a.done(cmd, "Run %d (%s) completed with %s%s", run.ID, run.Workflow, conclusion, took)
 	return nil
+}
+
+// runFailure fails for a completed run that did not succeed.
+func runFailure(run services.Run) error {
+	if services.SuccessfulRun(run) {
+		return nil
+	}
+	return fmt.Errorf("run %d (%s) completed with %s", run.ID, terminal.SafeLine(run.Workflow), terminal.SafeLine(cmp.Or(run.Conclusion, run.Status)))
 }
 
 // runProgress is one line about the state of a run and its jobs, for watching without a
@@ -638,7 +725,7 @@ func (a *application) runRerunCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rerun [<run-id>]",
 		Short: "Rerun a workflow run",
-		Long:  "Rerun all jobs of a completed workflow run, only its failed jobs, or a single job.",
+		Long:  "Rerun all jobs of a completed workflow run, only its failed jobs, or a single job, which --job or\nthe URL of the job selects.",
 		Example: `# rerun a run
 $ gt run rerun 34
 # rerun only the jobs that failed
@@ -651,6 +738,15 @@ $ gt run rerun 34 --job build`,
 			if failed && job != "" {
 				return clierr.Wrap(clierr.Usage, errors.New("--failed and --job cannot be combined"))
 			}
+			conflicting := ""
+			if failed {
+				conflicting = "--failed"
+			}
+			selected, urlJob, err := jobOfRunURL(args, job, conflicting)
+			if err != nil {
+				return err
+			}
+			job = selected
 			t, id, err := a.runArg(cmd, args, false)
 			if err != nil {
 				return err
@@ -671,6 +767,9 @@ $ gt run rerun 34 --job build`,
 				}
 				selected, err := findJob(jobs, job, id)
 				if err != nil {
+					return err
+				}
+				if err := sameJob(job, selected, urlJob); err != nil {
 					return err
 				}
 				jobID = selected.ID
@@ -698,6 +797,33 @@ $ gt run rerun 34 --job build`,
 // unfinished refuses to act on a run that has not completed, as Gitea does, before asking anything.
 func (a *application) unfinished(t target, run services.Run) error {
 	return fmt.Errorf("run %d is still %s; cancel it first: gt run cancel %d%s", run.ID, run.Status, run.ID, a.suggestedRepo(t))
+}
+
+// jobOfRunURL returns the --job value job, or the ID of the job that a job URL in args selects,
+// such as https://HOST/OWNER/REPO/actions/runs/N/jobs/M, with the ID of that URL's job or 0.
+// conflicting names a flag passed that cannot be combined with selecting one job, or is empty.
+// A --job name is checked against the URL's job by sameJob once the jobs are known.
+func jobOfRunURL(args []string, job, conflicting string) (string, int64, error) {
+	if len(args) == 0 {
+		return job, 0, nil
+	}
+	parsed, err := parseRef(args[0], runRef)
+	if err != nil || parsed.Job == 0 {
+		return job, 0, nil
+	}
+	if conflicting != "" {
+		return "", 0, clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with the URL of job %d", conflicting, parsed.Job))
+	}
+	return cmp.Or(job, strconv.FormatInt(parsed.Job, 10)), parsed.Job, nil
+}
+
+// sameJob refuses a --job value that selected another job than the job URL, whose job ID is
+// urlJob, or 0 without a job URL.
+func sameJob(raw string, selected services.Job, urlJob int64) error {
+	if urlJob == 0 || selected.ID == urlJob {
+		return nil
+	}
+	return clierr.Wrap(clierr.Usage, fmt.Errorf("--job %s cannot be combined with the URL of job %d", raw, urlJob))
 }
 
 func findJob(jobs []services.Job, raw string, run int64) (services.Job, error) {

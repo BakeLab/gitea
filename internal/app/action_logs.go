@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
@@ -31,7 +33,8 @@ func (a *application) runLogsCommand() *cobra.Command {
 
 With --follow, gt waits for jobs to start and prints new log lines until they complete,
 prefixing each line with its job's name when it follows several jobs. With --output or --dir,
-it downloads the logs of the whole run as a ZIP archive instead.`,
+it downloads the logs of the whole run as a ZIP archive instead. The URL of a job selects that job,
+like --job.`,
 		Example: `# print the logs of every job of a run
 $ gt run logs 34
 # follow the logs of one job while it runs
@@ -45,11 +48,39 @@ $ gt run logs 34 --output logs.zip`,
 				return clierr.Wrap(clierr.Usage, errors.New("--interval and --timeout must be positive"))
 			}
 			download := archive.output != "" || archive.dir != ""
+			conflicting := ""
+			switch {
+			case failed:
+				conflicting = "--failed"
+			case archive.output != "":
+				conflicting = "--output"
+			case archive.dir != "":
+				conflicting = "--dir"
+			}
+			selected, urlJob, err := jobOfRunURL(args, job, conflicting)
+			if err != nil {
+				return err
+			}
+			job = selected
 			if download && (follow || failed || job != "") {
 				return clierr.Wrap(clierr.Usage, errors.New("--output and --dir download the whole run and cannot be combined with --job, --failed or --follow"))
 			}
+			for _, flag := range []struct {
+				name string
+				set  bool
+			}{{"--clobber", archive.clobber}, {"--skip-existing", archive.skipExisting}} {
+				if flag.set && !download {
+					return clierr.Wrap(clierr.Usage, errors.New(flag.name+" requires --output or --dir"))
+				}
+			}
+			if err := archive.validate(); err != nil {
+				return err
+			}
 			if follow && failed {
 				return clierr.Wrap(clierr.Usage, errors.New("--follow and --failed cannot be combined"))
+			}
+			if failed && job != "" {
+				return clierr.Wrap(clierr.Usage, errors.New("--failed and --job cannot be combined"))
 			}
 			t, run, err := a.runArg(cmd, args, false)
 			if err != nil {
@@ -58,8 +89,12 @@ $ gt run logs 34 --output logs.zip`,
 			service := services.Actions{Client: t.client, Repository: t.Repo}
 			if download {
 				path, skip, err := archive.destination(fmt.Sprintf("run-%d-logs.zip", run))
-				if err != nil || skip {
+				switch {
+				case err != nil:
 					return err
+				case skip:
+					a.warn(cmd, "Skipped the logs of run %d: %s exists", run, path)
+					return nil
 				}
 				body, err := service.RunLogsArchive(cmd.Context(), run)
 				if err != nil {
@@ -80,8 +115,11 @@ $ gt run logs 34 --output logs.zip`,
 			}
 			switch {
 			case job != "":
-				selected, err := findJob(jobs, job, run)
+				selected, err := runJob(cmd.Context(), service, jobs, job, run)
 				if err != nil {
+					return err
+				}
+				if err := sameJob(job, selected, urlJob); err != nil {
 					return err
 				}
 				jobs = []services.Job{selected}
@@ -110,10 +148,22 @@ $ gt run logs 34 --output logs.zip`,
 	return cmd
 }
 
+// runJob returns the job of run that raw names among jobs, those of its latest attempt, else the
+// job of an earlier attempt with that ID, which gt showed before a rerun.
+func runJob(ctx context.Context, service services.Actions, jobs []services.Job, raw string, run int64) (services.Job, error) {
+	job, err := findJob(jobs, raw, run)
+	id, parseErr := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if _, missing := errors.AsType[*services.NotFoundError](err); !missing || parseErr != nil {
+		return job, err
+	}
+	return service.RunJob(ctx, run, id)
+}
+
 // printJobLogs prints the logs of jobs on stdout, each headed by its name on stderr. Jobs that
-// have not started are reported on stderr and skipped. A terminal keeps only the colors of logs.
-func (a *application) printJobLogs(cmd *cobra.Command, service services.Actions, jobs []services.Job) error {
-	out := terminal.SafeWriter(cmd.OutOrStdout(), a.deps.Streams.OutTTY, true)
+// have not started are reported on stderr and skipped.
+func (a *application) printJobLogs(cmd *cobra.Command, service services.Actions, jobs []services.Job) (err error) {
+	out := a.logWriter(cmd)
+	defer func() { err = cmp.Or(err, terminal.ResetSGR(out)) }()
 	for _, job := range jobs {
 		label := fmt.Sprintf("%s (job %d)", terminal.SafeLine(job.Name), job.ID)
 		var logs io.ReadCloser
@@ -136,17 +186,25 @@ func (a *application) printJobLogs(cmd *cobra.Command, service services.Actions,
 		}
 		_, copyErr := io.Copy(out, logs)
 		closeErr := logs.Close()
-		if err := cmp.Or(copyErr, closeErr); err != nil {
+		// The colors of one job's log end with it.
+		if err := cmp.Or(copyErr, closeErr, terminal.ResetSGR(out)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// logWriter returns stdout for job logs: on a terminal it drops their escape sequences but keeps
+// their colors when output is colored, which ResetSGR then ends, and drops them whole otherwise.
+func (a *application) logWriter(cmd *cobra.Command) io.Writer {
+	return terminal.SafeColorWriter(cmd.OutOrStdout(), a.deps.Streams.OutTTY, a.colorEnabled())
+}
+
 // followJobLogs follows the logs of jobs one after another until each completes, waiting for
 // those that have not started. Following several jobs prefixes each line with its job's name.
-func (a *application) followJobLogs(ctx context.Context, cmd *cobra.Command, service services.Actions, run int64, jobs []services.Job, interval time.Duration) error {
-	out := terminal.SafeWriter(cmd.OutOrStdout(), a.deps.Streams.OutTTY, true)
+func (a *application) followJobLogs(ctx context.Context, cmd *cobra.Command, service services.Actions, run int64, jobs []services.Job, interval time.Duration) (err error) {
+	out := a.logWriter(cmd)
+	defer func() { err = cmp.Or(err, terminal.ResetSGR(out)) }()
 	for _, job := range jobs {
 		label := fmt.Sprintf("%s (job %d)", terminal.SafeLine(job.Name), job.ID)
 		if job.Started() {
@@ -166,7 +224,7 @@ func (a *application) followJobLogs(ctx context.Context, cmd *cobra.Command, ser
 			fmt.Fprintf(cmd.ErrOrStderr(), "%s: never started\n", label)
 			continue
 		}
-		if err := cmp.Or(err, lines.Flush()); err != nil {
+		if err := cmp.Or(err, lines.Flush(), terminal.ResetSGR(out)); err != nil {
 			return err
 		}
 	}

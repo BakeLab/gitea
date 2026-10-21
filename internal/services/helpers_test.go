@@ -76,6 +76,23 @@ func TestNameOrIDPrefersIDsThenExactThenFoldedNames(t *testing.T) {
 	}
 }
 
+func TestNameOrIDExactMatchesNamesOnlyInTheirOwnCase(t *testing.T) {
+	type asset struct {
+		id   int64
+		name string
+	}
+	assets := []asset{{7, "GT-LINUX"}, {8, "notes.txt"}}
+	lookup := NameOrID[asset]{Kind: "asset", Scope: "release v1", Exact: true, ID: func(a asset) int64 { return a.id }, Name: func(a asset) string { return a.name }}
+	got, err := lookup.Find(assets, "GT-LINUX")
+	require.NoError(t, err)
+	require.Equal(t, int64(7), got.id)
+	got, err = lookup.Find(assets, "8")
+	require.NoError(t, err)
+	require.Equal(t, int64(8), got.id)
+	_, err = lookup.Find(assets, "gt-linux")
+	require.EqualError(t, err, `asset "gt-linux" not found in release v1`)
+}
+
 // writeFirstPage answers the first page of a listing with page and every later page with [].
 func writeFirstPage(w http.ResponseWriter, r *http.Request, page string) {
 	if r.URL.Query().Get("page") != "1" {

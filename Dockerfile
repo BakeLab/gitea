@@ -8,5 +8,4 @@ COPY --from=build /build/gt /bin/gt
 COPY --from=build --chown=65532:65532 /app /app
 VOLUME [ "/app" ]
 ENV HOME="/app"
-ENTRYPOINT ["/bin/sh", "-c"]
-CMD [ "gt" ]
+ENTRYPOINT ["/bin/gt"]

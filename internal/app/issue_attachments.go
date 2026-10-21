@@ -172,6 +172,9 @@ skips the download.`, Example: fmt.Sprintf(`$ gt %[1]s attachment download %[2]s
 $ gt %[1]s attachment download %[2]s 9 --output crash.log --clobber
 # Write the file to standard output
 $ gt %[1]s attachment download %[2]s 9 -O - | less`, words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments, "gt.text": "attachment downloads are binary"}, Args: argsExact(2), ValidArgsFunction: completeFirst, RunE: func(cmd *cobra.Command, args []string) error {
+		if err := destination.validate(); err != nil {
+			return err
+		}
 		t, n, id, err := attachmentArgs(cmd, args)
 		if err != nil {
 			return err
@@ -223,10 +226,11 @@ func uploadAttachments[T any](ctx context.Context, files []*os.File, id int64, u
 	return failures
 }
 
-// followUpError reports the steps that failed after what was created, or nil when none did.
-func followUpError(what string, failures []error) error {
+// followUpError reports the steps that failed after what was created or edited (as done says), or
+// nil when none did.
+func followUpError(what, done string, failures []error) error {
 	if len(failures) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%s was created, but follow-up steps failed: %w", what, errors.Join(failures...))
+	return fmt.Errorf("%s was %s, but follow-up steps failed: %w", what, done, errors.Join(failures...))
 }

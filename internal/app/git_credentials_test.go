@@ -15,6 +15,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSetupGitRequiresAnAccountOfTheInstance(t *testing.T) {
+	deps, _, _ := testDeps(t)
+	manager := testManager(t, deps)
+	instance := "https://example.test/gitea"
+	require.NoError(t, manager.Register(instance, "alice", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "alice-token"}))
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--host", "http://nothere:1"}, "no account for http://nothere:1; run gt auth login --host http://nothere:1"},
+		{[]string{"--host", instance, "--user", "nobody"}, `account "nobody" is not logged in on ` + instance + " (accounts: alice)"},
+	} {
+		git := &fakeGit{}
+		deps.Git = git
+		err := Execute(context.Background(), deps, append([]string{"auth", "setup-git", "--no-input"}, tc.args...))
+		require.ErrorContains(t, err, tc.want)
+		require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
+		require.Empty(t, git.calls, "no helper is configured")
+	}
+}
+
 func TestGitCredentialHelperSelectsAccountsAndDoesNotMutateFromGit(t *testing.T) {
 	deps, out, diagnostics := testDeps(t)
 	manager := testManager(t, deps)

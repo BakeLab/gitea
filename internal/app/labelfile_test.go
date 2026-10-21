@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"github.com/stretchr/testify/require"
 )
@@ -59,7 +60,7 @@ func TestLabelFileRoundTrip(t *testing.T) {
 		{Name: "bug", Color: "ff0000", Description: " padded"},
 	} {
 		_, err := formatLabel(label)
-		require.ErrorContains(t, err, "cannot be represented", label)
+		require.ErrorContains(t, err, fmt.Sprintf("label %q cannot be represented", label.Name), label)
 	}
 }
 
@@ -89,6 +90,25 @@ func TestLabelImportAcceptsColorPrefixedRows(t *testing.T) {
 	require.Empty(t, out.String())
 }
 
+func TestLabelImportNamesAnExistingLabelOnce(t *testing.T) {
+	var created []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeFirstPage(w, r, `[{"id":1,"name":"Bug"}]`)
+			return
+		}
+		created = append(created, r.Method)
+		_, _ = w.Write([]byte(`{"id":2,"name":"docs"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	file := filepath.Join(t.TempDir(), "labels.txt")
+	require.NoError(t, os.WriteFile(file, []byte("#ee0701 bug\n#0000ff docs\n"), 0o600))
+	err := Execute(context.Background(), deps, []string{"label", "import", file, "-R", "alice/project"})
+	require.EqualError(t, err, `label "bug": already exists in alice/project; pass --force to update it`)
+	require.Equal(t, []string{http.MethodPost}, created, "the other rows are still imported")
+}
+
 func TestLabelImportJSONIsAnArrayForOneRow(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -103,6 +123,40 @@ func TestLabelImportJSONIsAnArrayForOneRow(t *testing.T) {
 	require.NoError(t, os.WriteFile(file, []byte("#ee0701 bug\n"), 0o600))
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "import", file, "-R", "alice/project", "--json=id,name"}))
 	require.JSONEq(t, `[{"id":1,"name":"bug"}]`, out.String())
+}
+
+func TestLabelFileRejectsMistypedColorsInsteadOfSkippingThem(t *testing.T) {
+	for _, file := range []string{"#00ff00 good\n#00ff0 typo ;five digits\n", "#gg0000 typo\n"} {
+		_, err := parseLabelFile(strings.NewReader(file))
+		require.ErrorContains(t, err, "invalid color on row", file)
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	}
+	labels, err := parseLabelFile(strings.NewReader("# comment\n#\n## heading\n\t# indented\n#00ff00 good\n"))
+	require.NoError(t, err)
+	require.Len(t, labels, 1)
+}
+
+func TestLabelFlagsAreOneLastField(t *testing.T) {
+	for row, want := range map[string][3]any{
+		"#00ff00 kind/a ;exclusive":                 {"", true, false},
+		"#00ff00 kind/a ;exclusive,archived":        {"", true, true},
+		"#00ff00 kind/a ; ;archived":                {"", false, true},
+		"#00ff00 kind/b ;Bugs ;exclusive,archived":  {"Bugs", true, true},
+		"#00ff00 kind/c ;Bugs; and more ;exclusive": {"Bugs; and more", true, false},
+	} {
+		label, ok, err := parseLabelRow(row, 1)
+		require.NoError(t, err, row)
+		require.True(t, ok)
+		require.Equal(t, want, [3]any{*label.Description, *label.Exclusive, *label.Archived}, row)
+	}
+	for _, row := range []string{"#00ff00 kind/b ;Bugs ;exclusive ;archived", "#00ff00 kind/b ;exclusive ;Bugs", "#00ff00 kind/b ;Bugs ;archived ;"} {
+		_, _, err := parseLabelRow(row, 3)
+		require.EqualError(t, err, `invalid label row 3: write the flags as one last field, such as " ;exclusive,archived"`, row)
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	}
+	// A description that reads as flags cannot be written in a row.
+	_, err := formatLabel(services.Label{Name: "x", Color: "ff0000", Description: "archived"})
+	require.ErrorContains(t, err, `label "x" cannot be represented`)
 }
 
 func TestLabelRowsWithoutFlagsClearThem(t *testing.T) {

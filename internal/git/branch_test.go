@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"testing"
 
+	"gitea.dev/cli/internal/git/gittest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,6 +43,7 @@ func TestCurrentBranchConfig(t *testing.T) {
 }
 
 func TestCurrentBranchIgnoresATagWithTheSameName(t *testing.T) {
+	gittest.Isolate(t)
 	dir := t.TempDir()
 	for _, args := range [][]string{
 		{"init", "--quiet", "--initial-branch=rel-2"},

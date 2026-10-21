@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
@@ -23,7 +25,12 @@ repository, else your account, unless --owner names another.
 A package is addressed by its type, such as generic, npm or container, and its name.`}
 	group.PersistentFlags().StringVar(&owner, "owner", "", "User or organization whose packages to manage")
 	service := func(cmd *cobra.Command) (target, services.Packages, error) {
-		t, err := a.resolve(cmd.Context(), false)
+		// The owner of the clone's repository is the default, but outside a clone, or in one gt
+		// cannot act on, it is the account. Only a repository the user named must resolve.
+		t, err := a.resolve(cmd.Context(), owner == "")
+		if err != nil && owner == "" && a.options.repo == "" && a.deps.Getenv("GITEA_CLI_REPO") == "" && cloneUnusable(t, err) {
+			t, err = a.resolve(cmd.Context(), false)
+		}
 		if err != nil {
 			return t, services.Packages{}, err
 		}
@@ -32,6 +39,20 @@ A package is addressed by its type, such as generic, npm or container, and its n
 	group.AddCommand(a.packageListCommand(service), a.packageVersionsCommand(service), a.packageViewCommand(service),
 		a.packageDeleteCommand(service), a.packageLinkCommand(service, true), a.packageLinkCommand(service, false), a.packageUploadCommand(service))
 	return jsonOutput(group, jsonFields[services.Package]())
+}
+
+// cloneUnusable reports whether resolving failed because the working directory names no repository
+// gt can act on: it is no clone, its remotes are ambiguous, or the repository's instance has no
+// account. A canceled prompt or a failing credential would fail the same way for the account.
+func cloneUnusable(t target, err error) bool {
+	if errors.Is(err, errRepositoryRequired) || errors.Is(err, git.ErrAmbiguousRemote) {
+		return true
+	}
+	if errors.Is(err, terminal.ErrCanceled) || !t.repoFromClone() || t.Host == "" {
+		return false
+	}
+	_, exists := t.host.Users[t.User]
+	return !exists
 }
 
 // packageService resolves the package registry a command acts on.
@@ -125,7 +146,7 @@ $ gt package view npm @acme/ui 2.1.0 --json files`,
 			}
 			d := a.display()
 			return writeView(a, cmd, packageDetails{p, files}, func(details packageDetails) terminal.View {
-				fields := []terminal.Field{{Label: "Type", Value: p.Type}, {Label: "Repository", Value: p.Repository}, {Label: "Creator", Value: p.Creator}, timeField("Created", p.CreatedAt, d)}
+				fields := []terminal.Field{{Label: "Version", Value: p.Version, PipedOnly: true}, {Label: "Type", Value: p.Type}, {Label: "Repository", Value: p.Repository}, {Label: "Creator", Value: p.Creator}, timeField("Created", p.CreatedAt, d)}
 				for _, file := range details.Files {
 					fields = append(fields, terminal.Field{Label: "File", Value: file.Name + " (" + terminal.Bytes(file.Size) + ")"})
 				}
@@ -179,6 +200,13 @@ func (a *application) packageLinkCommand(service packageService, link bool) *cob
 			repository := ""
 			if link {
 				repository = args[2]
+				// A package links only to a repository of its owner, which OWNER/REPO may repeat.
+				if repoOwner, name, found := strings.Cut(repository, "/"); found {
+					if !strings.EqualFold(repoOwner, s.Owner) || name == "" || strings.Contains(name, "/") {
+						return clierr.Wrap(clierr.Usage, fmt.Errorf("a package of %s links only to a repository of %s; got %q", s.Owner, s.Owner, repository))
+					}
+					repository = name
+				}
 			}
 			if err := s.Link(cmd.Context(), args[0], args[1], repository); err != nil {
 				return err
@@ -209,8 +237,14 @@ name.`,
 		ValidArgsFunction: pathArgs(2, true, completeFiles, cobra.NoFileCompletions),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, version, paths := args[0], args[1], args[2:]
-			if err := requireUniqueAssetNames(paths); err != nil {
-				return err
+			// Gitea refuses a file whose name differs only in case from another of the version.
+			seen := map[string]string{}
+			for _, path := range paths {
+				key := strings.ToLower(filepath.Base(path))
+				if previous, ok := seen[key]; ok {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("%s and %s would both be uploaded as %s, ignoring case; rename one of them", previous, path, filepath.Base(path)))
+				}
+				seen[key] = path
 			}
 			files, err := openRegularFiles(paths)
 			defer closeFiles(files)
@@ -221,12 +255,22 @@ name.`,
 			if err != nil {
 				return err
 			}
-			for _, file := range files {
-				base := filepath.Base(file.Name())
-				if err := s.UploadGeneric(cmd.Context(), name, version, base, file); err != nil {
+			names := make([]string, len(files))
+			for i, file := range files {
+				names[i] = filepath.Base(file.Name())
+			}
+			// A version keeps its files: refuse before uploading any rather than stop halfway.
+			if err := s.CheckGenericUpload(cmd.Context(), name, version, names); err != nil {
+				return err
+			}
+			for i, file := range files {
+				if err := s.UploadGeneric(cmd.Context(), name, version, names[i], file); err != nil {
+					if i > 0 {
+						return fmt.Errorf("uploaded %s to generic package %s@%s, but not %s: %w", strings.Join(names[:i], ", "), name, version, names[i], err)
+					}
 					return err
 				}
-				a.done(cmd, "Uploaded %s to generic package %s@%s of %s", base, name, version, s.Owner)
+				a.done(cmd, "Uploaded %s to generic package %s@%s of %s", names[i], name, version, s.Owner)
 			}
 			return nil
 		},

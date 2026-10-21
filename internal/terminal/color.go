@@ -9,7 +9,10 @@ import (
 )
 
 // ColorEnabled resolves the color preference against terminal and environment policy.
-// auto colors TTY stdout unless NO_COLOR is set or TERM is dumb; always forces color; never disables it.
+// auto colors a TTY unless NO_COLOR is set, CLICOLOR is 0 or TERM is dumb; CLICOLOR_FORCE, unless
+// empty or 0, overrides CLICOLOR, TERM and a redirected outTTY, but not NO_COLOR. always forces
+// color; never disables it. Callers color stdout only on a terminal, since piped stdout is data, so
+// forced color reaches stderr even when redirected but stdout only on a terminal.
 func ColorEnabled(preference string, outTTY bool, getenv func(string) string) bool {
 	switch preference {
 	case "always":
@@ -17,10 +20,16 @@ func ColorEnabled(preference string, outTTY bool, getenv func(string) string) bo
 	case "never":
 		return false
 	default: // auto and unknown fall back to terminal detection
-		if getenv != nil && (getenv("NO_COLOR") != "" || getenv("TERM") == "dumb") {
+		if getenv == nil {
+			return outTTY
+		}
+		if getenv("NO_COLOR") != "" {
 			return false
 		}
-		return outTTY
+		if force := getenv("CLICOLOR_FORCE"); force != "" && force != "0" {
+			return true
+		}
+		return outTTY && getenv("CLICOLOR") != "0" && getenv("TERM") != "dumb"
 	}
 }
 

@@ -51,13 +51,13 @@ func TestPullCleanDeletesLocalAndRemoteBranches(t *testing.T) {
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
 	configureHost(t, deps, server.URL, settings.Host{User: "alice", Users: tokenAccounts(settings.StoreFile, "alice")})
-	deleteRemote := credentialCall(t, deps, server.URL, "alice", "push", "--delete", "--", "origin", "feature")
+	deleteRemote := credentialCall(t, deps, server.URL, "alice", "push", "--delete", "--", "origin", "refs/heads/feature")
 	runner := &fakeGit{results: map[string]string{
 		deleteRemote:                      "",
 		"remote":                          "origin",
 		"remote get-url origin":           "https://example.org/alice/project.git",
 		"rev-parse --is-inside-work-tree": "true",
-		"for-each-ref --format=%(objectname)%09%(refname:short)%09%(upstream:remotename) refs/heads/": "abc123\tpr/7\torigin",
+		"for-each-ref --format=%(objectname)%09%(refname:lstrip=2)%09%(upstream:remotename) refs/heads/": "abc123\tpr/7\torigin",
 		"check-ref-format --branch pr/7":              "",
 		"check-ref-format --branch main":              "",
 		"status --porcelain=v1 --untracked-files=no":  "",
@@ -115,8 +115,8 @@ func TestPullCleanRequiresIgnoreSHAWhenHeadMissingLocally(t *testing.T) {
 		"remote":                          "origin",
 		"remote get-url origin":           "https://example.org/alice/project.git",
 		"rev-parse --is-inside-work-tree": "true",
-		"for-each-ref --format=%(objectname)%09%(refname:short)%09%(upstream:remotename) refs/heads/": "deadbeef\tfeature\torigin/feature",
-		"rev-parse --verify refs/remotes/origin/feature^{commit}":                                     "deadbeef",
+		"for-each-ref --format=%(objectname)%09%(refname:lstrip=2)%09%(upstream:remotename) refs/heads/": "deadbeef\tfeature\torigin/feature",
+		"rev-parse --verify refs/remotes/origin/feature^{commit}":                                        "deadbeef",
 	}}
 	err := Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
@@ -130,19 +130,19 @@ func TestPullCleanFindsTheLocalBranchOfAnAGitPullRequestByItsCommit(t *testing.T
 		case "/api/v1/repos/alice/project":
 			_, _ = fmt.Fprint(w, `{"full_name":"alice/project","default_branch":"main"}`)
 		case "/api/v1/repos/alice/project/pulls/7":
-			_, _ = fmt.Fprint(w, `{"number":7,"state":"closed","merged":true,"head":{"sha":"abc123","ref":"refs/pull/7/head","repo":{"full_name":"alice/project","clone_url":"https://example.org/alice/project.git"}}}`)
+			_, _ = fmt.Fprint(w, `{"number":7,"state":"closed","merged":true,"head":{"sha":"abc123","ref":"refs/pull/7/head","label":"","repo":{"full_name":"alice/project","clone_url":"https://example.org/alice/project.git","permissions":{"push":true}}}}`)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer server.Close()
-	deps, out, _ := serverDeps(t, server.URL)
+	deps, out, diagnostics := serverDeps(t, server.URL)
 	runner := &fakeGit{results: map[string]string{
 		"remote":                          "origin",
 		"remote get-url origin":           "https://example.org/alice/project.git",
 		"rev-parse --is-inside-work-tree": "true",
-		"for-each-ref --format=%(objectname)%09%(refname:short)%09%(upstream:remotename) refs/heads/": "abc123\tpr/7\t",
+		"for-each-ref --format=%(objectname)%09%(refname:lstrip=2)%09%(upstream:remotename) refs/heads/": "abc123\tpr/7\t",
 		"check-ref-format --branch pr/7":              "",
 		"check-ref-format --branch main":              "",
 		"status --porcelain=v1 --untracked-files=no":  "",
@@ -154,5 +154,63 @@ func TestPullCleanFindsTheLocalBranchOfAnAGitPullRequestByItsCommit(t *testing.T
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--yes"}))
 	require.Contains(t, runner.calls, "branch -D -- pr/7")
+	for _, call := range runner.calls {
+		require.NotContains(t, call, "refs/remotes/")
+		require.NotContains(t, call, "push")
+	}
 	require.Empty(t, out.String())
+	require.NotContains(t, diagnostics.String(), "emote branch")
+}
+
+func TestPullCleanOfAnAGitPullRequestWithADivergedBranch(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project":
+			_, _ = fmt.Fprint(w, `{"full_name":"alice/project","default_branch":"main"}`)
+		case "/api/v1/repos/alice/project/pulls/7":
+			_, _ = fmt.Fprint(w, `{"number":7,"state":"closed","merged":true,"head":{"sha":"abc123","ref":"refs/pull/7/head","label":"","repo":{"full_name":"alice/project","clone_url":"https://example.org/alice/project.git","permissions":{"push":true}}}}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	for _, test := range []struct {
+		name, recorded string
+		flags          []string
+		want           string
+	}{
+		{name: "without --ignore-sha", want: "the local branch diverged"},
+		{name: "with --ignore-sha and nothing recorded", flags: []string{"--ignore-sha"}, want: "no local branch was recorded for this AGit pull request"},
+		{name: "with --ignore-sha and a recorded branch", recorded: "branch.topic.gitea-cli-pr 7", flags: []string{"--ignore-sha"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			deps, _, _ := serverDeps(t, server.URL)
+			runner := &fakeGit{results: map[string]string{
+				"remote":                          "origin",
+				"remote get-url origin":           "https://example.org/alice/project.git",
+				"rev-parse --is-inside-work-tree": "true",
+				"for-each-ref --format=%(objectname)%09%(refname:lstrip=2)%09%(upstream:remotename) refs/heads/": "def456\ttopic\t",
+				"check-ref-format --branch topic":              "",
+				"check-ref-format --branch main":               "",
+				"status --porcelain=v1 --untracked-files=no":   "",
+				"rev-parse --verify refs/heads/topic^{commit}": "def456",
+				"rev-parse --verify refs/heads/main^{commit}":  "mainsha",
+				"symbolic-ref --quiet HEAD":                    "main",
+				"branch -D -- topic":                           "",
+			}}
+			if test.recorded != "" {
+				runner.results[`config --get-regexp ^branch\..*\.gitea-cli-pr$`] = test.recorded
+			}
+			deps.Git = runner
+			err := Execute(context.Background(), deps, append([]string{"pr", "clean", "7", "--repo", "alice/project", "--yes"}, test.flags...))
+			if test.want == "" {
+				require.NoError(t, err)
+				require.Contains(t, runner.calls, "branch -D -- topic")
+				return
+			}
+			require.ErrorContains(t, err, test.want)
+			require.NotContains(t, err.Error(), "--ignore-sha")
+		})
+	}
 }

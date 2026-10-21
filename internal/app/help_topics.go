@@ -298,7 +298,8 @@ current branch's remote, upstream or origin, skipping remotes on instances witho
 account, or not on --host or the GITEA_TOKEN instance). Like gh, a clone with upstream
 and origin targets upstream: a branch tracking origin does not select the fork,
 and the instance from the repository URL, --host, GITEA_CLI_HOST or GITEA_INSTANCE_URL,
-default_host, or the only configured instance.
+default_host, the only configured instance, or, among several, the instance of the clone's
+repository.
 
 Environment variables:
 
@@ -313,8 +314,16 @@ Environment variables:
   GITEA_CLI_PAGER                     pager, overriding config.yml
   GITEA_CLI_COLOR                     color preference: auto, always or never
   GITEA_CLI_HTTP_TIMEOUT              longest wait for an answer, overriding config.yml
-  NO_COLOR                            disables automatic color when set
+  NO_COLOR                            disables automatic color when set, even with CLICOLOR_FORCE
+  CLICOLOR_FORCE                      unless empty or 0, colors stderr, even when redirected, and
+                                      a terminal stdout despite CLICOLOR=0 or TERM=dumb
+  CLICOLOR                            disables automatic color on a terminal when 0
   VISUAL, EDITOR, PAGER, BROWSER      editor (VISUAL first), pager and browser when config.yml sets none
+  TERM                                dumb asks each prompt as a line of text, for screen readers,
+                                      and turns off automatic color
+
+Piped or redirected stdout is data: the color settings never color it. Only a
+command's own --color always does, such as gt pr diff --color always.
 
 Preferences in config.yml are described in gt config --help.`},
 		{Use: "exit-codes", Short: "Exit codes used by gt", Long: `gt exits with one of these codes:
@@ -322,10 +331,10 @@ Preferences in config.yml are described in gt config --help.`},
   0    success, including an empty list
   1    the command failed
   2    usage error: an unknown command or flag, or a missing or invalid argument
-  3    canceled: a declined confirmation, an aborted prompt or a timeout
+  3    canceled: a declined confirmation, a prompt left with Esc or Ctrl-D, or a timeout
   4    authentication is missing or was rejected
   8    gt pr checks: some checks are still pending
-  130  interrupted with Ctrl-C
+  130  interrupted with Ctrl-C, also at a prompt
 
 A command may document further codes in its help.`},
 		{Use: "formatting", Short: "JSON output with --json and --jq", Long: `gt prints text for people by default. Scripts should use JSON: the columns and
@@ -342,6 +351,12 @@ offers them after --json. An unknown field reports the available ones.
 without quotes:
 
   $ gt issue list --json number,title --jq '.[] | "\(.number)\t\(.title)"'
+
+Some fields cost extra requests, such as the reviewers of pr list, the blocked_by and blocks
+of issue view and issue edit, and the visibility of org member list. gt makes them only when
+the output includes the field: --json names it, or --json selects every field and the --jq
+expression names it. An expression that reaches such a field without naming it, as
+to_entries does, sees it empty; name the field in --json instead.
 
 On a terminal, JSON is indented and colored; otherwise each value prints on one line.
 Commands that return no resource, such as deletes, reject --json.`},

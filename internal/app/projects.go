@@ -32,30 +32,36 @@ func loadProjectChanges(ctx context.Context, t target, add, remove []string, exi
 }
 
 // apply puts the issue with the global ID issueID, as project boards address issues, on the boards
-// to add and takes it off the others.
-func (c projectChanges) apply(ctx context.Context, issueID int64) error {
+// to add and takes it off the others. It reports whether it sent a request: boards that already
+// hold the issue, or lack it, are left as they are.
+func (c projectChanges) apply(ctx context.Context, issueID int64) (bool, error) {
 	var failures []error
+	sent := false
 	for _, board := range c.add {
-		if err := c.service.Add(ctx, board, issueID); err != nil {
+		added, err := c.service.Add(ctx, board, issueID)
+		if err != nil {
 			failures = append(failures, fmt.Errorf("add to project %q: %w", board.Title, err))
 		}
+		sent = sent || added
 	}
 	for _, board := range c.remove {
-		if err := c.service.Remove(ctx, board, issueID); err != nil {
+		removed, err := c.service.Remove(ctx, board, issueID)
+		if err != nil {
 			failures = append(failures, fmt.Errorf("remove from project %q: %w", board.Title, err))
 		}
+		sent = sent || removed
 	}
-	return errors.Join(failures...)
+	return sent, errors.Join(failures...)
 }
 
 // applyToNumber is apply for the issue or pull request numbered n, whose global ID it looks up.
-func (c projectChanges) applyToNumber(ctx context.Context, n int64) error {
+func (c projectChanges) applyToNumber(ctx context.Context, n int64) (bool, error) {
 	if len(c.add)+len(c.remove) == 0 {
-		return nil
+		return false, nil
 	}
 	issue, err := (services.Issues{Client: c.service.Client, Repository: c.service.Repository}).View(ctx, n)
 	if err != nil {
-		return err
+		return false, err
 	}
 	return c.apply(ctx, issue.ID)
 }

@@ -20,7 +20,7 @@ import (
 
 // Run is the stable command representation of an Actions run. StartedAt and CompletedAt are nil
 // until the run starts and completes. Workflow is the workflow's name and WorkflowPath its file
-// name; Jobs is only filled where commands show a single run.
+// name; Jobs is only filled where commands show a single run, and JSON leaves it out elsewhere.
 type Run struct {
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
@@ -39,7 +39,7 @@ type Run struct {
 	Actor        string  `json:"actor"`
 	Commit       string  `json:"commit"`
 	Attempt      int64   `json:"attempt"`
-	Jobs         []Job   `json:"jobs"`
+	Jobs         []Job   `json:"jobs,omitzero"`
 }
 
 // Completed reports whether the run finished, whatever its conclusion.
@@ -193,7 +193,7 @@ func (s Actions) runsPage(ctx context.Context, opts RunListOptions) (Page[Run], 
 	if opts.Workflow != "" {
 		endpoint = s.endpoint() + "workflows/" + url.PathEscape(opts.Workflow) + "/runs"
 	}
-	runs, err := listPage(opts.Limit, opts.Page, func(limit, page int) ([]Run, http.Header, error) {
+	runs, err := instancePage(ctx, s.Client, opts.Limit, opts.Page, func(limit, page int) ([]Run, http.Header, error) {
 		query.Set("limit", strconv.Itoa(limit))
 		query.Set("page", strconv.Itoa(page))
 		var response struct {
@@ -210,7 +210,7 @@ func (s Actions) runsPage(ctx context.Context, opts RunListOptions) (Page[Run], 
 	if opts.Workflow != "" && IsNotFound(err) {
 		return Page[Run]{}, NotFound("workflow", strconv.Quote(opts.Workflow), s.Repository)
 	}
-	return runs, err
+	return runs, Classify(err, "repository", s.Repository, "")
 }
 
 // nameRuns names runs after their workflows.
@@ -325,8 +325,15 @@ func (s Actions) Watch(ctx context.Context, id int64, interval time.Duration, up
 		return Run{}, err
 	}
 	var last Run
+	var failures outage
 	for {
 		current, err := s.runDetails(ctx, id, names)
+		if failures.retry(ctx, err) {
+			if err := sleepCtx(ctx, interval); err != nil {
+				return last, err
+			}
+			continue
+		}
 		if err != nil {
 			return last, err
 		}
@@ -339,6 +346,7 @@ func (s Actions) Watch(ctx context.Context, id int64, interval time.Duration, up
 		if current.Completed() {
 			return current, nil
 		}
+		failures.passed()
 		if err := sleepCtx(ctx, interval); err != nil {
 			return last, err
 		}

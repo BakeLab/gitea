@@ -6,15 +6,20 @@ package services
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
 )
 
-// WikiPage exposes decoded page content and revision metadata.
+// WikiPage exposes decoded page content and revision metadata. Gitea lists pages without their
+// content, so the JSON of a listed page leaves out body, commit_count, sidebar and footer rather
+// than report them empty.
 type WikiPage struct {
 	Title       string `json:"title"`
 	Body        string `json:"body"`
@@ -25,6 +30,23 @@ type WikiPage struct {
 	CommitCount int64  `json:"commit_count"`
 	Sidebar     string `json:"sidebar"`
 	Footer      string `json:"footer"`
+	// listed marks a page of a listing, which carries no content.
+	listed bool
+}
+
+// MarshalJSON leaves the content fields out of a listed page.
+func (p WikiPage) MarshalJSON() ([]byte, error) {
+	type page WikiPage
+	if !p.listed {
+		return json.Marshal(page(p))
+	}
+	return json.Marshal(struct {
+		Title     string `json:"title"`
+		URL       string `json:"url"`
+		SHA       string `json:"sha"`
+		Author    string `json:"author"`
+		UpdatedAt string `json:"updated_at"`
+	}{p.Title, p.URL, p.SHA, p.Author, p.UpdatedAt})
 }
 
 // WikiRevision represents a wiki commit without exposing author email addresses.
@@ -109,17 +131,15 @@ func (s Wiki) ListPage(ctx context.Context, limit, page int) (Page[WikiPage], er
 			}
 			// An uninitialized wiki returns 404. Verify repository visibility and
 			// wiki configuration before treating that response as an empty list.
-			repository, checkErr := (Repositories{Client: s.Client}).get(ctx, s.Repository)
-			if checkErr != nil {
-				return Page[WikiPage]{}, checkErr
-			}
-			if !repository.HasWiki {
+			if err := s.disabled(ctx, err); err != nil {
 				return Page[WikiPage]{}, err
 			}
 			return Page[WikiPage]{Items: []WikiPage{}, Counted: true}, nil
 		}
 		all = append(all, convertAll(items, func(item *gitea.WikiPageMetaData) WikiPage {
-			return wikiPageFrom(item.Title, item.HTMLURL, item.LastCommit)
+			listed := wikiPageFrom(item.Title, item.HTMLURL, item.LastCommit)
+			listed.listed = true
+			return listed
 		})...)
 		if next, _, _ := pageHints(headers); !next {
 			break
@@ -159,10 +179,57 @@ func (s Wiki) View(ctx context.Context, name string) (WikiPage, error) {
 	return item, err
 }
 
+// wikiPath is the page path that Gitea's wiki API takes for the page titled title. Gitea reads a
+// path ending in ".-" as the title itself, and any other path as a title with its spaces written
+// as "-", so like Gitea's own links it marks titles that contain "-" or end in ".md" with ".-".
+func wikiPath(title string) string {
+	if !strings.Contains(title, "-") && !strings.HasSuffix(title, ".md") {
+		return title
+	}
+	return title + ".-"
+}
+
+// wikiEndpoint is the API endpoint of the wiki page at path, below "wiki/page" or "wiki/revisions"
+// as kind says.
+// TODO(sdk): WikiService escapes the page path with url.PathEscape, which keeps "+", and Gitea
+// reads a "+" in the path as a space, so a title such as "C++" cannot be addressed through it.
+func (s Wiki) wikiEndpoint(kind, path string) (string, error) {
+	owner, repo, err := splitRepository(s.Repository)
+	if err != nil {
+		return "", err
+	}
+	escaped := strings.ReplaceAll(url.PathEscape(path), "+", "%2B")
+	return "repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/wiki/" + kind + "/" + escaped, nil
+}
+
+// pageAt sends method with payload, when not nil, to the page at path and decodes the page it
+// answers with.
+func (s Wiki) pageAt(ctx context.Context, method, path string, payload any) (WikiPage, error) {
+	endpoint, err := s.wikiEndpoint("page", path)
+	if err != nil {
+		return WikiPage{}, err
+	}
+	var page gitea.WikiPage
+	if err := sendJSON(ctx, s.Client, method, endpoint, payload, &page); err != nil {
+		return WikiPage{}, err
+	}
+	return wikiContentFrom(&page)
+}
+
+// atPage calls op with the path of the page titled name and, when there is no such page, with
+// name itself as the path, such as the Getting-Started of a page URL.
+func atPage[T any](name string, op func(path string) (T, error)) (T, error) {
+	result, err := op(wikiPath(name))
+	if IsNotFound(err) && wikiPath(name) != name {
+		return op(name)
+	}
+	return result, err
+}
+
 // lookup is View without the check for a disabled wiki.
 func (s Wiki) lookup(ctx context.Context, name string) (WikiPage, error) {
-	item, err := s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
-		return c.Wiki.GetPage(ctx, owner, repo, name)
+	item, err := atPage(name, func(path string) (WikiPage, error) {
+		return s.pageAt(ctx, http.MethodGet, path, nil)
 	})
 	return item, Classify(err, "wiki page", strconv.Quote(name), s.Repository)
 }
@@ -179,7 +246,8 @@ func (s Wiki) Create(ctx context.Context, opts WikiOptions) (WikiPage, error) {
 	if err := s.disabled(ctx, err); err != nil {
 		return WikiPage{}, err
 	}
-	return item, Classify(err, "wiki page", strconv.Quote(opts.Title), s.Repository)
+	// Gitea trims the title, and matches an existing page by what is left.
+	return item, Classify(err, "wiki page", strconv.Quote(strings.TrimSpace(opts.Title)), s.Repository)
 }
 
 // Edit replaces page content and optionally changes its title. It reports whether the title
@@ -203,16 +271,18 @@ func (s Wiki) Edit(ctx context.Context, name string, opts WikiOptions) (WikiPage
 			return WikiPage{}, false, err
 		}
 	}
-	item, err := s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
-		return c.Wiki.EditPage(ctx, owner, repo, name, wikiOptions(opts))
-	})
+	item, err := s.pageAt(ctx, http.MethodPatch, wikiPath(current.Title), wikiOptions(opts))
 	return item, renamed, Classify(err, "wiki page", strconv.Quote(name), s.Repository)
 }
 
 // Delete removes a named wiki page.
 func (s Wiki) Delete(ctx context.Context, name string) error {
-	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
-		return c.Wiki.DeletePage(ctx, owner, repo, name)
+	_, err := atPage(name, func(path string) (struct{}, error) {
+		endpoint, err := s.wikiEndpoint("page", path)
+		if err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, sendJSON(ctx, s.Client, http.MethodDelete, endpoint, nil, nil)
 	})
 	if err := s.disabled(ctx, err); err != nil {
 		return err
@@ -225,11 +295,19 @@ const wikiRevisionPageSize = 50
 
 // Revisions returns one server-paginated page of wiki commits and the total the server counted.
 func (s Wiki) Revisions(ctx context.Context, name string, page int) (Page[WikiRevision], error) {
-	revisions, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiCommitList, *gitea.Response, error) {
-		return c.Wiki.GetPageRevisions(ctx, owner, repo, name, gitea.ListWikiPageRevisionsOptions{Page: page})
+	revisions, err := atPage(name, func(path string) (*gitea.WikiCommitList, error) {
+		endpoint, err := s.wikiEndpoint("revisions", path)
+		if err != nil {
+			return nil, err
+		}
+		revisions := new(gitea.WikiCommitList)
+		return revisions, getJSON(ctx, s.Client, endpoint+"?page="+strconv.Itoa(page), revisions)
 	})
-	if err != nil {
+	if err := s.disabled(ctx, err); err != nil {
 		return Page[WikiRevision]{}, err
+	}
+	if err != nil {
+		return Page[WikiRevision]{}, Classify(err, "wiki page", strconv.Quote(name), s.Repository)
 	}
 	items := convertAll(revisions.WikiCommits, wikiRevisionFrom)
 	total := int(revisions.Count)

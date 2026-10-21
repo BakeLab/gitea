@@ -82,6 +82,7 @@ func (p *FormPrompter) CreatePull(ctx context.Context, choices PullFormChoices) 
 	if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(content...))); err != nil {
 		return PullFormValues{}, err
 	}
+	fields.body = fields.bodyResult(choices.Body, choices.EditBody)
 	values := PullFormValues{}
 	var err error
 	if values.Body, values.Draft, err = editBody(ctx, choices.EditBody, fields.body); err != nil {
@@ -103,7 +104,7 @@ func (p *FormPrompter) CreatePull(ctx context.Context, choices PullFormChoices) 
 		}
 		switch next {
 		case pullMetadata:
-			groups := fields.metadata(true, choices.Assignees, choices.Milestones, choices.Labels)
+			groups := fields.metadata(choices.Assignees, choices.Milestones, choices.Labels)
 			if err := p.runForm(ctx, huh.NewForm(groups...)); err != nil {
 				return values, err
 			}
@@ -135,14 +136,14 @@ type pullBranchFields struct {
 // fields asks for the branches; offerAgit adds the choice of an AGit push for users who cannot
 // push to the base repository.
 func (b *pullBranchFields) fields(offerAgit bool) []huh.Field {
-	fields := []huh.Field{huh.NewInput().Title("Base branch (required):").Value(&b.base).Validate(notBlank)}
+	fields := []huh.Field{lineField("Base branch (required):", &b.base, false).Validate(requiredText(&b.base))}
 	if offerAgit {
 		fields = append(fields, huh.NewConfirm().Title("Push through AGit (refs/for) instead of a branch of your own?").Value(&b.agit))
 	}
 	return append(fields,
-		huh.NewInput().Title("Head repository owner:").Value(&b.headOwner),
-		huh.NewInput().Title("Head branch (required):").Value(&b.headBranch).Validate(notBlank),
-		huh.NewInput().Title("AGit topic (when pushing through AGit):").Value(&b.topic),
+		lineField("Head repository owner:", &b.headOwner, true),
+		lineField("Head branch (required):", &b.headBranch, false).Validate(requiredText(&b.headBranch)),
+		lineField("AGit topic (when pushing through AGit):", &b.topic, true),
 		huh.NewConfirm().Title("Allow maintainers to push to the head branch?").Value(&b.allowEdits),
 	)
 }

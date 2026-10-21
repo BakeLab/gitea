@@ -6,7 +6,6 @@ package terminal
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -18,6 +17,13 @@ type Pager interface {
 	Page(context.Context, string, io.Reader, Streams) error
 }
 
+// PagerError reports a pager command that could not run or failed; callers name where it was configured.
+type PagerError struct{ Err error }
+
+func (e *PagerError) Error() string { return "pager failed: " + e.Err.Error() }
+
+func (e *PagerError) Unwrap() error { return e.Err }
+
 // SystemPager runs the pager without a shell and routes diagnostics to stderr.
 type SystemPager struct{}
 
@@ -26,7 +32,7 @@ type SystemPager struct{}
 func (SystemPager) Page(ctx context.Context, command string, input io.Reader, streams Streams) error {
 	args, ok := commandArgs(command)
 	if !ok {
-		return errors.New("pager command contains malformed quoted arguments")
+		return &PagerError{Err: errors.New("command contains malformed quoted arguments")}
 	}
 	process := exec.Command(args[0], args[1:]...)
 	process.Stdin = input
@@ -41,7 +47,7 @@ func (SystemPager) Page(ctx context.Context, command string, input io.Reader, st
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("pager failed; configure pager or PAGER: %w", err)
+		return &PagerError{Err: err}
 	}
 	return nil
 }

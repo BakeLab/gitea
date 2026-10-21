@@ -6,7 +6,6 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -184,14 +183,30 @@ func TestMissingScopeIsNotReportedAsAMissingValue(t *testing.T) {
 				"variable": (ActionVariables{Client: client, Scope: scope}).Delete(context.Background(), "MODE"),
 			} {
 				var missing *NotFoundError
-				require.Error(t, err)
+				require.ErrorAs(t, err, &missing, name)
 				if strings.Contains(test.message, name) {
-					require.ErrorAs(t, err, &missing, name)
+					require.Equal(t, name, missing.Kind)
 				} else {
-					require.False(t, errors.As(err, &missing), name)
+					require.EqualError(t, err, "organization acme not found", name)
 				}
 			}
 		})
+	}
+}
+
+func TestValueListsNameAMissingScope(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"not found"}`))
+	}))
+	for scope, want := range map[ActionScope]string{
+		{Repository: "alice/missing"}: "repository alice/missing not found",
+		{Organization: "acme"}:        "organization acme not found",
+	} {
+		_, err := (ActionSecrets{Client: client, Scope: scope}).ListPage(context.Background(), 30, 1)
+		require.EqualError(t, err, want)
+		_, err = (ActionVariables{Client: client, Scope: scope}).ListPage(context.Background(), 30, 1)
+		require.EqualError(t, err, want)
 	}
 }
 

@@ -173,13 +173,14 @@ type milestoneFields struct {
 	useEditor                                     bool
 }
 
-func (f *milestoneFields) register(cmd *cobra.Command) {
+// register adds the milestone flags; clearing says what an empty --deadline does.
+func (f *milestoneFields) register(cmd *cobra.Command, clearing string) {
 	flags := cmd.Flags()
 	flags.StringVarP(&f.title, "title", "t", "", "Milestone title")
 	flags.StringVarP(&f.description, "description", "d", "", "Milestone description")
 	flags.StringVarP(&f.descriptionFile, "description-file", "F", "", "Read the description from `file`, or - for stdin")
 	flags.BoolVarP(&f.useEditor, "editor", "e", false, "Write the description in the configured editor")
-	flags.StringVar(&f.deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339, or Unix timestamp; empty clears it")
+	flags.StringVar(&f.deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339 or Unix timestamp; only the date counts, as the end of that day in UTC; "+clearing)
 }
 
 // milestoneOptions returns the fields that were passed, reading the description and checking the
@@ -214,10 +215,18 @@ func (a *application) milestoneOptions(cmd *cobra.Command, f *milestoneFields) (
 	return opts, nil
 }
 
+// sameDate reports whether two optional due dates fall on the same date, as the form shows them.
+func sameDate(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Format(time.DateOnly) == b.Format(time.DateOnly)
+}
+
 func formOptions(values terminal.MilestoneFormValues) services.MilestoneOptions {
 	deadline := time.Time{}
 	if values.Deadline != nil {
-		deadline = *values.Deadline
+		deadline = endOfDay(*values.Deadline)
 	}
 	normalized := deadline.Format(time.RFC3339)
 	return services.MilestoneOptions{Title: &values.Title, Description: &values.Description, Deadline: &normalized}
@@ -226,9 +235,13 @@ func formOptions(values terminal.MilestoneFormValues) services.MilestoneOptions 
 func (a *application) milestoneCreateCommand(service milestoneService) *cobra.Command {
 	var fields milestoneFields
 	var state string
+	var force bool
 	cmd := &cobra.Command{Use: "create [<title>]", Aliases: []string{"new"}, Short: "Create a milestone", Long: `Create a milestone. Without flags on a terminal, a form asks for the title, description
-and due date.`, Example: `$ gt milestone create v1.0 --deadline 2026-12-31 --description "First release"
-$ gt milestone create --title v2.0 --editor`, Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+and due date. A milestone with the same title, ignoring case, is refused unless --force updates
+it, since titles address milestones.`, Example: `$ gt milestone create v1.0 --deadline 2026-12-31 --description "First release"
+$ gt milestone create --title v2.0 --editor
+# Update the milestone if it exists
+$ gt milestone create v1.0 --deadline 2027-01-31 --force`, Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		if err := validateTextSources(cmd, "description", "description-file"); err != nil {
 			return err
 		}
@@ -265,20 +278,28 @@ $ gt milestone create --title v2.0 --editor`, Args: usageArgs(cobra.MaximumNArgs
 				opts.Description = &draft.Body
 			}
 		}
-		opts.State = &state
+		// --force keeps the state of an existing milestone unless --state is passed.
+		if !force || cmd.Flags().Changed("state") {
+			opts.State = &state
+		}
 		s, t, err := service(cmd)
 		if err != nil {
 			return err
 		}
-		item, err := s.Create(cmd.Context(), opts)
+		item, updated, err := s.CreateUnique(cmd.Context(), opts, force)
 		if err != nil {
-			return err
+			return forceHint(err)
 		}
-		a.done(cmd, "Created %s", milestoneName(t, item))
+		verb := "Created"
+		if updated {
+			verb = "Updated"
+		}
+		a.done(cmd, "%s %s", verb, milestoneName(t, item))
 		return a.created(cmd, item, milestoneURL(t, item))
 	}}
-	fields.register(cmd)
+	fields.register(cmd, "with --force, empty clears the deadline of an existing milestone")
 	enumFlag(cmd, &state, "state", "", "open", "State of the new milestone", "open", "closed")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Update the milestone if one with the same title exists")
 	return cmd
 }
 
@@ -309,35 +330,58 @@ $ gt milestone edit 3 --editor`, Annotations: map[string]string{"gt.arguments": 
 		if err != nil {
 			return err
 		}
-		current, err := findMilestone(cmd, s, args[0], byName)
+		if strings.TrimSpace(args[0]) == "" {
+			return clierr.Wrap(clierr.Usage, errMilestoneEmpty)
+		}
+		// One listing finds the milestone and checks a new title.
+		existing, err := s.All(cmd.Context())
+		if err != nil {
+			return err
+		}
+		current, err := s.FindIn(existing, args[0], byName)
 		if err != nil {
 			return err
 		}
 		switch {
 		case form:
-			values := terminal.MilestoneFormValues{Title: current.Title, Description: current.Description, Editor: a.editorCommand()}
+			initial := terminal.MilestoneFormValues{Title: current.Title, Description: current.Description, Editor: a.editorCommand()}
 			if current.Deadline != nil {
 				deadline := terminal.ParseTime(*current.Deadline)
-				values.Deadline = &deadline
+				initial.Deadline = &deadline
 			}
-			if values, err = a.deps.MilestoneForm.EditMilestone(cmd.Context(), "Editing "+milestoneName(t, current), values); err != nil {
+			values, err := a.deps.MilestoneForm.EditMilestone(cmd.Context(), "Editing "+milestoneName(t, current), initial)
+			if err != nil {
 				return err
 			}
+			// Only what the form changed is sent: an unchanged deadline would move to the end of its day.
 			opts = formOptions(values)
+			if values.Title == initial.Title {
+				opts.Title = nil
+			}
+			if values.Description == initial.Description {
+				opts.Description = nil
+			}
+			if sameDate(values.Deadline, initial.Deadline) {
+				opts.Deadline = nil
+			}
+			if opts == (services.MilestoneOptions{}) {
+				a.warn(cmd, "No changes to %s", milestoneName(t, current))
+				return a.jsonResult(cmd, current)
+			}
 		case fields.useEditor:
 			if draft, err = a.editDraft(cmd, current.Description); err != nil {
 				return err
 			}
 			opts.Description = &draft.Body
 		}
-		item, err := s.Edit(cmd.Context(), current.ID, opts)
+		item, err := s.EditUnique(cmd.Context(), existing, current, opts)
 		if err != nil {
 			return err
 		}
 		a.done(cmd, "Edited %s", milestoneName(t, item))
 		return a.jsonResult(cmd, item)
 	}}
-	fields.register(cmd)
+	fields.register(cmd, "empty clears it")
 	cmd.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
 	cmd.ValidArgsFunction = firstArg(a.completeMilestonesIn("all"))
 	return cmd
@@ -370,9 +414,12 @@ $ gt milestone delete 7 --yes`, Annotations: map[string]string{"gt.confirm": "tr
 	return cmd
 }
 
+// errMilestoneEmpty refuses an empty milestone argument.
+var errMilestoneEmpty = errors.New("milestone title or ID cannot be empty")
+
 func findMilestone(cmd *cobra.Command, s services.Milestones, raw string, byName bool) (services.Milestone, error) {
 	if strings.TrimSpace(raw) == "" {
-		return services.Milestone{}, clierr.Wrap(clierr.Usage, errors.New("milestone title or ID cannot be empty"))
+		return services.Milestone{}, clierr.Wrap(clierr.Usage, errMilestoneEmpty)
 	}
 	return s.FindOne(cmd.Context(), raw, byName)
 }

@@ -244,11 +244,16 @@ $ gt label edit old-stuff --archived`, Annotations: map[string]string{"gt.argume
 		if err != nil {
 			return err
 		}
-		found, err := s.Find(cmd.Context(), args, byName)
+		// One listing finds the label and checks a new name.
+		existing, err := s.All(cmd.Context())
 		if err != nil {
 			return err
 		}
-		item, err := s.Edit(cmd.Context(), found[0].ID, opts.KeepArchived(found[0]))
+		current, err := s.FindIn(existing, args[0], byName)
+		if err != nil {
+			return err
+		}
+		item, err := s.EditUnique(cmd.Context(), existing, current, opts)
 		if err != nil {
 			return err
 		}
@@ -296,9 +301,11 @@ $ gt label delete wontfix duplicate --yes`, Annotations: map[string]string{"gt.t
 func (a *application) labelImportCommand(scope labelScope) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{Use: "import <file>", Short: "Create labels from a file", Long: `Create the labels of a label file, one per line: "#color name", optionally followed by
-" ;description" and " ;exclusive", " ;archived" or both. gt label export writes this
-format, and Gitea's label templates use it. Existing labels are refused unless --force
-updates them.`, Example: `$ gt label import labels.txt
+" ;description" and then by the flags in one last field: " ;exclusive", " ;archived" or
+" ;exclusive,archived". The description can be left out before the flags, as in
+"#7057ff priority/high ;exclusive". gt label export writes this format, and Gitea's label
+templates use it. Blank lines and lines starting with "# " or "##" are comments; any other
+line must be a valid label. Existing labels are refused unless --force updates them.`, Example: `$ gt label import labels.txt
 $ gt label export --repo alice/old | gt label import - --repo alice/new`, Args: argsExact(1), ValidArgsFunction: completeFiles, RunE: func(cmd *cobra.Command, args []string) error {
 		return a.importLabels(cmd, scope, args[0], force)
 	}}
@@ -327,7 +334,10 @@ func (a *application) importLabels(cmd *cobra.Command, scope labelScope, file st
 	outcome := map[string]string{}
 	results, failures := applyBatch(cmd, rows, func(row services.LabelOptions) string { return "label " + strconv.Quote(*row.Name) }, func(row services.LabelOptions) (services.Label, error) {
 		item, updated, err := s.CreateUnique(cmd.Context(), existing, row, force)
-		err = forceHint(err)
+		if conflict, ok := errors.AsType[*services.ConflictError](err); ok && conflict.Reason == services.ReasonExists {
+			// The batch names the label already.
+			err = explain(err, "already exists in %s; pass --force to update it", conflict.Scope)
+		}
 		switch {
 		case err != nil:
 			return item, err

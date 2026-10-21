@@ -35,6 +35,19 @@ func TestSSHKeyListPaginatesAndMapsKeys(t *testing.T) {
 	require.Empty(t, keys.Items)
 }
 
+func TestSSHKeyAllReadsEveryPage(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "3" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[` + sshKeyJSON + `]`))
+	}))
+	keys, err := SSHKeys{Client: client}.All(context.Background())
+	require.NoError(t, err)
+	require.Len(t, keys, 2)
+}
+
 func TestSSHKeyViewCreateAndDelete(t *testing.T) {
 	var requests []string
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

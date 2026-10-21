@@ -81,6 +81,12 @@ func TestRepoSyncUpdatesAForkOrMirrorOnTheServer(t *testing.T) {
 			feedback: "✓ Started updating the mirror bob/project from its source\n",
 			json:     `{"branch":"","commit":"","previous":"","remote":"https://example.test/source.git"}`,
 		},
+		{
+			name: "mirror of a path", repo: `{"full_name":"bob/project","mirror":true,"original_url":"/srv/source.git"}`,
+			requests: []string{"GET /api/v1/repos/bob/project", "POST /api/v1/repos/bob/project/mirror-sync"},
+			feedback: "✓ Started updating the mirror bob/project from its source\n",
+			json:     `{"branch":"","commit":"","previous":"","remote":"/srv/source.git"}`,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var requests []string
@@ -144,4 +150,10 @@ func TestRepoSyncOnTheServerIgnoresARemotePreferenceForAnotherRepository(t *test
 	deps.Git = &syncGit{url: server.URL + "/alice/project.git", inside: "true"}
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "sync", "bob/project"}))
 	require.Equal(t, []string{"GET /api/v1/repos/bob/project", "POST /api/v1/repos/bob/project/mirror-sync"}, requests)
+	// Gitea updates a mirror as a whole, so a branch of it cannot be synced.
+	requests = nil
+	err := Execute(context.Background(), deps, []string{"repo", "sync", "bob/project", "--branch", "develop"})
+	require.EqualError(t, err, "--branch cannot be used for the mirror bob/project: Gitea updates a mirror as a whole")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.Equal(t, []string{"GET /api/v1/repos/bob/project"}, requests)
 }

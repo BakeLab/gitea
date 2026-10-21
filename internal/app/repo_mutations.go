@@ -81,11 +81,7 @@ $ gt repo archive acme/legacy-api acme/legacy-web`,
 			return err
 		}
 		if item.Archived == archive {
-			if archive {
-				a.warn(cmd, "%s is already archived", item.FullName)
-			} else {
-				a.warn(cmd, "%s is not archived", item.FullName)
-			}
+			a.warnArchived(cmd, item)
 			return a.jsonResult(cmd, item)
 		}
 		if archive {
@@ -131,7 +127,8 @@ func (a *application) archiveRepositories(cmd *cobra.Command, repositories []str
 	}
 	// Each instance is connected to once, however many of its repositories are named.
 	clients := map[string]target{}
-	return batchDone(a, cmd, repositories, func(repository string) string { return repository }, func(repository string) (services.Repository, error) {
+	unchanged := map[string]bool{}
+	results, failures := applyBatch(cmd, repositories, func(repository string) string { return repository }, func(repository string) (services.Repository, error) {
 		ref, err := settings.ParseRepository(repository, hosts)
 		if err != nil {
 			return services.Repository{}, clierr.Wrap(clierr.Usage, err)
@@ -150,8 +147,30 @@ func (a *application) archiveRepositories(cmd *cobra.Command, repositories []str
 				return services.Repository{}, err
 			}
 		}
-		return services.Repositories{Client: t.client}.Edit(cmd.Context(), t.Repo, services.RepositoryEdit{Archived: &archive})
-	}, func(item services.Repository) string { return verb + " repository " + item.FullName })
+		service := services.Repositories{Client: t.client}
+		item, err := service.View(cmd.Context(), t.Repo)
+		if err != nil || item.Archived == archive {
+			unchanged[item.FullName] = err == nil
+			return item, err
+		}
+		return service.Edit(cmd.Context(), t.Repo, services.RepositoryEdit{Archived: &archive})
+	}, func(item services.Repository) {
+		if unchanged[item.FullName] {
+			a.warnArchived(cmd, item)
+			return
+		}
+		a.done(cmd, "%s repository %s", verb, item.FullName)
+	})
+	return errors.Join(append(failures, writeBatchJSON(a, cmd, len(repositories), results))...)
+}
+
+// warnArchived tells that item is already in the archived state asked for.
+func (a *application) warnArchived(cmd *cobra.Command, item services.Repository) {
+	if item.Archived {
+		a.warn(cmd, "%s is already archived", item.FullName)
+	} else {
+		a.warn(cmd, "%s is not archived", item.FullName)
+	}
 }
 
 func (a *application) repoRenameCommand() *cobra.Command {

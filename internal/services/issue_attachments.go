@@ -18,7 +18,7 @@ func (s Issues) Attachments(ctx context.Context, number int64, limit, page int) 
 		return c.Issues.ListIssueAttachments(ctx, owner, repo, number)
 	})
 	if err != nil {
-		return Page[IssueAttachment]{}, err
+		return Page[IssueAttachment]{}, s.issueError(ctx, err, number)
 	}
 	items, err := pageOf(attachments, limit, page)
 	if err != nil {

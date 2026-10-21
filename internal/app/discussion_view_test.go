@@ -26,8 +26,14 @@ func TestDiscussionViews(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/repos/alice/project/issues/3":
 			_, _ = w.Write([]byte(`{"number":3,"title":"Crash\u001b[2J","body":"Steps:\r\n\u001b]52;c;aGk=\u0007run‮\r","html_url":"https://example.org/i/3","state":"open","user":{"login":"bob"},"created_at":"2026-01-01T00:00:00Z","labels":[{"name":"bug","color":"ff0000"}],"assignees":[{"login":"alice"}],"comments":1}`))
-		case "/api/v1/repos/alice/project/issues/3/dependencies", "/api/v1/repos/alice/project/issues/3/blocks", "/api/v1/repos/alice/project/pulls/4/reviews":
+		case "/api/v1/repos/alice/project/issues/3/dependencies", "/api/v1/repos/alice/project/issues/3/blocks":
 			_, _ = w.Write([]byte(`[]`))
+		case "/api/v1/repos/alice/project/pulls/4/reviews":
+			if r.URL.Query().Get("page") > "1" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"id":1,"state":"REQUEST_REVIEW","user":{"login":"carol"}}]`))
 		case "/api/v1/repos/alice/project/issues/3/comments":
 			_, _ = w.Write([]byte(`[{"id":79,"body":"Confirmed\u001b[31m\n\tok","user":{"login":"carol"},"created_at":"2026-01-02T00:00:00Z"}]`))
 		case "/api/v1/repos/alice/project/pulls/4":
@@ -102,6 +108,13 @@ func TestIssueViewDependencies(t *testing.T) {
 	supported = true
 	require.NoError(t, Execute(context.Background(), deps, append(args, "--json=number,blocked_by,blocks")))
 	require.JSONEq(t, `{"number":3,"blocked_by":[{"repository":"alice/project","number":1},{"repository":"bob/lib","number":5},{"repository":"","number":0}],"blocks":[{"repository":"alice/project","number":9}]}`, out.String())
+	// All fields, as --json alone and --jq output them, include the dependencies.
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, append(args, "--jq", "[.blocked_by[].number, .blocks[].number]")))
+	require.JSONEq(t, `[1,5,0,9]`, out.String())
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, append(args, "--json")))
+	require.Contains(t, out.String(), `"blocks"`)
 }
 
 func TestPullViewCommentsIncludeReviews(t *testing.T) {
@@ -161,7 +174,7 @@ func TestPullViewStates(t *testing.T) {
 			name:     "fork with checks and conflicts",
 			pull:     `{"number":17,"title":"Improve greeting","state":"open","mergeable":false,"user":{"login":"bob"},"base":{"ref":"main"},"head":{"ref":"greet","sha":"abc","repo":{"full_name":"bob/project"}},"requested_reviewers":[{"login":"carol"}]}`,
 			statuses: `[{"id":1,"context":"ci / test","status":"pending"},{"id":2,"context":"lint","status":"failure"}]`,
-			reviews:  `[{"id":4,"state":"REQUEST_CHANGES","user":{"login":"alice"}}]`,
+			reviews:  `[{"id":4,"state":"REQUEST_CHANGES","user":{"login":"alice"}},{"id":5,"state":"REQUEST_REVIEW","user":{"login":"carol"}}]`,
 			want:     "Improve greeting #17\nOpen • bob wants to merge into main from bob:greet • about 1 day ago • 0 comments\nReviewers: alice (Changes requested), carol (Requested)\nChecks:    1 failing, 1 pending (gt pr checks 17)\nMergeable: no — conflicts with main\n",
 			decision: "changes_requested",
 		},

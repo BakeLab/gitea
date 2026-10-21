@@ -88,8 +88,12 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 		preferences.HTTPTimeout = value
 		sources["http_timeout"] = "GITEA_CLI_HTTP_TIMEOUT"
 	}
-	if value := strings.TrimSpace(a.deps.Getenv("GITEA_CLI_COLOR")); value != "" {
-		preferences.Color = value
+	color, err := a.colorEnvironment()
+	if err != nil {
+		return preferences, nil, err
+	}
+	if color != "" {
+		preferences.Color = color
 		sources["color"] = "GITEA_CLI_COLOR"
 	}
 	if value := a.deps.Getenv("GITEA_CLI_EDITOR"); value != "" {
@@ -107,6 +111,16 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 		sources["browser"] = "BROWSER"
 	}
 	return preferences, sources, nil
+}
+
+// colorEnvironment returns GITEA_CLI_COLOR, which must be a color preference like config set color.
+func (a *application) colorEnvironment() (string, error) {
+	switch value := strings.TrimSpace(a.deps.Getenv("GITEA_CLI_COLOR")); value {
+	case "", "auto", "always", "never":
+		return value, nil
+	default:
+		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("invalid GITEA_CLI_COLOR %q: color must be auto, always, or never", value))
+	}
 }
 
 // configSetting is one effective setting.
@@ -181,6 +195,8 @@ func unknownSetting(key string) error {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is an account setting; select the account with --host URL --user NAME", key))
 	case slices.Contains(instanceKeys, key):
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is an instance setting; select a configured instance with --host URL", key))
+	case key == "aliases":
+		return clierr.Wrap(clierr.Usage, errors.New("aliases are managed with gt alias; list them with gt alias list"))
 	}
 	return clierr.Wrap(clierr.Usage, fmt.Errorf("unknown setting %q; settings: %s", key, strings.Join(configKeys, ", ")))
 }
@@ -230,7 +246,7 @@ $ gt config get ssh_key --host https://gitea.com --user alice`,
 			if a.options.json != "" {
 				return a.writeSettingsJSON(cmd, map[string]any{args[0]: value}, sources, getSource)
 			}
-			line := fmt.Sprint(value)
+			line := settingText(value)
 			if getSource {
 				line += "\t" + settingSource(sources, args[0])
 			}
@@ -264,7 +280,7 @@ $ gt config list --host https://gitea.com`,
 			return writeTable(a, cmd, items, listSpec[configSetting]{
 				Columns: []terminal.Column{{Header: "Key"}, {Header: "Value", Flex: true}},
 				Row: func(item configSetting) []terminal.Cell {
-					return []terminal.Cell{{Text: item.Key}, {Text: fmt.Sprint(item.Value)}}
+					return []terminal.Cell{{Text: item.Key}, {Text: settingText(item.Value)}}
 				},
 			}, listPage{Number: 1})
 		},
@@ -286,14 +302,18 @@ Preferences:
   hyperlinks      auto, always or never, for clickable links in terminals
   markdown        auto renders Markdown on a terminal, raw prints the source
   remote          Git remote used to find the repository of a clone
-  http_timeout    longest wait for the instance to answer a request, such as 30s; 0 waits as
-                  long as it takes; a transfer that has started and migrations are not cut off
+  http_timeout    longest wait for the instance to answer a request, such as 30s, or for more
+                  data while a transfer stalls; 0 waits as long as it takes; a transfer that
+                  keeps moving and migrations are not cut off. The wait for an answer starts
+                  once an upload has reached the instance's machine, so an instance that reads
+                  uploads slowly from its connection needs a longer timeout
 
 Instance settings: user (active account), ssh_host, insecure, git_protocol, oauth_client_id,
 and headers: "Name: value" adds a header to every API request to the instance, such as an
-access proxy needs, "Name:" removes it, and a value of $NAME is read from that environment
-variable when sent; client_cert and client_key name the PEM files of a TLS client certificate
-for an instance that requires one; without client_key, the key is read from client_cert.
+access proxy needs, "Name:" removes it, and a value of $NAME or ${NAME} is read from that
+environment variable when sent; client_cert and client_key name the PEM files of a TLS client
+certificate for an instance that requires one; without client_key, the key is read from
+client_cert.
 Account settings: ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint.`,
 		Example: `$ gt config set editor "code --wait"
 $ gt config set ssh_host git.example.com:2222 --host https://example.com
@@ -327,6 +347,20 @@ $ gt config set ssh_key ~/.ssh/id_ed25519 --host https://example.com --user alic
 		},
 	})
 	return group
+}
+
+// settingText is a setting value as text: headers as the "Name: value" pairs config set takes, in
+// name order, rather than Go's map syntax.
+func settingText(value any) string {
+	headers, ok := value.(map[string]string)
+	if !ok {
+		return fmt.Sprint(value)
+	}
+	pairs := make([]string, 0, len(headers))
+	for _, name := range slices.Sorted(maps.Keys(headers)) {
+		pairs = append(pairs, name+": "+headers[name])
+	}
+	return strings.Join(pairs, "; ")
 }
 
 // settingSource names where the value of key comes from.
@@ -408,7 +442,7 @@ func (a *application) setPreference(key, value string) (string, error) {
 		case "user":
 			return clierr.Wrap(clierr.Usage, errors.New("the active account changes with gt auth switch"))
 		default:
-			if slices.Contains(instanceKeys, key) || slices.Contains(accountKeys, key) {
+			if slices.Contains(instanceKeys, key) || slices.Contains(accountKeys, key) || key == "aliases" {
 				return unknownSetting(key)
 			}
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("unknown setting %q; preferences: %s", key, strings.Join(preferenceKeys, ", ")))
@@ -470,11 +504,9 @@ func (a *application) setInstanceSetting(key, value string) (string, error) {
 		case "oauth_client_id":
 			host.OAuthClientID = value
 		case "client_cert", "client_key":
-			path := value
-			if value != "" {
-				if path, err = settingPath(value); err != nil {
-					return err
-				}
+			path, err := settingPath(value)
+			if err != nil {
+				return err
 			}
 			if key == "client_cert" {
 				host.ClientCert = path
@@ -483,6 +515,9 @@ func (a *application) setInstanceSetting(key, value string) (string, error) {
 			}
 		case "headers":
 			name, header, err := settings.ParseHeader(value)
+			if err == nil {
+				err = checkHeaderValue(name, header)
+			}
 			if err != nil {
 				return clierr.Wrap(clierr.Usage, err)
 			}

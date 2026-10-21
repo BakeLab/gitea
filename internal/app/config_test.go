@@ -99,6 +99,19 @@ func TestAccountConfigOnlyChangesSelectedAccountMetadata(t *testing.T) {
 	wd, err := os.Getwd()
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(wd, "keys", "id"), loaded.Hosts.Hosts[instance].Users["bob"].SSHKey)
+	// An empty path clears the key rather than naming the current directory.
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "ssh_key", "", "--host", instance, "--user", "bob"}))
+	loaded, err = deps.Settings.Load()
+	require.NoError(t, err)
+	require.Empty(t, loaded.Hosts.Hosts[instance].Users["bob"].SSHKey)
+}
+
+func TestConfigSetHelpExplainsWhatHTTPTimeoutBounds(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "--help"}))
+	help := strings.Join(strings.Fields(out.String()), " ")
+	require.Contains(t, help, "or for more data while a transfer stalls")
+	require.Contains(t, help, "The wait for an answer starts once an upload has reached the instance's machine, so an instance that reads uploads slowly from its connection needs a longer timeout")
 }
 
 func TestConfigHelpDocumentsSettingsAndEnvironment(t *testing.T) {
@@ -117,12 +130,42 @@ func TestConfigHelpDocumentsSettingsAndEnvironment(t *testing.T) {
 	for _, name := range []string{"GITEA_CLI_CONFIG_DIR", "GITEA_CLI_HOST", "GITEA_INSTANCE_URL", "GITEA_TOKEN", "GITEA_CLI_USER", "GITEA_CLI_REPO", "GITEA_CLI_EDITOR", "VISUAL", "EDITOR", "GITEA_CLI_PAGER", "PAGER", "GITEA_CLI_COLOR", "NO_COLOR", "BROWSER"} {
 		require.Contains(t, out.String(), name)
 	}
+	require.Contains(t, out.String(), "default_host, the only configured instance, or, among several, the instance of the clone's\nrepository.")
+	// CLICOLOR_FORCE colors stderr even when redirected, but never piped stdout.
+	require.Contains(t, out.String(), "colors stderr, even when redirected, and\n")
+	// gt pr diff --color always colors piped output, as git does.
+	require.Contains(t, out.String(), "Piped or redirected stdout is data: the color settings never color it. Only a\ncommand's own --color always does")
+	require.NotContains(t, out.String(), "even when piped")
+	// The terminal-size error points to TERM=dumb, so the help explains it.
+	require.Contains(t, out.String(), "TERM                                dumb asks each prompt as a line of text")
+}
+
+func TestConfigGetUserOfTheDefaultInstance(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	configureHost(t, deps, "http://localhost:3000", settings.Host{User: "alice", Users: tokenAccounts(settings.StoreFile, "alice")})
+	configureHost(t, deps, "http://localhost:3001", settings.Host{User: "bob", Users: tokenAccounts(settings.StoreFile, "bob")})
+	// Without a default instance among several, neither get nor list has an active account.
+	err := Execute(context.Background(), deps, []string{"config", "get", "user"})
+	require.EqualError(t, err, "user is an instance setting; select a configured instance with --host URL")
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "list"}))
+	require.NotContains(t, out.String(), "user\t")
+	// With one, both show its account.
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "default_host", "http://localhost:3001"}))
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "list"}))
+	require.Contains(t, out.String(), "user\tbob\n")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "user"}))
+	require.Equal(t, "bob\n", out.String())
 }
 
 func TestConfigGetPrintsOnlyTheValue(t *testing.T) {
 	deps, out, _ := testDeps(t)
-	configureHost(t, deps, "http://localhost:3001", settings.Host{User: "alice", Users: tokenAccounts(settings.StoreFile, "alice", "bob")})
+	configureHost(t, deps, "http://localhost:3001", settings.Host{User: "alice", Users: tokenAccounts(settings.StoreFile, "alice", "bob"), Headers: map[string]string{"X-B": "2", "X-A": "1"}})
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "editor", "code --wait"}))
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "list"}))
+	require.Contains(t, out.String(), "headers\tX-A: 1; X-B: 2\n", "headers as config set takes them")
 	for _, tc := range []struct {
 		args []string
 		want string
@@ -135,6 +178,7 @@ func TestConfigGetPrintsOnlyTheValue(t *testing.T) {
 		{[]string{"config", "get", "user", "--host", "localhost:3001", "--show-source"}, "alice\thosts.yml http://localhost:3001\n"},
 		{[]string{"config", "get", "user"}, "alice\n"},
 		{[]string{"config", "get", "insecure"}, "false\n"},
+		{[]string{"config", "get", "headers"}, "X-A: 1; X-B: 2\n"},
 	} {
 		t.Run(strings.Join(tc.args[2:], " "), func(t *testing.T) {
 			out.Reset()
@@ -155,6 +199,8 @@ func TestConfigNamesValidSettings(t *testing.T) {
 		{[]string{"config", "get", "ssh_key"}, "ssh_key is an account setting; select the account with --host URL --user NAME"},
 		{[]string{"config", "set", "nope", "1"}, `unknown setting "nope"; preferences: browser, color, default_host,`},
 		{[]string{"config", "set", "user", "bob"}, "the active account changes with gt auth switch"},
+		{[]string{"config", "get", "aliases"}, "aliases are managed with gt alias; list them with gt alias list"},
+		{[]string{"config", "set", "aliases", "x"}, "aliases are managed with gt alias; list them with gt alias list"},
 		{[]string{"config", "set", "hyperlinks", "off"}, "hyperlinks must be auto, always, or never"},
 		{[]string{"config", "set", "markdown", "never"}, "markdown must be auto or raw"},
 	} {

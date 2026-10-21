@@ -45,9 +45,9 @@ func (s Issues) Search(ctx context.Context, opts DiscussionSearchOptions) ([]Sea
 
 // SearchPage is Search with what the server reports about further results.
 func (s Issues) SearchPage(ctx context.Context, opts DiscussionSearchOptions) (Page[SearchItem], error) {
-	kind, resultType := gitea.IssueTypeIssue, "issue"
+	kind, resultType := gitea.IssueTypeIssue, KindIssue
 	if opts.Pulls {
-		kind, resultType = gitea.IssueTypePull, "pr"
+		kind, resultType = gitea.IssueTypePull, KindPull
 	}
 	if opts.Team != "" && opts.Owner == "" {
 		return Page[SearchItem]{}, fmt.Errorf("team search requires an organization owner")
@@ -106,10 +106,12 @@ func (s Issues) searchRepository(ctx context.Context, opts DiscussionSearchOptio
 			query.MentionedBy = account
 		}
 	}
-	return callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Issue, *gitea.Response, error) {
+	issues, err := callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Issue, *gitea.Response, error) {
 		query.ListOptions = list
 		return c.Issues.ListRepoIssues(ctx, owner, repo, query)
 	})
+	// A 404 here can only mean the repository is missing or invisible.
+	return issues, Classify(err, "repository", s.Repository, "")
 }
 
 func (s Issues) searchInstance(ctx context.Context, opts DiscussionSearchOptions, kind gitea.IssueType) (Page[*gitea.Issue], error) {

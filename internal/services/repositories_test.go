@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -12,6 +13,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRepositoryJSONReportsAMissingParentAsNull(t *testing.T) {
+	data, err := json.Marshal(Repository{FullName: "alice/project"})
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(data, &fields))
+	require.Contains(t, fields, "parent")
+	require.Nil(t, fields["parent"])
+}
 
 func TestRepositoryCreateSelectsOwnerEndpoint(t *testing.T) {
 	for org, path := range map[string]string{"": "/api/v1/user/repos", "acme": "/api/v1/orgs/acme/repos"} {
@@ -79,6 +89,16 @@ func TestRepositoryAssigneesTagsAndMissingPermissions(t *testing.T) {
 	permissions, err := service.viewPermissions(context.Background(), "alice/project")
 	require.NoError(t, err)
 	require.Equal(t, RepositoryPermissions{}, permissions)
+}
+
+func TestRepositoryRenameNamesTheTakenName(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"message":"repository already exists [uname: alice, name: taken]"}`))
+	}))
+	name := "taken"
+	_, err := (Repositories{Client: client}).Edit(context.Background(), "alice/old", RepositoryEdit{Name: &name})
+	require.EqualError(t, err, "repository alice/taken already exists")
 }
 
 func TestRepositoryCreateReportsMissingOrganization(t *testing.T) {

@@ -133,7 +133,7 @@ func TestPullCheckoutReusesMatchingBranch(t *testing.T) {
 	require.Equal(t, "switch --quiet pr/7", runner.calls[len(runner.calls)-3])
 	runner = &checkoutRunner{collision: true}
 	_, err = CheckoutPull(context.Background(), runner, CheckoutOptions{Directory: "/work", Remote: "origin", Number: 7, Branch: "pr/7", ExpectedCommit: "different"})
-	require.ErrorContains(t, err, "already exists with a different commit")
+	require.EqualError(t, err, `branch "pr/7" already exists with a different commit; pass --update to fast-forward it, or choose another checkout branch with --branch`)
 	for _, call := range runner.calls {
 		require.False(t, strings.HasPrefix(call, "fetch "))
 		require.False(t, strings.HasPrefix(call, "switch "))
@@ -146,7 +146,7 @@ func TestPullCheckoutUpdatesOnlyByFastForward(t *testing.T) {
 		_, err := CheckoutPull(context.Background(), runner, CheckoutOptions{Directory: "/work", Remote: "origin", Number: 7, Branch: "pr/7", ExpectedCommit: "abc123", Update: true})
 		require.Contains(t, runner.calls, "merge-base --is-ancestor previous abc123")
 		if diverged {
-			require.ErrorContains(t, err, "cannot be fast-forwarded")
+			require.EqualError(t, err, "local branch pr/7 has commits that pull request #7 does not have, so it cannot be fast-forwarded; choose another checkout branch with --branch")
 			for _, call := range runner.calls {
 				require.False(t, strings.HasPrefix(call, "switch "))
 				require.False(t, strings.HasPrefix(call, "merge "))

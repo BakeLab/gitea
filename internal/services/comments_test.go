@@ -67,6 +67,16 @@ func TestRemoveMilestoneRejectsDifferentMembership(t *testing.T) {
 	require.Zero(t, mutations)
 }
 
+func TestCommentListNamesAMissingIssue(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/repos/o/r/issues/99/comments", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"issue does not exist [id: 0, repo_id: 209, index: 99]"}`))
+	}))
+	_, err := (Comments{Client: client, Repository: "o/r"}).Page(context.Background(), 99, 30, 1)
+	require.EqualError(t, err, "issue #99 not found in o/r")
+}
+
 func TestCommentViewExplainsAnEmptyAnswerForReviewComments(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

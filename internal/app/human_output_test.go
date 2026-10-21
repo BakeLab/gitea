@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
@@ -109,6 +110,45 @@ func TestConfiguredPagerOverridesPagerEnvironment(t *testing.T) {
 	require.Equal(t, "configured-pager", pager.command)
 }
 
+func TestFailingPagerNamesWhereItWasConfigured(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":1,"name":"bug","color":"ff0000","description":""},{"id":2,"name":"docs","color":"00ff00","description":""}]`))
+	}))
+	defer server.Close()
+	missing := "gt-test-missing-pager"
+	for _, tc := range []struct {
+		name   string
+		env    map[string]string
+		config []string
+		want   string
+	}{
+		{name: "GITEA_CLI_PAGER", env: map[string]string{"GITEA_CLI_PAGER": missing, "PAGER": "less"}, want: "pager failed; check GITEA_CLI_PAGER: "},
+		{name: "config.yml", env: map[string]string{"PAGER": "less"}, config: []string{"pager", missing}, want: "pager failed; check pager in config.yml: "},
+		{name: "PAGER", env: map[string]string{"PAGER": missing}, want: "pager failed; check PAGER: "},
+		{name: "malformed", env: map[string]string{"PAGER": `less "x`}, want: "pager failed; check PAGER: command contains malformed quoted arguments"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _, _, _ := pagedDeps(t, server.URL, tc.env, tc.config...)
+			deps.Pager = terminal.SystemPager{}
+			err := Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"})
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestInvalidColorEnvironmentIsAUsageError(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+	deps, _, _, _ := pagedDeps(t, server.URL, map[string]string{"GITEA_CLI_COLOR": "bogus"})
+	for _, args := range [][]string{{"label", "list", "-R", "alice/project"}, {"config", "get", "color"}, {"config", "path"}} {
+		err := Execute(context.Background(), deps, args)
+		require.EqualError(t, err, `invalid GITEA_CLI_COLOR "bogus": color must be auto, always, or never`, "%v", args)
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	}
+}
+
 func TestTeaPagerAndColorEnvironmentOverrides(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[{"id":1,"name":"bug","color":"ff0000","description":""},{"id":2,"name":"docs","color":"00ff00","description":""}]`))
@@ -141,6 +181,16 @@ func TestColorAutoUsesStdoutTTY(t *testing.T) {
 	deps.Streams.OutTTY = true
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
 	require.Contains(t, out.String(), "\x1b[90mID\x1b[0m")
+
+	out.Reset()
+	deps.Streams.OutPlain = true
+	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
+	require.NotContains(t, out.String(), "\x1b[", "a console that shows escape sequences as text")
+
+	out.Reset()
+	deps.Getenv = serverEnv(server.URL, map[string]string{"CLICOLOR_FORCE": "1"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
+	require.NotContains(t, out.String(), "\x1b[", "forced color on a console that shows escape sequences as text")
 }
 
 func TestMultiItemHumanOutputPagesOnce(t *testing.T) {
@@ -358,11 +408,39 @@ func TestMutationFeedback(t *testing.T) {
 		})
 	}
 	deps, _, diagnostics := testDeps(t)
-	deps.Streams.OutTTY = true
+	deps.Streams.OutTTY, deps.Streams.ErrTTY = true, true
 	a, cmd := outputApplication(deps, "")
 	a.done(cmd, "Closed issue %s", "alice/x#5 (Bug)")
 	a.warn(cmd, "nothing to do")
 	require.Equal(t, "\x1b[32m✓\x1b[0m Closed issue alice/x#5 (Bug)\n\x1b[33m!\x1b[0m nothing to do\n", diagnostics.String())
+}
+
+func TestMutationFeedbackColorFollowsStderr(t *testing.T) {
+	deps, _, diagnostics := testDeps(t)
+	deps.Streams.OutTTY = true
+	a, cmd := outputApplication(deps, "")
+	a.done(cmd, "Dispatched %s", "ci.yml")
+	a.nextStep(cmd, "gt run list")
+	a.warn(cmd, "nothing to do")
+	require.Equal(t, "✓ Dispatched ci.yml\n  gt run list\n! nothing to do\n", diagnostics.String(), "stderr redirected away from the terminal")
+
+	diagnostics.Reset()
+	deps.Streams.OutTTY, deps.Streams.ErrTTY = false, true
+	a, cmd = outputApplication(deps, "")
+	a.warn(cmd, "nothing to do")
+	require.Equal(t, "\x1b[33m!\x1b[0m nothing to do\n", diagnostics.String(), "stdout piped, stderr on the terminal")
+
+	diagnostics.Reset()
+	deps.Streams.ErrPlain = true
+	a, cmd = outputApplication(deps, "")
+	a.warn(cmd, "nothing to do")
+	require.Equal(t, "! nothing to do\n", diagnostics.String(), "a console that shows escape sequences as text")
+
+	diagnostics.Reset()
+	deps.Getenv = envFunc(map[string]string{"CLICOLOR_FORCE": "1"})
+	a, cmd = outputApplication(deps, "")
+	a.warn(cmd, "nothing to do")
+	require.Equal(t, "! nothing to do\n", diagnostics.String(), "forced color on a console that shows escape sequences as text")
 }
 
 func TestBatchDoneReportsEachSuccess(t *testing.T) {
@@ -413,4 +491,40 @@ func TestShowing(t *testing.T) {
 
 func TestRefLabelDropsTerminalControls(t *testing.T) {
 	require.Equal(t, "alice/x#5 (fix ]0;pwnevil)", refLabel("alice/x", 5, "fix \x1b]0;pwn\x07evil"))
+}
+
+func TestFormsFollowTheColorSettingsForStderr(t *testing.T) {
+	for _, tc := range []struct {
+		env  map[string]string
+		want bool
+	}{
+		{nil, true},
+		{map[string]string{"GITEA_CLI_COLOR": "never"}, false},
+		{map[string]string{"CLICOLOR": "0"}, false},
+		{map[string]string{"TERM": "dumb"}, false},
+	} {
+		deps, _, _ := testDeps(t)
+		deps.Streams.ErrTTY = true
+		deps.Getenv = envFunc(tc.env)
+		prompter := &terminal.FormPrompter{Streams: deps.Streams}
+		deps.Prompter = prompter
+		NewRoot(deps)
+		require.Equal(t, tc.want, prompter.Color(), "%v", tc.env)
+	}
+}
+
+func TestForcedColorReachesRedirectedStderrButNeverPipedStdout(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":1,"name":"bug","color":"ff0000","description":""}]`))
+	}))
+	defer server.Close()
+	for _, env := range []map[string]string{{"CLICOLOR_FORCE": "1"}, {"GITEA_CLI_COLOR": "always"}} {
+		deps, out, diagnostics := serverDeps(t, server.URL)
+		deps.Getenv = serverEnv(server.URL, env)
+		require.NoError(t, Execute(context.Background(), deps, []string{"label", "list", "-R", "alice/project", "--no-input"}))
+		require.Equal(t, "1\tbug\tff0000\t\t\n", out.String(), "%v: piped stdout is data", env)
+		a, cmd := outputApplication(deps, "")
+		a.warn(cmd, "nothing to do")
+		require.Equal(t, "\x1b[33m!\x1b[0m nothing to do\n", diagnostics.String(), "%v: redirected stderr", env)
+	}
 }

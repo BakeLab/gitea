@@ -8,9 +8,14 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	gt "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
@@ -170,8 +175,222 @@ func TestFormPrompterAskRepromptsInline(t *testing.T) {
 	require.Contains(t, rendered.String(), "a value is required")
 }
 
+func TestFormsFollowTheColorSettings(t *testing.T) {
+	for _, colored := range []bool{true, false} {
+		p, rendered := accessiblePrompter(t, "\n")
+		p.Color = func() bool { return colored }
+		_, err := p.ConfirmDefault(context.Background(), "Delete?", false)
+		require.NoError(t, err)
+		require.Contains(t, rendered.String(), "Delete? [y/N]")
+		require.Equal(t, colored, strings.Contains(rendered.String(), "\x1b["), "accessible, colored %v: %q", colored, rendered)
+	}
+
+	// A terminal that takes 24-bit color, as the form sees it.
+	t.Setenv("TTY_FORCE", "1")
+	t.Setenv("COLORTERM", "truecolor")
+	t.Setenv("TERM", "xterm-256color")
+	for _, colored := range []bool{true, false} {
+		p, rendered, ctx := screenPrompter(t, keyStep{"Delete?", "\r"})
+		p.Color = func() bool { return colored }
+		_, err := p.ConfirmDefault(ctx, "Delete?", false)
+		require.NoError(t, err)
+		require.Equal(t, colored, strings.Contains(rendered.String(), "38;2;"), "interactive, colored %v", colored)
+	}
+
+	// Color always overrides NO_COLOR, so a form colored by the settings keeps its colors under it.
+	t.Setenv("NO_COLOR", "1")
+	p, rendered, ctx := screenPrompter(t, keyStep{"Delete?", "\r"})
+	p.Color = func() bool { return true }
+	_, err := p.ConfirmDefault(ctx, "Delete?", false)
+	require.NoError(t, err)
+	require.Contains(t, rendered.String(), "38;2;", "interactive under NO_COLOR")
+}
+
+// screen is the terminal a form draws on, which a test reads while the form runs.
+type screen struct {
+	mu   sync.Mutex
+	text strings.Builder
+}
+
+func (s *screen) Write(b []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.text.Write(b)
+}
+
+func (s *screen) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.text.String()
+}
+
+// keyStep sends key once the form drew show after the previous step's key.
+type keyStep struct{ show, key string }
+
+// screenPrompter is a prompter whose terminal sends the key of each step once the form shows the
+// step's text, so the form handled the keys before, and the focus or form change they cause,
+// whatever the speed of the machine. Unlike a plain reader, a pipe lets a finished form stop
+// reading, so the next form gets the keys that follow. Its context ends a form left waiting for
+// keys that never come.
+func screenPrompter(t *testing.T, steps ...keyStep) (*FormPrompter, *screen, context.Context) {
+	t.Helper()
+	in, out, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = in.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	drawn := &screen{}
+	go func() {
+		defer out.Close()
+		shown := 0
+		for _, step := range steps {
+			for !strings.Contains(drawn.String()[shown:], step.show) {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Millisecond):
+				}
+			}
+			shown = len(drawn.String())
+			_, _ = out.WriteString(step.key)
+		}
+	}()
+	size := func() (int, int, error) { return 80, 24, nil }
+	return &FormPrompter{Streams: Streams{In: in, Out: &bytes.Buffer{}, ErrOut: drawn, InTTY: true, ErrTTY: true}, size: size}, drawn, ctx
+}
+
+func TestAccessibleFormsEndOnInterrupt(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	in, out, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = in.Close(), out.Close() })
+	drawn := &screen{}
+	p := &FormPrompter{Streams: Streams{In: in, Out: &bytes.Buffer{}, ErrOut: drawn, InTTY: true, ErrTTY: true}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.Ask(ctx, "Title (required):", nil)
+		done <- err
+	}()
+	require.Eventually(t, func() bool { return strings.Contains(drawn.String(), "Title (required):") }, 10*time.Second, 5*time.Millisecond)
+	cancel() // Ctrl-C, while the form waits for a line
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+		require.True(t, strings.HasSuffix(drawn.String(), "\n"), "the prompt line ends after ^C: %q", drawn)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the form kept waiting for an answer after Ctrl-C")
+	}
+}
+
+func TestAccessibleFormsCancelOnEndOfInputOrEsc(t *testing.T) {
+	for _, input := range []string{"", "\x1b\n", "\x1b\r\n"} {
+		p, rendered := accessiblePrompter(t, input)
+		values, err := p.collectIssueProperties(context.Background(), "", "", IssueFormChoices{EditBody: noEdit})
+		require.ErrorIs(t, err, ErrCanceled, "%q", input)
+		require.Equal(t, clierr.Canceled, clierr.ExitCode(err))
+		require.Empty(t, values.Title)
+		require.NotContains(t, rendered.String(), BodyTitle, "%q: no prompt follows the end", input)
+		require.True(t, strings.HasSuffix(rendered.String(), "\n"), "%q: the prompt line ends", input)
+	}
+}
+
+func TestAccessibleSecretsCancelOnEndOfInputOrEsc(t *testing.T) {
+	// huh read secrets from the terminal itself, where Esc became the secret and Ctrl-D was ignored.
+	for _, input := range []string{"", "\x1b\n", "\x1b\r\n"} {
+		p, rendered := accessiblePrompter(t, input)
+		value, err := p.SecretInput(context.Background(), "Paste the value of TOKEN:")
+		require.ErrorIs(t, err, ErrCanceled, "%q", input)
+		require.Equal(t, clierr.Canceled, clierr.ExitCode(err))
+		require.Empty(t, value)
+		require.True(t, strings.HasSuffix(rendered.String(), "\n"), "%q: the prompt line ends", input)
+	}
+}
+
+func TestAccessibleSecretsAreReadAndValidated(t *testing.T) {
+	p, rendered := accessiblePrompter(t, "s3cret\r\n")
+	value, err := p.SecretInput(context.Background(), "Paste the value of TOKEN:")
+	require.NoError(t, err)
+	require.Equal(t, "s3cret", value)
+	require.Contains(t, rendered.String(), "Paste the value of TOKEN: \n")
+	require.NotContains(t, rendered.String(), "s3cret")
+
+	p, rendered = accessiblePrompter(t, "\nabc\n")
+	answers := LoginAnswers{Method: LoginToken}
+	require.NoError(t, p.Login(context.Background(), LoginQuestions{TokenHint: func(string) string { return "" }}, &answers))
+	require.Equal(t, "abc", answers.Token)
+	require.Equal(t, 2, strings.Count(rendered.String(), "Paste an access token"), "asked again: %q", rendered)
+	require.Contains(t, rendered.String(), "paste the token")
+}
+
+func TestAccessibleChoiceCancelsOnEndOfInput(t *testing.T) {
+	// huh takes the end of input after an invalid answer for that answer, and fails on it.
+	p, rendered := linePrompter(t, "x\n")
+	_, err := p.Choose(context.Background(), "Method:", []Choice{{Label: "Token", Value: "token"}, {Label: "OAuth", Value: "oauth"}}, "")
+	require.ErrorIs(t, err, ErrCanceled)
+	require.Equal(t, 2, strings.Count(rendered.String(), "Enter a number"), "no prompt follows the end")
+}
+
 func TestPromptAbortIsCanceled(t *testing.T) {
 	err := promptError(context.Background(), huh.ErrUserAborted)
 	require.ErrorIs(t, err, ErrCanceled)
 	require.Equal(t, clierr.Canceled, clierr.ExitCode(err))
+}
+
+func TestEscapeCancelsFormsLikeCtrlC(t *testing.T) {
+	// Esc cancels with code 3; Ctrl-C interrupts with code 130, as it does outside forms.
+	for key, code := range map[string]int{"\x1b": clierr.Canceled, "\x03": clierr.Interrupted} {
+		p, _ := testPrompter(strings.NewReader("abc" + key))
+		_, err := p.Ask(context.Background(), "Label name", nil)
+		require.ErrorIs(t, err, ErrCanceled, "%q", key)
+		require.Equal(t, code, clierr.ExitCode(err), "%q", key)
+
+		p, _ = testPrompter(strings.NewReader(key))
+		_, err = p.ConfirmDefault(context.Background(), "Delete?", true)
+		require.ErrorIs(t, err, ErrCanceled, "%q", key)
+		require.Equal(t, code, clierr.ExitCode(err), "%q", key)
+	}
+}
+
+func TestEscapeLeavesASelectFilterWithoutCanceling(t *testing.T) {
+	var value string
+	form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Options(huh.NewOptions("bug", "docs")...).Value(&value)))
+	view(form, 80, 24)
+	esc := gt.KeyPressMsg{Code: gt.KeyEscape}
+	var interrupted atomic.Bool
+	filter := escapeCancels(form, &interrupted)
+	require.Equal(t, gt.KeyPressMsg{Code: 'c', Mod: gt.ModCtrl}, filter(nil, esc), "Esc cancels the form")
+	require.False(t, interrupted.Load(), "Esc cancels without interrupting")
+	form.Update(gt.KeyPressMsg{Code: '/', Text: "/"})
+	require.Equal(t, esc, filter(nil, esc), "Esc leaves the filter")
+}
+
+func TestStreamsEscapes(t *testing.T) {
+	require.True(t, Streams{OutTTY: true, ErrTTY: true}.OutEscapes())
+	require.True(t, Streams{OutTTY: true, ErrTTY: true}.ErrEscapes())
+	require.False(t, Streams{ErrTTY: true}.OutEscapes())
+	require.False(t, Streams{OutTTY: true}.ErrEscapes())
+	require.False(t, Streams{OutTTY: true, OutPlain: true}.OutEscapes())
+	require.False(t, Streams{ErrTTY: true, ErrPlain: true}.ErrEscapes())
+}
+
+func TestStreamsRestoreTheTerminalsSystemChanged(t *testing.T) {
+	// The console mode itself changes only on Windows; this checks that Restore undoes every change.
+	var undone []string
+	s := Streams{restore: []func(){func() { undone = append(undone, "stderr") }, func() { undone = append(undone, "stdout") }}}
+	s.Restore()
+	require.Equal(t, []string{"stderr", "stdout"}, undone)
+	require.NotPanics(t, Streams{}.Restore, "streams that changed nothing")
+	require.NotPanics(t, System().Restore)
+}
+
+func TestStreamsNeverColorATerminalShowingEscapesAsText(t *testing.T) {
+	forced := env(map[string]string{"CLICOLOR_FORCE": "1"})
+	require.True(t, Streams{OutTTY: true}.OutColor("auto", forced))
+	require.True(t, Streams{}.ErrColor("auto", forced), "forced color reaches redirected diagnostics")
+	for _, preference := range []string{"auto", "always"} {
+		require.False(t, Streams{OutTTY: true, OutPlain: true}.OutColor(preference, forced), preference)
+		require.False(t, Streams{ErrTTY: true, ErrPlain: true}.ErrColor(preference, forced), preference)
+	}
 }

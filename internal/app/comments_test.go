@@ -107,6 +107,66 @@ func TestPullCommentsAndAttachmentsRequirePullRequests(t *testing.T) {
 	}, changed)
 }
 
+func TestPullCommentNamesAMissingPullRequest(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
+			return
+		}
+		require.Equal(t, "/api/v1/repos/alice/project/issues/99", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"issue does not exist [id: 0, repo_id: 1, index: 99]"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	for _, args := range [][]string{{"pr", "comment", "99", "-b", "x"}, {"pr", "attachment", "list", "99"}} {
+		err := Execute(context.Background(), deps, append(args, "-R", "alice/project"))
+		require.EqualError(t, err, "pull request #99 not found in alice/project")
+	}
+	err := Execute(context.Background(), deps, []string{"issue", "comment", "99", "-b", "x", "-R", "alice/project"})
+	require.EqualError(t, err, "issue #99 not found in alice/project")
+}
+
+func TestPullCommentSelectsThePullRequestLikeOtherPullCommands(t *testing.T) {
+	var created []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/alice/project/issues/9":
+			_, _ = w.Write([]byte(`{"number":9,"title":"Feature","pull_request":{}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/issues/9/comments":
+			created = append(created, payloadField(t, r, "body"))
+			_, _ = w.Write([]byte(`{"id":90,"body":"x","html_url":"https://example.org/alice/project/pulls/9#issuecomment-90"}`))
+		case r.URL.Path == "/api/v1/repos/alice/project/issues/9/comments":
+			_, _ = w.Write([]byte(`[]`))
+		case r.URL.Path == "/api/v1/repos/alice/project/pulls" && r.URL.Query().Get("page") == "1":
+			_, _ = w.Write([]byte(`[{"number":9,"title":"Feature","state":"open","head":{"ref":"feature","sha":"abc","repo":{"full_name":"alice/project"}}}]`))
+		case r.URL.Path == "/api/v1/repos/alice/project/pulls":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
+	deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --quiet HEAD": "feature"}}
+	for _, args := range [][]string{
+		{"pr", "comment", "-b", "current branch"},
+		{"pr", "comment", "feature", "-b", "branch"},
+		{"pr", "comment", "create", "-b", "create"},
+		{"pr", "comment", "list"},
+		{"pr", "comment", "list", "feature"},
+	} {
+		require.NoError(t, Execute(context.Background(), deps, append(args, "--no-input")), "%v", args)
+	}
+	require.Equal(t, []string{"current branch", "branch", "create"}, created)
+	// The commands that still take only a number or URL are named in the group's help.
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "--help"}))
+	require.Contains(t, out.String(), "pr attachment takes a number or a URL.")
+}
+
 func TestCommentGroupCommentsLikeGh(t *testing.T) {
 	var changed []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

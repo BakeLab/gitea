@@ -44,14 +44,28 @@ func rawJSON(ctx context.Context, client *transport.Client, method, endpoint str
 	}
 	defer resp.Body.Close()
 	if out == nil || resp.StatusCode == http.StatusNoContent {
-		_, err = io.Copy(io.Discard, resp.Body)
-		return resp.Header, err
+		if _, err = io.Copy(io.Discard, resp.Body); err != nil {
+			return nil, transport.ResponseError(ctx, resp, err)
+		}
+		return resp.Header, nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, errInvalidJSON
+		return nil, decodeError(ctx, resp, err)
 	}
 	return resp.Header, nil
+}
+
+// decodeError classifies a failure to decode the JSON body of resp: a body that is not JSON of
+// the expected shape is invalid, and one that could not be read, such as from a connection that
+// stalled or dropped, is a request failure.
+func decodeError(ctx context.Context, resp *http.Response, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	var syntaxErr *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) || err == io.EOF {
+		return errInvalidJSON
+	}
+	return transport.ResponseError(ctx, resp, err)
 }

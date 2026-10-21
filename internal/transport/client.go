@@ -14,19 +14,35 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 
 	"gitea.dev/cli/internal/version"
 )
 
-// RequestSigner attaches HTTP signature headers for SSH/HTTPSign authentication.
+// RequestSigner attaches HTTP signature headers for SSH/HTTPSign authentication. contents is the
+// body to digest, or nil when there is none or r already carries its SHA-512 Digest header.
 type RequestSigner interface {
 	SignRequest(r *http.Request, contents []byte) error
+}
+
+// ReplayableBody is a request body that can be read again from the start, so that signing can
+// hash a large body, such as an upload, as it reads it instead of buffering it.
+type ReplayableBody struct {
+	io.Reader
+	open func() io.Reader
+}
+
+// Replayable returns the body that open reads from the start each time it is called.
+func Replayable(open func() io.Reader) *ReplayableBody {
+	return &ReplayableBody{Reader: open(), open: open}
 }
 
 // APIError reports request failure without including credentials or raw response bodies.
@@ -37,22 +53,35 @@ type APIError struct {
 	// Instance is the installation URL the failed request was sent to, when it was recorded
 	// from a request.
 	Instance string
+	// Storage is the host a download was redirected to, such as signed object storage, when
+	// that host rather than the instance answered.
+	Storage string
+	// Moved is the OWNER/REPO a repository was renamed or transferred to, when the instance
+	// redirected a request that changes it and the redirect was not followed.
+	Moved string
 }
 
 func (e *APIError) Error() string {
 	var text string
-	switch e.Status {
-	case 401:
+	switch {
+	case e.Moved != "":
+		return "repository moved to " + e.Moved + "; address it by its new name to change it"
+	case e.Storage != "":
+		text = fmt.Sprintf("storage host %s refused the signed download with HTTP %d", e.Storage, e.Status)
+		if e.Status == http.StatusForbidden {
+			text += "; the signed URL may have expired, so try again"
+		}
+	case e.Status == 401:
 		text = "authentication rejected; run gt auth login"
-	case 403:
+	case e.Status == 403:
 		text = "permission denied by the Gitea instance"
-	case 404:
+	case e.Status == 404:
 		// Gitea's 404 message is usually just "not found"; the request names what was missing.
 		text = "not found (" + e.request() + ")"
 		if strings.EqualFold(e.Message, "not found") {
 			return text
 		}
-	case 429:
+	case e.Status == 429:
 		text = "Gitea rate limit exceeded; try again later"
 	default:
 		text = fmt.Sprintf("Gitea API returned HTTP %d for %s %s", e.Status, e.Method, e.Endpoint)
@@ -80,9 +109,10 @@ const (
 	maxErrorMessage = 300
 )
 
-// newAPIError keeps only a bounded, printable JSON "message" field of a failed response body.
+// newAPIError keeps only a bounded, printable JSON "message" field of a failed response body,
+// with the secrets marked on ctx and the passwords of URLs redacted before it is cut short.
 // Authentication failures and messages echoing the token keep no server text.
-func newAPIError(status int, method, endpoint, token string, data []byte) *APIError {
+func newAPIError(ctx context.Context, status int, method, endpoint, token string, data []byte) *APIError {
 	failure := &APIError{Status: status, Method: method, Endpoint: endpoint}
 	if status == http.StatusUnauthorized {
 		return failure
@@ -93,7 +123,7 @@ func newAPIError(status int, method, endpoint, token string, data []byte) *APIEr
 	if json.Unmarshal(data, &body) != nil || (token != "" && strings.Contains(body.Message, token)) {
 		return failure
 	}
-	message := strings.Join(strings.FieldsFunc(body.Message, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) || unicode.Is(unicode.Cf, r) }), " ")
+	message := strings.Join(strings.FieldsFunc(RedactSecrets(ctx, body.Message), func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) || unicode.Is(unicode.Cf, r) }), " ")
 	if runes := []rune(message); len(runes) > maxErrorMessage {
 		message = string(runes[:maxErrorMessage]) + "..."
 	}
@@ -128,13 +158,21 @@ func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error)
 // New constructs an instance-scoped client. Its HTTP client follows no redirects itself; API
 // requests follow only those within the instance API. Only connection setup is bounded here;
 // WithResponseTimeout bounds the wait for an answer, which a synchronous migration may need
-// minutes to start.
+// minutes to start. insecure skips certificate verification for the instance's host only; other
+// hosts, such as the storage a download redirects to, are still verified.
 func New(instance, token string, insecure bool) *Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	tr.TLSHandshakeTimeout = 10 * time.Second
 	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecure} // user-controlled, instance-scoped
-	return &Client{BaseURL: instance, Token: token, Retries: 2, HTTP: &http.Client{Transport: userAgentTransport{tr}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
+	var transport http.RoundTripper = tr
+	if base, err := url.Parse(instance); insecure && err == nil {
+		verified := tr.Clone()
+		verified.TLSClientConfig = tr.TLSClientConfig.Clone()
+		verified.TLSClientConfig.InsecureSkipVerify = false
+		transport = hostTransport{host: base.Host, instance: tr, other: verified}
+	}
+	return &Client{BaseURL: instance, Token: token, Retries: 2, HTTP: &http.Client{Transport: userAgentTransport{transport}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 
 // headerTransport adds headers, such as those an access proxy in front of the instance requires,
@@ -147,15 +185,38 @@ type headerTransport struct {
 }
 
 func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Host == t.host {
-		req = req.Clone(req.Context())
-		for name, values := range t.headers {
+	if strings.EqualFold(req.URL.Host, t.host) {
+		added := []string{}
+		for name := range t.headers {
 			if _, set := req.Header[name]; !set {
-				req.Header[name] = values
+				added = append(added, name)
 			}
+		}
+		ctx := context.WithValue(req.Context(), configuredHeaders{}, added)
+		// A server or proxy that echoes a configured value, such as an access proxy's secret, gets
+		// it redacted from --debug and from errors.
+		for _, name := range added {
+			ctx = WithSecrets(ctx, slices.DeleteFunc(slices.Clone(t.headers[name]), func(value string) bool { return len(value) < minHeaderSecret })...)
+		}
+		req = req.Clone(ctx)
+		for _, name := range added {
+			req.Header[name] = t.headers[name]
 		}
 	}
 	return t.base.RoundTrip(req)
+}
+
+// minHeaderSecret is the length below which a configured header value, such as "1" or "acme", is
+// not redacted: it is too short to be a credential, and redacting it would garble messages.
+const minHeaderSecret = 8
+
+type configuredHeaders struct{}
+
+// ConfiguredHeaders returns the names of the headers the instance's configuration added to req,
+// such as the request of a response, whose values may be secrets read from the environment.
+func ConfiguredHeaders(req *http.Request) []string {
+	names, _ := req.Context().Value(configuredHeaders{}).([]string)
+	return names
 }
 
 // WithHeaders returns a client that adds headers to every request to its instance.
@@ -174,11 +235,9 @@ func (c *Client) WithHeaders(headers http.Header) *Client {
 // WithClientCertificate returns a client that presents the PEM certificate and key in certFile and
 // keyFile, or in certFile alone, when the instance asks for one in the TLS handshake; other hosts
 // never see it. The files are read at the first handshake, so an unreadable pair fails the request
-// that needs it.
+// that needs it. A client whose transport cannot present one fails every request instead.
 func (c *Client) WithClientCertificate(certFile, keyFile string) *Client {
-	agent, ok := c.HTTP.Transport.(userAgentTransport)
-	tr, isHTTP := agent.base.(*http.Transport)
-	if !ok || !isHTTP || certFile == "" {
+	if certFile == "" {
 		return c
 	}
 	load := sync.OnceValues(func() (*tls.Certificate, error) { return LoadClientCertificate(certFile, keyFile) })
@@ -186,14 +245,60 @@ func (c *Client) WithClientCertificate(certFile, keyFile string) *Client {
 	if err != nil {
 		return c
 	}
-	instance := tr.Clone()
-	instance.TLSClientConfig = instance.TLSClientConfig.Clone()
-	instance.TLSClientConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return load() }
+	transport, ok := replaceHTTPTransport(c.HTTP.Transport, func(tr *http.Transport) http.RoundTripper {
+		instance := tr.Clone()
+		instance.TLSClientConfig = instance.TLSClientConfig.Clone()
+		if instance.TLSClientConfig == nil {
+			instance.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		instance.TLSClientConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return load() }
+		return hostTransport{host: base.Host, instance: instance, other: tr}
+	})
+	if !ok {
+		transport = failingTransport{fmt.Errorf("cannot present the client certificate %s: the HTTP transport cannot be configured", certFile)}
+	}
 	clone := *c
 	httpClient := *c.HTTP
-	httpClient.Transport = userAgentTransport{hostTransport{host: base.Host, instance: instance, other: tr}}
+	httpClient.Transport = transport
 	clone.HTTP = &httpClient
 	return &clone
+}
+
+// replaceHTTPTransport returns rt with the *http.Transport it wraps, through the wrappers of this
+// package, replaced by what replace returns for it, and false when rt wraps none. Of a
+// hostTransport, only the instance's side is replaced.
+func replaceHTTPTransport(rt http.RoundTripper, replace func(*http.Transport) http.RoundTripper) (http.RoundTripper, bool) {
+	var ok bool
+	switch t := rt.(type) {
+	case *http.Transport:
+		return replace(t), true
+	case userAgentTransport:
+		t.base, ok = replaceHTTPTransport(t.base, replace)
+		return t, ok
+	case headerTransport:
+		t.base, ok = replaceHTTPTransport(t.base, replace)
+		return t, ok
+	case responseTimeout:
+		t.base, ok = replaceHTTPTransport(t.base, replace)
+		return t, ok
+	case debugTransport:
+		t.base, ok = replaceHTTPTransport(t.base, replace)
+		return t, ok
+	case hostTransport:
+		t.instance, ok = replaceHTTPTransport(t.instance, replace)
+		return t, ok
+	}
+	return rt, false
+}
+
+// failingTransport fails every request with err, such as a client certificate it cannot present.
+type failingTransport struct{ err error }
+
+func (t failingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Body != nil {
+		_ = req.Body.Close()
+	}
+	return nil, t.err
 }
 
 // LoadClientCertificate loads the PEM certificate in certFile with the key in keyFile, or in
@@ -209,22 +314,26 @@ func LoadClientCertificate(certFile, keyFile string) (*tls.Certificate, error) {
 
 // hostTransport sends the requests to the instance's host through instance and all others, such as
 // to the storage a download redirects to, through other, so that only the instance sees what
-// instance presents, such as a client certificate.
+// instance presents, such as a client certificate, and only the instance is exempt from
+// certificate verification.
 type hostTransport struct {
 	host            string
 	instance, other http.RoundTripper
 }
 
 func (t hostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Host == t.host {
+	if strings.EqualFold(req.URL.Host, t.host) {
 		return t.instance.RoundTrip(req)
 	}
 	return t.other.RoundTrip(req)
 }
 
 // WithResponseTimeout returns a client whose requests fail when the instance takes longer than
-// timeout to start answering; once it answers, a slow body, such as a download, is not cut off.
-// Zero waits as long as it takes.
+// timeout to start answering once the request has been sent, or, while a request body is sent,
+// to read more of it, or, where the system tells, to receive more of what the connection still
+// holds of it, or, once it answers, to send more of the response body; neither a slow but
+// progressing upload nor a slow but progressing body, such as a download, is cut off. Zero waits
+// as long as it takes.
 func (c *Client) WithResponseTimeout(timeout time.Duration) *Client {
 	if timeout <= 0 {
 		return c
@@ -244,6 +353,18 @@ func UnboundedResponse(ctx context.Context) context.Context {
 	return context.WithValue(ctx, unboundedResponse{}, true)
 }
 
+// ErrTimeout is the cause of a request that ran out of the response timeout: whose answer did
+// not start, whose body stopped going out, or whose response stalled. It matches
+// context.DeadlineExceeded, so that it exits like a timeout, but tells the request apart from an
+// operation whose own deadline, such as a --timeout, expired.
+var ErrTimeout error = responseTimeoutError{}
+
+type responseTimeoutError struct{}
+
+func (responseTimeoutError) Error() string        { return context.DeadlineExceeded.Error() }
+func (responseTimeoutError) Is(target error) bool { return target == context.DeadlineExceeded }
+func (responseTimeoutError) Timeout() bool        { return true }
+
 type responseTimeout struct {
 	base    http.RoundTripper
 	timeout time.Duration
@@ -253,23 +374,246 @@ func (t responseTimeout) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Context().Value(unboundedResponse{}) != nil {
 		return t.base.RoundTrip(req)
 	}
-	ctx, cancel := context.WithCancel(req.Context())
-	timer := time.AfterFunc(t.timeout, cancel)
-	resp, err := t.base.RoundTrip(req.WithContext(ctx))
-	if !timer.Stop() {
+	// A request that runs out of time is canceled with the reason as its cause, for --debug.
+	ctx, cancelCause := context.WithCancelCause(req.Context())
+	cancel := func() { cancelCause(nil) }
+	wait := &answerWait{timeout: t.timeout, cancel: cancelCause, done: make(chan struct{})}
+	bounded := req.WithContext(ctx)
+	// The instance answers only once it has read the body, so while a body, such as a large
+	// upload, is being sent, the wait starts over whenever more of it goes out; a peer that stops
+	// reading it fails the request as one that does not answer.
+	if req.Body != nil && req.Body != http.NoBody {
+		wait.sending = true
+		// Once the body has been read, what the connection still holds of it goes out at the
+		// pace of the link; where the system tells, the wait follows its send queue.
+		bounded = bounded.WithContext(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+			GotConn: func(info httptrace.GotConnInfo) { wait.use(info.Conn) },
+		}))
+		bounded.Body = progressBody{req.Body, wait}
+		if req.GetBody != nil {
+			bounded.GetBody = func() (io.ReadCloser, error) {
+				body, err := req.GetBody()
+				if err != nil || body == http.NoBody {
+					wait.progress(false)
+					return body, err
+				}
+				wait.progress(true)
+				return progressBody{body, wait}, nil
+			}
+		}
+	}
+	wait.start()
+	resp, err := t.base.RoundTrip(bounded)
+	if timedOut := wait.stop(); timedOut != nil {
 		if err == nil {
 			_ = resp.Body.Close()
 		}
-		cancel()
-		return nil, fmt.Errorf("no answer within %s: %w", t.timeout, context.DeadlineExceeded)
+		cancelCause(timedOut)
+		return nil, timedOut
 	}
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 	// The body is read under the request's context, which lives until the body is closed.
-	resp.Body = cancelOnClose{resp.Body, cancel}
+	resp.Body = cancelOnClose{idleBody{resp.Body, ctx, t.timeout, cancelCause}, cancel}
 	return resp, nil
+}
+
+// idleBody fails a read of a response body that waits longer than timeout for data, such as from
+// a stalled connection, and cancels its request with why. Only the wait within a read counts, so
+// a body that is read slowly, or that arrives slowly but steadily, is not cut off.
+type idleBody struct {
+	io.ReadCloser
+	ctx     context.Context
+	timeout time.Duration
+	cancel  context.CancelCauseFunc
+}
+
+func (b idleBody) Read(p []byte) (int, error) {
+	timer := time.AfterFunc(b.timeout, func() {
+		b.cancel(fmt.Errorf("no data received within %s: %w", b.timeout, ErrTimeout))
+	})
+	n, err := b.ReadCloser.Read(p)
+	if !timer.Stop() && err != nil {
+		if cause := context.Cause(b.ctx); cause != nil {
+			err = cause
+		}
+	}
+	return n, err
+}
+
+// answerWait cancels a request that makes no progress for timeout: whose body, while sending,
+// stops going out, or whose answer has not started once the body has been sent.
+type answerWait struct {
+	mu      sync.Mutex
+	timer   *time.Timer
+	stopped bool
+	// sending reports whether the body is still being sent.
+	sending bool
+	// err is why the wait ran out, once it has.
+	err     error
+	timeout time.Duration
+	cancel  context.CancelCauseFunc
+	// conn is the connection the request is sent on, and drains counts the times its body was
+	// read in full, so that only the latest drain follows the connection.
+	conn   net.Conn
+	drains int
+	// done is closed once the wait has ended.
+	done chan struct{}
+}
+
+func (w *answerWait) start() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.timer == nil && !w.stopped {
+		w.timer = time.AfterFunc(w.timeout, w.expire)
+	}
+}
+
+// expire cancels the request once the wait has run out.
+func (w *answerWait) expire() {
+	w.mu.Lock()
+	err := w.timedOut()
+	w.mu.Unlock()
+	w.cancel(err)
+}
+
+// timedOut records and returns why the wait ran out. w.mu must be held.
+func (w *answerWait) timedOut() error {
+	if w.err == nil && w.sending {
+		w.err = fmt.Errorf("no progress sending the request within %s: %w", w.timeout, ErrTimeout)
+	} else if w.err == nil {
+		w.err = fmt.Errorf("no answer within %s: %w", w.timeout, ErrTimeout)
+	}
+	return w.err
+}
+
+// progress starts the wait over, unless it has already run out or ended, and records whether the
+// body is still being sent.
+func (w *answerWait) progress(sending bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.restart(sending)
+}
+
+// restart is progress with w.mu held.
+func (w *answerWait) restart(sending bool) {
+	w.sending = sending
+	if w.timer != nil && !w.stopped && w.timer.Stop() {
+		w.timer.Reset(w.timeout)
+	}
+}
+
+// use records the connection the request is sent on.
+func (w *answerWait) use(conn net.Conn) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.conn = conn
+}
+
+// sent records that the body has been read in full. The connection may still hold much of it,
+// up to several megabytes, which a slow link takes long to send, so where the system tells how
+// much the connection holds, the body counts as being sent until that is nothing, and the wait
+// starts over whenever it goes down. Elsewhere the wait for the answer starts at once. What the
+// instance's system has received counts as sent, though the instance may still be reading it
+// from its connection, which the wait for the answer then includes.
+func (w *answerWait) sent() {
+	w.mu.Lock()
+	w.drains++
+	conn, drain := w.conn, w.drains
+	if _, ok := unsentBytes(conn); !ok {
+		w.restart(false)
+		w.mu.Unlock()
+		return
+	}
+	w.restart(true)
+	w.mu.Unlock()
+	go w.drain(conn, drain)
+}
+
+// drain follows the send queue of conn until it is empty.
+func (w *answerWait) drain(conn net.Conn, drain int) {
+	tick := time.NewTicker(min(max(w.timeout/4, 10*time.Millisecond), 250*time.Millisecond))
+	defer tick.Stop()
+	last := -1
+	for {
+		unsent, ok := unsentBytes(conn)
+		w.mu.Lock()
+		if w.drains != drain {
+			w.mu.Unlock()
+			return
+		}
+		if !ok || unsent == 0 {
+			w.restart(false)
+		} else if last >= 0 && unsent < last {
+			w.restart(true)
+		}
+		w.mu.Unlock()
+		if !ok || unsent == 0 {
+			return
+		}
+		last = unsent
+		select {
+		case <-tick.C:
+		case <-w.done:
+			return
+		}
+	}
+}
+
+// stop ends the wait and returns why it had already run out, if it had.
+func (w *answerWait) stop() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.stopped && w.done != nil {
+		close(w.done)
+	}
+	w.stopped = true
+	if w.timer != nil && !w.timer.Stop() {
+		return w.timedOut()
+	}
+	return nil
+}
+
+// progressBody starts the wait over whenever part of the request body is read, and starts the
+// wait for the answer once it has been read in full.
+type progressBody struct {
+	io.ReadCloser
+	wait *answerWait
+}
+
+func (b progressBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	switch {
+	case err == io.EOF:
+		b.wait.sent()
+	case n > 0:
+		b.wait.progress(true)
+	}
+	return n, err
+}
+
+// unsentBytes returns the bytes of what was written to conn that its peer has not acknowledged,
+// and false when the system cannot tell. Tests replace it.
+var unsentBytes = func(conn net.Conn) (int, bool) {
+	if secure, ok := conn.(*tls.Conn); ok {
+		conn = secure.NetConn()
+	}
+	socket, ok := conn.(syscall.Conn)
+	if !ok {
+		return 0, false
+	}
+	raw, err := socket.SyscallConn()
+	if err != nil {
+		return 0, false
+	}
+	var unsent int
+	var queueErr error
+	if err := raw.Control(func(fd uintptr) { unsent, queueErr = queuedBytes(fd) }); err != nil || queueErr != nil {
+		return 0, false
+	}
+	return unsent, true
 }
 
 type cancelOnClose struct {
@@ -334,7 +678,7 @@ func (c *Client) URL(endpoint string) (string, error) {
 }
 
 // RequestFailure reports a request that received no HTTP response, such as a refused
-// connection or an untrusted certificate.
+// connection or an untrusted certificate, or whose response broke off.
 type RequestFailure struct {
 	// Action names what failed, such as "API request failed".
 	Action string
@@ -363,6 +707,19 @@ func RequestError(ctx context.Context, action string, err error) error {
 	return errors.New(action + "; check connectivity and TLS settings")
 }
 
+// ResponseError reports a failure to read the body of resp, such as a connection that stalled or
+// dropped, as a *RequestFailure, like a request that received no answer.
+func ResponseError(ctx context.Context, resp *http.Response, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	failure := &RequestFailure{Action: "reading the API response failed", Err: err}
+	if resp != nil && resp.Request != nil && resp.Request.URL != nil {
+		failure.Server = (&url.URL{Scheme: resp.Request.URL.Scheme, Host: resp.Request.URL.Host}).String()
+	}
+	return failure
+}
+
 // Do executes a cancellable request, retrying only safe body-free reads.
 // A response outside 2xx is closed and returned as an *APIError.
 func (c *Client) Do(ctx context.Context, method, endpoint string, body io.Reader, headers http.Header) (*http.Response, error) {
@@ -384,6 +741,9 @@ func (c *Client) Send(ctx context.Context, method, endpoint string, body io.Read
 	req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
 	if err != nil {
 		return nil, errors.New("cannot construct API request")
+	}
+	if replay, ok := body.(*ReplayableBody); ok {
+		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(replay.open()), nil }
 	}
 	req.Header = headers.Clone()
 	if req.Header == nil {

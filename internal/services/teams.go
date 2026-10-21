@@ -18,11 +18,15 @@ import (
 
 // Team is an organization's access group and its permission policy.
 type Team struct {
-	ID              int64             `json:"id"`
-	Name            string            `json:"name"`
-	Description     string            `json:"description"`
-	Organization    string            `json:"organization"`
-	Permission      string            `json:"permission"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Organization string `json:"organization"`
+	// Permission is the team-wide level Gitea reports: owner, admin, read, write, or none for a
+	// team that grants its access per unit.
+	Permission string `json:"permission"`
+	// Access is the team's effective access, as EffectiveAccess summarizes it.
+	Access          string            `json:"access"`
 	CanCreateRepo   bool              `json:"can_create_repo"`
 	AllRepositories bool              `json:"all_repositories"`
 	Units           map[string]string `json:"units"`
@@ -57,10 +61,10 @@ func UnitPolicy(access string) map[string]string {
 	return units
 }
 
-// Access summarizes what the team may do in its repositories: owner or admin; the one level it
-// grants, such as write, followed by the units when it does not grant all of them, as in
+// EffectiveAccess summarizes what the team may do in its repositories: owner or admin; the one
+// level it grants, such as write, followed by the units when it does not grant all of them, as in
 // "write (code, issues, pulls)"; none; or custom when it grants different levels.
-func (t Team) Access() string {
+func (t Team) EffectiveAccess() string {
 	if t.Permission == "owner" || t.Permission == "admin" {
 		return t.Permission
 	}
@@ -118,6 +122,7 @@ func teamFrom(team *gitea.Team) Team {
 	if result.Units == nil {
 		result.Units = map[string]string{}
 	}
+	result.Access = result.EffectiveAccess()
 	if team.Organization != nil {
 		result.Organization = organizationFrom(team.Organization).Name
 	}
@@ -144,7 +149,7 @@ func (s Teams) List(ctx context.Context, org string, limit, page int) (Page[Team
 	teams, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Team, *gitea.Response, error) {
 		return c.Organizations.ListOrgTeams(ctx, org, gitea.ListTeamsOptions{ListOptions: list})
 	})
-	return inOrganization(convertPage(teams, teamFrom), org), err
+	return inOrganization(convertPage(teams, teamFrom), org), Classify(err, "organization", strconv.Quote(org), "")
 }
 
 // inOrganization sets the organization of teams that the server listed without it.
@@ -157,10 +162,7 @@ func inOrganization(teams Page[Team], org string) Page[Team] {
 
 // ByName indexes every team of an organization by lower-case name, which Gitea keeps unique.
 func (s Teams) ByName(ctx context.Context, org string) (map[string]Team, error) {
-	teams, err := listAll(func(page int) ([]Team, error) {
-		teams, err := s.List(ctx, org, 50, page)
-		return teams.Items, err
-	})
+	teams, err := listEvery(50, func(limit, page int) (Page[Team], error) { return s.List(ctx, org, limit, page) })
 	if err != nil {
 		return nil, err
 	}
@@ -177,12 +179,10 @@ func (s Teams) Find(ctx context.Context, org, team string) (Team, error) {
 	if _, err := strconv.ParseInt(team, 10, 64); err == nil {
 		query = ""
 	}
-	teams, err := listAll(func(page int) ([]Team, error) {
-		teams, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Team, *gitea.Response, error) {
-			return c.Organizations.SearchOrgTeams(ctx, org, &gitea.SearchTeamsOptions{ListOptions: listOptions(50, page), Query: query})
-		})
-		return convertAll(teams, teamFrom), err
+	listed, err := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Team, *gitea.Response, error) {
+		return c.Organizations.SearchOrgTeams(ctx, org, &gitea.SearchTeamsOptions{ListOptions: list, Query: query})
 	})
+	teams := convertAll(listed, teamFrom)
 	if err != nil {
 		return Team{}, Classify(err, "organization", strconv.Quote(org), "")
 	}
@@ -238,8 +238,11 @@ func (s Teams) Create(ctx context.Context, org string, opts TeamOptions) (Team, 
 			CanCreateOrgRepo: deref(opts.CanCreateRepo), IncludesAllRepositories: deref(opts.AllRepositories), UnitsMap: opts.Units,
 		})
 	})
+	if IsNotFound(err) {
+		return Team{}, Classify(err, "organization", strconv.Quote(org), "")
+	}
 	if err != nil {
-		return Team{}, err
+		return Team{}, Classify(err, "team", strconv.Quote(deref(opts.Name)), org)
 	}
 	created := teamFrom(team)
 	created.Organization = org

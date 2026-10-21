@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -56,6 +58,30 @@ func TestStatusJSONAndActionsScope(t *testing.T) {
 			require.JSONEq(t, `{"runs_included":false,"failing_runs":[]}`, out.String())
 		}
 		require.Equal(t, 1, runs)
+	}
+}
+
+func TestStatusStaysPlainWhenPipedEvenWithForcedColor(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		args []string
+	}{
+		{name: "CLICOLOR_FORCE", env: map[string]string{"CLICOLOR_FORCE": "1"}, args: []string{"status", "--runs=false"}},
+		{name: "color always", env: map[string]string{"GITEA_CLI_COLOR": "always"}, args: []string{"status", "--runs=false"}},
+		{name: "pr status", env: map[string]string{"CLICOLOR_FORCE": "1"}, args: []string{"pr", "status", "-R", "alice/project"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, out, _ := serverDeps(t, server.URL)
+			deps.Getenv = serverEnv(server.URL, tc.env)
+			require.NoError(t, Execute(context.Background(), deps, tc.args))
+			require.NotEmpty(t, out.String())
+			require.NotContains(t, out.String(), "\x1b[")
+		})
 	}
 }
 
@@ -112,6 +138,11 @@ Assigned to you
 Requesting a code review from you
   Nothing here
 `, stripLinks(out.String()))
+}
+
+func TestPullStatusNamesTheCheckedOutBranchOfAnAGitPullRequest(t *testing.T) {
+	text := currentBranchSection(terminal.Display{Width: 80}, "topic", &services.Pull{Number: 6, Title: "agit change", State: "open"}, pullDetails{})
+	require.Contains(t, text, "agit change\t[topic]")
 }
 
 func TestStatusInACloneListsItsRunsWithoutFailingOnAnUnreadableRepository(t *testing.T) {

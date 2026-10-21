@@ -27,31 +27,47 @@ func TestIssueCreateSeedsFromTemplate(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/repos/alice/project/issue_templates":
-			_, _ = w.Write([]byte(`[{"name":"Bug Report","title":"[bug] ","content":"Steps:"},{"name":"Feature","about":"Describe the idea","body":[{"type":"textarea"}]}]`))
+			_, _ = w.Write([]byte(`[{"name":"Bug Report","title":"[bug] Crash","content":"Steps:","labels":["bug","gone"],"ref":"main","file_name":".gitea/ISSUE_TEMPLATE/bug.md"},{"name":"Feature","about":"Describe the idea","body":[{"type":"textarea"}]}]`))
+		case "/api/v1/orgs/alice":
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/v1/repos/alice/project/labels":
+			writeFirstPage(w, r, `[{"id":2,"name":"bug"},{"id":3,"name":"docs"}]`)
 		case "/api/v1/repos/alice/project/issues":
 			require.Equal(t, http.MethodPost, r.Method)
 			payload, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
 			created = append(created, string(payload))
-			_, _ = w.Write([]byte(`{"number":1}`))
+			_, _ = w.Write([]byte(`{"number":1,"labels":[{"id":2},{"id":3}]}`))
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
 	}))
 	defer server.Close()
-	deps, _, _ := serverDeps(t, server.URL)
+	deps, _, diagnostics := serverDeps(t, server.URL)
 	editor := &draftEditor{draft: terminal.Draft{Body: "edited idea"}}
 	deps.Editor = editor
 	deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "chosen-editor"})
 	run := func(args ...string) error {
 		return Execute(context.Background(), deps, append([]string{"issue", "create", "-R", "alice/project", "--no-input", "--json=number"}, args...))
 	}
+	// The title of a template is a prefix to complete, which never becomes the title without the form.
 	err := run("--template", "bug report")
-	require.ErrorContains(t, err, "missing required input: supply --title", "the template title is a placeholder and is never filed")
-	require.NoError(t, run("--template", "bug report", "--title", "Crash"))
-	require.NoError(t, run("--template", "Bug Report", "--title", "Explicit", "--body", "Override"))
+	require.ErrorContains(t, err, "missing required input: supply --title")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.Empty(t, created)
+	browser := &recordingBrowser{}
+	deps.Browser = browser
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--no-input", "--template", "bug report", "--web"}))
+	require.Equal(t, server.URL+"/alice/project/issues/new?template=.gitea%2FISSUE_TEMPLATE%2Fbug.md", browser.resource, "the page applies the whole template")
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--no-input", "--template", "bug report", "--web", "--title", "Mine"}))
+	require.Equal(t, server.URL+"/alice/project/issues/new?template=.gitea%2FISSUE_TEMPLATE%2Fbug.md&title=Mine", browser.resource)
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--no-input", "--template", "feature", "--web"}))
+	require.Equal(t, server.URL+"/alice/project/issues/new?body=&title=", browser.resource, "a template without a file name prefills what it has")
+	require.NoError(t, run("--template", "bug report", "--title", "[bug] Crash"))
+	require.Equal(t, "! label \"gone\" of the issue template does not exist in alice/project; it was left out\n", diagnostics.String())
+	require.NoError(t, run("--template", "Bug Report", "--title", "Explicit", "--body", "Override", "--label", "docs", "--ref", "v1"))
 	require.NoError(t, run("--template", "feature", "--title", "Idea", "--editor"))
-	require.Equal(t, "Describe the idea", editor.initial)
+	require.Empty(t, editor.initial, "a form template seeds no body")
 	err = run("--template", "missing", "--title", "x")
 	require.ErrorContains(t, err, `issue template "missing" does not exist; available: Bug Report, Feature`)
 	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
@@ -63,10 +79,10 @@ func TestIssueCreateSeedsFromTemplate(t *testing.T) {
 	require.ErrorContains(t, err, "--body-file - requires --title")
 	require.Len(t, created, 4)
 	for i, want := range []string{
-		`{"title":"Crash","body":"Steps:"}`,
-		`{"title":"Explicit","body":"Override"}`,
+		`{"title":"[bug] Crash","body":"Steps:","labels":[2],"ref":"main"}`,
+		`{"title":"Explicit","body":"Override","labels":[3],"ref":"v1"}`,
 		`{"title":"Idea","body":"edited idea"}`,
-		`{"title":"Crash","body":"From stdin"}`,
+		`{"title":"Crash","body":"From stdin","labels":[2],"ref":"main"}`,
 	} {
 		requirePayload(t, want, strings.NewReader(created[i]))
 	}
@@ -86,8 +102,76 @@ func TestIssueCreateTemplateOpensFormWithTemplateBody(t *testing.T) {
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--json=number", "--interactive", "--template", "bug"}))
 	require.Equal(t, 1, form.calls)
-	require.Equal(t, &terminal.IssueTemplateChoice{Name: "Bug", About: "Report", Body: "## Steps"}, form.choices.Template, "the form starts with the template body and an empty title")
+	require.Equal(t, &terminal.IssueTemplateChoice{Name: "Bug", About: "Report", Title: "bug: ", Body: "## Steps"}, form.choices.Template, "the form starts with the template title and body")
 	require.Equal(t, "Mine", createPayload["title"])
+}
+
+func TestIssueCreateFormAddsLabelsOfPickedTemplate(t *testing.T) {
+	var createPayload map[string]any
+	server := newAuthenticatedServer(selectablesHandler(t, true, func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&createPayload))
+		_, _ = w.Write([]byte(`{"number":9,"title":"Mine","labels":[{"id":3},{"id":2}]}`))
+	}))
+	defer server.Close()
+	form := &recordingIssueForm{values: terminal.IssueFormValues{Title: "Mine", Labels: []int64{3}, TemplateLabels: []string{"bug", "gone"}}}
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	deps.IssueForm = form
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--json=number", "--interactive"}))
+	require.Equal(t, []any{float64(3), float64(2)}, createPayload["labels"])
+	require.Equal(t, "! label \"gone\" of the issue template does not exist in alice/project; it was left out\n", withoutANSI(diagnostics.String()))
+}
+
+func TestIssueCreateFormPrefersRepositoryLabelsOfTemplateAndKeepsTheBody(t *testing.T) {
+	var payloads []map[string]any
+	fail := false
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/acme/project/assignees", "/api/v1/repos/acme/project/issue_templates":
+			_, _ = w.Write([]byte(`[]`))
+		case "/api/v1/repos/acme/project/milestones":
+			writeFirstPage(w, r, `[]`)
+		case "/api/v1/orgs/acme":
+			_, _ = w.Write([]byte(`{"id":5,"username":"acme"}`))
+		case "/api/v1/orgs/acme/labels":
+			writeFirstPage(w, r, `[{"id":7,"name":"bug"}]`)
+		case "/api/v1/repos/acme/project/labels":
+			writeFirstPage(w, r, `[{"id":2,"name":"bug"},{"id":10,"name":"Dup"},{"id":11,"name":"dup"}]`)
+		case "/api/v1/repos/acme/project/issues":
+			var payload map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			payloads = append(payloads, payload)
+			if fail {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"message":"boom"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"number":9,"title":"Mine","labels":[{"id":2}]}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	form := &recordingIssueForm{values: terminal.IssueFormValues{Title: "Mine", Body: "typed in the form", TemplateLabels: []string{"bug", "DUP"}}}
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	deps.IssueForm = form
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	run := func() error {
+		return Execute(context.Background(), deps, []string{"issue", "create", "-R", "acme/project", "--json=number", "--interactive"})
+	}
+	require.NoError(t, run())
+	require.Equal(t, []any{float64(2)}, payloads[0]["labels"], "the repository's label wins over the organization's")
+	require.Equal(t, "! label \"DUP\" of the issue template matches several labels in acme/project; it was left out\n", withoutANSI(diagnostics.String()))
+	fail = true
+	err := run()
+	require.ErrorContains(t, err, "boom")
+	path := DraftPath(err)
+	require.NotEmpty(t, path, "the typed body is kept when creating fails")
+	t.Cleanup(func() { _ = os.Remove(path) })
+	saved, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	require.Equal(t, "typed in the form", string(saved))
 }
 
 func TestIssueCreateUploadsAttachmentsAndKeepsIssueOnFailure(t *testing.T) {
@@ -122,7 +206,7 @@ func TestIssueCreateUploadsAttachmentsAndKeepsIssueOnFailure(t *testing.T) {
 	require.Empty(t, requests)
 	require.NoError(t, os.WriteFile(second, []byte("two"), 0o600))
 	err := Execute(context.Background(), deps, args)
-	require.ErrorContains(t, err, "issue 5 was created, but follow-up steps failed: attachment second.txt")
+	require.ErrorContains(t, err, "issue #5 was created, but follow-up steps failed: attachment second.txt")
 	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 	require.JSONEq(t, `{"number":5,"title":"Crash"}`, out.String())
 	require.Equal(t, []string{"first.txt=one", "second.txt=two"}, uploaded)
@@ -151,7 +235,8 @@ func TestIssueCreateImplicitInteractiveForm(t *testing.T) {
 			return
 		}
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&createPayload))
-		_, _ = w.Write([]byte(`{"number":9,"title":"Interactive","html_url":"https://example.org/alice/project/issues/9","state":"open"}`))
+		_, _ = w.Write([]byte(`{"number":9,"title":"Interactive","html_url":"https://example.org/alice/project/issues/9","state":"open",` +
+			`"assignees":[{"login":"alice"}],"milestone":{"id":4},"labels":[{"id":2}],"due_date":"2028-01-15T23:59:59Z"}`))
 	}))
 	defer server.Close()
 	form := &recordingIssueForm{values: terminal.IssueFormValues{
@@ -165,7 +250,6 @@ func TestIssueCreateImplicitInteractiveForm(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--json=number,url", "--interactive"}))
 	require.Equal(t, 1, form.calls)
 	require.Nil(t, form.choices.EditBody, "without an editor the form asks for the body")
-	require.True(t, form.choices.CanPush)
 	require.Equal(t, []string{"alice", "bob"}, form.choices.Assignees)
 	require.Equal(t, []terminal.IssueMilestoneChoice{{Title: "Release", ID: 4}}, form.choices.Milestones)
 	require.Equal(t, []terminal.IssueLabelChoice{{Name: "bug", ID: 2}, {Name: "docs", ID: 3}}, form.choices.Labels)
@@ -176,9 +260,56 @@ func TestIssueCreateImplicitInteractiveForm(t *testing.T) {
 	require.Equal(t, []any{"alice"}, createPayload["assignees"])
 	require.Equal(t, float64(4), createPayload["milestone"])
 	require.Equal(t, []any{float64(2)}, createPayload["labels"])
-	require.Equal(t, "2028-01-15T00:00:00Z", createPayload["due_date"])
+	require.Equal(t, "2028-01-15T23:59:59Z", createPayload["due_date"])
 	require.JSONEq(t, `{"number":9,"url":"https://example.org/alice/project/issues/9"}`, out.String())
 	require.Empty(t, diagnostics.String())
+}
+
+func TestIssueCreateFormOffersMetadataWithoutPushAndNamesWhatGiteaLeftOut(t *testing.T) {
+	var created []map[string]any
+	server := newAuthenticatedServer(selectablesHandler(t, false, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/repos/alice/project/issues" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var payload map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		created = append(created, payload)
+		if len(created) == 1 {
+			// Someone who can write to the issues without pushing gets the metadata.
+			_, _ = w.Write([]byte(`{"number":9,"labels":[{"id":2},{"id":3}],"milestone":{"id":4},"assignees":[{"login":"alice"}]}`))
+			return
+		}
+		// Gitea drops the metadata of people who cannot write to the issues.
+		_, _ = w.Write([]byte(`{"number":10}`))
+	}))
+	defer server.Close()
+	form := &recordingIssueForm{values: terminal.IssueFormValues{
+		Title: "Triaged", Assignees: []string{"alice"}, Milestone: 4, Labels: []int64{2}, TemplateLabels: []string{"docs"},
+	}}
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	deps.IssueForm = form
+	deps.Prompter = &scriptedPrompter{accept: true}
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	run := func() error {
+		return Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--json=number", "--interactive"})
+	}
+	require.NoError(t, run())
+	require.Equal(t, []string{"alice", "bob"}, form.choices.Assignees, "the form offers metadata without push access")
+	require.Equal(t, []terminal.IssueMilestoneChoice{{Title: "Release", ID: 4}}, form.choices.Milestones)
+	require.Equal(t, []terminal.IssueLabelChoice{{Name: "bug", ID: 2}, {Name: "docs", ID: 3}}, form.choices.Labels)
+	require.Equal(t, []any{float64(2), float64(3)}, created[0]["labels"], "with the labels of the template")
+	require.Equal(t, []any{"alice"}, created[0]["assignees"])
+	require.Equal(t, float64(4), created[0]["milestone"])
+	require.Empty(t, diagnostics.String())
+
+	out.Reset()
+	err := run()
+	require.EqualError(t, err, "issue #10 was created without labels, milestone, assignees: Gitea leaves them out for people who cannot write to the issues of alice/project")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+	require.JSONEq(t, `{"number":10}`, out.String(), "the created issue is still reported")
+	require.Equal(t, "! Gitea left out the labels of the issue template, as you cannot write to the issues of alice/project\n", withoutANSI(diagnostics.String()))
 }
 
 func TestIssueCreateInteractiveDraftSurvivesSubmissionFailure(t *testing.T) {
@@ -219,7 +350,11 @@ func TestIssueCreateSkipsInteractiveFormWithoutTTY(t *testing.T) {
 func TestIssueCreationMetadataAndReferenceClearing(t *testing.T) {
 	calls := 0
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/repos/owner/repo/milestones" {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"full_name":"owner/repo","permissions":{"push":true}}`))
+			return
+		case "/api/v1/repos/owner/repo/milestones":
 			writeFirstPage(w, r, `[{"id":4,"title":"Release"}]`)
 			return
 		}
@@ -248,12 +383,73 @@ func TestIssueCreationMetadataAndReferenceClearing(t *testing.T) {
 	require.Empty(t, diagnostics.String())
 }
 
+func TestJSONFieldsThatCostRequestsAreDocumentedOnce(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	require.NoError(t, Execute(context.Background(), deps, []string{"help", "formatting"}))
+	require.Contains(t, out.String(), "An expression that reaches such a field without naming it, as\nto_entries does, sees it empty")
+	for _, args := range [][]string{{"pr", "list"}, {"issue", "view"}, {"issue", "edit"}, {"org", "member", "list"}} {
+		out.Reset()
+		require.NoError(t, Execute(context.Background(), deps, append(args, "--help")))
+		require.Contains(t, strings.Join(strings.Fields(out.String()), " "), "(see gt help formatting)", args)
+	}
+}
+
+func TestIssueCreateNamesMetadataGiteaLeftOut(t *testing.T) {
+	var created []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/owner/repo/issue_templates":
+			_, _ = w.Write([]byte(`[{"name":"Bug","content":"Steps:","labels":["bug"]}]`))
+		case "GET /api/v1/repos/owner/repo/labels":
+			writeFirstPage(w, r, `[{"id":2,"name":"bug"}]`)
+		case "GET /api/v1/orgs/owner":
+			w.WriteHeader(http.StatusNotFound)
+		case "GET /api/v1/repos/owner/repo/milestones":
+			writeFirstPage(w, r, `[{"id":4,"title":"v1"}]`)
+		case "GET /api/v1/repos/owner/repo/projects":
+			writeFirstPage(w, r, `[{"id":3,"title":"Board"}]`)
+		case "GET /api/v1/repos/owner/repo/projects/3/columns":
+			writeFirstPage(w, r, `[{"id":11,"title":"Backlog","default":true}]`)
+		case "POST /api/v1/repos/owner/repo/projects/3/columns/11/issues/70":
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"user should have a permission to write to a repo"}`))
+		case "POST /api/v1/repos/owner/repo/issues":
+			payload, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			created = append(created, string(payload))
+			// Gitea drops the metadata of people who cannot write to the issues.
+			_, _ = w.Write([]byte(`{"id":70,"number":1}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	run := func(args ...string) error {
+		return Execute(context.Background(), deps, append([]string{"issue", "create", "-R", "owner/repo", "--title", "x", "--no-input", "--json=number"}, args...))
+	}
+	err := run("--label", "bug", "--milestone", "v1", "--assignee", "alice", "--deadline", "2028-01-15")
+	require.EqualError(t, err, "issue #1 was created without --label, --milestone, --assignee, --deadline: Gitea leaves them out for people who cannot write to the issues of owner/repo")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+	require.JSONEq(t, `{"number":1}`, out.String(), "the created issue is still reported")
+	requirePayload(t, `{"title":"x","body":"","assignees":["alice"],"labels":[2],"milestone":4,"due_date":"2028-01-15T23:59:59Z"}`, strings.NewReader(created[0]))
+	require.NoError(t, run("--template", "bug"))
+	require.Contains(t, created[1], `"labels":[2]`)
+	require.Equal(t, "! Gitea left out the labels of the issue template, as you cannot write to the issues of owner/repo\n", diagnostics.String())
+	err = run("--project", "board")
+	require.EqualError(t, err, `issue #1 was created, but follow-up steps failed: add to project "Board": permission denied by the Gitea instance: user should have a permission to write to a repo; add it later with: gt issue edit 1 --add-project "Board" -R owner/repo`)
+	require.Len(t, created, 3)
+}
+
 func TestNameFlagsAreTrimmed(t *testing.T) {
 	var routes, payloads []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/orgs/owner":
 			w.WriteHeader(http.StatusNotFound)
+		case r.URL.Path == "/api/v1/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"full_name":"owner/repo","permissions":{"push":true}}`))
 		case r.URL.Path == "/api/v1/repos/owner/repo/labels" && r.URL.Query().Get("page") == "1":
 			_, _ = w.Write([]byte(`[{"id":2,"name":"bug"}]`))
 		case r.URL.Path == "/api/v1/repos/owner/repo/labels":
@@ -268,7 +464,7 @@ func TestNameFlagsAreTrimmed(t *testing.T) {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
-			_, _ = w.Write([]byte(`{"number":1}`))
+			_, _ = w.Write([]byte(`{"number":1,"labels":[{"id":2}],"assignees":[{"login":"Alice"},{"login":"bob"}]}`))
 		}
 	}))
 	defer server.Close()
@@ -399,7 +595,7 @@ func TestIssueListTables(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, args))
 	require.Equal(t, "7\tShort\tbug, priority/high\topen\tissue\talice\t2026-10-11T18:00:00Z\n"+
 		"12\tEvil]52;c;aGk= Title\t\tclosed\tissue\tbob\t2026-10-09T20:00:00Z\n"+
-		"14\tMerged\t\tmerged\tpr\tbob\t2026-10-11T19:59:00Z\n", out.String())
+		"14\tMerged\t\tmerged\tpull\tbob\t2026-10-11T19:59:00Z\n", out.String())
 	for _, test := range []struct {
 		args []string
 		want string
@@ -413,7 +609,7 @@ func TestIssueListTables(t *testing.T) {
 			"ID   TITLE                 LABELS              STATE   KIND   AUTHOR  UPDATED\n" +
 			"#7   Short                 bug, priority/high  open    issue  alice   about 2 hours ago\n" +
 			"#12  Evil]52;c;aGk= Title                      closed  issue  bob     about 2 days ago\n" +
-			"#14  Merged                                    merged  pr     bob     about 1 minute ago\n"},
+			"#14  Merged                                    merged  pull   bob     about 1 minute ago\n"},
 	} {
 		out.Reset()
 		deps.Streams.OutTTY = true
@@ -593,5 +789,42 @@ func TestIssueListWebRejectsFiltersTheBrowserCannotReceive(t *testing.T) {
 	for _, flag := range []string{"--label=bug", "--assignee=alice", "--milestone=v1", "--author=bob"} {
 		requireUsageBeforeRequests(t, "cannot be combined with --web", "issue", "list", "--web", flag)
 		requireUsageBeforeRequests(t, "cannot be combined with --web; the browser only receives --state", "pr", "list", "--web", flag)
+	}
+	requireUsageBeforeRequests(t, "--kind all cannot be combined with --web", "issue", "list", "--web", "--kind=all")
+}
+
+func TestIssueCloseAndReopenHelpFitTheVerb(t *testing.T) {
+	for verb, want := range map[string][]string{
+		"close":  {`--comment "Done in #14"`, "Leave a comment before closing the issue"},
+		"reopen": {`--comment "Still happens on v1.2"`, "Leave a comment before reopening the issue"},
+	} {
+		deps, out, _ := testDeps(t)
+		require.NoError(t, Execute(context.Background(), deps, []string{"issue", verb, "--help"}))
+		for _, text := range want {
+			require.Contains(t, out.String(), text, verb)
+		}
+	}
+}
+
+func TestMissingIssuesBranchesAndOrganizationsAreNamed(t *testing.T) {
+	server := fakeGitea(t, map[string][2]string{
+		"GET /api/v1/user":                                   {"200", `{"login":"alice"}`},
+		"GET /api/v1/repos/alice/project":                    {"200", `{"full_name":"alice/project","has_issues":true}`},
+		"GET /api/v1/repos/alice/project/issues/99/timeline": {"500", `{"message":"issue does not exist [id: 0, repo_id: 81, index: 99]"}`},
+		"GET /api/v1/repos/alice/project/issues/99/assets":   {"404", `{"message":"issue does not exist [id: 0, repo_id: 81, index: 99]"}`},
+		"PATCH /api/v1/repos/alice/project/branches/nope":    {"404", `{"message":"Branch doesn't exist."}`},
+	})
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"issue", "timeline", "99", "-R", "alice/project"}, "issue #99 not found in alice/project"},
+		{[]string{"issue", "attachment", "list", "99", "-R", "alice/project"}, "issue #99 not found in alice/project"},
+		{[]string{"branch", "rename", "nope", "x", "-R", "alice/project"}, `branch "nope" not found in alice/project`},
+		{[]string{"team", "list", "nosuchorg"}, `organization "nosuchorg" not found`},
+	} {
+		deps, _, _ := serverDeps(t, server.URL)
+		err := Execute(context.Background(), deps, append(tc.args, "--no-input"))
+		require.EqualError(t, Explain(context.Background(), deps, err), tc.want, "%v", tc.args)
 	}
 }

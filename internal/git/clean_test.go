@@ -5,10 +5,12 @@ package git
 
 import (
 	"context"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/git/gittest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -157,7 +159,7 @@ func TestCleanPullDeletesLocalAndRemoteBranches(t *testing.T) {
 	require.Equal(t, CleanResult{LocalBranch: "feature", Remote: "origin", RemoteBranch: "feature", DefaultBranch: "main", RemoteDeleted: true}, result)
 	require.Contains(t, runner.calls, "switch --quiet -- main")
 	require.Contains(t, runner.calls, "branch -D -- feature")
-	require.Contains(t, runner.calls, "-c credential.helper=gt push --delete -- origin feature")
+	require.Contains(t, runner.calls, "-c credential.helper=gt push --delete -- origin refs/heads/feature")
 }
 
 func TestCleanPullSkipsRemoteWhenUnavailable(t *testing.T) {
@@ -179,4 +181,47 @@ func TestFindCleanBranchMatchesTheRemotesThatPullCheckoutAdds(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "feature", branch)
 	require.Equal(t, "pulls/bob/project", remote)
+}
+
+func TestFindCleanBranchIgnoresATagWithTheSameName(t *testing.T) {
+	gittest.Isolate(t)
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "--quiet", "--initial-branch=main"},
+		{"-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "--quiet", "--allow-empty", "--message=x"},
+		{"branch", "feature"},
+		{"tag", "feature"},
+	} {
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	branch, _, err := FindCleanBranch(context.Background(), System{}, FindCleanBranchOptions{
+		Directory: dir, HeadBranch: "feature", DefaultBranch: "main", IgnoreSHA: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "feature", branch)
+}
+
+func TestCleanPullDeletesTheRemoteBranchBesideATagWithTheSameName(t *testing.T) {
+	gittest.Isolate(t)
+	remote, dir := t.TempDir(), t.TempDir()
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+		return string(out)
+	}
+	run(remote, "init", "--quiet", "--bare")
+	run(dir, "init", "--quiet", "--initial-branch=main")
+	run(dir, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "--quiet", "--allow-empty", "--message=x")
+	run(dir, "branch", "feature")
+	run(dir, "tag", "feature")
+	run(dir, "remote", "add", "origin", remote)
+	run(dir, "push", "--quiet", "origin", "refs/heads/main", "refs/heads/feature", "refs/tags/feature")
+	result, err := CleanPull(context.Background(), System{}, CleanOptions{
+		Directory: dir, DefaultBranch: "main", LocalBranch: "feature", Remote: "origin", RemoteBranch: "feature", DeleteRemote: true,
+	})
+	require.NoError(t, err)
+	require.True(t, result.RemoteDeleted)
+	require.Equal(t, "refs/heads/main\nrefs/tags/feature\n", run(remote, "for-each-ref", "--format=%(refname)"))
 }

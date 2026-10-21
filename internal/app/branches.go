@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -129,12 +128,12 @@ func (a *application) branchViewCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if web {
-				return a.openBrowser(cmd, branchURL(repository, args[0]))
-			}
-			item, err := (services.Branches{Client: target.client}).View(cmd.Context(), target.Repo, args[0])
+			item, err := (services.Branches{Client: target.client}).Find(cmd.Context(), target.Repo, args[0])
 			if err != nil {
 				return err
+			}
+			if web {
+				return a.openBrowser(cmd, branchURL(repository, args[0]))
 			}
 			return writeView(a, cmd, item, func(item services.Branch) terminal.View {
 				var badges []terminal.Cell
@@ -248,6 +247,13 @@ $ gt branch delete old-a old-b --yes`,
 			if err != nil {
 				return err
 			}
+			service := services.Branches{Client: target.client}
+			// Every branch is looked up first, so that a misspelled one deletes none.
+			if len(args) > 1 {
+				if err := service.RequireAll(cmd.Context(), target.Repo, args); err != nil {
+					return err
+				}
+			}
 			subject := "branch " + args[0]
 			if len(args) > 1 {
 				subject = fmt.Sprintf("%d branches (%s)", len(args), strings.Join(args, ", "))
@@ -255,7 +261,6 @@ $ gt branch delete old-a old-b --yes`,
 			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + " from " + target.Repo + "?"}); err != nil {
 				return err
 			}
-			service := services.Branches{Client: target.client}
 			return batchDone(a, cmd, args, func(name string) string { return "delete branch " + name }, func(name string) (string, error) {
 				return name, service.Delete(cmd.Context(), target.Repo, name)
 			}, func(name string) string { return "Deleted branch " + name + " from " + target.Repo })
@@ -273,7 +278,10 @@ func (a *application) branchProtectCommand() *cobra.Command {
 		Use:   "protect <branch>...",
 		Short: "Protect branches",
 		Long: `Add a protection rule for each existing branch, or with --pattern for every branch matching a
-glob. By default nobody can push directly and pull requests need one approving review.`,
+glob. By default nobody can push directly and pull requests need one approving review.
+
+When a branch or pattern has a rule already, change only the settings the flags name and keep
+the others; --allow-push replaces those who may push directly.`,
 		Example: `# Require two approvals and passing CI on main
 $ gt branch protect main --required-approvals 2 --status-check ci/build
 
@@ -296,8 +304,17 @@ $ gt branch protect --pattern 'release/*' --allow-push acme/release`,
 			if rule.RequiredApprovals < 0 {
 				return clierr.Wrap(clierr.Usage, errors.New("--required-approvals cannot be negative"))
 			}
-			if err := requireNames("push", "", pushers, rule.StatusChecks); err != nil {
-				return err
+			for _, names := range []struct {
+				flag, kind string
+				list       []string
+			}{{"allow-push", "pusher", pushers}, {"status-check", "status check", rule.StatusChecks}} {
+				// An empty value, as in --status-check=, parses to no names at all.
+				if cmd.Flags().Changed(names.flag) && len(names.list) == 0 {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("%s names cannot be empty", names.kind))
+				}
+				if err := requireNames(names.kind, "", names.list); err != nil {
+					return err
+				}
 			}
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {
@@ -320,27 +337,39 @@ $ gt branch protect --pattern 'release/*' --allow-push acme/release`,
 			if pattern != "" {
 				rules = []string{pattern}
 			}
+			flags := cmd.Flags()
+			changes := services.ProtectionChanges{
+				RequiredApprovals: flags.Changed("required-approvals"), Pushers: flags.Changed("allow-push"),
+				StatusChecks: flags.Changed("status-check"), BlockOnRejected: flags.Changed("block-on-rejected-reviews"),
+				DismissStaleApprovals: flags.Changed("dismiss-stale-approvals"),
+			}
+			updated := map[string]bool{}
 			_, failures := applyBatch(cmd, rules, func(name string) string { return "protect " + name }, func(name string) (string, error) {
 				if pattern == "" {
-					if _, err := service.View(cmd.Context(), target.Repo, name); err != nil {
-						if services.IsNotFound(err) {
-							if _, repoErr := (services.Repositories{Client: target.client}).View(cmd.Context(), target.Repo); repoErr != nil {
-								return "", repoErr
-							}
-						}
-						return "", services.Classify(err, "branch", strconv.Quote(name), target.Repo)
+					if _, err := service.Find(cmd.Context(), target.Repo, name); err != nil {
+						return "", err
 					}
 				}
 				protection := rule
 				protection.Rule = name
 				created, err := service.Protect(cmd.Context(), target.Repo, protection)
-				if err == nil && !created {
-					a.warn(cmd, "%s is already protected in %s; change its rule on the web", name, target.Repo)
+				if err != nil || created {
+					return name, err
+				}
+				if changes == (services.ProtectionChanges{}) {
+					a.warn(cmd, "%s is already protected in %s; pass the settings to change", name, target.Repo)
 					return "", nil
 				}
-				return name, err
+				if err := service.EditProtection(cmd.Context(), target.Repo, protection, changes); err != nil {
+					return "", err
+				}
+				updated[name] = true
+				return name, nil
 			}, func(name string) {
-				if name != "" {
+				switch {
+				case updated[name]:
+					a.done(cmd, "Updated the protection of %s in %s", name, target.Repo)
+				case name != "":
 					a.done(cmd, "Protected %s in %s (%s)", name, target.Repo, protectionSummary(rule))
 				}
 			})

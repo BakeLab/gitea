@@ -63,24 +63,34 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 			headers := map[string]string{}
 			for _, raw := range headerArgs {
 				name, value, err := settings.ParseHeader(raw)
+				if err == nil {
+					err = checkHeaderValue(name, value)
+				}
 				if err != nil {
 					return clierr.Wrap(clierr.Usage, err)
 				}
 				headers[name] = value
 			}
-			selected := 0
-			for _, chosen := range []bool{withToken, oauth, sshKey != "", sshAgentPrincipal != "", sshAgentKey != ""} {
-				if chosen {
-					selected++
+			selected, methodFlag := 0, ""
+			for _, choice := range []struct {
+				flag   string
+				chosen bool
+			}{{"--with-token", withToken}, {"--oauth", oauth}, {"--ssh-key", sshKey != ""}, {"--ssh-agent-principal", sshAgentPrincipal != ""}, {"--ssh-agent-key", sshAgentKey != ""}} {
+				if choice.chosen {
+					selected, methodFlag = selected+1, choice.flag
 				}
+			}
+			if selected == 0 && (clientID != "" || cmd.Flags().Changed("scopes")) {
+				// --client-id and --scopes only apply to OAuth, so they choose it.
+				oauth, selected = true, 1
 			}
 			switch {
 			case selected > 1:
 				return clierr.Wrap(clierr.Usage, errors.New("select one of --with-token, --oauth, --ssh-key, --ssh-agent-principal or --ssh-agent-key"))
-			case selected == 1 && !oauth && clientID != "":
-				return clierr.Wrap(clierr.Usage, errors.New("--client-id requires --oauth"))
-			case selected == 1 && !oauth && cmd.Flags().Changed("scopes"):
-				return clierr.Wrap(clierr.Usage, errors.New("--scopes requires --oauth"))
+			case !oauth && clientID != "":
+				return clierr.Wrap(clierr.Usage, errors.New("--client-id cannot be combined with "+methodFlag))
+			case !oauth && cmd.Flags().Changed("scopes"):
+				return clierr.Wrap(clierr.Usage, errors.New("--scopes cannot be combined with "+methodFlag))
 			}
 			snapshot, err := a.settings()
 			if err != nil {
@@ -167,11 +177,20 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 				}
 				clientID = cmp.Or(clientID, host.OAuthClientID, auth.DefaultClientID)
 				credential, err = auth.OAuthLogin(cmd.Context(), auth.OAuthOptions{Instance: instance, ClientID: clientID, Scopes: scopes, HTTP: a.instanceClient(instance, "", loginHost).HTTP, Authorize: func(_ context.Context, authorizationURL string) error {
-					if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Open this URL to authorize gt:", authorizationURL); err != nil {
-						return err
+					// On a terminal, openBrowserShowing names the whole URL, which people can copy when
+					// no browser shows up, and the URL is printed again only when opening fails.
+					announced := a.deps.Streams.OutTTY
+					if !announced {
+						if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Open this URL to authorize gt:", authorizationURL); err != nil {
+							return err
+						}
 					}
-					if err := a.openBrowser(cmd, authorizationURL); err != nil {
-						_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Could not open a browser automatically; open the URL above manually.")
+					if err := a.openBrowserShowing(cmd, authorizationURL, terminal.SafeLine(authorizationURL)); err != nil {
+						if announced {
+							_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Could not open a browser automatically; open this URL to authorize gt:", authorizationURL)
+						} else {
+							_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Could not open a browser automatically; open the URL above manually.")
+						}
 					}
 					return nil
 				}})
@@ -228,12 +247,12 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 		},
 	}
 	login.Flags().BoolVar(&oauth, "oauth", false, "Authorize in a web browser with OAuth")
-	login.Flags().StringVar(&clientID, "client-id", "", "OAuth application `ID` registered on the instance (default: the instance's stored ID, then gt's)")
-	login.Flags().StringSliceVar(&scopes, "scopes", nil, "OAuth token `scopes`, such as read:repository (default: write access to everything but administration)")
+	login.Flags().StringVar(&clientID, "client-id", "", "OAuth application `ID` registered on the instance (default: the instance's stored ID, then gt's); implies --oauth")
+	login.Flags().StringSliceVar(&scopes, "scopes", nil, "OAuth token `scopes`, such as read:repository (default: write access to everything but administration); implies --oauth")
 	login.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification for this instance")
 	login.Flags().StringVar(&clientCert, "client-cert", "", "Present the PEM TLS client certificate in `file` to an instance that requires one; convert a PKCS#12 file with: openssl pkcs12 -in cert.p12 -clcerts -nokeys -out cert.pem")
 	login.Flags().StringVar(&clientKey, "client-key", "", "Unencrypted PEM private key `file` of --client-cert (default: the key in the --client-cert file); convert a PKCS#12 file with: openssl pkcs12 -in cert.p12 -nocerts -nodes -out key.pem")
-	login.Flags().StringArrayVar(&headerArgs, "header", nil, "Send the `\"Name: value\"` header with every request to this instance, such as an access proxy needs; a value of $NAME is read from that environment variable (repeatable)")
+	login.Flags().StringArrayVar(&headerArgs, "header", nil, "Send the `\"Name: value\"` header with every request to this instance, such as an access proxy needs; a value of $NAME or ${NAME} is read from that environment variable (repeatable)")
 	login.Flags().BoolVar(&withToken, "with-token", false, "Read an access token from stdin, or ask for it on a terminal")
 	login.Flags().StringVar(&sshKey, "ssh-key", "", "Sign requests with the SSH private key in `file`")
 	login.Flags().StringVar(&sshAgentPrincipal, "ssh-agent-principal", "", "Sign requests with the ssh-agent certificate of `principal`")
@@ -308,8 +327,11 @@ func (a *application) signedLogin(cmd *cobra.Command, snapshot settings.Snapshot
 }
 
 // settingPath stores a file path, such as an SSH key's, absolute so that it names the same file
-// from every directory.
+// from every directory. An empty path stays empty, which clears the setting.
 func settingPath(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
 	return filepath.Abs(terminal.ExpandHome(path))
 }
 

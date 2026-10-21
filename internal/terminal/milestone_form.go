@@ -5,7 +5,6 @@ package terminal
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"charm.land/huh/v2"
@@ -15,7 +14,7 @@ import (
 type MilestoneFormValues struct {
 	Title, Description string
 	Deadline           *time.Time
-	// Editor is the configured editor command, input only: with one, ctrl+e opens it in the description.
+	// Editor is the configured editor command, input only: with one, ctrl+e opens it in the description, except in accessible mode.
 	Editor string
 }
 
@@ -32,18 +31,14 @@ func (p *FormPrompter) EditMilestone(ctx context.Context, heading string, curren
 	if current.Deadline != nil {
 		deadline = current.Deadline.Format(time.DateOnly)
 	}
-	descriptionTitle := "Milestone description (markdown):"
-	descriptionField := bodyField(descriptionTitle, &description)
-	if args, ok := commandArgs(current.Editor); ok {
-		descriptionField = bodyField(strings.TrimSuffix(descriptionTitle, "):")+", ctrl+e opens your editor):", &description).ExternalEditor(true).Editor(args...).EditorExtension("md")
-	}
+	descriptionField := bodyField("Milestone description (markdown):", &description).withEditor(current.Editor)
 	if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Milestone title (required):").Value(&title).Validate(notBlank),
+		lineField("Milestone title (required):", &title, false).Validate(requiredText(&title)),
 		descriptionField,
 		dueDateInput("Milestone deadline:", &deadline),
 	).Title(SafeLine(heading)))); err != nil {
 		return MilestoneFormValues{}, err
 	}
 	parsed, err := parseDueDate(deadline)
-	return MilestoneFormValues{Title: strings.TrimSpace(title), Description: fieldResult(current.Description, description), Deadline: parsed}, err
+	return MilestoneFormValues{Title: titleResult(current.Title, title), Description: fieldResult(current.Description, description), Deadline: parsed}, err
 }

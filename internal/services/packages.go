@@ -5,10 +5,13 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -119,18 +122,80 @@ func (s Packages) Link(ctx context.Context, kind, name, repository string) error
 		}
 		return c.Packages.LinkPackage(ctx, s.Owner, kind, name, repository)
 	})
+	apiErr, ok := errors.AsType[*transport.APIError](err)
+	switch {
+	case ok && apiErr.Status == http.StatusNotFound && strings.Contains(apiErr.Message, "repository does not exist"):
+		return &NotFoundError{Kind: "repository", Key: s.Owner + "/" + repository, Err: err}
+	case ok && apiErr.Status == http.StatusBadRequest && repository == "":
+		// Gitea answers "invalid argument" for a package without a repository.
+		return fmt.Errorf("package %s is not linked to a repository", s.key(kind, name, ""))
+	case ok && apiErr.Status == http.StatusBadRequest:
+		// It answers the same for a package that is linked already; linking it again to its
+		// repository changes nothing.
+		if p, viewErr := s.View(ctx, kind, name, ""); viewErr == nil && p.Repository != "" {
+			if strings.EqualFold(p.Repository, s.Owner+"/"+repository) {
+				return nil
+			}
+			return fmt.Errorf("package %s is already linked to %s; unlink it first", s.key(kind, name, ""), p.Repository)
+		}
+	}
 	return Classify(err, "package", s.key(kind, name, ""), "")
+}
+
+// CheckGenericUpload refuses to upload files to a version of a generic package that holds a file
+// of the same name already, ignoring case as Gitea does; a new version holds none.
+func (s Packages) CheckGenericUpload(ctx context.Context, name, version string, files []string) error {
+	if err := s.checkRegistryAccount(); err != nil {
+		return err
+	}
+	existing, err := s.Files(ctx, "generic", name, version)
+	if IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, file := range existing {
+		if slices.ContainsFunc(files, func(upload string) bool { return strings.EqualFold(upload, file.Name) }) {
+			return genericFileExists(name, version, file.Name, nil)
+		}
+	}
+	return nil
 }
 
 // UploadGeneric streams one file into a version of a generic package, creating either as needed.
 // TODO(sdk): the SDK has no client for the package registries' upload endpoints.
 func (s Packages) UploadGeneric(ctx context.Context, name, version, file string, input io.Reader) error {
+	if err := s.checkRegistryAccount(); err != nil {
+		return err
+	}
 	endpoint := fmt.Sprintf("/api/packages/%s/generic/%s/%s/%s", url.PathEscape(s.Owner), url.PathEscape(name), url.PathEscape(version), url.PathEscape(file))
 	response, err := s.Client.Do(ctx, http.MethodPut, endpoint, input, http.Header{"Content-Type": {"application/octet-stream"}})
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusConflict {
+		return genericFileExists(name, version, file, err)
+	}
 	if err != nil {
 		return Classify(err, "package file", s.key("generic", name, version)+"/"+file, "")
 	}
 	return response.Body.Close()
+}
+
+// errRegistrySignature refuses a package upload from an SSH key account up front: Gitea's package
+// registries do not accept HTTP signatures, and would answer only "authentication rejected".
+var errRegistrySignature = errors.New("Gitea's package registry does not accept SSH key accounts; log in with a token to upload packages: gt auth login --with-token")
+
+// checkRegistryAccount refuses an account that the package registries cannot authenticate.
+func (s Packages) checkRegistryAccount() error {
+	if s.Client.Signer != nil {
+		return errRegistrySignature
+	}
+	return nil
+}
+
+// genericFileExists reports a file that a version of a generic package holds already, such as
+// "file tool-linux already exists in tool@1.0".
+func genericFileExists(name, version, file string, err error) error {
+	return &ConflictError{Reason: ReasonExists, Kind: "file", Key: file, Scope: name + "@" + version, Err: err}
 }
 
 // key names a package in errors, such as "generic/tool@1.0" of alice.

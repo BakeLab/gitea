@@ -65,6 +65,22 @@ func TestAssetFromUsesBrowserDownloadURL(t *testing.T) {
 	require.Equal(t, ReleaseAsset{ID: 5, Name: "file.bin", Size: 12, URL: "https://gitea.test/attachments/abc", CreatedAt: "2026-10-01T12:00:00Z", DownloadCount: 2}, assetFrom(attachment))
 }
 
+func TestAssetFromReportsTheAttachmentURLOfListedReleaseAssets(t *testing.T) {
+	for download, want := range map[string]string{
+		// Gitea lists the assets of a release with their release download URL.
+		"https://gitea.test/alice/project/releases/download/v1.0/file.bin":       "https://gitea.test/attachments/abc",
+		"https://gitea.test/sub/alice/project/releases/download/v1.0/file.bin":   "https://gitea.test/sub/attachments/abc",
+		"https://gitea.test/alice/project/releases/download/feature/v1/file.bin": "https://gitea.test/attachments/abc",
+		"https://gitea.test/attachments/abc":                                     "https://gitea.test/attachments/abc",
+		"https://files.example.test/file.bin":                                    "https://files.example.test/file.bin",
+	} {
+		attachment := &gitea.Attachment{UUID: "abc", Name: "file.bin", DownloadURL: download}
+		require.Equal(t, want, assetFrom(attachment).URL, download)
+	}
+	require.Equal(t, "https://gitea.test/alice/project/releases/download/v1.0/file.bin",
+		assetFrom(&gitea.Attachment{DownloadURL: "https://gitea.test/alice/project/releases/download/v1.0/file.bin"}).URL, "kept without a UUID")
+}
+
 func TestConvertAllSkipsAbsentItems(t *testing.T) {
 	require.Equal(t, []string{}, convertAll(nil, login))
 	require.Equal(t, []string{"alice"}, convertAll([]*gitea.User{{UserName: "alice"}, nil}, login))

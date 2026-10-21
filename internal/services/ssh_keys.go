@@ -38,6 +38,11 @@ func (s SSHKeys) List(ctx context.Context, limit, page int) (Page[SSHKey], error
 	return convertPage(keys, sshKeyFrom), err
 }
 
+// All returns every public key of the account.
+func (s SSHKeys) All(ctx context.Context) ([]SSHKey, error) {
+	return listEvery(filterPageSize, func(limit, page int) (Page[SSHKey], error) { return s.List(ctx, limit, page) })
+}
+
 // View retrieves a public key of the account by ID. Gitea also answers for other accounts' keys
 // and lets administrators delete them, so a key that belongs to someone else is refused.
 func (s SSHKeys) View(ctx context.Context, id int64) (SSHKey, error) {

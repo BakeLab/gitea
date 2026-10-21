@@ -208,3 +208,30 @@ func TestLabelEditAndForceKeepArchivedStateAndColor(t *testing.T) {
 		require.Contains(t, patch, `"color":null`)
 	}
 }
+
+func TestLabelEditRefusesTheNameOfAnotherLabel(t *testing.T) {
+	var patches []string
+	listings := 0
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Get("page") == "1" {
+				listings++
+			}
+			writeFirstPage(w, r, `[{"id":11,"name":"bug"},{"id":12,"name":"defect"}]`)
+		case http.MethodPatch:
+			patches = append(patches, r.URL.Path)
+			_, _ = w.Write([]byte(`{"id":11,"name":"Bug"}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"label", "edit", "bug", "-R", "alice/project", "--name", "DEFECT"})
+	require.EqualError(t, err, `label "defect" already exists in alice/project`)
+	require.Empty(t, patches)
+	require.Equal(t, 1, listings, "one listing finds the label and checks the name")
+	require.NoError(t, Execute(context.Background(), deps, []string{"label", "edit", "bug", "-R", "alice/project", "--name", "Bug"}))
+	require.Equal(t, []string{"/api/v1/repos/alice/project/labels/11"}, patches)
+}

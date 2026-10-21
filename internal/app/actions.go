@@ -174,7 +174,9 @@ there; --ref only selects the branch or tag whose version of it runs, as in gh. 
 gt workflow list.
 
 Without --ref, the workflow runs on the checked-out branch, which must be on the server, or on
-the default branch when the repository does not come from the working directory.`,
+the default branch when the repository does not come from the working directory.
+
+With --follow, the command fails like gt run watch when the run completes without success.`,
 		Example: `# run a workflow on the default or current branch
 $ gt workflow run CI
 # run it on a branch with inputs
@@ -261,7 +263,15 @@ $ gt workflow run nightly --follow`,
 			if len(jobs) == 0 {
 				jobs = []services.Job{job}
 			}
-			return timeoutError(a.followJobLogs(ctx, cmd, service, result.ID, jobs, interval), timeout, "following the logs of run %d", result.ID)
+			if err := a.followJobLogs(ctx, cmd, service, result.ID, jobs, interval); err != nil {
+				return timeoutError(err, timeout, "following the logs of run %d", result.ID)
+			}
+			// Like gt run watch, fail when the run does not succeed; it completes just after its jobs.
+			run, err := service.Watch(ctx, result.ID, interval, nil)
+			if err != nil {
+				return timeoutError(err, timeout, "waiting for run %d", result.ID)
+			}
+			return runFailure(run)
 		},
 	}
 	cmd.Flags().StringVarP(&ref, "ref", "r", "", "Branch or tag to run the workflow on (default: the current or default branch)")
@@ -278,7 +288,7 @@ $ gt workflow run nightly --follow`,
 // nextStep shows a next step under a done line, under the same conditions.
 func (a *application) nextStep(cmd *cobra.Command, format string, args ...any) {
 	if a.deps.Streams.OutTTY && a.options.json == "" {
-		fmt.Fprintln(cmd.ErrOrStderr(), "  "+terminal.Colorize("muted", terminal.SafeLine(fmt.Sprintf(format, args...)), a.colorEnabled()))
+		fmt.Fprintln(cmd.ErrOrStderr(), "  "+terminal.Colorize("muted", terminal.SafeLine(fmt.Sprintf(format, args...)), a.errColorEnabled()))
 	}
 }
 

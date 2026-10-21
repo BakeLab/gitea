@@ -118,6 +118,90 @@ func TestIssueCreateInMissingRepositoryReportsTheRepository(t *testing.T) {
 	require.EqualError(t, err, "repository alice/projetc not found")
 }
 
+func TestIssueRequestsNameTheMissingRepositoryOrItem(t *testing.T) {
+	for _, repository := range []string{"owner/repo", "owner/missing"} {
+		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/repos/owner/repo" {
+				_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		}))
+		missing := "repository owner/missing not found"
+		want := func(item string) string {
+			if repository == "owner/missing" {
+				return missing
+			}
+			return item + " not found in owner/repo"
+		}
+		ctx := context.Background()
+		issues := Issues{Client: client, Repository: repository}
+		_, err := issues.View(ctx, 9)
+		require.EqualError(t, err, want("issue #9"))
+		_, err = issues.SetState(ctx, 9, "closed")
+		require.EqualError(t, err, want("issue #9"))
+		_, err = (Comments{Client: client, Repository: repository}).Create(ctx, 9, "hi")
+		require.EqualError(t, err, want("issue #9"))
+		_, err = (Comments{Client: client, Repository: repository}).View(ctx, 4)
+		require.EqualError(t, err, want("comment 4"))
+		_, err = (Webhooks{Client: client, Scope: WebhookScope{Repository: repository}}).View(ctx, 7)
+		require.EqualError(t, err, want("webhook 7"))
+		_, err = (Pulls{Client: client, Repository: repository}).View(ctx, 3)
+		require.EqualError(t, err, want("pull request #3"))
+		_, err = (Releases{Client: client, Repository: repository}).View(ctx, "v9")
+		require.EqualError(t, err, want("release v9"))
+		_, err = (Releases{Client: client, Repository: repository}).Latest(ctx)
+		require.EqualError(t, err, want("latest release"))
+		branches := Branches{Client: client}
+		_, err = branches.Find(ctx, repository, "dev")
+		require.EqualError(t, err, want(`branch "dev"`))
+		require.EqualError(t, branches.Delete(ctx, repository, "dev"), want(`branch "dev"`))
+		require.EqualError(t, branches.Rename(ctx, repository, "dev", "main"), want(`branch "dev"`))
+		_, err = (DeployKeys{Client: client, Repository: repository}).View(ctx, 13)
+		require.EqualError(t, err, want("deploy key 13"))
+		require.EqualError(t, (DeployKeys{Client: client, Repository: repository}).Delete(ctx, 13), want("deploy key 13"))
+		if repository == "owner/missing" {
+			require.EqualError(t, branches.RequireAll(ctx, repository, []string{"a", "b", "c"}), missing, "the repository is named once, not every branch")
+			_, err = (Milestones{Client: client, Repository: repository}).AllIn(ctx, "open")
+			require.EqualError(t, err, missing)
+		} else {
+			require.EqualError(t, branches.RequireAll(ctx, repository, []string{"a", "b"}), "branch \"a\" not found in owner/repo\nbranch \"b\" not found in owner/repo")
+		}
+		if repository == "owner/missing" {
+			_, _, err = issues.List(ctx, ListOptions{State: "open", Limit: 10, Page: 1})
+			require.EqualError(t, err, missing)
+			_, err = issues.Search(ctx, DiscussionSearchOptions{Query: "x", Limit: 10, Page: 1})
+			require.EqualError(t, err, missing)
+			_, err = (Milestones{Client: client, Repository: repository}).List(ctx, "open", 10, 1)
+			require.EqualError(t, err, missing)
+			_, err = (Webhooks{Client: client, Scope: WebhookScope{Repository: repository}}).List(ctx, 10, 1)
+			require.EqualError(t, err, missing)
+			_, err = (Webhooks{Client: client, Scope: WebhookScope{Organization: "nope"}}).List(ctx, 10, 1)
+			require.EqualError(t, err, `organization "nope" not found`)
+			_, err = (Notifications{Client: client, Repository: repository}).List(ctx, NotificationOptions{Limit: 10, Page: 1})
+			require.EqualError(t, err, missing)
+		}
+	}
+}
+
+func TestAFailedRepositoryLookupKeepsTheMissingItem(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo" {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	ctx := context.Background()
+	_, err := (Releases{Client: client, Repository: "owner/repo"}).View(ctx, "v9")
+	require.EqualError(t, err, "release v9 not found in owner/repo")
+	branches := Branches{Client: client}
+	require.EqualError(t, branches.Delete(ctx, "owner/repo", "dev"), `branch "dev" not found in owner/repo`)
+	require.EqualError(t, branches.Rename(ctx, "owner/repo", "dev", "main"), `branch "dev" not found in owner/repo`)
+	require.EqualError(t, branches.RequireAll(ctx, "owner/repo", []string{"dev"}), `branch "dev" not found in owner/repo`)
+}
+
 func TestIssueDependenciesReportAFailureBesideAMissingList(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/dependencies") {

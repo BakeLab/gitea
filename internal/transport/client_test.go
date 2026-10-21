@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -200,6 +201,20 @@ func TestDebugLogsRequestsWithoutSecrets(t *testing.T) {
 	require.NotContains(t, log.String(), "secret")
 }
 
+func TestDebugLogsWhyARequestTimedOut(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+	}))
+	defer server.Close()
+	var log bytes.Buffer
+	client := New(server.URL, "", false).Debug(&log).WithResponseTimeout(20 * time.Millisecond)
+	_, err := client.Do(context.Background(), http.MethodGet, "version", nil, nil)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, ErrTimeout, "told apart from the end of the caller's deadline")
+	require.ErrorContains(t, err, "no answer within 20ms")
+	require.Regexp(t, `-> error: no answer within 20ms: context deadline exceeded \(\d+(\.\d+)?[µm]?s\)\n$`, log.String())
+}
+
 func TestDebugRedactsOnlySensitiveQueryValues(t *testing.T) {
 	for _, tc := range []struct {
 		path, key string
@@ -279,13 +294,23 @@ func TestClientCertificatesAreLoadedForInstancesThatRequireThem(t *testing.T) {
 	}
 	_, err = get(New(server.URL, "", true))
 	require.Error(t, err)
-	for _, client := range []*Client{New(server.URL, "", true).WithClientCertificate(certFile, keyFile), New(server.URL, "", true).WithClientCertificate(combined, "")} {
+	for _, client := range []*Client{
+		New(server.URL, "", true).WithClientCertificate(certFile, keyFile),
+		New(server.URL, "", true).WithClientCertificate(combined, ""),
+		// --debug wraps the transport before the certificate is configured.
+		New(server.URL, "", true).Debug(io.Discard).WithHeaders(http.Header{"X-Tenant": {"a"}}).WithClientCertificate(certFile, keyFile),
+	} {
 		name, err := get(client)
 		require.NoError(t, err)
 		require.Equal(t, "gt", name)
 	}
 	_, err = get(New(server.URL, "", true).WithClientCertificate(filepath.Join(dir, "missing.pem"), ""))
 	require.ErrorContains(t, err, "cannot load the client certificate")
+	// A transport that cannot present the certificate fails instead of connecting without it.
+	custom := New(server.URL, "", true)
+	custom.HTTP.Transport = roundTripFunc(http.DefaultTransport.RoundTrip)
+	_, err = get(custom.WithClientCertificate(certFile, keyFile))
+	require.ErrorContains(t, err, "cannot present the client certificate "+certFile)
 
 	// A host that a download redirects to never sees the certificate.
 	presented := true
@@ -301,15 +326,93 @@ func TestClientCertificatesAreLoadedForInstancesThatRequireThem(t *testing.T) {
 	redirecting.TLS = &tls.Config{ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool}
 	redirecting.StartTLS()
 	defer redirecting.Close()
-	response, err := New(redirecting.URL, "", true).WithClientCertificate(certFile, keyFile).DownloadSigned(context.Background(), redirecting.URL+"/attachments/x")
+	client := New(redirecting.URL, "", true).WithClientCertificate(certFile, keyFile)
+	trustOtherHosts(client, storage)
+	response, err := client.DownloadSigned(context.Background(), redirecting.URL+"/attachments/x")
 	require.NoError(t, err)
 	_ = response.Body.Close()
 	require.False(t, presented)
 }
+
+func TestInsecureSkipsVerificationOnlyForTheInstance(t *testing.T) {
+	storage := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("file"))
+	}))
+	defer storage.Close()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, storage.URL+"/signed", http.StatusFound)
+	}))
+	defer server.Close()
+	client := New(server.URL, "", true)
+	response, err := client.Send(context.Background(), http.MethodGet, "version", nil, nil)
+	require.NoError(t, err)
+	_ = response.Body.Close()
+	_, err = client.DownloadSigned(context.Background(), server.URL+"/attachments/x")
+	var untrusted *tls.CertificateVerificationError
+	require.ErrorAs(t, err, &untrusted)
+	trustOtherHosts(client, storage)
+	response, err = client.DownloadSigned(context.Background(), server.URL+"/attachments/x")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, "file", string(must(io.ReadAll(response.Body))))
+}
+
+func TestInstanceHostMatchesIgnoringCase(t *testing.T) {
+	var tenant string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tenant = r.Header.Get("X-Tenant")
+	}))
+	defer server.Close()
+	port := server.URL[strings.LastIndex(server.URL, ":"):]
+	client := New("https://localhost"+port, "", true).WithHeaders(http.Header{"X-Tenant": {"acme"}})
+	// A link or redirect from a ROOT_URL that differs only in case still goes to the instance,
+	// which is exempt from certificate verification and gets the configured headers.
+	response, err := client.Send(context.Background(), http.MethodGet, "https://LOCALHOST"+port+"/api/v1/version", nil, nil)
+	require.NoError(t, err)
+	_ = response.Body.Close()
+	require.Equal(t, "acme", tenant)
+}
+
+// trustOtherHosts makes the hosts other than the instance of an insecure client trust the
+// certificate of server.
+func trustOtherHosts(client *Client, server *httptest.Server) {
+	other := client.HTTP.Transport.(userAgentTransport).base.(hostTransport).other.(*http.Transport)
+	other.TLSClientConfig.RootCAs = server.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func must[T any](value T, err error) T {
 	if err != nil {
 		panic(err)
 	}
 	return value
+}
+
+func TestSignedDownloadNamesTheStorageHostThatRefusesIt(t *testing.T) {
+	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`<Error><Code>AccessDenied</Code></Error>`))
+	}))
+	defer storage.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/attachments/gone" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		http.Redirect(w, r, storage.URL+"/signed?X-Amz-Signature=bad", http.StatusSeeOther)
+	}))
+	defer server.Close()
+	client := New(server.URL, "", false)
+	_, err := client.DownloadSigned(context.Background(), server.URL+"/attachments/x")
+	storageURL, _ := url.Parse(storage.URL)
+	require.EqualError(t, err, "storage host "+storageURL.Host+" refused the signed download with HTTP 403; the signed URL may have expired, so try again")
+	var failure *APIError
+	require.ErrorAs(t, err, &failure)
+	require.Equal(t, http.StatusForbidden, failure.Status)
+	// The instance's own refusal keeps its wording.
+	_, err = client.DownloadSigned(context.Background(), server.URL+"/attachments/gone")
+	require.EqualError(t, err, "permission denied by the Gitea instance")
 }

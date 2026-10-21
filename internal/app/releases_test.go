@@ -50,6 +50,17 @@ View this release on Gitea: https://gitea.test/alice/project/releases/tag/v0.1.0
 `, out.String())
 }
 
+func TestPipedReleaseViewShowsDraftAndPrerelease(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/repos/alice/project/releases/tags/v0.3.0", r.URL.Path)
+		_, _ = w.Write([]byte(`{"id":4,"tag_name":"v0.3.0","draft":true,"prerelease":true,"body":"Soon."}`))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "view", "v0.3.0", "-R", "alice/project"}))
+	require.Contains(t, out.String(), "tag:\tv0.3.0\ndraft:\ttrue\nprerelease:\ttrue\nassets:\t\n")
+}
+
 func TestReleaseListShowsTypes(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`[
@@ -82,6 +93,37 @@ func TestReleaseDeleteSaysWhatHappenedToTheTag(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"release", "delete", "v2.0.0", "--yes", "-R", "alice/project"}))
 	require.Empty(t, out.String())
 	require.Equal(t, "✓ Deleted release v2.0.0 from alice/project (tag kept; use --delete-tag)\n", diagnostics.String())
+}
+
+func TestReleaseBatchesNameAMissingReleaseOnce(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(`{"id":1,"full_name":"alice/project"}`))
+		case "/api/v1/repos/alice/project/releases/tags/v1":
+			_, _ = w.Write([]byte(`{"id":5,"tag_name":"v1"}`))
+		default:
+			if r.Method == http.MethodGet {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"not found"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := repoTTYDeps(t, server.URL)
+	for _, args := range [][]string{
+		{"release", "delete", "v1", "nosuch", "--yes"},
+		{"release", "edit", "nosuch", "--title", "x"},
+		{"release", "publish", "nosuch"},
+	} {
+		err := Execute(context.Background(), deps, append(args, "-R", "alice/project"))
+		require.EqualError(t, Explain(context.Background(), deps, err), "release nosuch: not found in alice/project", args)
+	}
+	// A missing repository is blamed, not the release.
+	err := Execute(context.Background(), deps, []string{"release", "edit", "v9", "--title", "x", "-R", "alice/missing"})
+	require.EqualError(t, Explain(context.Background(), deps, err), "release v9: repository alice/missing not found")
 }
 
 func TestReleaseCreateUploadsPositionalFiles(t *testing.T) {

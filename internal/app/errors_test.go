@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -46,7 +47,7 @@ func TestExplainKeepsClassifiedErrorsAndAddsHints(t *testing.T) {
 		"POST /api/v1/repos/alice/old/issues":            {"423", `{"message":"repo is archived"}`},
 		"POST /api/v1/repos/alice/project/pulls":         {"409", `{"message":"pull request already exists for these targets [id: 16, issue_id: 3, head_repo_id: 1, base_repo_id: 1, head_branch: feat, base_branch: main]"}`},
 		"GET /api/v1/repos/alice/project/pulls/3":        {"200", `{"number":3,"state":"open","mergeable":false,"head":{"sha":"abc"}}`},
-		"POST /api/v1/repos/alice/project/pulls/3/merge": {"405", `{"message":"Please try again later"}`},
+		"POST /api/v1/repos/alice/project/pulls/3/merge": {"405", `{"message":"PR is not ready to be merged"}`},
 	})
 	for _, tc := range []struct {
 		name string
@@ -57,7 +58,7 @@ func TestExplainKeepsClassifiedErrorsAndAddsHints(t *testing.T) {
 		{"missing pull request", []string{"pr", "view", "999", "-R", "alice/project"}, "pull request #999 not found in alice/project"},
 		{"archived repository", []string{"issue", "create", "-R", "alice/old", "--title", "x", "--body", "y"}, "alice/old is archived (read-only); unarchive it with: gt repo unarchive alice/old"},
 		{"existing pull request", []string{"pr", "create", "-R", "alice/project", "--head", "feat", "--base", "main", "--title", "x", "--body", "y"}, "pull request for feat into main already exists in alice/project"},
-		{"context added by the command", []string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, "pull request #3 has conflicting files or is otherwise not mergeable: Gitea API returned HTTP 405 for POST /api/v1/repos/alice/project/pulls/3/merge: Please try again later"},
+		{"context added by the command", []string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, "pull request #3 has conflicting files or is otherwise not mergeable: Gitea API returned HTTP 405 for POST /api/v1/repos/alice/project/pulls/3/merge: PR is not ready to be merged"},
 		{"raw api response", []string{"api", "users/nobody"}, "not found (HTTP 404 GET /api/v1/users/nobody)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -84,7 +85,6 @@ func TestExplainAddsTheNextStepToRefusals(t *testing.T) {
 		{"POST", "pull request", "", "Invalid PullRequest: There are no changes between the head and the base", 422, "no commits between the base and head branches; check out your feature branch or pass --head"},
 		{"POST", "workflow", "nightly.yaml", "workflow is disabled", 403, "workflow nightly.yaml is disabled; enable it with: gt workflow enable nightly.yaml"},
 		{"DELETE", "run", "37", "this workflow run is not done", 400, "run 37 has not finished; cancel it first: gt run cancel 37"},
-		{"POST", "wiki page", `"Home"`, "wiki page already exists [title: Home.md]", 400, `wiki page "Home" already exists in alice/x; edit it with: gt wiki edit "Home"`},
 		{"POST", "issue", "", "repo is archived", 423, "alice/x is archived (read-only); unarchive it with: gt repo unarchive alice/x"},
 		{"DELETE", "user", `"uxadm1"`, "user still has ownership of repositories [uid: 7]", 422, `user "uxadm1" still owns repositories; transfer or delete them first`},
 		{"POST", "SSH key", "", "Key content has been used as non-deploy key", 422, "this SSH key is already registered"},
@@ -107,6 +107,13 @@ func TestExplainWordsCredentialAndConnectionFailures(t *testing.T) {
 	deps, _, _ = serverDeps(t, closed.URL)
 	err = Execute(context.Background(), deps, []string{"issue", "list", "-R", "alice/project"})
 	require.EqualError(t, Explain(context.Background(), deps, err), "cannot reach "+closed.URL+" (connection refused); check --host or your network")
+
+	// An unreachable proxy is named instead of the instance behind it.
+	proxy, err := url.Parse(closed.URL)
+	require.NoError(t, err)
+	_, err = (&http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}}).Get("http://example.test/api/v1/user")
+	err = transport.RequestError(context.Background(), "API request failed", err)
+	require.EqualError(t, Explain(context.Background(), deps, err), "cannot reach the proxy "+proxy.Host+" (connection refused); check HTTPS_PROXY and HTTP_PROXY")
 }
 
 func TestTimeoutErrorsNameTheWaitAndKeepTheExitCode(t *testing.T) {
@@ -128,7 +135,32 @@ func TestTimeoutErrorsNameTheWaitAndKeepTheExitCode(t *testing.T) {
 	}
 	other := errors.New("boom")
 	require.Equal(t, other, timeoutError(other, time.Second, "waiting"))
+	// A request that ran out of http_timeout is not the end of --timeout.
+	stalled := &transport.RequestFailure{Action: "reading the API response failed", Err: fmt.Errorf("no data received within 2s: %w", transport.ErrTimeout)}
+	require.Equal(t, error(stalled), timeoutError(stalled, time.Hour, "waiting for run %d", 34))
+	require.Equal(t, clierr.ExitCode(err), clierr.ExitCode(stalled))
+	require.EqualError(t, Explain(context.Background(), Dependencies{}, stalled), "the instance did not respond within http_timeout; raise it with: gt config set http_timeout DURATION")
 	require.EqualError(t, Explain(context.Background(), Dependencies{}, err), "timed out before the operation finished")
+}
+
+func TestHTTPTimeoutNamesTheServerAndTheSetting(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer server.Close()
+	defer close(release)
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Client = transport.New
+	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_HTTP_TIMEOUT": "50ms"})
+	err := Explain(context.Background(), deps, Execute(context.Background(), deps, []string{"api", "version"}))
+	require.EqualError(t, err, server.URL+" did not respond within http_timeout (50ms); raise GITEA_CLI_HTTP_TIMEOUT")
+	require.ErrorIs(t, err, context.DeadlineExceeded, "it exits like a timeout")
+
+	deps.Getenv = serverEnv(server.URL, nil)
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "http_timeout", "50ms"}))
+	err = Explain(context.Background(), deps, Execute(context.Background(), deps, []string{"api", "version"}))
+	require.EqualError(t, err, server.URL+" did not respond within http_timeout (50ms); raise it with: gt config set http_timeout DURATION")
 }
 
 func TestRejectedLoginTokenIsNotBlamedOnTheEnvironment(t *testing.T) {

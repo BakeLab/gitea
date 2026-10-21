@@ -26,10 +26,13 @@ type ReviewFormChoices struct {
 	Author bool
 	// Body seeds the review body.
 	Body string
-	// Editor is the configured editor command that ctrl+e opens on the body; empty disables it.
+	// Editor is the configured editor command that ctrl+e opens on the body, except in accessible mode; empty disables it.
 	Editor string
 	// ReviewDiff, when non-nil, offers to annotate the diff in the editor after the body.
 	ReviewDiff func(context.Context) ([]ReviewCommentDraft, error)
+	// Pending tells that the pending review a comment would publish has a body or inline
+	// comments, so that the comment needs neither.
+	Pending bool
 }
 
 // ReviewFormValues holds an interactively collected review: its API state, body and inline comments.
@@ -63,22 +66,16 @@ func (p *FormPrompter) CreateReview(ctx context.Context, choices ReviewFormChoic
 		return values, err
 	}
 
-	// A comment can consist of inline comments alone, which are collected after the body.
-	required := values.Event == "REQUEST_CHANGES" || (values.Event == "COMMENT" && choices.ReviewDiff == nil)
+	// A comment can consist of inline comments alone, which are collected after the body, or of
+	// the pending review it publishes.
+	required := values.Event == "REQUEST_CHANGES" || (values.Event == "COMMENT" && choices.ReviewDiff == nil && !choices.Pending)
 	title := "Body (markdown, optional):"
 	if required {
 		title = "Body (markdown, required):"
 	}
-	args, editor := commandArgs(choices.Editor)
-	if editor {
-		title = strings.TrimSuffix(title, "):") + ", ctrl+e opens your editor):"
-	}
-	body := bodyField(title, &values.Body)
-	if editor {
-		body = body.ExternalEditor(true).Editor(args...).EditorExtension("md")
-	}
+	body := bodyField(title, &values.Body).withEditor(choices.Editor)
 	if required {
-		body = body.Validate(notBlank)
+		body.Validate(requiredText(&values.Body))
 	}
 	if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(body))); err != nil {
 		return values, err
@@ -98,10 +95,10 @@ func (p *FormPrompter) CreateReview(ctx context.Context, choices ReviewFormChoic
 				return values, fmt.Errorf("diff review failed: %w", err)
 			}
 			values.Comments = comments
-			fmt.Fprintf(p.Streams.ErrOut, "Found %d inline comments in the annotated diff\n", len(comments))
+			fmt.Fprintf(p.Streams.ErrOut, "Found %s in the annotated diff\n", Plural(len(comments), "inline comment"))
 		}
 	}
-	if values.Event == "COMMENT" && values.Body == "" && len(values.Comments) == 0 {
+	if values.Event == "COMMENT" && values.Body == "" && len(values.Comments) == 0 && !choices.Pending {
 		return values, errEmptyComment
 	}
 	return values, nil

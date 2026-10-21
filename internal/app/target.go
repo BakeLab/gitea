@@ -174,6 +174,9 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 			return t, err
 		}
 	}
+	if t.Host == "" && a.options.host == "" {
+		a.cloneInstance(ctx, &t, s)
+	}
 	if err := a.selectHost(&t, s); err != nil {
 		return t, err
 	}
@@ -261,12 +264,12 @@ func (a *application) responseTimeout() time.Duration {
 	return timeout
 }
 
-// instanceHeaders returns the configured headers of host, reading a $NAME value from the
-// environment variable NAME; a header whose value is empty is not sent.
+// instanceHeaders returns the configured headers of host, reading a $NAME or ${NAME} value from
+// the environment variable NAME; a header whose value is empty is not sent.
 func (a *application) instanceHeaders(host settings.Host) http.Header {
 	headers := http.Header{}
 	for name, value := range host.Headers {
-		if variable, ok := strings.CutPrefix(value, "$"); ok {
+		if variable, ok := headerVariable(value); ok {
 			value = a.deps.Getenv(variable)
 		}
 		if value != "" {
@@ -274,6 +277,35 @@ func (a *application) instanceHeaders(host settings.Host) http.Header {
 		}
 	}
 	return headers
+}
+
+// headerVariable returns the environment variable NAME that a configured header value of $NAME
+// or ${NAME} is read from, and whether the value names one.
+func headerVariable(value string) (string, bool) {
+	variable, ok := strings.CutPrefix(value, "$")
+	if braced, found := strings.CutPrefix(variable, "{"); ok && found {
+		if name, closed := strings.CutSuffix(braced, "}"); closed {
+			variable = name
+		}
+	}
+	return variable, ok
+}
+
+// checkHeaderValue refuses a header value that starts with $ but does not name an environment
+// variable as $NAME or ${NAME}, such as "$NOT-A-VAR", whose header would never be sent.
+func checkHeaderValue(name, value string) error {
+	variable, ok := headerVariable(value)
+	if !ok {
+		return nil
+	}
+	valid := variable != ""
+	for i, char := range variable {
+		valid = valid && (char == '_' || (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z') || (i > 0 && char >= '0' && char <= '9'))
+	}
+	if !valid {
+		return fmt.Errorf("header %s must name an environment variable as $NAME or ${NAME}, not %q", name, value)
+	}
+	return nil
 }
 
 // loadCredential loads the account's stored credential, refreshing an expiring OAuth token unless
@@ -315,6 +347,12 @@ func (a *application) repositorySource(ctx context.Context, t *target, s setting
 	if !req.requireRepo {
 		return "", nil
 	}
+	return a.discoverRepository(ctx, t, s)
+}
+
+// discoverRepository returns the raw repository of the clone in the working directory, the saved
+// gt.repository or a Git remote on an instance gt can act on, and records its source.
+func (a *application) discoverRepository(ctx context.Context, t *target, s settings.Snapshot) (string, error) {
 	// Discovery probes fail outside a checkout; Git's diagnostics would only precede gt's own error.
 	probe := func(args ...string) (string, error) { return a.gitProbe().Output(ctx, a.options.cwd, false, args...) }
 	if saved, err := probe("config", "--get", "gt.repository"); err == nil && saved != "" {
@@ -431,6 +469,22 @@ func (a *application) selectRepository(ctx context.Context, t *target, s setting
 	return nil
 }
 
+// cloneInstance selects the instance of the clone in the working directory for a target that
+// names none, such as a command that needs no repository or a repository named without an
+// instance, when nothing else would select one: no GITEA_CLI_HOST or GITEA_INSTANCE_URL, no
+// default_host and several instances. Outside such a clone it does nothing.
+func (a *application) cloneInstance(ctx context.Context, t *target, s settings.Snapshot) {
+	if value, _ := a.envHost(); value != "" || s.Preferences.DefaultHost != "" || len(s.Hosts.Hosts) < 2 {
+		return
+	}
+	var clone target
+	raw, err := a.discoverRepository(ctx, &clone, s)
+	if err != nil || a.selectRepository(ctx, &clone, s, raw) != nil || clone.Host == "" {
+		return
+	}
+	t.Host, t.HostSource = clone.Host, clone.HostSource
+}
+
 // isGitRemote reports whether name is a remote of the working directory's Git checkout.
 func (a *application) isGitRemote(ctx context.Context, name string) bool {
 	remotes, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote")
@@ -438,7 +492,7 @@ func (a *application) isGitRemote(ctx context.Context, name string) bool {
 }
 
 // selectHost picks the instance: the repository's, --host, GITEA_CLI_HOST or GITEA_INSTANCE_URL,
-// default_host, or the only configured instance.
+// default_host, the only configured instance, or the clone's (see cloneInstance).
 func (a *application) selectHost(t *target, s settings.Snapshot) error {
 	if a.options.host != "" {
 		explicit, err := settings.ResolveHost(a.options.host, s.Hosts.Hosts)

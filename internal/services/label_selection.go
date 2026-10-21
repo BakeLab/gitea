@@ -34,11 +34,16 @@ func (s Labels) Find(ctx context.Context, raws []string, byName bool) ([]Label, 
 	}
 	result := make([]Label, len(raws))
 	for i, raw := range raws {
-		if result[i], err = s.finder(byName).Find(items, raw); err != nil {
+		if result[i], err = s.FindIn(items, raw, byName); err != nil {
 			return nil, err
 		}
 	}
 	return result, nil
+}
+
+// FindIn returns the label among items, the labels of the scope, that raw addresses like Find.
+func (s Labels) FindIn(items []Label, raw string, byName bool) (Label, error) {
+	return s.finder(byName).Find(items, raw)
 }
 
 // CreateUnique creates a label unless existing has one with its name, ignoring case: Gitea would
@@ -59,6 +64,20 @@ func (s Labels) CreateUnique(ctx context.Context, existing []Label, opts LabelOp
 	opts.Name = nil
 	label, err := s.Edit(ctx, current.ID, opts.KeepArchived(current))
 	return label, true, err
+}
+
+// EditUnique edits current like Edit, keeping its archived state, but refuses to rename it to the
+// name of another label among existing, the labels of the scope, ignoring case, which
+// CreateUnique refuses too: names would no longer address either label.
+func (s Labels) EditUnique(ctx context.Context, existing []Label, current Label, opts LabelOptions) (Label, error) {
+	if opts.Name != nil && *opts.Name != current.Name {
+		for _, other := range existing {
+			if other.ID != current.ID && strings.EqualFold(other.Name, *opts.Name) {
+				return Label{}, &ConflictError{Reason: ReasonExists, Kind: "label", Key: strconv.Quote(other.Name), Scope: s.Scope()}
+			}
+		}
+	}
+	return s.Edit(ctx, current.ID, opts.KeepArchived(current))
 }
 
 func selectLabelNames(scope string, names []string, matches map[string][]int64) ([]int64, error) {

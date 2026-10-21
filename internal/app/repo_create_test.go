@@ -6,8 +6,12 @@ package app
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -149,6 +153,46 @@ func TestRepositoryMigrateNamesTheRepositoryAfterItsSource(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "migrate", "https://github.com/go-gitea/gitea.git", "--mirror", "--mirror-interval", "8h"}))
 	require.Equal(t, "https://gitea.test/alice/gitea\n", out.String())
 	require.Equal(t, "✓ Imported https://github.com/go-gitea/gitea.git into alice/gitea (pull mirror, every 8h)\n", diagnostics.String())
-	err := Execute(context.Background(), deps, []string{"repo", "migrate", "https://github.com/go-gitea/gitea.git", "--service", "GitHub", "--issues"})
-	require.ErrorContains(t, err, "importing from github needs --auth-token or --auth-token-file")
+}
+
+func TestRepositoryMigrateFromAForgeWithoutAToken(t *testing.T) {
+	var payloads []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		payloads = append(payloads, string(body))
+		_, _ = w.Write([]byte(`{"full_name":"alice/gitea","html_url":"https://gitea.test/alice/gitea"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := repoTTYDeps(t, server.URL)
+	deps.Streams.In = strings.NewReader("source-secret\n")
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "migrate", "https://github.com/go-gitea/gitea.git", "--service", "GitHub", "--issues"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "migrate", "https://gitlab.com/acme/tool", "--service", "gitlab", "--auth-user", "bob", "--auth-password-file", "-"}))
+	require.Len(t, payloads, 2)
+	requirePayload(t, `{"repo_name":"gitea","clone_addr":"https://github.com/go-gitea/gitea.git","service":"github","issues":true}`, strings.NewReader(payloads[0]))
+	requirePayload(t, `{"repo_name":"tool","clone_addr":"https://gitlab.com/acme/tool","service":"gitlab","auth_username":"bob","auth_password":"source-secret"}`, strings.NewReader(payloads[1]))
+}
+
+func TestRepositoryMigrateDebugRedactsSourceCredentials(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Password string `json:"auth_password"`
+			Token    string `json:"auth_token"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		secret := payload.Password + payload.Token
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = fmt.Fprintf(w, `{"message":"cannot clone https://bob:%s@source.test/repo with %s"}`, url.QueryEscape(secret), secret)
+	}))
+	defer server.Close()
+	for _, credential := range [][]string{{"--auth-password", "p@ss/w", "--auth-user", "bob"}, {"--auth-token", "source-pat"}} {
+		deps, _, diagnostics := repoTTYDeps(t, server.URL)
+		err := Execute(context.Background(), deps, append([]string{"--debug", "repo", "migrate", "https://gitlab.com/acme/tool", "--service", "gitlab"}, credential...))
+		require.Error(t, err)
+		require.Contains(t, diagnostics.String(), "[debug] POST "+server.URL+"/api/v1/repos/migrate -> 422 Unprocessable Entity", credential[0])
+		require.Contains(t, diagnostics.String(), ": cannot clone https://bob:[REDACTED]@source.test/repo with [REDACTED]\n", credential[0])
+		for _, form := range []string{credential[1], url.QueryEscape(credential[1])} {
+			require.NotContains(t, diagnostics.String(), form, credential[0])
+			require.NotContains(t, err.Error(), form, credential[0])
+		}
+	}
 }

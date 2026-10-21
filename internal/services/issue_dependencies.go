@@ -5,11 +5,14 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
 )
 
@@ -54,12 +57,9 @@ func (s Issues) Dependencies(ctx context.Context, number int64) (IssueDependenci
 	}
 	failures := make([]error, len(lists))
 	_ = concurrently(len(lists), func(i int) error {
-		*lists[i].dest, failures[i] = listAll(func(page int) ([]IssueReference, error) {
-			issues, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Issue, *gitea.Response, error) {
-				return lists[i].fetch(ctx, c, listOptions(50, page))
-			})
-			return convertAll(issues, issueReferenceFrom), err
-		})
+		var issues []*gitea.Issue
+		issues, failures[i] = callAll(ctx, s.Client, 50, lists[i].fetch)
+		*lists[i].dest = convertAll(issues, issueReferenceFrom)
 		return nil
 	})
 	for _, err := range failures {
@@ -75,7 +75,8 @@ func (s Issues) Dependencies(ctx context.Context, number int64) (IssueDependenci
 }
 
 // SetBlockedBy makes issue n blocked by issue blocker, which may belong to another repository
-// where the instance allows that, or with block false lifts that dependency.
+// where the instance allows that, or with block false lifts that dependency. Like other additions
+// and removals, adding a dependency that exists or removing one that does not changes nothing.
 func (s Issues) SetBlockedBy(ctx context.Context, n int64, blocker IssueReference, block bool) error {
 	owner, repo, err := splitRepository(blocker.Repository)
 	if err != nil {
@@ -88,5 +89,31 @@ func (s Issues) SetBlockedBy(ctx context.Context, n int64, blocker IssueReferenc
 	// TODO(sdk): IssueMeta lacks the owner and repo that Gitea needs to find the blocking issue.
 	body := map[string]any{"owner": owner, "repo": repo, "index": blocker.Number}
 	err = sendJSON(ctx, s.Client, method, fmt.Sprintf("%s/%d/dependencies", s.endpoint(), n), body, nil)
-	return Classify(err, "issue", blocker.Repository+"#"+strconv.FormatInt(blocker.Number, 10), "")
+	name := blocker.Repository + "#" + strconv.FormatInt(blocker.Number, 10)
+	// Gitea answers 500 when the dependency to add exists or the one to remove does not.
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok {
+		message := strings.ToLower(apiErr.Message)
+		if strings.Contains(message, "issue dependency does already exist") || strings.Contains(message, "issue dependency does not exist") {
+			return nil
+		}
+		// A 404 names the missing issue by its index, or the missing repository of the blocker.
+		if apiErr.Status == http.StatusNotFound {
+			missing := &NotFoundError{Kind: "issue", Key: "#" + strconv.FormatInt(n, 10), Scope: s.Repository, Err: err}
+			switch {
+			case strings.Contains(message, "repository does not exist"):
+				return &NotFoundError{Kind: "repository", Key: blocker.Repository, Err: err}
+			case !strings.Contains(message, fmt.Sprintf("index: %d]", blocker.Number)):
+				return missing
+			case blocker.Number == n && !strings.EqualFold(blocker.Repository, s.Repository):
+				// The index fits both issues; the edited one tells which is missing.
+				if _, viewErr := s.View(ctx, n); viewErr != nil {
+					return missing
+				}
+			case blocker.Number == n:
+				return missing
+			}
+			return &NotFoundError{Kind: "issue", Key: name, Err: err}
+		}
+	}
+	return Classify(err, "issue", name, "")
 }

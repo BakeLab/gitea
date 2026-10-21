@@ -20,9 +20,19 @@ import (
 // cappedServer serves total items in pages of at most maxItems, like Gitea's MAX_RESPONSE_ITEMS.
 func cappedServer(t *testing.T, total, maxItems int, link, count bool) (*httptest.Server, *int) {
 	t.Helper()
+	return wrappedCappedServer(t, total, maxItems, link, count, func(items string, _ int) string { return items })
+}
+
+// wrappedCappedServer is cappedServer for endpoints that wrap the JSON array of a page in an object.
+func wrappedCappedServer(t *testing.T, total, maxItems int, link, count bool, wrap func(items string, total int) string) (*httptest.Server, *int) {
+	t.Helper()
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
+		if r.URL.Path == "/api/v1/settings/api" {
+			_, _ = fmt.Fprintf(w, `{"max_response_items":%d}`, maxItems)
+			return
+		}
 		limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 		require.NoError(t, err)
 		page, err := strconv.Atoi(r.URL.Query().Get("page"))
@@ -38,7 +48,7 @@ func cappedServer(t *testing.T, total, maxItems int, link, count bool) (*httptes
 		if link && page*size < total {
 			w.Header().Set("Link", fmt.Sprintf(`<%s%s?limit=%d&page=%d>; rel="next"`, "http://"+r.Host, r.URL.Path, limit, page+1))
 		}
-		_, _ = w.Write([]byte("[" + strings.Join(items, ",") + "]"))
+		_, _ = w.Write([]byte(wrap("["+strings.Join(items, ",")+"]", total)))
 	}))
 	t.Cleanup(server.Close)
 	return server, &requests
@@ -63,6 +73,10 @@ func TestListsCollectPagesBeyondServerPageSize(t *testing.T) {
 		{110, 60, 100, 2, false, true},
 		{40, 50, 100, 1, false, false},
 		{120, 100, 100, 2, true, true},
+		// The capped page 2 of 50 items accounts for the remainder of 120 after the first 70.
+		{120, 50, 70, 2, false, true},
+		{120, 50, 70, 2, true, true},
+		{100, 50, 70, 2, false, true},
 	} {
 		t.Run(fmt.Sprintf("%+v", tc), func(t *testing.T) {
 			server, requests := cappedServer(t, tc.total, tc.maxItems, tc.link, tc.count)
@@ -117,4 +131,143 @@ func TestPagesReportTheCountedTotal(t *testing.T) {
 			require.Equal(t, url.Values{"state": {"open"}}, query, "the caller's query is not modified")
 		})
 	}
+}
+
+func TestFullListingsStopAtTheCountedEnd(t *testing.T) {
+	for _, tc := range []struct {
+		total, maxItems int
+		count           bool
+		requests        int
+	}{
+		{40, 50, true, 1},
+		{100, 100, true, 1},
+		{120, 50, true, 4},
+		// Without a count only an empty page ends the listing.
+		{40, 50, false, 2},
+	} {
+		t.Run(fmt.Sprintf("%+v", tc), func(t *testing.T) {
+			server, requests := cappedServer(t, tc.total, tc.maxItems, false, tc.count)
+			labels, err := (Labels{Client: transport.New(server.URL, "", false), Repository: "o/r"}).All(context.Background())
+			require.NoError(t, err)
+			require.Len(t, labels, tc.total)
+			for i, label := range labels {
+				require.Equal(t, int64(i+1), label.ID)
+			}
+			require.Equal(t, tc.requests, *requests)
+		})
+	}
+}
+
+func TestPullListingsStopAtTheCountedEnd(t *testing.T) {
+	listers := map[string]struct {
+		limit int
+		list  func(*transport.Client) (int, error)
+	}{
+		"open pulls": {50, func(client *transport.Client) (int, error) {
+			items, err := (Pulls{Client: client, Repository: "o/r"}).ListOpen(context.Background())
+			return len(items), err
+		}},
+		"changed files": {100, func(client *transport.Client) (int, error) {
+			items, err := (Pulls{Client: client, Repository: "o/r"}).Files(context.Background(), 1)
+			return len(items), err
+		}},
+		"reviews": {100, func(client *transport.Client) (int, error) {
+			items, err := (Reviews{Client: client, Repository: "o/r"}).All(context.Background(), 1)
+			return len(items), err
+		}},
+	}
+	for name, lister := range listers {
+		for _, tc := range []struct {
+			total int
+			count bool
+		}{{40, true}, {100, true}, {120, true}, {120, false}} {
+			t.Run(fmt.Sprintf("%s %+v", name, tc), func(t *testing.T) {
+				server, requests := cappedServer(t, tc.total, 200, false, tc.count)
+				client := transport.New(server.URL, "", false)
+				// The instance's page size is read once per client, not once per listing.
+				require.Equal(t, 200, maxPageSize(context.Background(), client))
+				*requests = 0
+				got, err := lister.list(client)
+				require.NoError(t, err)
+				require.Equal(t, tc.total, got)
+				want := (tc.total + lister.limit - 1) / lister.limit
+				if !tc.count {
+					// Without a count only an empty page ends the listing.
+					want++
+				}
+				require.Equal(t, want, *requests)
+			})
+		}
+	}
+}
+
+func TestCappedLaterPagesOfReleasesReviewsAndActions(t *testing.T) {
+	ids := func(n int, id func(int) int64) []int64 {
+		result := make([]int64, n)
+		for i := range result {
+			result[i] = id(i)
+		}
+		return result
+	}
+	wrapIn := func(field string) func(items string, total int) string {
+		return func(items string, total int) string {
+			return fmt.Sprintf(`{"total_count":%d,%q:%s}`, total, field, items)
+		}
+	}
+	listers := map[string]struct {
+		wrap func(items string, total int) string
+		list func(client *transport.Client, limit, page int) ([]int64, error)
+	}{
+		"releases": {nil, func(client *transport.Client, limit, page int) ([]int64, error) {
+			window, err := (Releases{Client: client, Repository: "o/r"}).ListPage(context.Background(), limit, page)
+			return ids(len(window.Items), func(i int) int64 { return window.Items[i].ID }), err
+		}},
+		"reviews": {nil, func(client *transport.Client, limit, page int) ([]int64, error) {
+			window, err := (Reviews{Client: client, Repository: "o/r"}).ListPage(context.Background(), 1, limit, page)
+			return ids(len(window.Items), func(i int) int64 { return window.Items[i].ID }), err
+		}},
+		"jobs": {wrapIn("jobs"), func(client *transport.Client, limit, page int) ([]int64, error) {
+			window, err := (Actions{Client: client, Repository: "o/r"}).JobsPage(context.Background(), 1, limit, page)
+			return ids(len(window.Items), func(i int) int64 { return window.Items[i].ID }), err
+		}},
+		"runs": {wrapIn("workflow_runs"), func(client *transport.Client, limit, page int) ([]int64, error) {
+			runs, err := (Actions{Client: client, Repository: "o/r"}).Runs(context.Background(), RunListOptions{Limit: limit, Page: page})
+			return ids(len(runs), func(i int) int64 { return runs[i].ID }), err
+		}},
+		"artifacts": {wrapIn("artifacts"), func(client *transport.Client, limit, page int) ([]int64, error) {
+			window, err := (Actions{Client: client, Repository: "o/r"}).Artifacts(context.Background(), 1, limit, page)
+			return ids(len(window.Items), func(i int) int64 { return window.Items[i].ID }), err
+		}},
+	}
+	for name, lister := range listers {
+		// The capped page 2 of 50 items accounts for the remainder of 120 after the first 70.
+		for _, total := range []int{120, 100} {
+			t.Run(fmt.Sprintf("%s of %d", name, total), func(t *testing.T) {
+				wrap := lister.wrap
+				if wrap == nil {
+					wrap = func(items string, _ int) string { return items }
+				}
+				server, _ := wrappedCappedServer(t, total, 50, false, true, wrap)
+				got, err := lister.list(transport.New(server.URL, "", false), 70, 2)
+				require.NoError(t, err)
+				require.Equal(t, ids(total-70, func(i int) int64 { return int64(71 + i) }), got)
+			})
+		}
+	}
+}
+
+func TestShortLastPageWithLinksSkipsThePageSizeLookup(t *testing.T) {
+	headers := http.Header{"X-Total-Count": {"12"}}
+	headers.Set("Link", `<http://h/api/v1/o?limit=10&page=1>; rel="prev",<http://h/api/v1/o?limit=10&page=1>; rel="first"`)
+	window, err := cappedPage(10, 2, func() int {
+		t.Fatal("a last page with links but no next link needs no page size lookup")
+		return 0
+	}, func(limit, page int) ([]int, http.Header, error) {
+		require.Equal(t, 10, limit)
+		require.Equal(t, 2, page)
+		return []int{11, 12}, headers, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, []int{11, 12}, window.Items)
+	require.False(t, window.More)
 }

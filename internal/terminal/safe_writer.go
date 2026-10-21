@@ -14,7 +14,8 @@ const maxSGRLength = 256
 
 // SafeWriter returns w unchanged when tty is false, so piped output stays byte-exact.
 // On a terminal it filters streamed server text like SafeText, and with allowSGR it keeps
-// SGR color sequences (ESC [ ... m) while dropping every other escape sequence's ESC.
+// SGR color sequences (ESC [ ... m) while dropping every other escape sequence's ESC; ResetSGR
+// then ends the colors it passed.
 func SafeWriter(w io.Writer, tty, allowSGR bool) io.Writer {
 	if !tty {
 		return w
@@ -22,9 +23,34 @@ func SafeWriter(w io.Writer, tty, allowSGR bool) io.Writer {
 	return &safeWriter{w: w, allowSGR: allowSGR}
 }
 
+// SafeColorWriter is SafeWriter for text that is colored throughout, such as job logs: without
+// color it drops SGR sequences whole instead of showing them as "[36m" text.
+func SafeColorWriter(w io.Writer, tty, color bool) io.Writer {
+	if !tty {
+		return w
+	}
+	return &safeWriter{w: w, allowSGR: color, dropSGR: !color}
+}
+
+// ResetSGR resets the terminal's colors when the SafeWriter w passed SGR sequences, so that text
+// cut off while colored, such as a failed job's log, does not leave the terminal colored.
+func ResetSGR(w io.Writer) error {
+	s, ok := w.(*safeWriter)
+	if !ok || !s.colored {
+		return nil
+	}
+	s.colored = false
+	_, err := io.WriteString(s.w, "\x1b[0m")
+	return err
+}
+
 type safeWriter struct {
 	w        io.Writer
 	allowSGR bool
+	// dropSGR drops SGR sequences instead of passing them.
+	dropSGR bool
+	// colored is set once an SGR sequence was passed.
+	colored bool
 	// pending holds a rune or SGR sequence split across writes.
 	pending []byte
 }
@@ -34,7 +60,7 @@ func (s *safeWriter) Write(p []byte) (int, error) {
 	out := make([]byte, 0, len(data))
 	i := 0
 	for i < len(data) {
-		if s.allowSGR && data[i] == '\x1b' {
+		if (s.allowSGR || s.dropSGR) && data[i] == '\x1b' {
 			n, complete := sgrLength(data[i:])
 			if !complete {
 				break
@@ -43,7 +69,10 @@ func (s *safeWriter) Write(p []byte) (int, error) {
 				i++
 				continue
 			}
-			out = append(out, data[i:i+n]...)
+			if s.allowSGR {
+				out = append(out, data[i:i+n]...)
+				s.colored = true
+			}
 			i += n
 			continue
 		}

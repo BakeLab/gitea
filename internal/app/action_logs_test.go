@@ -5,11 +5,13 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,6 +28,8 @@ func TestRunLogsStreamWithoutMixingDiagnosticsAndVerifyJobMembership(t *testing.
 			}
 		case "/api/v1/repos/owner/repo/actions/runs/7/logs":
 			_, _ = w.Write([]byte("ZIP archive bytes"))
+		case "/api/v1/repos/owner/repo/actions/jobs/10":
+			_, _ = w.Write([]byte(`{"id":10,"run_id":8,"name":"Build"}`))
 		case "/api/v1/repos/owner/repo/actions/jobs/9/logs":
 			downloads++
 			_, _ = w.Write([]byte("exact log\n"))
@@ -63,6 +67,9 @@ func TestRunLogsStreamWithoutMixingDiagnosticsAndVerifyJobMembership(t *testing.
 	require.Equal(t, "ZIP archive bytes", string(data))
 	require.Empty(t, out.String())
 	require.Empty(t, diagnostics.String())
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--output", path, "--skip-existing"}))
+	require.Empty(t, out.String())
+	require.Equal(t, "! Skipped the logs of run 7: "+path+" exists\n", diagnostics.String())
 }
 
 func TestRunLogsKeepOnlyColorsOnATerminal(t *testing.T) {
@@ -83,12 +90,33 @@ func TestRunLogsKeepOnlyColorsOnATerminal(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	for tty, want := range map[bool]string{false: logs, true: "\x1b[36mstep\x1b[0m ]0;PWNEDdone[2J\n"} {
-		deps, out, diagnostics := serverDeps(t, server.URL)
-		deps.Streams.OutTTY = tty
-		require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--job=9", "--no-input"}))
-		require.Equal(t, want, out.String(), "tty=%t", tty)
-		require.Equal(t, "Build]0;PWNED (job 9)\n", diagnostics.String())
+	for _, tc := range []struct {
+		name       string
+		tty, plain bool
+		env        map[string]string
+		want       string
+	}{
+		{"piped", false, false, nil, logs},
+		{"piped with color always", false, false, map[string]string{"GITEA_CLI_COLOR": "always"}, logs},
+		// The colors end with the log, which may stop in the middle of colored text.
+		{"terminal", true, false, nil, "\x1b[36mstep\x1b[0m ]0;PWNEDdone[2J\n\x1b[0m"},
+		// Without color the colors are dropped whole, and other escape sequences stay visible.
+		{"NO_COLOR", true, false, map[string]string{"NO_COLOR": "1"}, "step ]0;PWNEDdone[2J\n"},
+		{"dumb terminal", true, false, map[string]string{"TERM": "dumb"}, "step ]0;PWNEDdone[2J\n"},
+		{"console without escape sequences", true, true, nil, "step ]0;PWNEDdone[2J\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, out, diagnostics := serverDeps(t, server.URL)
+			deps.Getenv = serverEnv(server.URL, tc.env)
+			deps.Streams.OutTTY, deps.Streams.OutPlain = tc.tty, tc.plain
+			require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--job=9", "--no-input"}))
+			require.Equal(t, tc.want, out.String())
+			require.Equal(t, "Build]0;PWNED (job 9)\n", diagnostics.String())
+			// gt run view --log prints the logs the same way.
+			out.Reset()
+			require.NoError(t, Execute(context.Background(), deps, []string{"run", "view", "7", "-R", "owner/repo", "--log", "--no-input"}))
+			require.Equal(t, tc.want, out.String())
+		})
 	}
 }
 
@@ -122,6 +150,64 @@ func TestRunLogsContinuePastJobsThatHaveNotStarted(t *testing.T) {
 	require.Equal(t, "lint (job 8): never started (skipped)\nbuild (job 9): not started yet\ntest (job 10)\ndeploy (job 11): not started yet\n", diagnostics.String())
 }
 
+func TestRunLogsAndRerunSelectTheJobOfAJobURL(t *testing.T) {
+	server, requests := actionsAPI(t, map[string]string{
+		"GET actions/runs/29":                failedRunFixture,
+		"GET actions/runs/29/jobs":           failedJobsFixture,
+		"GET actions/jobs/30/logs":           "compiled\n",
+		"POST actions/runs/29/jobs/31/rerun": `{"id":31}`,
+	})
+	jobURL := func(job int) string { return fmt.Sprintf("%s/alice/project/actions/runs/29/jobs/%d", server.URL, job) }
+	deps, out, _ := actionsDeps(t, server.URL, false)
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", jobURL(30)}))
+	require.Equal(t, "compiled\n", out.String())
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", jobURL(30), "--job", "30"}))
+	// --job may also name the job of the URL.
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", jobURL(30), "--job", "build"}))
+	require.Equal(t, "compiled\n", out.String())
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "rerun", jobURL(31)}))
+	require.Contains(t, *requests, "POST actions/runs/29/jobs/31/rerun")
+	*requests = nil
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "rerun", jobURL(31), "--job", "test"}))
+	require.Contains(t, *requests, "POST actions/runs/29/jobs/31/rerun")
+	for _, tc := range []struct {
+		args []string
+		err  string
+	}{
+		{[]string{"run", "logs", jobURL(30), "--job", "test"}, "--job test cannot be combined with the URL of job 30"},
+		{[]string{"run", "rerun", jobURL(31), "--job", "build"}, "--job build cannot be combined with the URL of job 31"},
+		{[]string{"run", "logs", jobURL(30), "--failed"}, "--failed cannot be combined with the URL of job 30"},
+		{[]string{"run", "logs", jobURL(30), "--output", "logs.zip"}, "--output cannot be combined with the URL of job 30"},
+		{[]string{"run", "rerun", jobURL(31), "--failed"}, "--failed cannot be combined with the URL of job 31"},
+	} {
+		err := Execute(context.Background(), deps, tc.args)
+		require.EqualError(t, err, tc.err)
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	}
+}
+
+func TestRunLogsSelectAJobOfAnEarlierAttempt(t *testing.T) {
+	const earlier = `{"id":20,"run_id":29,"run_attempt":1,"name":"test","status":"completed","conclusion":"failure",
+		"started_at":"2028-01-01T10:00:05Z","completed_at":"2028-01-01T10:00:50Z"}`
+	server, _ := actionsAPI(t, map[string]string{
+		"GET actions/runs/29/jobs": failedJobsFixture,
+		"GET actions/jobs/20":      earlier,
+		"GET actions/jobs/20/logs": "first attempt\n",
+	})
+	jobURL := server.URL + "/alice/project/actions/runs/29/jobs/20"
+	for _, args := range [][]string{
+		{"run", "logs", "29", "-R", "alice/project", "--job", "20"},
+		{"run", "logs", jobURL},
+		{"run", "logs", jobURL, "--follow", "--interval=1ms"},
+	} {
+		deps, out, diagnostics := actionsDeps(t, server.URL, false)
+		require.NoError(t, Execute(context.Background(), deps, args), "%v", args)
+		require.Equal(t, "first attempt\n", out.String(), "%v", args)
+		require.Equal(t, "test (job 20)\n", diagnostics.String(), "%v", args)
+	}
+}
+
 func TestRunLogsSelectJobsAndFollowSeveral(t *testing.T) {
 	server, _ := actionsAPI(t, map[string]string{
 		"GET actions/runs/29/jobs": failedJobsFixture,
@@ -138,6 +224,11 @@ func TestRunLogsSelectJobsAndFollowSeveral(t *testing.T) {
 		{"a job by name", []string{"--job", "Build"}, "compiled\nlinked", "build (job 30)\n", ""},
 		{"follow several jobs", []string{"--follow", "--interval=1ms"}, "build\tcompiled\nbuild\tlinked\ntest\tboom\n", "build (job 30)\ntest (job 31)\n", ""},
 		{"unknown job", []string{"--job", "deploy"}, "", "", `job "deploy" not found in run 29`},
+		{"failed with a job", []string{"--job", "Build", "--failed"}, "", "", "--failed and --job cannot be combined"},
+		{"clobber without a download", []string{"--clobber"}, "", "", "--clobber requires --output or --dir"},
+		{"clobber to standard output", []string{"--clobber", "--output", "-"}, "", "", "--clobber cannot be combined with --output -"},
+		{"skip-existing without a download", []string{"--failed", "--skip-existing"}, "", "", "--skip-existing requires --output or --dir"},
+		{"skip-existing to standard output", []string{"--skip-existing", "--output", "-"}, "", "", "--skip-existing cannot be combined with --output -"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, out, diagnostics := actionsDeps(t, server.URL, false)

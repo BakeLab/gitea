@@ -85,7 +85,7 @@ $ gt repo deploy-key add deploy.pub --title "Release bot" --allow-write`,
 			if err != nil {
 				return fmt.Errorf("read public key: %w", err)
 			}
-			_, comment, err := publicKey(data, args[0])
+			_, comment, err := publicKey(data, args[0], cmd.CommandPath())
 			if err != nil {
 				return err
 			}

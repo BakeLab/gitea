@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -20,6 +21,10 @@ func TestOrganizationMemberChangesCheckMembershipFirst(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case "GET /api/v1/orgs/acme/members/carol", "GET /api/v1/orgs/acme/public_members/carol":
 			w.WriteHeader(http.StatusNoContent)
+		case "GET /api/v1/orgs/acme":
+			_, _ = w.Write([]byte(`{"name":"acme"}`))
+		case "GET /api/v1/orgs/nobody/members/bob", "GET /api/v1/orgs/nobody":
+			w.WriteHeader(http.StatusNotFound)
 		default:
 			changes = append(changes, r.Method+" "+r.URL.Path)
 			w.WriteHeader(http.StatusNoContent)
@@ -32,10 +37,38 @@ func TestOrganizationMemberChangesCheckMembershipFirst(t *testing.T) {
 	require.Equal(t, "! bob is not a member of acme\n", withoutANSI(diagnostics.String()))
 	err := Execute(context.Background(), deps, []string{"org", "member", "publicize", "acme", "bob"})
 	require.EqualError(t, err, "bob is not a member of acme")
+	for _, verb := range []string{"publicize", "conceal", "remove"} {
+		err = Execute(context.Background(), deps, []string{"org", "member", verb, "nobody", "bob", "--yes"})
+		require.EqualError(t, err, `organization "nobody" not found`)
+	}
 	diagnostics.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"org", "member", "public", "acme", "carol"}))
 	require.Equal(t, "! carol's membership of acme is already public\n", withoutANSI(diagnostics.String()))
 	require.Empty(t, changes)
+}
+
+func TestOrganizationMemberListReadsVisibilityOnlyForItsOutput(t *testing.T) {
+	var visibilityReads []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/orgs/acme/members":
+			writeFirstPage(w, r, `[{"id":1,"login":"bob"},{"id":2,"login":"carol"}]`)
+		case strings.HasPrefix(r.URL.Path, "/api/v1/orgs/acme/public_members"):
+			visibilityReads = append(visibilityReads, r.URL.Path)
+			writeFirstPage(w, r, `[{"id":2,"login":"carol"}]`)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"org", "member", "list", "acme", "--json", "username"}))
+	require.JSONEq(t, `[{"username":"bob"},{"username":"carol"}]`, out.String())
+	require.Empty(t, visibilityReads)
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"org", "member", "list", "acme", "--json", "username,visibility"}))
+	require.JSONEq(t, `[{"username":"bob","visibility":"concealed"},{"username":"carol","visibility":"public"}]`, out.String())
+	require.NotEmpty(t, visibilityReads)
 }
 
 func TestOrganizationDeleteAsksToTypeTheName(t *testing.T) {

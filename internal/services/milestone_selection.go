@@ -5,9 +5,12 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+
+	gitea "gitea.dev/sdk"
 )
 
 // All returns the open and closed milestones of the repository.
@@ -15,7 +18,18 @@ func (s Milestones) All(ctx context.Context) ([]Milestone, error) { return s.All
 
 // AllIn returns every milestone in state: open, closed or all.
 func (s Milestones) AllIn(ctx context.Context, state string) ([]Milestone, error) {
-	return listAll(func(page int) ([]Milestone, error) { return s.List(ctx, state, 100, page) })
+	owner, repo, err := splitRepository(s.Repository)
+	if err != nil {
+		return nil, err
+	}
+	milestones, err := callAll(ctx, s.Client, 100, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Milestone, *gitea.Response, error) {
+		return c.Repositories.ListMilestones(ctx, owner, repo, gitea.ListMilestoneOption{ListOptions: list, State: gitea.StateType(state)})
+	})
+	if err != nil {
+		// A 404 here can only mean the repository is missing or invisible.
+		return nil, Classify(err, "repository", s.Repository, "")
+	}
+	return convertAll(milestones, milestoneFrom), nil
 }
 
 // Find returns the milestones that raws address among the open and closed milestones, each by ID
@@ -25,14 +39,58 @@ func (s Milestones) Find(ctx context.Context, raws []string, byName bool) ([]Mil
 	if err != nil {
 		return nil, err
 	}
-	finder := NameOrID[Milestone]{Kind: "milestone", Scope: s.Repository, ID: func(m Milestone) int64 { return m.ID }, Name: func(m Milestone) string { return m.Title }, ByName: byName}
 	result := make([]Milestone, len(raws))
 	for i, raw := range raws {
-		if result[i], err = finder.Find(items, raw); err != nil {
+		if result[i], err = s.FindIn(items, raw, byName); err != nil {
 			return nil, err
 		}
 	}
 	return result, nil
+}
+
+// FindIn returns the milestone among items, the milestones of the repository, that raw addresses
+// like Find.
+func (s Milestones) FindIn(items []Milestone, raw string, byName bool) (Milestone, error) {
+	finder := NameOrID[Milestone]{Kind: "milestone", Scope: s.Repository, ID: func(m Milestone) int64 { return m.ID }, Name: func(m Milestone) string { return m.Title }, ByName: byName}
+	return finder.Find(items, raw)
+}
+
+// CreateUnique creates a milestone unless one has its title, ignoring case, which titles would
+// then no longer address. With update it edits that milestone instead and reports true.
+func (s Milestones) CreateUnique(ctx context.Context, opts MilestoneOptions, update bool) (Milestone, bool, error) {
+	items, err := s.All(ctx)
+	if err != nil {
+		return Milestone{}, false, err
+	}
+	finder := NameOrID[Milestone]{Kind: "milestone", Scope: s.Repository, ID: func(m Milestone) int64 { return m.ID }, Name: func(m Milestone) string { return m.Title }, ByName: true}
+	current, err := finder.Find(items, deref(opts.Title))
+	if errors.As(err, new(*NotFoundError)) {
+		milestone, err := s.Create(ctx, opts)
+		return milestone, false, err
+	}
+	if err != nil {
+		return Milestone{}, false, err
+	}
+	if !update {
+		return Milestone{}, false, &ConflictError{Reason: ReasonExists, Kind: "milestone", Key: strconv.Quote(current.Title), Scope: s.Repository}
+	}
+	opts.Title = nil
+	milestone, err := s.Edit(ctx, current.ID, opts)
+	return milestone, true, err
+}
+
+// EditUnique edits current like Edit but refuses to retitle it to the title of another milestone
+// among existing, the milestones of the repository, ignoring case, which CreateUnique refuses too:
+// titles would no longer address either milestone.
+func (s Milestones) EditUnique(ctx context.Context, existing []Milestone, current Milestone, opts MilestoneOptions) (Milestone, error) {
+	if opts.Title != nil && *opts.Title != current.Title {
+		for _, other := range existing {
+			if other.ID != current.ID && strings.EqualFold(other.Title, *opts.Title) {
+				return Milestone{}, &ConflictError{Reason: ReasonExists, Kind: "milestone", Key: strconv.Quote(other.Title), Scope: s.Repository}
+			}
+		}
+	}
+	return s.Edit(ctx, current.ID, opts)
 }
 
 // FindOne returns the milestone that raw addresses like Find.

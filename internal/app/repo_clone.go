@@ -181,6 +181,10 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 			if err != nil {
 				return err
 			}
+			if _, name, _ := strings.Cut(fork.FullName, "/"); existed && opts.Name != "" && !strings.EqualFold(name, opts.Name) {
+				// Gitea allows one fork per owner, so --fork-name cannot give a second one.
+				return fmt.Errorf("--fork-name %s was not applied: %s already forked %s as %s, and Gitea allows one fork per owner", opts.Name, cmp.Or(opts.Organization, t.User), t.Repo, fork.FullName)
+			}
 			if existed {
 				a.warn(cmd, "%s already exists", fork.FullName)
 			} else {
@@ -334,6 +338,15 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 		origin, _, _ = strings.Cut(origin, "\n")
 		if _, err := a.gitIn(cmd.Context(), clone, "remote", "add", "--", opts.upstream, upstream); err != nil {
 			return clone, fmt.Errorf("cloned the fork, but could not add the %s remote: %w", opts.upstream, err)
+		}
+		// Fetched, so that the default branch does not track a missing upstream branch. The parent
+		// is on the same instance with the same protocol, so the clone's credentials apply.
+		fetchArgs := append(append([]string{}, credentialArgs...), "fetch", "--quiet")
+		if depth > 0 {
+			fetchArgs = append(fetchArgs, "--depth", fmt.Sprint(depth))
+		}
+		if _, err := a.gitIn(cmd.Context(), clone, append(fetchArgs, "--", opts.upstream)...); err != nil {
+			return clone, fmt.Errorf("cloned the fork and added the %s remote, but could not fetch it: %w", opts.upstream, err)
 		}
 		// The default branch pulls from upstream, but pushes stay on the fork.
 		if branch := item.Parent.DefaultBranch; branch != "" {

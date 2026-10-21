@@ -43,7 +43,7 @@ func notificationFrom(thread *gitea.NotificationThread) Notification {
 	if subject := thread.Subject; subject != nil {
 		result.Title = subject.Title
 		result.URL = subject.HTMLURL
-		result.Type = string(subject.Type)
+		result.Type = strings.ToLower(string(subject.Type))
 		result.State = string(subject.State)
 		result.latestComment = subject.LatestCommentURL
 		if subject.Type == gitea.NotificationSubjectIssue || subject.Type == gitea.NotificationSubjectPull {
@@ -103,7 +103,7 @@ type Notifications struct {
 
 // List returns a non-nil page of notifications and what the server reported about the rest.
 func (s Notifications) List(ctx context.Context, opts NotificationOptions) (Page[Notification], error) {
-	return listPage(opts.Limit, opts.Page, func(limit, page int) ([]Notification, http.Header, error) {
+	return instancePage(ctx, s.Client, opts.Limit, opts.Page, func(limit, page int) ([]Notification, http.Header, error) {
 		window := opts
 		window.Limit, window.Page = limit, page
 		threads, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.NotificationThread, *gitea.Response, error) {
@@ -117,6 +117,10 @@ func (s Notifications) List(ctx context.Context, opts NotificationOptions) (Page
 			return c.Notifications.ListByRepo(ctx, owner, name, window.sdk())
 		})
 		if err != nil {
+			if s.Repository != "" {
+				// A 404 here can only mean the repository is missing or invisible.
+				err = Classify(err, "repository", s.Repository, "")
+			}
 			return nil, nil, err
 		}
 		return convertAll(threads, notificationFrom), headerOf(resp), nil
@@ -162,7 +166,7 @@ func (s Notifications) Mark(ctx context.Context, id int64, status string) (Notif
 		return c.Notifications.MarkReadByID(ctx, id, gitea.NotificationStatus(status))
 	})
 	if err != nil {
-		return Notification{}, err
+		return Notification{}, Classify(err, "notification", strconv.FormatInt(id, 10), "")
 	}
 	return notificationFrom(thread), nil
 }
@@ -186,26 +190,35 @@ func (s Notifications) MarkAll(ctx context.Context, status string, filters []str
 	return convertAll(threads, notificationFrom), nil
 }
 
-// Watch reports new or changed threads and propagates cancellation and callback errors.
+// Watch reports new or changed threads and propagates cancellation and callback errors. It polls
+// on through an outage of the instance of up to pollOutage once a poll succeeded. The first poll
+// reports the page opts selects; later polls read on past it while every thread on a page is new,
+// so a burst of more than a page of notifications between two polls is reported whole.
 func (s Notifications) Watch(ctx context.Context, opts NotificationOptions, interval time.Duration, onChange func([]Notification) error) error {
 	if interval <= 0 {
 		return errors.New("notification polling interval must be positive")
 	}
 	seen := map[int64]Notification{}
-	for {
-		listed, err := s.List(ctx, opts)
+	var newest time.Time
+	var failures outage
+	for polled := false; ; polled = true {
+		changes, next, err := s.poll(ctx, opts, seen, newest, polled)
+		if failures.retry(ctx, err) {
+			if err := sleepCtx(ctx, interval); err != nil {
+				return err
+			}
+			continue
+		}
 		if err != nil {
 			return err
 		}
-		changes := []Notification{}
-		next := map[int64]Notification{}
-		for _, item := range listed.Items {
-			next[item.ID] = item
-			if previous, exists := seen[item.ID]; !exists || previous != item {
-				changes = append(changes, item)
+		failures.passed()
+		seen = next
+		for _, item := range next {
+			if updated := updatedAt(item); updated.After(newest) {
+				newest = updated
 			}
 		}
-		seen = next
 		if len(changes) > 0 {
 			if err := onChange(changes); err != nil {
 				return err
@@ -215,4 +228,45 @@ func (s Notifications) Watch(ctx context.Context, opts NotificationOptions, inte
 			return err
 		}
 	}
+}
+
+// poll reads the page opts selects and returns the threads on it that are new or changed since
+// seen, together with every thread it read. With readOn, it reads on while a page holds only such
+// threads, up to the first thread that is unchanged or was last updated before newest, the latest
+// update the previous polls read: notifications come newest first, so the threads past it are
+// older ones.
+func (s Notifications) poll(ctx context.Context, opts NotificationOptions, seen map[int64]Notification, newest time.Time, readOn bool) ([]Notification, map[int64]Notification, error) {
+	changes := []Notification{}
+	next := map[int64]Notification{}
+	for page := opts.Page; ; page++ {
+		window := opts
+		window.Page = page
+		listed, err := s.List(ctx, window)
+		if err != nil {
+			return nil, nil, err
+		}
+		fresh := true
+		for _, item := range listed.Items {
+			previous, exists := seen[item.ID]
+			changed := !exists || previous != item
+			if page != opts.Page && (!changed || updatedAt(item).Before(newest)) {
+				return changes, next, nil
+			}
+			next[item.ID] = item
+			if changed {
+				changes = append(changes, item)
+			} else {
+				fresh = false
+			}
+		}
+		if !readOn || !fresh || !listed.More || len(listed.Items) == 0 || page-opts.Page+1 >= maxListPages {
+			return changes, next, nil
+		}
+	}
+}
+
+// updatedAt is the time a thread was last updated, or the zero time when it is unknown.
+func updatedAt(item Notification) time.Time {
+	updated, _ := time.Parse(time.RFC3339Nano, item.UpdatedAt)
+	return updated
 }

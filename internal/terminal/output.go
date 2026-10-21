@@ -11,6 +11,8 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf16"
 
 	"github.com/itchyny/gojq"
 )
@@ -119,8 +121,7 @@ func (o JSONOutput) encode(w io.Writer, value any) error {
 	}
 	text := buf.String()
 	if o.Pretty || o.Safe {
-		// The encoder escapes control characters but not format characters such as bidirectional overrides.
-		text = SafeText(text)
+		text = escapeJSONText(text)
 	}
 	if o.Color {
 		text = colorJSON(text)
@@ -136,11 +137,40 @@ func IndentJSON(data []byte, color bool) (string, error) {
 	if err := json.Indent(&buf, bytes.TrimSpace(data), "", "  "); err != nil {
 		return "", err
 	}
-	text := SafeText(buf.String()) + "\n"
+	text := escapeJSONText(buf.String()) + "\n"
 	if color {
 		text = colorJSON(text)
 	}
 	return text, nil
+}
+
+// escapeJSONText escapes the control and format characters left in encoded JSON text, such as DEL,
+// C1 controls and bidirectional overrides, which the encoder writes as they are. JSON text holds them
+// only inside strings, where \uXXXX stands for the same character, so the text cannot drive the
+// terminal and still decodes to the same data. The line breaks and tabs of indentation stay.
+func escapeJSONText(text string) string {
+	if !strings.ContainsFunc(text, needsJSONEscape) {
+		return text
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	for _, r := range text {
+		if !needsJSONEscape(r) {
+			b.WriteRune(r)
+			continue
+		}
+		if r1, r2 := utf16.EncodeRune(r); r1 != unicode.ReplacementChar {
+			fmt.Fprintf(&b, `\u%04x\u%04x`, r1, r2)
+		} else {
+			fmt.Fprintf(&b, `\u%04x`, r)
+		}
+	}
+	return b.String()
+}
+
+// needsJSONEscape reports whether r is a control or format character other than a line break or tab.
+func needsJSONEscape(r rune) bool {
+	return r != '\t' && r != '\n' && (unicode.IsControl(r) || unicode.Is(unicode.Cf, r))
 }
 
 // JSON colors, following gh: bold blue keys, green strings, yellow booleans, cyan null.

@@ -183,20 +183,34 @@ func TestWebhookEditKeepsEventGroupsNarrow(t *testing.T) {
 
 func TestWebhookNotFoundNamesTheSelectedScope(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
+		case "/api/v1/orgs/acme":
+			_, _ = w.Write([]byte(`{"id":3,"name":"acme"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
+	ctx := context.Background()
 	for name, tc := range map[string]struct {
-		scope WebhookScope
-		want  string
+		scope         WebhookScope
+		want, created string
 	}{
-		"organization": {WebhookScope{Repository: "owner/repo", Organization: "acme"}, "webhook 9 not found in acme"},
-		"account":      {WebhookScope{Repository: "owner/repo", Account: true}, "webhook 9 not found"},
-		"global":       {WebhookScope{Repository: "owner/repo", Global: true}, "webhook 9 not found"},
-		"repository":   {WebhookScope{Repository: "owner/repo"}, "webhook 9 not found in owner/repo"},
+		"organization":         {WebhookScope{Repository: "owner/repo", Organization: "acme"}, "webhook 9 not found in acme", `organization "acme" not found`},
+		"missing organization": {WebhookScope{Repository: "owner/repo", Organization: "gone"}, `organization "gone" not found`, `organization "gone" not found`},
+		"account":              {WebhookScope{Repository: "owner/repo", Account: true}, "webhook 9 not found", "not found (HTTP 404 POST /api/v1/user/hooks)"},
+		"global":               {WebhookScope{Repository: "owner/repo", Global: true}, "webhook 9 not found", "not found (HTTP 404 POST /api/v1/admin/hooks)"},
+		"repository":           {WebhookScope{Repository: "owner/repo"}, "webhook 9 not found in owner/repo", "repository owner/repo not found"},
+		"missing repository":   {WebhookScope{Repository: "owner/gone"}, "repository owner/gone not found", "repository owner/gone not found"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := (Webhooks{Client: client, Scope: tc.scope}).View(context.Background(), 9)
+			service := Webhooks{Client: client, Scope: tc.scope}
+			_, err := service.View(ctx, 9)
 			require.EqualError(t, err, tc.want)
+			require.EqualError(t, service.Delete(ctx, 9), tc.want)
+			_, err = service.Create(ctx, WebhookOptions{Type: "gitea", Config: map[string]string{"url": "https://ci.invalid/x"}})
+			require.EqualError(t, err, tc.created, "a create answers 404 only for a missing repository or organization")
 		})
 	}
 }

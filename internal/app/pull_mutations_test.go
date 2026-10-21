@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"slices"
@@ -26,18 +27,20 @@ func TestPullDiffStripsTerminalControlsOnlyOnATerminal(t *testing.T) {
 	}))
 	defer server.Close()
 	for _, tc := range []struct {
-		tty   bool
-		args  []string
-		color string
-		want  string
+		tty  bool
+		args []string
+		env  map[string]string
+		want string
 	}{
-		{false, nil, "", diff},
-		{true, nil, "1", "+hello ]0;PWNED [31mred[0m\n-old\tline\n"},
-		{true, nil, "", "\x1b[32m+hello ]0;PWNED [31mred[0m\x1b[0m\n\x1b[31m-old\tline\x1b[0m\n"},
-		{false, []string{"--color", "always"}, "", "\x1b[32m+hello ]0;PWNED [31mred[0m\x1b[0m\n\x1b[31m-old\tline\x1b[0m\n"},
+		{false, nil, nil, diff},
+		// A diff piped into git apply stays plain even when color is forced for other commands.
+		{false, nil, map[string]string{"CLICOLOR_FORCE": "1"}, diff},
+		{true, nil, map[string]string{"NO_COLOR": "1"}, "+hello ]0;PWNED [31mred[0m\n-old\tline\n"},
+		{true, nil, nil, "\x1b[32m+hello ]0;PWNED [31mred[0m\x1b[0m\n\x1b[31m-old\tline\x1b[0m\n"},
+		{false, []string{"--color", "always"}, nil, "\x1b[32m+hello ]0;PWNED [31mred[0m\x1b[0m\n\x1b[31m-old\tline\x1b[0m\n"},
 	} {
 		deps, out, _ := serverDeps(t, server.URL)
-		deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": tc.color})
+		deps.Getenv = serverEnv(server.URL, tc.env)
 		deps.Streams.OutTTY = tc.tty
 		require.NoError(t, Execute(context.Background(), deps, append([]string{"pr", "diff", "2", "-R", "alice/project"}, tc.args...)))
 		require.Equal(t, tc.want, out.String(), "%+v", tc)
@@ -53,12 +56,22 @@ func TestPullDiffColorsHeadersAndHunks(t *testing.T) {
 func TestPullDiffNameOnly(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/repos/alice/project/pulls/2/files", r.URL.Path)
-		writeFirstPage(w, r, `[{"filename":"one.txt"},{"filename":"docs/two.md"}]`)
+		writeFirstPage(w, r, `[{"filename":"one.txt"},{"filename":"docs/two.md"},{"filename":"tab\tname.txt"},{"filename":"esc\u001b[31mred.txt"}]`)
 	}))
 	defer server.Close()
-	deps, out, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "diff", "2", "-R", "alice/project", "--name-only"}))
-	require.Equal(t, "one.txt\ndocs/two.md\n", out.String())
+	for _, tc := range []struct {
+		tty  bool
+		want string
+	}{
+		// Piped names stay exact, so that they can be passed on to other commands.
+		{false, "one.txt\ndocs/two.md\ntab\tname.txt\nesc\x1b[31mred.txt\n"},
+		{true, "one.txt\ndocs/two.md\ntab name.txt\nesc[31mred.txt\n"},
+	} {
+		deps, out, _ := serverDeps(t, server.URL)
+		deps.Streams.OutTTY = tc.tty
+		require.NoError(t, Execute(context.Background(), deps, []string{"pr", "diff", "2", "-R", "alice/project", "--name-only"}))
+		require.Equal(t, tc.want, out.String(), "tty %v", tc.tty)
+	}
 }
 
 func TestPullCloseCommentsFirstAndDeletesTheBranchOnlyWhenAsked(t *testing.T) {
@@ -332,6 +345,28 @@ func TestPullMergeRefusals(t *testing.T) {
 	}
 }
 
+func TestPullMergeExplainsADivergedFastForward(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","allow_fast_forward_only_merge":true,"default_merge_style":"fast-forward-only"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
+			_, _ = w.Write([]byte(openPull))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls/3/merge":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"message":"Merge DivergingFastForwardOnly Error: exit status 128 - hint: Diverging branches can't be fast-forwarded\nfatal: Not possible to fast-forward, aborting."}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "-s", "fast-forward-only", "--delete-branch=false", "--yes"})
+	require.EqualError(t, err, "cannot fast-forward pull request alice/project#3 (Add login): the base branch has commits the head lacks; rebase the head branch or choose another merge method")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+}
+
 func TestPullMergeAlreadyMergedIsANoOp(t *testing.T) {
 	var payload map[string]any
 	server := newAuthenticatedServer(mergeServer(t, `{"number":3,"title":"Done","state":"closed","merged":true}`, &payload))
@@ -417,4 +452,75 @@ func TestPullMergeReportsNoBranchDeletionForAGitPullRequests(t *testing.T) {
 	deps, _, diagnostics := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "--yes", "--delete-branch"}))
 	require.NotContains(t, diagnostics.String(), "emote branch")
+
+	// The form does not offer to delete a branch the pull request does not have.
+	form := &mergeForm{options: func(choices terminal.MergeFormChoices) terminal.MergeFormValues {
+		return terminal.MergeFormValues{Method: choices.Method}
+	}}
+	deps.MergeForm, deps.Prompter = form, &scriptedPrompter{accept: true}
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "--squash"}))
+	require.Empty(t, form.asked)
+}
+
+func TestPullCloseReportsTheDeletedHeadBranch(t *testing.T) {
+	pull := `{"number":3,"title":"Add login","state":"STATE","base":{"ref":"main"},"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"alice/project","permissions":{"push":true}}}}`
+	deletes := 0
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
+			_, _ = w.Write([]byte(strings.Replace(pull, "STATE", "open", 1)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
+			_, _ = w.Write([]byte(strings.Replace(pull, "STATE", "closed", 1)))
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/repos/alice/project/branches/feature":
+			deletes++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "close", "3", "-R", "alice/project", "--delete-branch", "--json", "state,head_remote_deleted"}))
+	require.Equal(t, 1, deletes)
+	require.JSONEq(t, `{"state":"closed","head_remote_deleted":true}`, out.String())
+}
+
+func TestPullDeleteBranchDeletesAForkBranchOnlyWhereYouCanPush(t *testing.T) {
+	for _, push := range []bool{true, false} {
+		t.Run(fmt.Sprint(push), func(t *testing.T) {
+			pull := fmt.Sprintf(`{"number":3,"title":"Add login","state":"STATE","base":{"ref":"main","repo":{"full_name":"alice/project"}},"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"bob/project","permissions":{"push":%t}}}}`, push)
+			deletes := 0
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
+					_, _ = w.Write([]byte(strings.Replace(pull, "STATE", "open", 1)))
+				case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
+					_, _ = w.Write([]byte(strings.Replace(pull, "STATE", "closed", 1)))
+				case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/repos/bob/project/branches/feature":
+					deletes++
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			deps, out, diagnostics := serverDeps(t, server.URL)
+			require.NoError(t, Execute(context.Background(), deps, []string{"pr", "close", "3", "-R", "alice/project", "-d"}))
+			if push {
+				require.Equal(t, 1, deletes)
+			} else {
+				require.Zero(t, deletes)
+				require.Contains(t, diagnostics.String(), "Kept remote branch feature: you cannot push to bob/project")
+			}
+			out.Reset()
+			require.NoError(t, Execute(context.Background(), deps, []string{"pr", "close", "--help"}))
+			require.Contains(t, out.String(), "also in a fork you can push to")
+			out.Reset()
+			require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge", "--help"}))
+			require.Contains(t, out.String(), "deletes the head branch of a pull request from a fork too, when you can push")
+		})
+	}
 }

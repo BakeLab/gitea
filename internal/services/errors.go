@@ -48,6 +48,18 @@ func NotFound(kind, key, scope string) *NotFoundError {
 	return &NotFoundError{Kind: kind, Key: key, Scope: scope}
 }
 
+// RefusedError words a refusal that Gitea answers without naming what it refused, such as a
+// 403 "write permission is required".
+type RefusedError struct {
+	Text string
+	// Err is the underlying *transport.APIError.
+	Err error
+}
+
+func (e *RefusedError) Error() string { return e.Text }
+
+func (e *RefusedError) Unwrap() error { return e.Err }
+
 // Reasons a ConflictError gives for refusing a request.
 const (
 	ReasonArchived  = "archived"          // the repository is archived and read-only
@@ -161,14 +173,16 @@ var refusals = []struct {
 }
 
 var (
-	// unknownUser finds the name in Gitea's "user does not exist [uid: 0, name: nobody]".
-	unknownUser = regexp.MustCompile(`user does not exist \[uid: \d+, name: ([^\]]+)\]`)
+	// unknownUser finds the name in Gitea's "user does not exist [uid: 0, name: nobody]" and in
+	// "user redirect does not exist [name: nobody]", which it answers for an unknown account name.
+	unknownUser = regexp.MustCompile(`user (?:redirect )?does not exist \[(?:uid: \d+, )?name: ([^\]]+)\]`)
 	// pullTargets finds the branches in "pull request already exists for these targets [... head_branch: x, base_branch: y]".
 	pullTargets = regexp.MustCompile(`head_branch: ([^,\]]+), base_branch: ([^,\]]+)`)
 	// missingBranch finds the branch in the 404 messages `ref "x" does not exist` (create pull
 	// request) and `new base 'x' not exist` (edit pull request).
 	missingBranch = regexp.MustCompile(`^(?:ref "([^"]+)" does not exist|new base '([^']+)' not exist)$`)
-	// wikiTitle finds the page in "wiki page already exists [title: Home.md]".
+	// wikiTitle finds the page in "wiki page already exists [title: Home.md]", for callers that
+	// do not name it.
 	wikiTitle = regexp.MustCompile(`\[title: (.+?)(?:\.md)?\]`)
 )
 
@@ -190,7 +204,9 @@ func Classify(err error, kind, key, scope string) error {
 		if match := pullTargets.FindStringSubmatch(apiErr.Message); reason == ReasonExists && match != nil {
 			conflict.Kind, conflict.Key = "pull request", "for "+match[1]+" into "+match[2]
 		}
-		if match := wikiTitle.FindStringSubmatch(apiErr.Message); reason == ReasonExists && match != nil {
+		// Gitea names the page by its escaped file name, such as "dir%2Fx", which no command
+		// takes, so the caller's name for it wins.
+		if match := wikiTitle.FindStringSubmatch(apiErr.Message); reason == ReasonExists && match != nil && key == "" {
 			conflict.Kind, conflict.Key = "wiki page", strconv.Quote(match[1])
 		}
 		return conflict

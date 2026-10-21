@@ -6,6 +6,10 @@ package app
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -53,6 +57,14 @@ Getting Started  alice   about 2 hours ago
 `, out.String())
 }
 
+func TestWikiListOffersOnlyTheFieldsOfListedPages(t *testing.T) {
+	requireUsageBeforeRequests(t, `unknown JSON field "body"`, "wiki", "list", "--json", "title,body")
+	deps, _, _ := testDeps(t)
+	list, _, err := NewRoot(deps).Find([]string{"wiki", "list"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"author", "sha", "title", "updated_at", "url"}, commandOutputFields(list))
+}
+
 func TestWikiViewAndCreate(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -71,6 +83,93 @@ func TestWikiViewAndCreate(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"wiki", "create", "Page Two", "-b", "body", "-R", "alice/x"}))
 	require.Equal(t, "https://gitea.test/alice/x/wiki/Page-Two\n", out.String())
 	require.Equal(t, "✓ Created wiki page \"Page Two\" in alice/x\n", diagnostics.String())
+}
+
+func TestWikiCreateSuggestsARunnableEditOfAnExistingPage(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"wiki page already exists [title: Home.md]"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{" Home ", "-b", "body"}, `wiki page "Home" already exists in alice/x; edit it with: gt wiki edit 'Home' -b 'body' -R alice/x`},
+		{[]string{"Bob's\tpage", "-b", "it's"}, `wiki page "Bob's\tpage" already exists in alice/x; edit it with: gt wiki edit $'Bob\'s\tpage' -b 'it'\''s' -R alice/x`},
+		{[]string{"Home", "-F", "docs/home page.md", "-m", "Rewrite"}, `wiki page "Home" already exists in alice/x; edit it with: gt wiki edit 'Home' -F 'docs/home page.md' -m 'Rewrite' -R alice/x`},
+		{[]string{"Home", "-t", "-r8dash", "-b", "body"}, ""},
+	} {
+		if tc.want == "" {
+			// A title that starts with - goes after --, behind every flag.
+			tc.args, tc.want = []string{"-t", "-dash", "-b", "body"}, `wiki page "-dash" already exists in alice/x; edit it with: gt wiki edit -b 'body' -R alice/x -- '-dash'`
+		}
+		if tc.args[1] == "-F" {
+			dir := t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(dir, "docs"), 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, tc.args[2]), []byte("body"), 0o600))
+			t.Chdir(dir)
+		}
+		err := Execute(context.Background(), deps, append(append([]string{"wiki", "create"}, tc.args...), "-R", "alice/x"))
+		require.EqualError(t, Explain(context.Background(), deps, err), tc.want)
+	}
+	// Content written in the editor is in its draft.
+	editor, _ := newDraftEditor(t, "body")
+	deps.Editor = editor
+	deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "editor"})
+	err := Execute(context.Background(), deps, []string{"wiki", "create", "Home", "-e", "-R", "alice/x"})
+	require.ErrorContains(t, Explain(context.Background(), deps, err), "edit it with: gt wiki edit 'Home' -F '"+editor.draft.Path+"' -R alice/x; draft saved at ")
+}
+
+func TestWikiCreateKeepsContentTheEditHintCannotCarryInADraft(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"wiki page already exists [title: Home.md]"}`))
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name, body string
+		args       []string
+	}{
+		{"multi-line", "line one\nline two", []string{"-b", "line one\nline two"}},
+		{"tab", "a\tb", []string{"-b", "a\tb"}},
+		{"long", strings.Repeat("x", 81), []string{"-b", strings.Repeat("x", 81)}},
+		{"stdin", "from stdin\n", []string{"-F", "-"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _, _ := serverDeps(t, server.URL)
+			deps.Streams.In = strings.NewReader(tc.body)
+			err := Execute(context.Background(), deps, append([]string{"wiki", "create", "Home", "-R", "alice/x"}, tc.args...))
+			match := regexp.MustCompile(`edit it with: gt wiki edit 'Home' -F '([^']+)' -R alice/x; draft saved at (\S+)$`).FindStringSubmatch(Explain(context.Background(), deps, err).Error())
+			require.Len(t, match, 3, err.Error())
+			require.Equal(t, match[1], match[2])
+			data, readErr := os.ReadFile(match[1])
+			require.NoError(t, readErr)
+			require.Equal(t, tc.body, string(data))
+			require.NoError(t, os.Remove(match[1]))
+		})
+	}
+}
+
+func TestWikiViewPipedNormalizesTheUpdateTime(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"title":"Home","content_base64":"Ym9keQ==","last_commit":{"author":{"name":"alice","date":"2026-10-11T21:00:00.123+02:00"}}}`))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"wiki", "view", "Home", "-R", "alice/x"}))
+	require.Equal(t, "title:\tHome\nauthor:\talice\nupdated:\t2026-10-11T19:00:00Z\n--\nbody\n", out.String())
+}
+
+func TestWikiViewPipedKeepsAnUnparseableUpdateTime(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"title":"Home","content_base64":"Ym9keQ==","last_commit":{"author":{"name":"alice","date":"yesterday"}}}`))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"wiki", "view", "Home", "-R", "alice/x"}))
+	require.Contains(t, out.String(), "\nupdated:\tyesterday\n")
 }
 
 func TestWikiEditRefusesToOverwriteOrCreate(t *testing.T) {

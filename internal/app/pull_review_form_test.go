@@ -30,6 +30,10 @@ func TestPullReviewImplicitInteractiveForm(t *testing.T) {
 			_, _ = w.Write([]byte(`{"number":3,"title":"Add one","user":{"login":"bob"},"head":{"ref":"feat/one"},"base":{"ref":"main"}}`))
 			return
 		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3/reviews" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Equal(t, "/api/v1/repos/alice/project/pulls/3/reviews", r.URL.Path)
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&createPayload))
@@ -69,6 +73,10 @@ func TestPullReviewImplicitInteractiveForm(t *testing.T) {
 func TestPullReviewFormKeepsTheBodyWhenSubmissionIsDeclined(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method, "nothing may be submitted")
+		if strings.HasSuffix(r.URL.Path, "/reviews") {
+			writeFirstPage(w, r, `[]`)
+			return
+		}
 		_, _ = w.Write([]byte(`{"number":3,"title":"Add one","user":{"login":"alice"},"head":{"ref":"feat/one"},"base":{"ref":"main"}}`))
 	}))
 	defer server.Close()
@@ -100,7 +108,7 @@ func TestPullReviewInteractiveDiffRoundTrip(t *testing.T) {
 			_, _ = w.Write([]byte(`diff --git a/sample.go b/sample.go
 --- a/sample.go
 +++ b/sample.go
-@@ -1,2 +1,3 @@
+@@ -1 +1,2 @@
  package sample
 +func added() {}
 `))
@@ -165,6 +173,51 @@ func TestPullReviewDiffFailureKeepsAnnotatedDiff(t *testing.T) {
 	require.NoError(t, os.Remove(editor.path))
 }
 
+func TestPullReviewDiffRefusesCommentsOffTheDiff(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method, "nothing may be submitted")
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/pulls/4":
+			_, _ = w.Write([]byte(`{"number":4,"title":"Add","user":{"login":"bob"}}`))
+		case "/api/v1/repos/alice/project/pulls/4/reviews":
+			writeFirstPage(w, r, `[]`)
+		default:
+			_, _ = w.Write([]byte("diff --git a/sample.go b/sample.go\n--- a/sample.go\n+++ b/sample.go\n@@ -1 +1,2 @@\n package sample\n+func added() {}\n"))
+		}
+	}))
+	defer server.Close()
+	editor := &headerEditingEditor{}
+	deps, _, _ := testDeps(t)
+	deps.ReviewForm = reviewFormFunc(func(ctx context.Context, choices terminal.ReviewFormChoices) (terminal.ReviewFormValues, error) {
+		_, err := choices.ReviewDiff(ctx)
+		return terminal.ReviewFormValues{}, err
+	})
+	deps.Prompter = &scriptedPrompter{accept: true}
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	deps.Editor = editor
+	deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "true"})
+	err := Execute(context.Background(), deps, []string{"pr", "review", "4", "-R", "alice/project", "--interactive"})
+	require.ErrorContains(t, err, `line 20 of the annotated diff, "+++ b/other.go", is not the next line of the diff, "+++ b/sample.go"; keep the lines of the diff as they are and start every comment line with #; the annotated diff is kept at `+editor.path)
+	require.NoError(t, os.Remove(editor.path))
+}
+
+// headerEditingEditor comments on a line after changing the file header above it.
+type headerEditingEditor struct{ path string }
+
+func (*headerEditingEditor) Edit(context.Context, string, string) (terminal.Draft, error) {
+	return terminal.Draft{}, nil
+}
+
+func (e *headerEditingEditor) EditPath(_ context.Context, _, path string) error {
+	e.path = path
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	annotated := strings.NewReplacer("+++ b/sample.go\n", "+++ b/other.go\n", "+func added() {}\n", "+func added() {}\n# off the diff\n").Replace(string(data))
+	return os.WriteFile(path, []byte(annotated), 0o600)
+}
+
 type failingPathEditor struct{ path string }
 
 func (*failingPathEditor) Edit(context.Context, string, string) (terminal.Draft, error) {
@@ -194,11 +247,15 @@ func (pathAnnotatingEditor) EditPath(_ context.Context, _, path string) error {
 func TestPullReviewKeepsAnnotatedDiffWhenSubmissionIsDeclined(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method, "nothing may be submitted")
+		if strings.HasSuffix(r.URL.Path, "/reviews") {
+			writeFirstPage(w, r, `[]`)
+			return
+		}
 		if r.URL.Path == "/api/v1/repos/alice/project/pulls/4" {
 			_, _ = w.Write([]byte(`{"number":4,"title":"Add","user":{"login":"bob"}}`))
 			return
 		}
-		_, _ = w.Write([]byte("diff --git a/sample.go b/sample.go\n--- a/sample.go\n+++ b/sample.go\n@@ -1,2 +1,3 @@\n package sample\n+func added() {}\n"))
+		_, _ = w.Write([]byte("diff --git a/sample.go b/sample.go\n--- a/sample.go\n+++ b/sample.go\n@@ -1 +1,2 @@\n package sample\n+func added() {}\n"))
 	}))
 	defer server.Close()
 	deps, _, _ := testDeps(t)

@@ -127,7 +127,7 @@ func (s Reviews) List(ctx context.Context, n int64, limit, page int) ([]Review, 
 		return c.PullRequests.ListPullReviews(ctx, owner, name, n, gitea.ListPullReviewsOptions{ListOptions: listOptions(limit, page)})
 	})
 	if err != nil {
-		return nil, err
+		return nil, repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
 	}
 	return convertAll(reviews, reviewFrom), nil
 }
@@ -135,7 +135,7 @@ func (s Reviews) List(ctx context.Context, n int64, limit, page int) ([]Review, 
 // ListPage lists a window of reviews of pull request n. It reaches past the server's smaller
 // page size, which List would silently take as the whole window.
 func (s Reviews) ListPage(ctx context.Context, n int64, limit, page int) (Page[Review], error) {
-	window, err := listPage(limit, page, func(limit, page int) ([]*gitea.PullReview, http.Header, error) {
+	window, err := instancePage(ctx, s.Client, limit, page, func(limit, page int) ([]*gitea.PullReview, http.Header, error) {
 		var headers http.Header
 		reviews, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.PullReview, *gitea.Response, error) {
 			reviews, resp, err := c.PullRequests.ListPullReviews(ctx, owner, name, n, gitea.ListPullReviewsOptions{ListOptions: listOptions(limit, page)})
@@ -145,7 +145,7 @@ func (s Reviews) ListPage(ctx context.Context, n int64, limit, page int) (Page[R
 		return reviews, headers, err
 	})
 	if err != nil {
-		return Page[Review]{}, err
+		return Page[Review]{}, repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
 	}
 	return convertPage(window, reviewFrom), nil
 }
@@ -167,9 +167,37 @@ func (s Reviews) Pending(ctx context.Context, n int64, login string) ([]Review, 
 
 // View retrieves a review belonging to the selected pull request.
 func (s Reviews) View(ctx context.Context, n, id int64) (Review, error) {
-	return repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
 		return c.PullRequests.GetPullReview(ctx, owner, name, n, id)
 	})
+	return item, s.reviewError(ctx, err, n, id)
+}
+
+// reviewError names the missing repository, pull request or review of a 404. Gitea names a missing
+// pull request or review in its message, but answers a missing repository and a review of another
+// pull request with the same bare "not found", so the repository is checked then.
+func (s Reviews) reviewError(ctx context.Context, err error, n, id int64) error {
+	apiErr, ok := errors.AsType[*transport.APIError](err)
+	if !ok || apiErr.Status != http.StatusNotFound {
+		return err
+	}
+	if strings.HasPrefix(apiErr.Message, "pull request does not exist") {
+		return &NotFoundError{Kind: "pull request", Key: "#" + strconv.FormatInt(n, 10), Scope: s.Repository, Err: err}
+	}
+	missing := &NotFoundError{Kind: "review", Key: strconv.FormatInt(id, 10), Scope: "pull request #" + strconv.FormatInt(n, 10), Err: err}
+	if strings.HasPrefix(apiErr.Message, "review does not exist") {
+		return missing
+	}
+	if repoErr := repositoryItemError(ctx, s.Client, s.Repository, err, "review", missing.Key); isMissingRepository(repoErr) {
+		return repoErr
+	}
+	return missing
+}
+
+// isMissingRepository reports whether err is the error of a missing repository.
+func isMissingRepository(err error) bool {
+	missing, ok := errors.AsType[*NotFoundError](err)
+	return ok && missing.Kind == "repository"
 }
 
 // Create submits a review.
@@ -209,16 +237,17 @@ func (s Reviews) Submit(ctx context.Context, n, id int64, opts ReviewSubmitOptio
 		}
 		return reviewFrom(&review), nil
 	}
-	return repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
 		return c.PullRequests.SubmitPullReview(ctx, owner, name, n, id, option)
 	})
+	return item, s.reviewError(ctx, err, n, id)
 }
 
 // Delete removes one review.
 func (s Reviews) Delete(ctx context.Context, n, id int64) error {
-	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
+	return s.reviewError(ctx, repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
 		return c.PullRequests.DeletePullReview(ctx, owner, name, n, id)
-	})
+	}), n, id)
 }
 
 // Dismiss changes a review's contribution to approval requirements and returns the review.
@@ -230,7 +259,7 @@ func (s Reviews) Dismiss(ctx context.Context, n, id int64, dismiss bool, message
 		return c.PullRequests.UnDismissPullReview(ctx, owner, name, n, id)
 	})
 	if err != nil {
-		return Review{}, err
+		return Review{}, s.reviewError(ctx, err, n, id)
 	}
 	review, err := s.View(ctx, n, id)
 	if err != nil {
@@ -244,7 +273,7 @@ func (s Reviews) Comments(ctx context.Context, n, reviewID int64, limit, page in
 	reviews := []Review{{ID: reviewID}}
 	if reviewID == 0 {
 		var err error
-		reviews, err = listAll(func(page int) ([]Review, error) { return s.List(ctx, n, 100, page) })
+		reviews, err = s.All(ctx, n)
 		if err != nil {
 			return Page[ReviewComment]{}, err
 		}
@@ -258,7 +287,7 @@ func (s Reviews) Comments(ctx context.Context, n, reviewID int64, limit, page in
 
 // All returns every review of a pull request, including requests for a review.
 func (s Reviews) All(ctx context.Context, n int64) ([]Review, error) {
-	return listAll(func(page int) ([]Review, error) { return s.List(ctx, n, 100, page) })
+	return listEvery(100, func(limit, page int) (Page[Review], error) { return s.ListPage(ctx, n, limit, page) })
 }
 
 // Inline returns the inline comments of the given reviews of pull request n.
@@ -285,6 +314,24 @@ func LatestReviews(reviews []Review) []Review {
 		latest = append(latest, review)
 	}
 	return latest
+}
+
+// RequestedReviewers returns the users and teams with an outstanding review request: each user
+// whose latest review is a request, and each team with a request. Gitea's requested_reviewers
+// also lists users who reviewed, even after their request was canceled, so the reviews decide.
+func RequestedReviewers(reviews []Review) (users, teams []string) {
+	users, teams = []string{}, []string{}
+	for _, review := range LatestReviews(reviews) {
+		if review.State == string(gitea.ReviewStateRequestReview) {
+			users = append(users, review.Author)
+		}
+	}
+	for _, review := range reviews {
+		if review.Author == "" && review.Team != "" && review.State == string(gitea.ReviewStateRequestReview) && !slices.Contains(teams, review.Team) {
+			teams = append(teams, review.Team)
+		}
+	}
+	return users, teams
 }
 
 // ReviewDecision summarizes reviews like gh: changes_requested when a reviewer's latest decisive
@@ -337,17 +384,27 @@ func (s Reviews) reviewComments(ctx context.Context, n int64, reviews []Review, 
 
 // Resolve marks a review conversation resolved or unresolved.
 func (s Reviews) Resolve(ctx context.Context, id int64, resolved bool) error {
-	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
 		if resolved {
 			return c.PullRequests.ResolvePullReviewComment(ctx, owner, name, id)
 		}
 		return c.PullRequests.UnresolvePullReviewComment(ctx, owner, name, id)
 	})
+	return repositoryItemError(ctx, s.Client, s.Repository, err, "review comment", strconv.FormatInt(id, 10))
 }
 
 // Reply adds a reply to a review comment.
 func (s Reviews) Reply(ctx context.Context, n, id int64, body string) (ReviewComment, error) {
-	return repoConvert(ctx, s.Client, s.Repository, reviewCommentFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReviewComment, *gitea.Response, error) {
+	item, err := repoConvert(ctx, s.Client, s.Repository, reviewCommentFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReviewComment, *gitea.Response, error) {
 		return c.PullRequests.CreatePullReviewCommentReply(ctx, owner, name, n, id, gitea.CreatePullReviewCommentReplyOptions{Body: body})
 	})
+	if !IsNotFound(err) {
+		return item, Classify(err, "review comment", strconv.FormatInt(id, 10), s.Repository)
+	}
+	// Gitea answers a bare "not found" for a missing pull request and for a comment on another
+	// one, so look the pull request, and with it the repository, up before blaming the comment.
+	if _, pullErr := (Pulls{Client: s.Client, Repository: s.Repository}).get(ctx, n); IsNotFound(pullErr) {
+		return item, pullErr
+	}
+	return item, &NotFoundError{Kind: "review comment", Key: strconv.FormatInt(id, 10), Scope: "pull request #" + strconv.FormatInt(n, 10) + " of " + s.Repository, Err: err}
 }

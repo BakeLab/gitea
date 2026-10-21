@@ -89,7 +89,11 @@ func (a *application) completeTeamThen(next func(ctx context.Context, t target, 
 
 func (a *application) teamCommand() *cobra.Command {
 	group := &cobra.Command{Use: "team", Short: "Manage organization teams and access", Long: `Manage the teams of an organization: what they may do in its repositories, who belongs to
-them, and which repositories they can reach.`}
+them, and which repositories they can reach.
+
+In JSON, access is the team's effective access as the text views show it, such as write or
+"write (code, issues, pulls)"; permission is the team-wide level Gitea reports, which is none
+for a team that grants its access per unit.`}
 	group.AddCommand(a.teamListCommand(), a.teamViewCommand(), a.teamCreateCommand(), a.teamEditCommand(), a.teamDeleteCommand(), a.teamMemberCommand(), a.teamRepoCommand())
 	return jsonOutput(group, jsonFields[services.Team]())
 }
@@ -98,7 +102,9 @@ func (a *application) teamListCommand() *cobra.Command {
 	var limit, page int
 	cmd := &cobra.Command{
 		Use: "list <org>", Short: "List organization teams", Args: argsExact(1), ValidArgsFunction: a.completeOrgs(),
-		Long: "List the teams of an organization with their access to its repositories and their sizes.",
+		Long: fmt.Sprintf(`List the teams of an organization with their access to its repositories and, when the page
+holds at most %d teams, their member and repository counts. Gitea reports no counts with the
+teams, so each team costs two more requests; gt team view shows the counts of one team.`, teamCountLimit),
 		Example: `$ gt team list acme
 # print the team names
 $ gt team list acme --jq '.[].name'`,
@@ -113,24 +119,31 @@ $ gt team list acme --jq '.[].name'`,
 			if err != nil {
 				return err
 			}
+			columns := []terminal.Column{{Header: "ID"}, {Header: "Name"}, {Header: "Permission", Flex: true}}
+			counted := a.options.json == "" && len(teams.Items) <= teamCountLimit
 			sizes := map[int64]services.TeamSize{}
-			if a.options.json == "" {
-				counted, err := service.Sizes(cmd.Context(), teams.Items)
+			if counted {
+				columns = append(columns, terminal.Column{Header: "Members"}, terminal.Column{Header: "Repos"})
+				counts, err := service.Sizes(cmd.Context(), teams.Items)
 				if err != nil {
 					return err
 				}
 				for i, team := range teams.Items {
-					sizes[team.ID] = counted[i]
+					sizes[team.ID] = counts[i]
 				}
 			}
 			return writeTable(a, cmd, teams.Items, listSpec[services.Team]{
-				Columns: []terminal.Column{{Header: "ID"}, {Header: "Name"}, {Header: "Permission", Flex: true}, {Header: "Members"}, {Header: "Repos"}},
+				Columns: columns,
 				Row: func(team services.Team) []terminal.Cell {
+					row := []terminal.Cell{{Text: strconv.FormatInt(team.ID, 10), Link: teamURL(target, team)}, {Text: team.Name, Bold: true}, {Text: team.Access}}
+					if !counted {
+						return row
+					}
 					size, repos := sizes[team.ID], "all"
 					if !team.AllRepositories {
 						repos = countText(size.Repositories)
 					}
-					return []terminal.Cell{{Text: strconv.FormatInt(team.ID, 10), Link: teamURL(target, team)}, {Text: team.Name, Bold: true}, {Text: team.Access()}, {Text: countText(size.Members)}, {Text: repos}}
+					return append(row, terminal.Cell{Text: countText(size.Members)}, terminal.Cell{Text: repos})
 				},
 				Context: "teams in " + org, Empty: "no teams in " + org,
 			}, servicePage(teams, page))
@@ -139,6 +152,10 @@ $ gt team list acme --jq '.[].name'`,
 	pageFlags(cmd, &limit, &page)
 	return cmd
 }
+
+// teamCountLimit is the most teams that team list counts the members and repositories of, as
+// each count is a request of its own.
+const teamCountLimit = 10
 
 // countText shows a count, or nothing when it is unknown.
 func countText(n *int) string {
@@ -210,10 +227,10 @@ $ gt team view 2 --json units`,
 					repositories = "all repositories of " + team.Organization
 				}
 				return terminal.View{
-					Title: team.Slug(), ID: fmt.Sprintf("(ID %d)", team.ID), Badges: []terminal.Cell{{Text: team.Access(), Bold: true}},
+					Title: team.Slug(), ID: fmt.Sprintf("(ID %d)", team.ID), Badges: []terminal.Cell{{Text: team.Access, Bold: true}},
 					Fields: []terminal.Field{
 						{Label: "ID", Value: strconv.FormatInt(team.ID, 10), PipedOnly: true},
-						{Label: "Access", Value: team.Access(), PipedOnly: true},
+						{Label: "Access", Value: team.Access, PipedOnly: true},
 						{Label: "Units", Value: strings.Join(units, ", ")},
 						{Label: "Members", Value: memberNames},
 						{Label: "Repositories", Value: repositories},
@@ -376,7 +393,7 @@ $ gt team create acme ops --permission admin --all-repositories`,
 			if err != nil {
 				return err
 			}
-			a.done(cmd, "Created team %s (ID %d) with %s access", team.Slug(), team.ID, team.Access())
+			a.done(cmd, "Created team %s (ID %d) with %s access", team.Slug(), team.ID, team.Access)
 			return a.created(cmd, team, teamURL(target, team))
 		},
 	}
@@ -390,7 +407,8 @@ func (a *application) teamEditCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "edit <team>", Short: "Edit a team", Args: argsExact(1), ValidArgsFunction: a.completeTeams(),
 		Long: `Edit a team. --permission sets every repository unit to read or write, or grants admin
-access. --unit changes single units and keeps the others, unless --unit-replace is passed.`,
+access. --unit changes single units and keeps the others, unless --unit-replace is passed.
+Only the description of an organization's owner team can be edited.`,
 		Example: `$ gt team edit acme/developers --permission write
 # also let the team edit the wiki
 $ gt team edit acme/developers --unit repo.wiki=write
@@ -422,7 +440,19 @@ $ gt team edit acme/developers --name devs --description "Core developers"`,
 			if err != nil {
 				return err
 			}
-			if opts.Units != nil && !opts.ReplaceUnits && (team.Permission == "admin" || team.Permission == "owner") {
+			// Gitea ignores access changes to the owner team and answers with it unchanged.
+			if team.Permission == "owner" {
+				var access []string
+				for _, name := range []string{"permission", "unit", "can-create-repo", "all-repositories"} {
+					if cmd.Flags().Changed(name) {
+						access = append(access, "--"+name)
+					}
+				}
+				if len(access) > 0 {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("team %s is the organization's owner team, whose access cannot be changed; drop %s", team.Slug(), joinNames(access)))
+				}
+			}
+			if opts.Units != nil && !opts.ReplaceUnits && team.Permission == "admin" {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("--unit cannot restrict the %s access of team %s; pass --permission read or write, or --unit-replace", team.Permission, team.Slug()))
 			}
 			// Gitea finds the owner team by its name, so renaming it leaves the organization without owners.
@@ -435,8 +465,9 @@ $ gt team edit acme/developers --name devs --description "Core developers"`,
 			}
 			edited.Organization = team.Organization
 			// Some Gitea versions keep an admin team admin when permission and units_map are sent together.
-			if opts.Permission != nil && edited.Permission != "" && edited.Permission != *opts.Permission {
-				return fmt.Errorf("team %s was edited, but its permission is %s instead of the requested %s; other changes were applied", edited.Slug(), edited.Permission, *opts.Permission)
+			// Gitea 28 reports permission none for a read or write team, whose units grant its access.
+			if opts.Permission != nil && edited.Permission != "" && (edited.Permission == "admin") != (*opts.Permission == "admin") {
+				return fmt.Errorf("team %s was edited, but its access is %s instead of the requested %s; other changes were applied", edited.Slug(), edited.Access, *opts.Permission)
 			}
 			a.done(cmd, "Edited team %s (ID %d)", edited.Slug(), edited.ID)
 			return a.jsonResult(cmd, edited)
@@ -493,6 +524,15 @@ func joinNames(names []string) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
+// teamItemError words the failure of one user or repository of a team batch, which the batch
+// prefixes with the item, such as "user bob: not found".
+func teamItemError(err error) error {
+	if _, ok := errors.AsType[*services.NotFoundError](err); ok {
+		return explain(err, "not found")
+	}
+	return err
+}
+
 func (a *application) teamMemberCommand() *cobra.Command {
 	group := &cobra.Command{Use: "member", Short: "Manage team members", Long: `List, add and remove the members of a team. Adding a user to a team of an organization
 also makes them a member of the organization.`}
@@ -536,13 +576,9 @@ $ gt team member add 2 bob carol`,
 			if err != nil {
 				return err
 			}
-			for _, username := range args[1:] {
-				if err := service.SetMember(cmd.Context(), team.ID, username, true); err != nil {
-					return err
-				}
-				a.done(cmd, "Added %s to team %s", username, team.Slug())
-			}
-			return nil
+			return batchDone(a, cmd, args[1:], func(username string) string { return "user " + username }, func(username string) (string, error) {
+				return username, teamItemError(service.SetMember(cmd.Context(), team.ID, username, true))
+			}, func(username string) string { return fmt.Sprintf("Added %s to team %s", username, team.Slug()) })
 		},
 	}
 	remove := &cobra.Command{
@@ -562,13 +598,9 @@ $ gt team member add 2 bob carol`,
 			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Remove %s from team %s?", joinNames(members), team.Slug())}); err != nil {
 				return err
 			}
-			for _, username := range members {
-				if err := service.SetMember(cmd.Context(), team.ID, username, false); err != nil {
-					return err
-				}
-				a.done(cmd, "Removed %s from team %s", username, team.Slug())
-			}
-			return nil
+			return batchDone(a, cmd, members, func(username string) string { return "user " + username }, func(username string) (string, error) {
+				return username, teamItemError(service.SetMember(cmd.Context(), team.ID, username, false))
+			}, func(username string) string { return fmt.Sprintf("Removed %s from team %s", username, team.Slug()) })
 		},
 	}
 	group.AddCommand(list, add, remove)
@@ -662,17 +694,14 @@ repositories of other owners cannot be granted to a team.`,
 					return err
 				}
 			}
-			for _, repo := range repos {
-				if err := service.SetRepository(cmd.Context(), team.ID, repo, grant); err != nil {
-					return err
-				}
+			return batchDone(a, cmd, repos, func(repo string) string { return "repository " + repo }, func(repo string) (string, error) {
+				return repo, teamItemError(service.SetRepository(cmd.Context(), team.ID, repo, grant))
+			}, func(repo string) string {
 				if grant {
-					a.done(cmd, "Granted team %s access to %s", team.Slug(), repo)
-				} else {
-					a.done(cmd, "Revoked team %s access to %s", team.Slug(), repo)
+					return fmt.Sprintf("Granted team %s access to %s", team.Slug(), repo)
 				}
-			}
-			return nil
+				return fmt.Sprintf("Revoked team %s access to %s", team.Slug(), repo)
+			})
 		},
 	}
 }

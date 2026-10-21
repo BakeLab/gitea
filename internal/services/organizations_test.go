@@ -118,12 +118,17 @@ func TestOrganizationMembershipChecksReportWhatGiteaRefuses(t *testing.T) {
 		case "/api/v1/orgs/acme/members/bbo":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"user does not exist [uid: 0, name: bbo]"}`))
+		case "/api/v1/orgs/acme":
+			_, _ = w.Write([]byte(`{"name":"acme"}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	service := Organizations{Client: client}
-	_, err := service.IsMember(context.Background(), "acme", "bob")
+	// Gitea answers a missing organization with the same 404 as a missing membership.
+	_, err := service.IsMember(context.Background(), "nobody", "carol")
+	require.EqualError(t, err, `organization "nobody" not found`)
+	_, err = service.IsMember(context.Background(), "acme", "bob")
 	require.True(t, IsForbidden(err), "%v", err)
 	_, err = service.IsMember(context.Background(), "acme", "bbo")
 	require.EqualError(t, err, `user "bbo" not found`)
@@ -159,10 +164,25 @@ func TestOrganizationMembershipRequests(t *testing.T) {
 	}, requests)
 }
 
+// newAdminTestClient returns a client signed in as an administrator, to whom Gitea lists
+// concealed members among the public ones.
+func newAdminTestClient(t *testing.T, handler http.Handler) *transport.Client {
+	t.Helper()
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/user" {
+			_, _ = w.Write([]byte(`{"id":99,"login":"root","is_admin":true}`))
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	client.Token = "token"
+	return client
+}
+
 func TestOrganizationMembersCheckEachMembership(t *testing.T) {
 	// Gitea lists concealed members among the public ones to administrators; only the check of
 	// each membership tells them apart.
-	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newAdminTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/orgs/acme/members", "/api/v1/orgs/acme/public_members":
 			w.Header().Set("X-Total-Count", "2")
@@ -199,7 +219,7 @@ func TestOrganizationMembersCheckEachMembership(t *testing.T) {
 
 func TestOrganizationPublicMembersReadLaterPages(t *testing.T) {
 	// The first server page holds only concealed members; a public one follows on page 2.
-	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newAdminTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/orgs/acme/public_members" && r.URL.Query().Get("page") == "1":
 			var users []string
@@ -222,4 +242,89 @@ func TestOrganizationPublicMembersReadLaterPages(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []OrganizationMember{{ID: 1, Username: "alice", Visibility: MembershipPublic}}, members.Items)
 	require.False(t, members.More)
+}
+
+func TestOrganizationWithoutPublicMembersListsNone(t *testing.T) {
+	client := newAdminTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/orgs/acme/public_members":
+			_, _ = w.Write([]byte(`[{"id":2,"login":"bob"}]`))
+		case "/api/v1/orgs/acme/public_members/bob":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	members, err := (Organizations{Client: client}).Members(context.Background(), "acme", MemberListOptions{Public: true, Limit: 10, Page: 1})
+	require.NoError(t, err)
+	require.NotNil(t, members.Items, "an empty list is [] in JSON, not null")
+	require.Empty(t, members.Items)
+}
+
+func TestOrganizationMembersReadPublicMembersOnce(t *testing.T) {
+	// To anyone but an administrator Gitea lists exactly the public memberships, so one listing
+	// tells every member's visibility apart.
+	var requests []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/v1/user":
+			_, _ = w.Write([]byte(`{"id":3,"login":"carol"}`))
+		case "/api/v1/orgs/acme/members":
+			w.Header().Set("X-Total-Count", "3")
+			_, _ = w.Write([]byte(`[{"id":1,"login":"alice"},{"id":2,"login":"bob"},{"id":3,"login":"carol"}]`))
+		case "/api/v1/orgs/acme/public_members":
+			w.Header().Set("X-Total-Count", "2")
+			_, _ = w.Write([]byte(`[{"id":1,"login":"alice"},{"id":3,"login":"carol"}]`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	client.Token = "token"
+	service := Organizations{Client: client}
+
+	members, err := service.Members(context.Background(), "acme", MemberListOptions{Visibility: true, Limit: 10, Page: 1})
+	require.NoError(t, err)
+	require.Equal(t, []OrganizationMember{
+		{ID: 1, Username: "alice", Visibility: MembershipPublic},
+		{ID: 2, Username: "bob", Visibility: MembershipConcealed},
+		{ID: 3, Username: "carol", Visibility: MembershipPublic},
+	}, members.Items)
+	require.Equal(t, []string{"GET /api/v1/orgs/acme/members", "GET /api/v1/user", "GET /api/v1/orgs/acme/public_members"}, requests)
+
+	requests = nil
+	members, err = service.Members(context.Background(), "acme", MemberListOptions{Public: true, Limit: 10, Page: 1})
+	require.NoError(t, err)
+	require.Equal(t, []OrganizationMember{
+		{ID: 1, Username: "alice", Visibility: MembershipPublic},
+		{ID: 3, Username: "carol", Visibility: MembershipPublic},
+	}, members.Items)
+	require.True(t, members.Counted)
+	require.Equal(t, 2, members.Total)
+	require.Equal(t, []string{"GET /api/v1/user", "GET /api/v1/orgs/acme/public_members"}, requests)
+}
+
+func TestAccountListsNameTheMissingUser(t *testing.T) {
+	// Gitea answers an unknown account name with "user redirect does not exist".
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"user redirect does not exist [name: nosuch]"}`))
+	}))
+	_, err := (Organizations{Client: client}).List(context.Background(), false, "nosuch", 10, 1)
+	require.EqualError(t, err, `user "nosuch" not found`)
+	_, err = (Repositories{Client: client}).ListPage(context.Background(), RepositoryListOptions{Owner: "nosuch", Limit: 10, Page: 1})
+	require.EqualError(t, err, `user "nosuch" not found`)
+	_, err = (Repositories{Client: client}).Search(context.Background(), RepositorySearchOptions{Owner: "nosuch", Limit: 10, Page: 1})
+	require.EqualError(t, err, `user "nosuch" not found`)
+}
+
+func TestOrganizationMembersNameTheMissingOrganization(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"not found"}`))
+	}))
+	for _, public := range []bool{false, true} {
+		_, err := (Organizations{Client: client}).Members(context.Background(), "nope", MemberListOptions{Public: public, Limit: 10, Page: 1})
+		require.EqualError(t, err, `organization "nope" not found`)
+	}
 }

@@ -92,7 +92,7 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 					return CheckoutResult{}, err
 				}
 				if commit != options.ExpectedCommit && !options.Update {
-					return CheckoutResult{}, fmt.Errorf("branch %q already exists with a different commit; choose another checkout branch", options.Branch)
+					return CheckoutResult{}, fmt.Errorf("branch %q already exists with a different commit; pass --update to fast-forward it, or choose another checkout branch with --branch", options.Branch)
 				}
 				previousCommit = commit
 				existing = true
@@ -136,8 +136,12 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 			return CheckoutResult{}, errors.New("local branch changed while fetching; retry checkout")
 		}
 		if localCommit != commit {
+			// merge-base --is-ancestor exits with status 1 to answer that it is not an ancestor.
 			if _, err := run("merge-base", "--is-ancestor", localCommit, commit); err != nil {
-				return CheckoutResult{}, fmt.Errorf("existing branch cannot be fast-forwarded; choose another checkout branch: %w", err)
+				if failure, ok := errors.AsType[*CommandError](err); ok && failure.ExitCode == 1 {
+					return CheckoutResult{}, fmt.Errorf("local branch %s has commits that pull request #%d does not have, so it cannot be fast-forwarded; choose another checkout branch with --branch", options.Branch, options.Number)
+				}
+				return CheckoutResult{}, err
 			}
 		}
 	}
@@ -165,13 +169,23 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 		}
 	}
 	if !options.Detached {
-		for _, setting := range [][2]string{{pullNumberKey, strconv.FormatInt(options.Number, 10)}, {pullBaseRemoteKey, options.Remote}} {
-			if _, err := run("config", "branch."+options.Branch+"."+setting[0], setting[1]); err != nil {
-				return CheckoutResult{}, fmt.Errorf("checked out the branch, but could not record its pull request: %w", err)
-			}
+		if err := RecordPull(ctx, runner, options.Directory, options.Branch, options.Number, options.Remote); err != nil {
+			return CheckoutResult{}, fmt.Errorf("checked out the branch, but could not record its pull request: %w", err)
 		}
 	}
 	return CheckoutResult{Branch: options.Branch, Commit: commit, Detached: options.Detached, Remote: fetchRemote, Tracking: tracking}, nil
+}
+
+// RecordPull records in the configuration of branch the pull request it belongs to and the remote
+// of that pull request's base repository, which pr commands read to find the pull request of the
+// branch and pr clean to find the branch of the pull request.
+func RecordPull(ctx context.Context, runner Runner, dir, branch string, number int64, baseRemote string) error {
+	for _, setting := range [][2]string{{pullNumberKey, strconv.FormatInt(number, 10)}, {pullBaseRemoteKey, baseRemote}} {
+		if _, err := runner.Output(ctx, dir, false, "config", "branch."+branch+"."+setting[0], setting[1]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // requireBranchFreeElsewhere fails when branch is checked out in a linked worktree other than

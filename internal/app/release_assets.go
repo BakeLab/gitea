@@ -25,16 +25,17 @@ func (a *application) releaseAssetCommand() *cobra.Command {
 	group := &cobra.Command{
 		Use:   "asset",
 		Short: "Manage release assets",
-		Long:  "List, upload, download, rename and delete the files attached to a release. Assets are addressed by name or ID.",
+		Long:  "List, upload, download, rename and delete the files attached to a release. Assets are addressed by their exact, case-sensitive name or by ID.",
 	}
 	group.AddCommand(a.assetListCommand(), a.releaseUploadCommand(), a.releaseDownloadCommand(), a.assetEditCommand(), a.assetDeleteCommand())
 	return jsonOutput(group, jsonFields[services.ReleaseAsset]())
 }
 
-// assetFinder addresses the assets of the release tagged tag by name or ID.
+// assetFinder addresses the assets of the release tagged tag by name or ID. Asset names are
+// case-sensitive: a release can hold gt-linux and GT-LINUX, so a name never matches another case.
 func assetFinder(tag string, byName bool) services.NameOrID[services.ReleaseAsset] {
 	return services.NameOrID[services.ReleaseAsset]{
-		Kind: "asset", Scope: "release " + tag, ByName: byName,
+		Kind: "asset", Scope: "release " + tag, ByName: byName, Exact: true,
 		ID: func(asset services.ReleaseAsset) int64 { return asset.ID }, Name: func(asset services.ReleaseAsset) string { return asset.Name },
 	}
 }
@@ -109,6 +110,9 @@ $ gt release upload v1.0.0 dist/gt-linux --clobber`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("name") && (len(args) != 2 || strings.TrimSpace(name) == "") {
 				return clierr.Wrap(clierr.Usage, errors.New("--name requires exactly one file and a nonempty name"))
+			}
+			if err := checkAssetName(cmd, name); err != nil {
+				return err
 			}
 			if err := requireUniqueAssetNames(args[1:]); err != nil {
 				return err
@@ -188,6 +192,9 @@ $ gt release download v1.0.0 --archive zip`,
 		Annotations: textOutput("asset downloads are files"),
 		Args:        usageArgs(cobra.ArbitraryArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := flags.validate(); err != nil {
+				return err
+			}
 			for _, pattern := range patterns {
 				if _, err := path.Match(pattern, ""); err != nil {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid --pattern %q", pattern))
@@ -210,7 +217,12 @@ $ gt release download v1.0.0 --archive zip`,
 				return err
 			}
 			if archive != "" {
-				return a.downloadArchive(cmd, service, flags, release.Tag, archive)
+				err := a.downloadArchive(cmd, service, flags, release.Tag, archive)
+				if _, missing := errors.AsType[*services.NotFoundError](err); missing && release.Draft {
+					// Gitea creates the tag of a draft only when it is published.
+					return fmt.Errorf("release %s is a draft whose tag does not exist yet; publish it to create the tag", terminal.SafeLine(release.Tag))
+				}
+				return err
 			}
 			assets, err := selectAssets(release, names, patterns)
 			if err != nil {
@@ -221,19 +233,25 @@ $ gt release download v1.0.0 --archive zip`,
 			}
 			paths := make([]string, len(assets))
 			skipped := make([]bool, len(assets))
+			// Paths are compared ignoring case: on a case-insensitive filesystem, such as the
+			// default ones of macOS and Windows, the second would replace the first.
 			seen := map[string]services.ReleaseAsset{}
 			for i, asset := range assets {
 				if paths[i], skipped[i], err = flags.destination(asset.Name); err != nil {
 					return err
 				}
-				if first, dup := seen[paths[i]]; dup && paths[i] != "-" {
-					return clierr.Wrap(clierr.Usage, fmt.Errorf("assets %d and %d are both named %s; download one at a time with --output", first.ID, asset.ID, asset.Name))
+				key := strings.ToLower(paths[i])
+				if first, dup := seen[key]; dup && paths[i] != "-" {
+					if first.Name == asset.Name {
+						return clierr.Wrap(clierr.Usage, fmt.Errorf("assets %d and %d are both named %s; download one at a time with --output", first.ID, asset.ID, terminal.SafeLine(asset.Name)))
+					}
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("assets %s (ID %d) and %s (ID %d) differ only in case and would overwrite each other; download one at a time with --output", terminal.SafeLine(first.Name), first.ID, terminal.SafeLine(asset.Name), asset.ID))
 				}
-				seen[paths[i]] = asset
+				seen[key] = asset
 			}
 			for i, asset := range assets {
 				if skipped[i] {
-					a.warn(cmd, "Skipped %s; %s already exists", asset.Name, paths[i])
+					a.warn(cmd, "Skipped %s: %s exists", asset.Name, paths[i])
 					continue
 				}
 				body, err := service.DownloadAsset(cmd.Context(), release.ID, asset.ID)
@@ -303,7 +321,7 @@ func (a *application) downloadArchive(cmd *cobra.Command, service services.Relea
 	destination, skip, err := flags.destination(name)
 	if err != nil || skip {
 		if skip {
-			a.warn(cmd, "Skipped %s; %s already exists", name, destination)
+			a.warn(cmd, "Skipped %s: %s exists", name, destination)
 		}
 		return err
 	}
@@ -333,6 +351,20 @@ func (r *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// checkAssetName refuses a --name that gt release download could not save under its own name.
+func checkAssetName(cmd *cobra.Command, name string) error {
+	switch {
+	case !cmd.Flags().Changed("name"):
+		return nil
+	case strings.ContainsAny(name, `/\`):
+		// Gitea keeps only the last part of an uploaded file's path as its name.
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("--name %q cannot contain / or \\", name))
+	case !isFileName(name):
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("--name %q is not a valid file name", name))
+	}
+	return nil
+}
+
 func (a *application) assetEditCommand() *cobra.Command {
 	var name string
 	command := &cobra.Command{
@@ -343,6 +375,9 @@ func (a *application) assetEditCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(name) == "" {
 				return clierr.Wrap(clierr.Usage, errors.New("supply --name for asset rename"))
+			}
+			if err := checkAssetName(cmd, name); err != nil {
+				return err
 			}
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {
@@ -356,6 +391,9 @@ func (a *application) assetEditCommand() *cobra.Command {
 			asset, err := assetFinder(release.Tag, false).Find(release.Assets, args[1])
 			if err != nil {
 				return err
+			}
+			if slices.ContainsFunc(release.Assets, func(other services.ReleaseAsset) bool { return other.ID != asset.ID && other.Name == name }) {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("asset %s already exists in release %s; delete it first", name, release.Tag))
 			}
 			item, err := service.RenameAsset(cmd.Context(), release.ID, asset.ID, name)
 			if err != nil {

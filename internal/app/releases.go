@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -163,7 +164,13 @@ func (a *application) releaseView(item services.Release, latest int64) terminal.
 	for i, asset := range item.Assets {
 		assets[i] = fmt.Sprintf("%s (%s)", asset.Name, terminal.Bytes(asset.Size))
 	}
-	view.Fields = []terminal.Field{{Label: "Tag", Value: item.Tag, PipedOnly: true}, {Label: "Assets", Value: strings.Join(assets, ", ")}}
+	// Scripts get the state that the badge shows on a terminal.
+	view.Fields = []terminal.Field{
+		{Label: "Tag", Value: item.Tag, PipedOnly: true},
+		{Label: "Draft", Value: strconv.FormatBool(item.Draft), PipedOnly: true},
+		{Label: "Prerelease", Value: strconv.FormatBool(item.Prerelease), PipedOnly: true},
+		{Label: "Assets", Value: strings.Join(assets, ", ")},
+	}
 	return view
 }
 
@@ -302,7 +309,7 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 				item.Assets = append(item.Assets, asset)
 				a.done(cmd, "Uploaded %s (%s)", asset.Name, terminal.Bytes(asset.Size))
 			})
-			return errors.Join(followUpError("release "+item.Tag, failures), a.created(cmd, item, item.URL))
+			return errors.Join(followUpError("release "+item.Tag, "created", failures), a.created(cmd, item, item.URL))
 		},
 	}
 	fields.register(a, command)
@@ -441,7 +448,7 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 			return batchDone(a, cmd, args, func(tag string) string { return "release " + tag }, func(tag string) (services.Release, error) {
 				item, err := service.View(cmd.Context(), tag)
 				if err != nil {
-					return item, err
+					return item, releaseError(err, target.Repo)
 				}
 				return service.Edit(cmd.Context(), item.ID, opts)
 			}, func(item services.Release) string { return "Edited release " + item.Tag + " in " + target.Repo })
@@ -451,6 +458,15 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 	command.Flags().StringVar(&fields.tag, "tag", "", "Change the release's tag (one release only)")
 	command.ValidArgsFunction = a.completeReleases()
 	return command
+}
+
+// releaseError words the failure to find one release of a batch, which the batch prefixes with
+// the release, as "release v9: not found in alice/x".
+func releaseError(err error, repo string) error {
+	if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Kind == "release" {
+		return explain(err, "not found in %s", repo)
+	}
+	return err
 }
 
 func (a *application) releasePublishCommand() *cobra.Command {
@@ -468,7 +484,7 @@ func (a *application) releasePublishCommand() *cobra.Command {
 			results, failures := applyBatch(cmd, args, func(tag string) string { return "release " + tag }, func(tag string) (services.Release, error) {
 				item, err := service.View(cmd.Context(), tag)
 				if err != nil {
-					return item, err
+					return item, releaseError(err, target.Repo)
 				}
 				if !item.Draft {
 					a.warn(cmd, "Release %s is already published", item.Tag)
@@ -518,10 +534,10 @@ $ gt release delete v1.0.0-rc1 v1.0.0-rc2 --delete-tag --yes`,
 			service := services.Releases{Client: target.client, Repository: target.Repo}
 			return batchDone(a, cmd, args, func(tag string) string { return "release " + tag }, func(tag string) (services.Release, error) {
 				item, err := service.View(cmd.Context(), tag)
-				if err == nil {
-					err = service.Delete(cmd.Context(), item, deleteTag)
+				if err != nil {
+					return item, releaseError(err, target.Repo)
 				}
-				return item, err
+				return item, service.Delete(cmd.Context(), item, deleteTag)
 			}, func(item services.Release) string {
 				if deleteTag {
 					return "Deleted release " + item.Tag + " and its tag from " + target.Repo

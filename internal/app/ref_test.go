@@ -32,7 +32,7 @@ func TestParseRefAcceptsNumbersQualifiedNumbersAndURLs(t *testing.T) {
 		{raw: "https://gitea.com/alice/issues/issues/4", want: ref{Number: 4, Repo: "https://gitea.com/alice/issues"}},
 		{raw: "https://gitea.com/alice/project/pulls/7", kind: issueRef, want: ref{Number: 7, Repo: "https://gitea.com/alice/project"}},
 		{raw: "https://gitea.com/alice/project/actions/runs/34", kind: runRef, want: ref{Number: 34, Repo: "https://gitea.com/alice/project"}},
-		{raw: "https://gitea.com/alice/project/actions/runs/34/jobs/2", kind: runRef, want: ref{Number: 34, Repo: "https://gitea.com/alice/project"}},
+		{raw: "https://gitea.com/alice/project/actions/runs/34/jobs/2", kind: runRef, want: ref{Number: 34, Repo: "https://gitea.com/alice/project", Job: 2}},
 		{raw: "#34", kind: runRef, want: ref{Number: 34}},
 		{raw: "0", err: `invalid issue "0": use a number, #number, OWNER/REPO#number or URL`},
 		{raw: "#abc", kind: pullRef, err: `invalid pull request "#abc"`},

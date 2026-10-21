@@ -6,6 +6,7 @@ package terminal
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -136,4 +137,38 @@ func TestMarkdownKeepsOrdinaryCharacterReferences(t *testing.T) {
 	require.Contains(t, Markdown("a&#9;b", plain), "a\tb")
 	require.Equal(t, "ab", strings.TrimSpace(Markdown("a&#27;&#x1B;&#7;&#155;&#8238;b", plain)))
 	require.Equal(t, "ab", strings.TrimSpace(Markdown("a&rlm;&lrm;&zwj;&shy;b", plain)), "named entities of format characters")
+}
+
+func TestMarkdownRendersLongBodiesQuickly(t *testing.T) {
+	body := strings.Repeat("Some **bold** text with a [link](https://example.org) and `code`.\n\n", 3000)
+	require.Greater(t, len(body), 200_000)
+	for _, d := range []Display{{Width: 80}, {Width: 80, Color: true, Links: true}} {
+		renderers.Lock()
+		renderer, err := markdownRenderer(d.Width, d.Color)
+		require.NoError(t, err)
+		start := time.Now()
+		_, err = renderer.Render(body)
+		glamour := time.Since(start)
+		renderers.Unlock()
+		require.NoError(t, err)
+
+		start = time.Now()
+		rendered := Markdown(body, d)
+		// Measured against glamour on the same machine, so a slow or busy one does not fail the test:
+		// what Markdown does around glamour, such as stripping controls, stays small next to it.
+		require.Less(t, time.Since(start), 3*glamour+time.Second, "rendering %d bytes took too long; glamour took %v", len(body), glamour)
+		require.Equal(t, 3000, strings.Count(rendered, "text with a"))
+	}
+}
+
+func TestStripControlsIsLinear(t *testing.T) {
+	for _, text := range []string{
+		strings.Repeat("\x1b[1mbold\x1b[m plain \u200ftext \x1b]8;id=1;https://example.org\x07link\x1b]8;;\x07\n", 4000),
+		strings.Repeat("a long code block line without any color in \u200fit\n", 20000) + "\x1b[1mend\x1b[m",
+	} {
+		start := time.Now()
+		stripped := stripControls(text)
+		require.Less(t, time.Since(start), time.Second, "stripping %d bytes took too long", len(text))
+		require.Equal(t, strings.ReplaceAll(text, "\u200f", ""), stripped)
+	}
 }

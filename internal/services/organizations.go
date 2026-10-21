@@ -73,6 +73,9 @@ func (s Organizations) List(ctx context.Context, mine bool, username string, lim
 		}
 		return c.Organizations.ListOrgs(ctx, opts)
 	})
+	if username != "" && !mine {
+		err = Classify(err, "user", strconv.Quote(username), "")
+	}
 	return convertPage(orgs, organizationFrom), err
 }
 
@@ -205,8 +208,9 @@ const (
 // MemberListOptions selects a page of organization members.
 type MemberListOptions struct {
 	// Public lists only public memberships, and Visibility reports the visibility of each one.
-	// Gitea lists concealed members as public to administrators, so both check each membership on
-	// its own, and Public drops the server's total, which counts concealed members too.
+	// Gitea lists concealed members as public to administrators, so for them both check each
+	// membership on its own, and Public drops the server's total, which counts concealed members
+	// too.
 	Public, Visibility bool
 	Limit, Page        int
 }
@@ -236,17 +240,65 @@ func (s Organizations) memberPage(ctx context.Context, name string, limit, page 
 		}
 		return c.Organizations.ListOrgMembership(ctx, name, membership)
 	})
-	return convertPage(users, memberFrom), err
+	// A 404 here can only mean the organization is missing or invisible.
+	return convertPage(users, memberFrom), Classify(err, "organization", strconv.Quote(name), "")
 }
 
-// withVisibility checks the membership of each member and reports which ones are public.
+// publicListExact reports whether Gitea lists exactly the public memberships to the caller; it
+// lists every membership as public to an administrator. A caller that cannot be read counts as one.
+func (s Organizations) publicListExact(ctx context.Context) bool {
+	if s.Client.Token == "" && s.Client.Signer == nil {
+		return true
+	}
+	user, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
+		return c.Users.GetMyUserInfo(ctx)
+	})
+	return err == nil && !user.IsAdmin
+}
+
+// publicIDs returns the IDs of the public members of an organization, and false when Gitea does
+// not list them exactly or listing them takes more than budget requests.
+func (s Organizations) publicIDs(ctx context.Context, name string, budget int) (map[int64]bool, bool, error) {
+	const size = 50
+	if budget < 1 || !s.publicListExact(ctx) {
+		return nil, false, nil
+	}
+	ids := map[int64]bool{}
+	for page := 1; page <= min(budget, maxListPages); page++ {
+		batch, err := s.memberPage(ctx, name, size, page, true)
+		if err != nil {
+			return nil, false, err
+		}
+		for _, member := range batch.Items {
+			ids[member.ID] = true
+		}
+		if !batch.More {
+			return ids, true, nil
+		}
+		if batch.Counted && (batch.Total+size-1)/size > budget {
+			break
+		}
+	}
+	return nil, false, nil
+}
+
+// withVisibility reports which members are public: from the list of public members, or, when
+// Gitea does not list them exactly or the list is longer than the members, by checking each
+// membership.
 func (s Organizations) withVisibility(ctx context.Context, name string, members []OrganizationMember) ([]OrganizationMember, []bool, error) {
 	public := make([]bool, len(members))
-	err := concurrently(len(members), func(i int) (err error) {
+	publicIDs, listed, err := s.publicIDs(ctx, name, len(members))
+	if err != nil {
+		return nil, nil, err
+	}
+	if listed {
+		for i, member := range members {
+			public[i] = publicIDs[member.ID]
+		}
+	} else if err := concurrently(len(members), func(i int) (err error) {
 		public[i], err = s.IsPublicMember(ctx, name, members[i].Username)
 		return err
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, nil, err
 	}
 	members = slices.Clone(members)
@@ -260,11 +312,19 @@ func (s Organizations) withVisibility(ctx context.Context, name string, members 
 }
 
 // publicMembers lists the public memberships. Gitea lists concealed members as public to
-// administrators, so it reads server pages until the requested page of confirmed ones is full.
+// administrators, so for them it reads server pages until the requested page of confirmed ones is
+// full.
 func (s Organizations) publicMembers(ctx context.Context, name string, opts MemberListOptions) (Page[OrganizationMember], error) {
 	const size = 50
+	if s.publicListExact(ctx) {
+		members, err := s.memberPage(ctx, name, opts.Limit, opts.Page, true)
+		for i := range members.Items {
+			members.Items[i].Visibility = MembershipPublic
+		}
+		return members, err
+	}
 	skip := (opts.Page - 1) * opts.Limit
-	var matches []OrganizationMember
+	matches := []OrganizationMember{}
 	more := false
 	for page := 1; page <= publicScanPages && len(matches) <= skip+opts.Limit; page++ {
 		batch, err := s.memberPage(ctx, name, size, page, true)
@@ -311,12 +371,20 @@ func concurrently(n int, request func(i int) error) error {
 	return errors.Join(errs...)
 }
 
-// IsMember reports whether username belongs to the organization.
+// IsMember reports whether username belongs to the organization. It fails with a *NotFoundError
+// when the organization does not exist.
 func (s Organizations) IsMember(ctx context.Context, name, username string) (bool, error) {
-	return s.check(ctx, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	member, err := s.check(ctx, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		_, resp, err := c.Organizations.CheckOrgMembership(ctx, name, username)
 		return resp, err
 	})
+	if err == nil && !member {
+		// Gitea answers a missing organization with the same 404 as a missing membership.
+		if _, err := s.View(ctx, name); err != nil {
+			return false, err
+		}
+	}
+	return member, err
 }
 
 // IsPublicMember reports whether username's membership of the organization is public.

@@ -4,8 +4,10 @@
 package app
 
 import (
+	"errors"
 	"strings"
 
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"github.com/spf13/cobra"
 )
@@ -32,6 +34,10 @@ $ gt search repo --owner acme --archived
 # Search by topic, most recently updated first
 $ gt search repo go --topic --sort updated --order desc`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --order applies to an explicit sort only; the default order puts your own repositories first.
+			if cmd.Flags().Changed("order") && opts.Sort == "" {
+				return clierr.Wrap(clierr.Usage, errors.New("--order requires --sort"))
+			}
 			if err := a.rejectRepoFlag(cmd, func(owner string) string { return "gt search repo --owner " + owner }); err != nil {
 				return err
 			}
@@ -63,7 +69,7 @@ $ gt search repo go --topic --sort updated --order desc`,
 	flags.StringVar(&opts.Owner, "owner", "", "Only repositories of this user or organization")
 	enumFlag(command, &opts.Kind, "type", "", "", "Only repositories of this kind", "fork", "source", "mirror")
 	enumFlag(command, &opts.Sort, "sort", "", "", "Sort by (default: alphabetical, your own repositories first)", "alpha", "created", "updated", "size", "id")
-	enumFlag(command, &opts.Order, "order", "", "asc", "Sort order", "asc", "desc")
+	enumFlag(command, &opts.Order, "order", "", "asc", "Sort order (requires --sort)", "asc", "desc")
 	flags.BoolVar(&opts.Topic, "topic", false, "Match repository topics")
 	flags.BoolVar(&private, "private", false, "Only private repositories (use =false for public)")
 	flags.BoolVar(&archived, "archived", false, "Only archived repositories (use =false for active)")

@@ -43,14 +43,46 @@ func Explain(ctx context.Context, deps Dependencies, err error) error {
 		return explainAPIError(deps, err, apiErr)
 	}
 	if failure, ok := errors.AsType[*transport.RequestFailure](err); ok {
+		// Go reports a proxy it cannot connect to as a proxyconnect error around the dial error.
+		if proxy, ok := errors.AsType[*net.OpError](failure.Err); ok && proxy.Op == "proxyconnect" {
+			if reason := unreachable(proxy.Err); reason != "" {
+				name := "the configured proxy"
+				if dial, ok := errors.AsType[*net.OpError](proxy.Err); ok && dial.Addr != nil {
+					name = "the proxy " + dial.Addr.String()
+				}
+				return explain(err, "cannot reach %s (%s); check HTTPS_PROXY and HTTP_PROXY", name, reason)
+			}
+		}
 		if reason := unreachable(failure.Err); reason != "" && failure.Server != "" {
 			return explain(err, "cannot reach %s (%s); check --host or your network", failure.Server, reason)
 		}
+	}
+	if errors.Is(err, transport.ErrTimeout) {
+		return httpTimeoutError(deps, err)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return explain(err, "timed out before the operation finished")
 	}
 	return err
+}
+
+// httpTimeoutError words a request that ran out of http_timeout, which an expired --timeout is
+// not: the server that did not respond, within how long, and how to wait longer.
+func httpTimeoutError(deps Dependencies, err error) error {
+	server := "the instance"
+	if failure, ok := errors.AsType[*transport.RequestFailure](err); ok && failure.Server != "" {
+		server = failure.Server
+	}
+	within, raise := "http_timeout", "raise it with: gt config set http_timeout DURATION"
+	if deps.Settings != nil && deps.Getenv != nil {
+		if timeout := (&application{deps: deps}).responseTimeout(); timeout > 0 {
+			within += " (" + shortDuration(timeout) + ")"
+		}
+		if strings.TrimSpace(deps.Getenv("GITEA_CLI_HTTP_TIMEOUT")) != "" {
+			raise = "raise GITEA_CLI_HTTP_TIMEOUT"
+		}
+	}
+	return explain(err, "%s did not respond within %s; %s", server, within, raise)
 }
 
 func explainAPIError(deps Dependencies, err error, apiErr *transport.APIError) error {
@@ -105,10 +137,6 @@ func conflictHint(apiErr *transport.APIError, conflict *services.ConflictError) 
 		if conflict.Scope != "" {
 			return "unarchive it with: gt repo unarchive " + conflict.Scope
 		}
-	case services.ReasonExists:
-		if conflict.Kind == "wiki page" {
-			return "edit it with: gt wiki edit " + conflict.Key
-		}
 	case services.ReasonMerged:
 		if apiErr.Method == http.MethodPatch {
 			return "its state can no longer change"
@@ -135,6 +163,11 @@ func conflictHint(apiErr *transport.APIError, conflict *services.ConflictError) 
 	return ""
 }
 
+// shellQuote quotes s as one argument of a suggested command line, in single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // unreachable words a failure to connect, or returns "" for other request failures.
 func unreachable(err error) string {
 	var dnsErr *net.DNSError
@@ -152,10 +185,16 @@ func unreachable(err error) string {
 	return ""
 }
 
+// expired reports whether err is the expiry of the command's own deadline, such as --timeout,
+// rather than a request that ran out of http_timeout.
+func expired(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, transport.ErrTimeout)
+}
+
 // timeoutError words an expired --timeout as "timed out after 4s waiting for run 34" instead of
 // "context deadline exceeded", keeping the exit code. Other errors are returned unchanged.
 func timeoutError(err error, d time.Duration, format string, args ...any) error {
-	if !errors.Is(err, context.DeadlineExceeded) {
+	if !expired(err) {
 		return err
 	}
 	text := "timed out after " + shortDuration(d)

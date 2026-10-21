@@ -23,6 +23,43 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestResolveTakesTheCloneInstanceWhenNothingElseSelectsOne(t *testing.T) {
+	var paths, otherPaths []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		writeFirstPage(w, r, `[]`)
+	}))
+	defer server.Close()
+	other := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		otherPaths = append(otherPaths, r.URL.Path)
+		writeFirstPage(w, r, `[]`)
+	}))
+	defer other.Close()
+	deps, _, _ := testDeps(t)
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	configureAccounts(t, deps, other.URL, "bob", "bob")
+	clone := &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": server.URL + "/acme/tool.git"}}
+	deps.Git = clone
+	// A command that needs no repository, and a repository named without an instance.
+	require.NoError(t, Execute(context.Background(), deps, []string{"package", "list", "--owner", "team"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"package", "list", "-R", "acme/tool"}))
+	require.Equal(t, []string{"/api/v1/packages/team", "/api/v1/packages/acme"}, paths)
+	// Outside a clone the instance stays required.
+	deps.Git = &fakeGit{}
+	err := Execute(context.Background(), deps, []string{"package", "list", "--owner", "team"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.ErrorContains(t, err, "instance required")
+	// default_host still selects the instance in a clone of another one.
+	deps.Git = clone
+	require.NoError(t, deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
+		s.Preferences.DefaultHost = other.URL
+		return nil
+	}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"package", "list", "--owner", "team"}))
+	require.Len(t, paths, 2)
+	require.Equal(t, []string{"/api/v1/packages/team"}, otherPaths)
+}
+
 func TestResolvePromptsForAccountWhenNoneActive(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/user/repos", r.URL.Path)

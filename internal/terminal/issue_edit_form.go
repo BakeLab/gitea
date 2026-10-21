@@ -22,7 +22,6 @@ type IssueEditFormChoices struct {
 	Milestone          *IssueMilestoneChoice
 	Labels             []IssueLabelChoice
 	Deadline           *time.Time
-	CanPush            bool
 	AvailableAssignees []string
 	Milestones         []IssueMilestoneChoice
 	AvailableLabels    []IssueLabelChoice
@@ -62,12 +61,15 @@ func (p *FormPrompter) EditIssue(ctx context.Context, choices IssueEditFormChoic
 	for _, label := range choices.Labels {
 		fields.labels = append(fields.labels, label.ID)
 	}
-	groups := fields.groups(choices.Heading, choices.EditBody, choices.CanPush, withCurrent(choices.AvailableAssignees, choices.Assignees...), milestones, withCurrent(choices.AvailableLabels, choices.Labels...))
+	groups := fields.groups(choices.Heading, choices.EditBody, withCurrent(choices.AvailableAssignees, choices.Assignees...), milestones, withCurrent(choices.AvailableLabels, choices.Labels...))
 	if err := p.runForm(ctx, huh.NewForm(groups...)); err != nil {
 		return IssueEditFormValues{}, err
 	}
-	values := IssueEditFormValues{Title: strings.TrimSpace(fields.title), Assignees: fields.assignees, Milestone: fields.milestone, Labels: fields.labels}
+	values := IssueEditFormValues{Title: titleResult(choices.Title, fields.title), Assignees: fields.assignees, Milestone: fields.milestone, Labels: fields.labels}
 	values.ClearMilestone = fields.milestone == 0 && choices.Milestone != nil
+	if choices.EditBody == nil {
+		fields.body = fieldResult(choices.Body, fields.body)
+	}
 	var err error
 	if values.Body, values.Draft, err = editBody(ctx, choices.EditBody, fields.body); err != nil {
 		return values, err

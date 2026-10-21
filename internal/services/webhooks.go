@@ -144,7 +144,19 @@ func (s Webhooks) List(ctx context.Context, limit, page int) (Page[Webhook], err
 		}
 		return c.Hooks.ListRepoHooks(ctx, owner, name, opts)
 	})
-	return convertPage(hooks, s.from), err
+	return convertPage(hooks, s.from), s.listError(err)
+}
+
+// listError names the repository or organization of the selected scope when a list answers 404,
+// which can only mean that it is missing or invisible.
+func (s Webhooks) listError(err error) error {
+	switch {
+	case s.Scope.Global, s.Scope.Account:
+		return err
+	case s.Scope.Organization != "":
+		return Classify(err, "organization", strconv.Quote(s.Scope.Organization), "")
+	}
+	return Classify(err, "repository", s.Scope.Repository, "")
 }
 
 func (s Webhooks) get(ctx context.Context, id int64) (*gitea.Hook, error) {
@@ -163,7 +175,26 @@ func (s Webhooks) get(ctx context.Context, id int64) (*gitea.Hook, error) {
 		}
 		return c.Hooks.GetRepoHook(ctx, owner, name, id)
 	})
-	return hook, Classify(err, "webhook", strconv.FormatInt(id, 10), s.errorScope())
+	return hook, s.itemError(ctx, err, id)
+}
+
+// itemError names webhook id in the failure of a request about it, or the repository or
+// organization of the selected scope when that is what is missing: Gitea answers both with the
+// same 404.
+func (s Webhooks) itemError(ctx context.Context, err error, id int64) error {
+	key := strconv.FormatInt(id, 10)
+	switch {
+	case s.Scope.Global, s.Scope.Account:
+	case s.Scope.Organization != "":
+		if IsNotFound(err) {
+			if _, isOrg, orgErr := organization(ctx, s.Client, s.Scope.Organization); orgErr == nil && !isOrg {
+				return s.listError(err)
+			}
+		}
+	default:
+		return repositoryItemError(ctx, s.Client, s.Scope.Repository, err, "webhook", key)
+	}
+	return Classify(err, "webhook", key, s.errorScope())
 }
 
 // errorScope names the repository or organization the selected scope looks in, for error messages.
@@ -213,7 +244,8 @@ func (s Webhooks) Create(ctx context.Context, opts WebhookOptions) (Webhook, err
 		return c.Hooks.CreateRepoHook(ctx, owner, name, create)
 	})
 	if err != nil {
-		return Webhook{}, err
+		// A 404 here can only mean the repository or organization is missing or invisible.
+		return Webhook{}, s.listError(err)
 	}
 	return s.from(hook), nil
 }
@@ -273,7 +305,7 @@ func (s Webhooks) Edit(ctx context.Context, id int64, opts WebhookOptions) (Webh
 
 // Delete removes a webhook from the selected scope.
 func (s Webhooks) Delete(ctx context.Context, id int64) error {
-	return do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		switch {
 		case s.Scope.Global:
 			return c.Hooks.DeleteGlobalHook(ctx, id)
@@ -288,4 +320,5 @@ func (s Webhooks) Delete(ctx context.Context, id int64) error {
 		}
 		return c.Hooks.DeleteRepoHook(ctx, owner, name, id)
 	})
+	return s.itemError(ctx, err, id)
 }

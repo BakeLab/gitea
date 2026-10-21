@@ -66,7 +66,7 @@ func (s Actions) Jobs(ctx context.Context, run int64) ([]Job, error) {
 
 // JobsPage lists a page of jobs in the selected run.
 func (s Actions) JobsPage(ctx context.Context, run int64, limit, page int) (Page[Job], error) {
-	window, err := listPage(limit, page, func(limit, page int) ([]*gitea.ActionsWorkflowJob, http.Header, error) {
+	window, err := instancePage(ctx, s.Client, limit, page, func(limit, page int) ([]*gitea.ActionsWorkflowJob, http.Header, error) {
 		response, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.ActionsWorkflowJobsResponse, *gitea.Response, error) {
 			owner, repo, err := splitRepository(s.Repository)
 			if err != nil {
@@ -85,19 +85,47 @@ func (s Actions) JobsPage(ctx context.Context, run int64, limit, page int) (Page
 	return convertPage(window, jobFrom), nil
 }
 
+// RunJob retrieves the job id of run, including a job of an earlier attempt, which Jobs no
+// longer lists after a rerun.
+func (s Actions) RunJob(ctx context.Context, run, id int64) (Job, error) {
+	job, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.ActionsWorkflowJob, *gitea.Response, error) {
+		owner, repo, err := splitRepository(s.Repository)
+		if err != nil {
+			return nil, nil, err
+		}
+		return c.Actions.GetRepoRunJob(ctx, owner, repo, id)
+	})
+	key, scope := strconv.FormatInt(id, 10), fmt.Sprintf("run %d", run)
+	if err != nil {
+		return Job{}, Classify(err, "job", key, scope)
+	}
+	if job.RunID != run {
+		return Job{}, NotFound("job", key, scope)
+	}
+	return jobFrom(job), nil
+}
+
 // WaitForFirstJob polls a freshly dispatched run until the server has created its first job.
 func (s Actions) WaitForFirstJob(ctx context.Context, run int64, interval time.Duration) (Job, error) {
 	if interval <= 0 {
 		return Job{}, errors.New("job polling interval must be positive")
 	}
+	var failures outage
 	for {
 		jobs, err := s.Jobs(ctx, run)
+		if failures.retry(ctx, err) {
+			if err := sleepCtx(ctx, interval); err != nil {
+				return Job{}, err
+			}
+			continue
+		}
 		if err != nil {
 			return Job{}, err
 		}
 		if len(jobs) > 0 {
 			return jobs[0], nil
 		}
+		failures.passed()
 		if err := sleepCtx(ctx, interval); err != nil {
 			return Job{}, err
 		}
@@ -157,8 +185,15 @@ func (s Actions) FollowJobLogs(ctx context.Context, run, id int64, interval time
 	var offset int64
 	var attempt int64
 	var previousHash []byte
+	var failures outage
 	for {
 		jobs, err := s.Jobs(ctx, run)
+		if failures.retry(ctx, err) {
+			if err := sleepCtx(ctx, interval); err != nil {
+				return err
+			}
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -170,16 +205,31 @@ func (s Actions) FollowJobLogs(ctx context.Context, run, id int64, interval time
 			}
 		}
 		if current == nil {
-			return fmt.Errorf("job %d no longer belongs to run %d", id, run)
+			// A job of an earlier attempt still belongs to the run.
+			earlier, err := s.RunJob(ctx, run, id)
+			if _, missing := errors.AsType[*NotFoundError](err); missing {
+				return fmt.Errorf("job %d no longer belongs to run %d", id, run)
+			}
+			if err != nil {
+				return err
+			}
+			current = &earlier
 		}
 		if attempt != 0 && current.RunAttempt != attempt {
 			return fmt.Errorf("job attempt changed while following logs; restart with the current attempt")
 		}
 		attempt = current.RunAttempt
 		logs, err := s.JobLogs(ctx, id)
+		if failures.retry(ctx, err) {
+			if err := sleepCtx(ctx, interval); err != nil {
+				return err
+			}
+			continue
+		}
 		if err != nil {
 			api, ok := errors.AsType[*transport.APIError](err)
 			if offset == 0 && !completedActionStatus(current.Status) && (errors.Is(err, ErrJobNotStarted) || ok && api.Status == http.StatusNotFound) {
+				failures.passed()
 				if err := sleepCtx(ctx, interval); err != nil {
 					return err
 				}
@@ -190,8 +240,10 @@ func (s Actions) FollowJobLogs(ctx context.Context, run, id int64, interval time
 		err = func() error {
 			defer logs.Close()
 			snapshotHash := sha256.New()
-			if _, err := io.CopyN(snapshotHash, logs, offset); err != nil {
+			if _, err := io.CopyN(snapshotHash, logs, offset); errors.Is(err, io.EOF) {
 				return fmt.Errorf("job log snapshot became shorter; select the current run attempt: %w", err)
+			} else if err != nil {
+				return transport.ResponseError(ctx, nil, err)
 			}
 			if offset > 0 && !bytes.Equal(previousHash, snapshotHash.Sum(nil)) {
 				return errors.New("job log contents changed while following; restart with the current attempt")
@@ -211,10 +263,18 @@ func (s Actions) FollowJobLogs(ctx context.Context, run, id int64, interval time
 					return nil
 				}
 				if err != nil {
-					return err
+					// A later poll goes on after what was printed.
+					previousHash = snapshotHash.Sum(nil)
+					return transport.ResponseError(ctx, nil, err)
 				}
 			}
 		}()
+		if failures.retry(ctx, err) {
+			if err := sleepCtx(ctx, interval); err != nil {
+				return err
+			}
+			continue
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -224,6 +284,7 @@ func (s Actions) FollowJobLogs(ctx context.Context, run, id int64, interval time
 		if completedActionStatus(current.Status) {
 			return nil
 		}
+		failures.passed()
 		if err := sleepCtx(ctx, interval); err != nil {
 			return err
 		}
@@ -232,9 +293,9 @@ func (s Actions) FollowJobLogs(ctx context.Context, run, id int64, interval time
 
 // RunLogsArchive streams the server's ZIP archive without extracting its entries. A run without
 // logs, such as one that never started, is reported as not found.
+// TODO(sdk): GetRepoRunLogsReader cannot follow the redirect to object storage that serves logs
+// directly.
 func (s Actions) RunLogsArchive(ctx context.Context, run int64) (io.ReadCloser, error) {
-	body, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (io.ReadCloser, *gitea.Response, error) {
-		return c.Actions.GetRepoRunLogsReader(ctx, owner, repo, run)
-	})
+	body, err := downloadAPI(ctx, s.Client, fmt.Sprintf("%sruns/%d/logs", s.endpoint(), run))
 	return body, Classify(err, "logs of run", strconv.FormatInt(run, 10), s.Repository)
 }

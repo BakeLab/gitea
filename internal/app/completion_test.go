@@ -8,6 +8,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +17,8 @@ import (
 
 	"gitea.dev/cli/internal/auth"
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/git/gittest"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"github.com/spf13/cobra"
@@ -176,8 +179,8 @@ func TestCompletionOffersPathsOnlyWherePathsAreExpected(t *testing.T) {
 func TestOfflineCompletions(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	deps.Git = &fakeGit{results: map[string]string{
-		`config --get-regexp ^remote\..*\.url$`:             "remote.origin.url https://gitea.example.com/alice/project.git\nremote.my.fork.url git@gitea.example.com:bob/project.git\nremote.ci.url https://bot:s3cret@gitea.example.com/alice/project.git?token=x\n",
-		"for-each-ref --format=%(refname:short) refs/heads": "main\nfeature/login\n",
+		`config --get-regexp ^remote\..*\.url$`:                "remote.origin.url https://gitea.example.com/alice/project.git\nremote.my.fork.url git@gitea.example.com:bob/project.git\nremote.ci.url https://bot:s3cret@gitea.example.com/alice/project.git?token=x\n",
+		"for-each-ref --format=%(refname:lstrip=2) refs/heads": "main\nfeature/login\n",
 	}}
 	configureAccounts(t, deps, "https://gitea.example.com", "alice", "alice", "bob")
 	for args, want := range map[string][]string{
@@ -205,6 +208,28 @@ func TestOfflineCompletions(t *testing.T) {
 		values, _ := tc.complete(cmd, tc.args, tc.prefix)
 		require.Equal(t, tc.want, append([]string{}, values...), "%v %q", tc.args, tc.prefix)
 	}
+}
+
+func TestLocalBranchCompletionIgnoresATagWithTheSameName(t *testing.T) {
+	gittest.Isolate(t)
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "--quiet", "--initial-branch=main"},
+		{"-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "--quiet", "--allow-empty", "--message=x"},
+		{"branch", "feature"},
+		{"tag", "feature"},
+	} {
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	deps, _, _ := testDeps(t)
+	deps.Git = git.System{}
+	a := &application{deps: deps}
+	a.options.cwd = dir
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	values, _ := a.completeLocalBranches(cmd, nil, "f")
+	require.Equal(t, []string{"feature\tlocal branch"}, append([]string{}, values...))
 }
 
 func TestRepositoryCompletionUsesRemotesAndInstance(t *testing.T) {

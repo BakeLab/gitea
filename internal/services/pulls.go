@@ -39,29 +39,39 @@ type Pull struct {
 	State     string          `json:"state"`
 	Merged    bool            `json:"merged"`
 	MergedAt  *string         `json:"merged_at"`
-	// MergedBy, Reviewers and ReviewerTeams are only in responses for one pull request; lists
-	// leave them out.
+	// MergedBy is only in responses for one pull request; lists leave it out.
 	MergedBy  string `json:"merged_by"`
 	Mergeable bool   `json:"mergeable"`
 	Draft     bool   `json:"draft"`
 	// ReviewDecision summarizes the reviews like gh: approved, changes_requested, review_required
 	// or "". Only commands that read the reviews fill it.
-	ReviewDecision    string   `json:"review_decision"`
-	Base              string   `json:"base"`
-	Head              string   `json:"head"`
-	HeadSHA           string   `json:"head_sha"`
-	HeadRepo          string   `json:"head_repo,omitempty"`
-	HeadRemoteDeleted bool     `json:"head_remote_deleted"`
-	HeadCanPush       bool     `json:"-"`
-	HeadCloneURL      string   `json:"-"`
-	HeadSSHURL        string   `json:"-"`
-	Reviewers         []string `json:"reviewers"`
-	ReviewerTeams     []string `json:"reviewer_teams"`
-	Comments          int64    `json:"comments"`
+	ReviewDecision    string `json:"review_decision"`
+	Base              string `json:"base"`
+	Head              string `json:"head"`
+	HeadSHA           string `json:"head_sha"`
+	HeadRepo          string `json:"head_repo"`
+	HeadRemoteDeleted bool   `json:"head_remote_deleted"`
+	HeadCanPush       bool   `json:"-"`
+	HeadCloneURL      string `json:"-"`
+	HeadSSHURL        string `json:"-"`
+	// AllowMaintainerEdit tells whether maintainers can push to the head branch.
+	AllowMaintainerEdit bool `json:"-"`
+	// Reviewers and ReviewerTeams are the outstanding review requests. Gitea's own list also
+	// names users who already reviewed, so commands that read the reviews replace them with
+	// WithReviews.
+	Reviewers     []string `json:"reviewers"`
+	ReviewerTeams []string `json:"reviewer_teams"`
+	Comments      int64    `json:"comments"`
 }
 
+// pullHeadBranch returns the head branch of a pull request and whether Gitea deleted it, in which
+// case Gitea answers the pull ref and keeps the branch in the label. An AGit pull request also
+// answers the pull ref, but with an empty label: it has no head branch to delete.
 func pullHeadBranch(number int64, ref, label string) (branch string, deleted bool) {
 	if ref == fmt.Sprintf("refs/pull/%d/head", number) {
+		if label == "" {
+			return "", false
+		}
 		branch = label
 		if _, name, ok := strings.Cut(label, ":"); ok && name != "" {
 			branch = name
@@ -85,13 +95,15 @@ func pullFrom(pull *gitea.PullRequest) Pull {
 		Assignees: convertAll(pull.Assignees, login), Milestone: issueMilestoneFrom(pull.Milestone), Labels: convertAll(pull.Labels, labelFrom),
 		Deadline: optionalTimestamp(pull.Deadline), ID: pull.ID, Number: pull.Index, Title: pull.Title, Body: pull.Body,
 		URL: pull.HTMLURL, State: string(pull.State), Merged: pull.HasMerged, MergedAt: optionalTimestamp(pull.Merged), MergedBy: login(pull.MergedBy),
-		Mergeable: pull.Mergeable, Draft: pull.Draft,
+		Mergeable: pull.Mergeable, Draft: pull.Draft, AllowMaintainerEdit: pull.AllowMaintainerEdit,
 		Base: base.Ref, Head: headBranch, HeadSHA: head.Sha, HeadRemoteDeleted: remoteDeleted,
 		Reviewers: convertAll(pull.RequestedReviewers, login), Comments: int64(pull.Comments),
 		ReviewerTeams: convertAll(pull.RequestedReviewersTeams, func(team *gitea.Team) string { return team.Name }),
 	}
+	// Without a head repository, an AGit pull request, which has no label, has its head in the base
+	// repository, while any other lost the fork its head was in.
 	repo := head.Repository
-	if remoteDeleted || repo == nil {
+	if repo == nil && head.Name == "" {
 		repo = base.Repository
 	}
 	if repo != nil {
@@ -99,6 +111,11 @@ func pullFrom(pull *gitea.PullRequest) Pull {
 		if repo.Permissions != nil {
 			result.HeadCanPush = repo.Permissions.Push
 		}
+	}
+	// A deleted head branch is fetched from the base repository's refs/pull, while the head
+	// repository still names the fork it came from.
+	if remoteDeleted && base.Repository != nil {
+		result.HeadCloneURL, result.HeadSSHURL = base.Repository.CloneURL, base.Repository.SSHURL
 	}
 	return result
 }
@@ -216,7 +233,8 @@ func (s Pulls) listPage(ctx context.Context, options PullListOptions) (Page[Pull
 	// TODO(sdk): ListPullRequestsOptions lacks the poster, base_branch, and labels filters.
 	page, err := rawPage[*gitea.PullRequest](ctx, s.Client, "repos/"+s.Repository+"/pulls", query, options.Limit, options.Page)
 	if err != nil {
-		return Page[Pull]{}, err
+		// A 404 here can only mean the repository is missing or invisible.
+		return Page[Pull]{}, Classify(err, "repository", s.Repository, "")
 	}
 	return convertPage(page, pullFrom), nil
 }
@@ -230,49 +248,48 @@ func (s Pulls) View(ctx context.Context, n int64) (Pull, error) {
 	return pullFrom(pull), nil
 }
 
-// ViewAll retrieves each of items again, a few at a time, for the fields only a single pull
-// request carries, such as its reviewers.
-func (s Pulls) ViewAll(ctx context.Context, items []Pull) ([]Pull, error) {
-	viewed := make([]Pull, len(items))
-	err := concurrently(len(items), func(i int) (err error) {
-		viewed[i], err = s.View(ctx, items[i].Number)
-		return err
-	})
-	return viewed, err
+// WithReviews returns the pull request with its reviewers, reviewer teams and review decision
+// taken from reviews, all of its reviews.
+func (p Pull) WithReviews(reviews []Review) Pull {
+	p.Reviewers, p.ReviewerTeams = RequestedReviewers(reviews)
+	p.ReviewDecision = ReviewDecision(reviews, len(p.ReviewerTeams) > 0)
+	return p
 }
 
-// DecideAll is ViewAll that also fills each pull request's ReviewDecision from its reviews.
-func (s Pulls) DecideAll(ctx context.Context, items []Pull) ([]Pull, error) {
-	viewed := make([]Pull, len(items))
-	reviews := Reviews{Client: s.Client, Repository: s.Repository}
-	err := concurrently(len(items), func(i int) error {
-		item, err := s.View(ctx, items[i].Number)
-		if err != nil {
-			return err
+// Detail reads, a few pull requests at a time, what a listing leaves out: with view, each pull
+// request again, for merged_by; with reviews, its reviews, for WithReviews.
+func (s Pulls) Detail(ctx context.Context, items []Pull, view, reviews bool) ([]Pull, error) {
+	detailed := slices.Clone(items)
+	service := Reviews{Client: s.Client, Repository: s.Repository}
+	err := concurrently(len(items), func(i int) (err error) {
+		if view {
+			if detailed[i], err = s.View(ctx, items[i].Number); err != nil {
+				return err
+			}
 		}
-		all, err := reviews.All(ctx, item.Number)
-		if err != nil {
-			return err
+		if reviews {
+			all, err := service.All(ctx, items[i].Number)
+			if err != nil {
+				return err
+			}
+			detailed[i] = detailed[i].WithReviews(all)
 		}
-		item.ReviewDecision = ReviewDecision(all, len(item.Reviewers)+len(item.ReviewerTeams) > 0)
-		viewed[i] = item
 		return nil
 	})
-	return viewed, err
+	return detailed, err
 }
 
 func (s Pulls) get(ctx context.Context, n int64) (*gitea.PullRequest, error) {
 	item, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
 		return c.PullRequests.GetPullRequest(ctx, owner, name, n)
 	})
-	return item, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository)
+	return item, repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
 }
 
 // ListOpen returns every open pull request in the repository.
 func (s Pulls) ListOpen(ctx context.Context) ([]Pull, error) {
-	return listAll(func(page int) ([]Pull, error) {
-		items, _, err := s.List(ctx, PullListOptions{State: "open", Limit: 50, Page: page})
-		return items, err
+	return listEvery(50, func(limit, page int) (Page[Pull], error) {
+		return s.ListPage(ctx, PullListOptions{State: "open", Limit: limit, Page: page})
 	})
 }
 
@@ -301,63 +318,597 @@ func (s Pulls) Create(ctx context.Context, opts PullOptions) (Pull, error) {
 	// TODO(sdk): CreatePullRequestOption lacks allow_maintainer_edit.
 	var pull gitea.PullRequest
 	if err := sendJSON(ctx, s.Client, http.MethodPost, "repos/"+s.Repository+"/pulls", opts, &pull); err != nil {
-		return Pull{}, Classify(err, "pull request", "", s.Repository)
+		return Pull{}, s.createError(ctx, err, opts.Head)
 	}
 	return pullFrom(&pull), nil
 }
 
+// PushableFork reports whether repo is a fork of the pull requests' repository that the account
+// may push to, so that it can hold the head branch of a new pull request.
+func (s Pulls) PushableFork(ctx context.Context, repo string) (bool, error) {
+	item, err := (Repositories{Client: s.Client}).get(ctx, repo)
+	if err != nil {
+		return false, err
+	}
+	return item.Parent != nil && strings.EqualFold(item.Parent.FullName, s.Repository) && permissionsFrom(item).Push, nil
+}
+
+// CheckUsers verifies that the named assignees and reviewers, such as those of a pull request
+// about to be created, exist, so that an unknown name fails before a branch is pushed or the pull
+// request exists. A user the account may not see is left for Gitea to refuse, and so is a reviewer
+// named by email address, which Gitea looks up by email; assignees are taken by name only.
+func (s Pulls) CheckUsers(ctx context.Context, assignees, reviewers []string) error {
+	names := slices.Concat(assignees, slices.DeleteFunc(slices.Clone(reviewers), func(name string) bool { return strings.Contains(name, "@") }))
+	checked := map[string]bool{}
+	for _, name := range names {
+		if checked[strings.ToLower(name)] {
+			continue
+		}
+		checked[strings.ToLower(name)] = true
+		_, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
+			return c.Users.GetUserInfo(ctx, name)
+		})
+		if IsNotFound(err) {
+			return &NotFoundError{Kind: "user", Key: strconv.Quote(name), Err: err}
+		}
+		if err != nil && !IsForbidden(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// createError explains a refused pull request creation. Gitea looks a head of another owner,
+// OWNER:BRANCH, up in that owner's fork, and answers a bare "not found" for an unknown owner and
+// a missing branch without saying it looked in the fork. It answers a missing repository with a
+// bare "not found" too.
+func (s Pulls) createError(ctx context.Context, err error, head string) error {
+	if IsNotFound(err) {
+		if repoErr := missingRepository(ctx, s.Client, s.Repository); repoErr != nil {
+			return repoErr
+		}
+	}
+	owner, branch, qualified := strings.Cut(head, ":")
+	baseOwner, _, _ := strings.Cut(s.Repository, "/")
+	apiErr, ok := errors.AsType[*transport.APIError](err)
+	if !qualified || strings.EqualFold(owner, baseOwner) || !ok {
+		return Classify(err, "pull request", "", s.Repository)
+	}
+	// Gitea refuses the head of an owner without a fork with a bare 400.
+	if strings.Contains(apiErr.Message, "does not have a fork of the base repository") {
+		return &NotFoundError{Kind: "fork", Key: "of " + s.Repository + " owned by " + owner, Err: err}
+	}
+	if apiErr.Status != http.StatusNotFound {
+		return Classify(err, "pull request", "", s.Repository)
+	}
+	if apiErr.Message == "not found" {
+		return &NotFoundError{Kind: "user or organization", Key: strconv.Quote(owner), Err: err}
+	}
+	classified := Classify(err, "pull request", "", s.Repository)
+	if notFound, ok := errors.AsType[*NotFoundError](classified); ok && notFound.Kind == "branch" {
+		return &NotFoundError{Kind: "branch", Key: strconv.Quote(branch), Scope: "the fork of " + s.Repository + " owned by " + owner, Err: err}
+	}
+	return classified
+}
+
 // Edit updates only explicitly supplied resource fields.
 func (s Pulls) Edit(ctx context.Context, n int64, opts PullEdit) (Pull, error) {
-	if opts.ReviewerChanges != nil {
-		reviews, changes := Reviews{Client: s.Client, Repository: s.Repository}, opts.ReviewerChanges
-		opts.ReviewerChanges = nil
-		if opts == (PullEdit{}) {
-			return reviews.ChangeRequests(ctx, n, *changes)
+	return s.EditFrom(ctx, n, opts, nil)
+}
+
+// EditFrom is Edit for pull request n as before holds it just ahead of the edit, or nil when it
+// was not read. When an edit of several fields fails, the pull request read back is compared with
+// before to tell what was saved; without before, such an edit reads it first.
+func (s Pulls) EditFrom(ctx context.Context, n int64, opts PullEdit, before *Pull) (Pull, error) {
+	if opts.ReviewerChanges == nil {
+		return s.edit(ctx, n, opts, before, nil)
+	}
+	reviews, changes := Reviews{Client: s.Client, Repository: s.Repository}, opts.ReviewerChanges
+	opts.ReviewerChanges = nil
+	if opts == (PullEdit{}) {
+		return reviews.ChangeRequests(ctx, n, *changes)
+	}
+	// Gitea takes the request of a reviewer it already asked, and the withdrawal of one it did not,
+	// without a change: only the requests as they were tell a failed edit whether they were saved.
+	if err := changes.Validate(); err != nil {
+		return Pull{}, err
+	}
+	held, err := reviews.All(ctx, n)
+	if err != nil {
+		return Pull{}, err
+	}
+	if err := reviews.changeRequests(ctx, n, *changes); err != nil {
+		return Pull{}, err
+	}
+	var saved []string
+	if changesRequests(held, *changes) {
+		saved = []string{"the review requests"}
+	}
+	item, err := s.edit(ctx, n, opts, before, saved)
+	if _, partial := errors.AsType[*PartialEditError](err); err != nil && !partial && len(saved) > 0 {
+		return Pull{}, fmt.Errorf("review requests were updated, but editing other pull request fields failed: %w", err)
+	}
+	return item, err
+}
+
+// changesRequests reports whether changes change the review requests among reviews. A reviewer
+// named by email address is taken to change them, since the reviews name users by login.
+func changesRequests(reviews []Review, changes ReviewRequestChanges) bool {
+	users, teams := RequestedReviewers(reviews)
+	for _, names := range []struct{ held, add, remove []string }{
+		{users, changes.Add.Users, changes.Remove.Users}, {teams, changes.Add.Teams, changes.Remove.Teams},
+	} {
+		held := func(name string) bool {
+			return !strings.Contains(name, "@") && slices.ContainsFunc(names.held, func(h string) bool { return strings.EqualFold(h, name) })
 		}
-		if err := reviews.changeRequests(ctx, n, *changes); err != nil {
+		if slices.ContainsFunc(names.add, func(name string) bool { return !held(name) }) ||
+			slices.ContainsFunc(names.remove, func(name string) bool { return held(name) || strings.Contains(name, "@") }) {
+			return true
+		}
+	}
+	return false
+}
+
+// edit sends opts after the changes that saved names were saved.
+func (s Pulls) edit(ctx context.Context, n int64, opts PullEdit, before *Pull, saved []string) (Pull, error) {
+	if before == nil && editFieldCount(opts) > 1 {
+		// Gitea saves the fields of a request one after another and keeps those it saved before
+		// a failure: only the pull request as it was tells them from those it already held.
+		item, err := s.View(ctx, n)
+		if err != nil {
 			return Pull{}, err
 		}
-		item, err := s.Edit(ctx, n, opts)
-		if err != nil {
-			return Pull{}, fmt.Errorf("review requests were updated, but editing other pull request fields failed: %w", err)
-		}
-		return item, nil
+		before = &item
 	}
-	issues := Issues{Client: s.Client, Repository: s.Repository}
 	if opts.Changes != nil {
-		resolved, err := issues.applyChanges(ctx, n, IssueEdit{Labels: opts.Labels, Assignees: opts.Assignees, Changes: opts.Changes})
-		if err != nil {
-			return Pull{}, err
-		}
-		opts.Labels, opts.Assignees, opts.Changes = resolved.Labels, resolved.Assignees, nil
-	}
-	if opts.Milestone != nil || opts.Labels != nil {
-		// The PR endpoint ignores zero milestones. Its issue endpoint supports
-		// clearing and lets common fields share the same mutation.
-		_, err := issues.Edit(ctx, n, IssueEdit{
-			Title: opts.Title, Body: opts.Body, Assignees: opts.Assignees, Milestone: opts.Milestone, Labels: opts.Labels,
-			Deadline: opts.Deadline, RemoveDeadline: opts.RemoveDeadline,
-		})
-		if err != nil {
-			return Pull{}, err
-		}
-		opts.Title, opts.Body, opts.Assignees, opts.Milestone = nil, nil, nil, nil
-		opts.Deadline, opts.RemoveDeadline, opts.Labels = nil, nil, nil
-		var result Pull
-		if opts == (PullEdit{}) {
-			result, err = s.View(ctx, n)
+		issues, edit := Issues{Client: s.Client, Repository: s.Repository}, IssueEdit{Labels: opts.Labels, Assignees: opts.Assignees, Changes: opts.Changes}
+		var err error
+		if before != nil {
+			edit, err = issues.applyChangesTo(ctx, before.Labels, before.Assignees, edit)
 		} else {
-			result, err = s.Edit(ctx, n, opts)
+			edit, err = issues.applyChanges(ctx, n, edit)
 		}
 		if err != nil {
-			return Pull{}, fmt.Errorf("issue fields were updated, but completing the pull request edit failed: %w", err)
+			return Pull{}, err
 		}
-		return result, nil
+		opts.Labels, opts.Assignees, opts.Changes = edit.Labels, edit.Assignees, nil
 	}
+	run := &editRun{Pulls: s, n: n, opts: opts, before: before, saved: saved}
+	if opts.Milestone != nil || opts.Labels != nil {
+		return run.throughIssue(ctx)
+	}
+	item, err := s.editPull(ctx, n, opts)
+	if err != nil {
+		run.failures = append(run.failures, editFailure{sent: opts, err: err})
+		return run.failed(ctx)
+	}
+	return item, nil
+}
+
+// editFieldCount counts the fields that opts changes, the review requests aside.
+func editFieldCount(opts PullEdit) int {
+	count := len(editFieldNames(opts))
+	if changes := opts.Changes; changes != nil {
+		if opts.Labels == nil && len(changes.AddLabels)+len(changes.RemoveLabels) > 0 {
+			count++
+		}
+		if opts.Assignees == nil && len(changes.AddAssignees)+len(changes.RemoveAssignees) > 0 {
+			count++
+		}
+	}
+	return count
+}
+
+// editPull sends opts to the pull request endpoint.
+func (s Pulls) editPull(ctx context.Context, n int64, opts PullEdit) (Pull, error) {
 	item, err := repoConvert(ctx, s.Client, s.Repository, pullFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
 		return c.PullRequests.EditPullRequest(ctx, owner, name, n, editPullOption(opts))
 	})
 	return item, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository)
+}
+
+// editRun follows the requests that edit pull request n with opts.
+type editRun struct {
+	Pulls
+	n    int64
+	opts PullEdit
+	// before is the pull request ahead of the edit, or nil for an edit of one field.
+	before *Pull
+	// saved names the changes that requests ahead of the edit saved, such as the review requests.
+	saved []string
+	// answered holds the requests that succeeded, with the pull request as each answered.
+	answered []answeredEdit
+	failures []editFailure
+	// skipped is set when a failure kept the later requests from being sent.
+	skipped bool
+	// labelsSent is set when the labels were sent, labels are those that Gitea took, and
+	// labelsErr is the error of a refused label change.
+	labelsSent bool
+	labels     []Label
+	labelsErr  error
+	// after is the pull request read back after a failure, or nil when readErr kept it from being
+	// read; afterLabels is set when it was read after the labels were sent.
+	after       *Pull
+	afterLabels bool
+	readErr     error
+	read        bool
+}
+
+// answeredEdit is a request that sent the changes of sent, answered with item.
+type answeredEdit struct {
+	sent PullEdit
+	item Pull
+}
+
+// editFailure is a request that sent the changes of sent and failed with err.
+type editFailure struct {
+	sent PullEdit
+	err  error
+}
+
+// throughIssue edits the pull request when its milestone or labels change. The PR endpoint
+// ignores zero milestones and cannot clear the labels; its issue endpoint can, and lets the common
+// fields share the same mutation. The labels go last: Gitea refuses label changes from people
+// who cannot write to the pull requests, and still takes the other changes from the author.
+func (r *editRun) throughIssue(ctx context.Context) (Pull, error) {
+	issues := Issues{Client: r.Client, Repository: r.Repository}
+	opts := r.opts
+	common := PullEdit{
+		Title: opts.Title, Body: opts.Body, Assignees: opts.Assignees, Milestone: opts.Milestone,
+		Deadline: opts.Deadline, RemoveDeadline: opts.RemoveDeadline,
+	}
+	pull := PullEdit{State: opts.State, Base: opts.Base, AllowMaintainerEdit: opts.AllowMaintainerEdit}
+	if common != (PullEdit{}) {
+		issue, err := issues.Edit(ctx, r.n, IssueEdit{
+			Title: common.Title, Body: common.Body, Assignees: common.Assignees, Milestone: common.Milestone,
+			Deadline: common.Deadline, RemoveDeadline: common.RemoveDeadline,
+		})
+		if err != nil {
+			// Neither the fields of the pull request nor the labels go after a failure here.
+			r.failures, r.skipped = append(r.failures, editFailure{sent: common, err: err}), true
+			return r.failed(ctx)
+		}
+		r.answered = append(r.answered, answeredEdit{sent: common, item: pullFromIssue(issue)})
+	}
+	var result Pull
+	if pull != (PullEdit{}) {
+		item, err := r.editPull(ctx, r.n, pull)
+		if err != nil {
+			r.failures = append(r.failures, editFailure{sent: pull, err: err})
+		} else {
+			result = item
+			r.answered = append(r.answered, answeredEdit{sent: pull, item: item})
+		}
+	}
+	if opts.Labels != nil {
+		// After a failure, the labels go only with other changes that stand, so that a refused
+		// edit leaves the pull request as it was.
+		if len(r.failures) == 0 || len(r.answered) > 0 || len(r.saved) > 0 || r.savedSome(ctx) {
+			r.labelsSent = true
+			if r.labels, r.labelsErr = issues.replaceLabels(ctx, r.n, *opts.Labels); r.labelsErr == nil {
+				result.Labels = r.labels
+			}
+		} else {
+			r.skipped = true
+		}
+	}
+	if len(r.failures) > 0 || r.labelsErr != nil {
+		return r.failed(ctx)
+	}
+	if result.Number == 0 {
+		// The issue endpoint answers with an issue: the pull request goes with the edit.
+		item, err := r.View(ctx, r.n)
+		if err != nil {
+			return Pull{}, fmt.Errorf("pull request #%d was edited, but reading it back failed: %w", r.n, err)
+		}
+		return item, nil
+	}
+	return result, nil
+}
+
+// readBack reads the pull request after a failure, once.
+func (r *editRun) readBack(ctx context.Context) {
+	if r.read {
+		return
+	}
+	r.read, r.afterLabels = true, r.labelsSent
+	item, err := r.View(ctx, r.n)
+	if err != nil {
+		r.readErr = err
+		return
+	}
+	r.after = &item
+}
+
+// savedSome reports whether the pull request, read back after a failure, holds a change that the
+// edit saved.
+func (r *editRun) savedSome(ctx context.Context) bool {
+	if r.before == nil {
+		return false
+	}
+	r.readBack(ctx)
+	if r.after == nil {
+		return false
+	}
+	saved, _ := editOutcome(r.opts, *r.before, *r.after)
+	return len(saved) > 0
+}
+
+// failed reports an edit that a request failed. It names the changes that were saved and, read
+// back, those the pull request does not hold. The error of a request that sent one change names
+// that change; that of one which sent several names none, since Gitea does not say which it
+// refused. A change the pull request held before the edit is named in neither. Only an edit
+// that went to its end and saved something returns the pull request.
+func (r *editRun) failed(ctx context.Context) (Pull, error) {
+	issues := Issues{Client: r.Client, Repository: r.Repository}
+	if r.before == nil {
+		// An edit of one field: with nothing to compare with, the error goes as Gitea gave it.
+		if r.labelsErr != nil {
+			if len(r.saved) == 0 {
+				return Pull{}, issues.labelsError(ctx, r.n, KindPull, "", r.labelsErr)
+			}
+			return Pull{}, &PartialEditError{Saved: r.saved, Errs: []error{r.labelsFailure(ctx, false)}, Number: r.n}
+		}
+		if len(r.saved) == 0 {
+			return Pull{}, r.failures[0].err
+		}
+		return Pull{}, &PartialEditError{Saved: r.saved, Errs: []error{fmt.Errorf("the edit failed: %w", r.failures[0].err)}, Number: r.n}
+	}
+	r.readBack(ctx)
+	saved := slices.Clone(r.saved)
+	var failed []string
+	fields := r.opts
+	fields.Labels = nil
+	if r.after != nil {
+		stored, missed := editOutcome(fields, *r.before, *r.after)
+		saved, failed = append(saved, stored...), missed
+	} else {
+		// Unread, the pull request holds at least what the requests that succeeded answered, and
+		// lacks what no request sent.
+		sent := map[string]bool{}
+		for _, answered := range r.answered {
+			stored, _ := editOutcome(answered.sent, *r.before, answered.item)
+			saved = append(saved, stored...)
+			for _, name := range editFieldNames(answered.sent) {
+				sent[name] = true
+			}
+		}
+		for _, failure := range r.failures {
+			for _, name := range editFieldNames(failure.sent) {
+				sent[name] = true
+			}
+		}
+		_, missed := editOutcome(fields, *r.before, *r.before)
+		failed = slices.DeleteFunc(missed, func(name string) bool { return sent[name] })
+	}
+	// labelsKnown is set when the labels are known to be stored or not after their request.
+	labelsKnown := r.labelsErr == nil || (r.after != nil && r.afterLabels)
+	labelsHeld := r.opts.Labels == nil || sameLabels(r.before.Labels, *r.opts.Labels)
+	labelsStored := false
+	if !labelsHeld {
+		switch {
+		case !r.labelsSent:
+			failed = append(failed, "the labels")
+		case r.labelsErr == nil:
+			saved = append(saved, "the labels")
+		case labelsKnown && sameLabels(r.after.Labels, *r.opts.Labels):
+			// Gitea stored the labels, and then failed: a server error or a lost answer.
+			labelsStored = true
+			saved = append(saved, "the labels")
+		}
+	}
+	var errs, plain []error
+	for _, failure := range r.failures {
+		plain = append(plain, failure.err)
+		names := editFieldNames(failure.sent)
+		if r.after != nil && len(names) == 1 && slices.Contains(failed, names[0]) {
+			failed = slices.DeleteFunc(failed, func(name string) bool { return name == names[0] })
+			errs = append(errs, fmt.Errorf("changing %s failed: %w", names[0], failure.err))
+			continue
+		}
+		errs = append(errs, fmt.Errorf("the edit failed: %w", failure.err))
+	}
+	if r.labelsErr != nil {
+		plain = append(plain, issues.labelsError(ctx, r.n, KindPull, "", r.labelsErr))
+		if labelsHeld || labelsStored {
+			errs = append(errs, fmt.Errorf("the edit failed: %w", r.labelsErr))
+		} else {
+			errs = append(errs, r.labelsFailure(ctx, !labelsKnown))
+		}
+	}
+	if len(saved) == 0 && r.after != nil {
+		// Nothing was saved: the errors go as Gitea gave them.
+		return Pull{}, errors.Join(plain...)
+	}
+	partial := &PartialEditError{Saved: saved, Failed: failed, Errs: errs, Number: r.n, ReadErr: r.readErr}
+	if r.after == nil || r.skipped {
+		return Pull{}, partial
+	}
+	item := *r.after
+	if r.labelsSent && r.labelsErr == nil {
+		item.Labels = r.labels
+	}
+	return item, partial
+}
+
+// labelsFailure words the failed label change of the edit; unknown is set when no read of the
+// pull request after the label request tells whether Gitea stored them before it failed.
+func (r *editRun) labelsFailure(ctx context.Context, unknown bool) error {
+	issues := Issues{Client: r.Client, Repository: r.Repository}
+	if refusal := issues.labelsRefusal(ctx, r.n, KindPull, r.labelsErr); refusal != "" {
+		return &RefusedError{Text: "the labels were left unchanged: " + refusal, Err: r.labelsErr}
+	}
+	if !unknown {
+		return fmt.Errorf("changing the labels failed: %w", r.labelsErr)
+	}
+	if r.readErr != nil {
+		// The error of the read points to the current state.
+		return fmt.Errorf("the labels may or may not have been saved: %w", r.labelsErr)
+	}
+	return fmt.Errorf("the labels may or may not have been saved: %w; gt pr view %d shows the current state", r.labelsErr, r.n)
+}
+
+// pullFromIssue is the pull request that the issue endpoint answered with.
+func pullFromIssue(issue Issue) Pull {
+	return Pull{
+		Number: issue.Number, Title: issue.Title, Body: issue.Body, State: issue.State, Assignees: issue.Assignees,
+		Milestone: issue.Milestone, Deadline: issue.Deadline, Labels: issue.Labels,
+	}
+}
+
+// PartialEditError reports an edit that Gitea took only in part: the changes that Saved names
+// were saved, and those that Failed names were not. Errs are the errors of the requests that
+// failed; one that names its change, as that of a request which sent only it, keeps the change
+// out of Failed. ReadErr is set when pull request Number could not be read back after the
+// failure: the changes besides Saved and Failed may or may not have been saved then.
+type PartialEditError struct {
+	Saved, Failed []string
+	Errs          []error
+	Number        int64
+	ReadErr       error
+}
+
+func (e *PartialEditError) Error() string {
+	var parts []string
+	if len(e.Failed) > 0 {
+		parts = append(parts, changesClause(e.Failed, "not changed"))
+	}
+	for _, err := range e.Errs {
+		parts = append(parts, err.Error())
+	}
+	if e.ReadErr != nil {
+		changes := "the changes"
+		if len(e.Saved)+len(e.Failed) > 0 {
+			changes = "the other changes"
+		}
+		parts = append(parts, fmt.Sprintf("%s may or may not have been saved, as reading the pull request back failed: %v; gt pr view %d shows the current state", changes, e.ReadErr, e.Number))
+	}
+	text := strings.Join(parts, "; ")
+	if len(e.Saved) > 0 {
+		text = changesClause(e.Saved, "saved") + ", but " + text
+	}
+	return text
+}
+
+func (e *PartialEditError) Unwrap() []error {
+	if e.ReadErr == nil {
+		return e.Errs
+	}
+	return append(slices.Clone(e.Errs), e.ReadErr)
+}
+
+// changesClause words that the changes names were done: "the title was saved".
+func changesClause(names []string, done string) string {
+	verb := "were"
+	if len(names) == 1 && !strings.HasSuffix(names[0], "s") {
+		verb = "was"
+	}
+	return joinWords(names) + " " + verb + " " + done
+}
+
+// joinWords lists words in a sentence: "a", "a and b", "a, b and c".
+func joinWords(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}
+
+// editField is a change that an edit can ask for, named for messages.
+type editField struct {
+	name string
+	set  bool
+	// stored reports whether a pull request holds the change.
+	stored func(Pull) bool
+}
+
+// editFields lists the changes to the fields of the pull request that opts can ask for, in the
+// order of messages. The labels change through their own request.
+func editFields(opts PullEdit) []editField {
+	return []editField{
+		{name: "the title", set: opts.Title != nil, stored: func(item Pull) bool {
+			return strings.TrimSpace(item.Title) == strings.TrimSpace(*opts.Title)
+		}},
+		{name: "the body", set: opts.Body != nil, stored: func(item Pull) bool { return item.Body == *opts.Body }},
+		{name: "the assignees", set: opts.Assignees != nil, stored: func(item Pull) bool {
+			return sameFold(item.Assignees, *opts.Assignees)
+		}},
+		{name: "the milestone", set: opts.Milestone != nil, stored: func(item Pull) bool {
+			var id int64
+			if item.Milestone != nil {
+				id = item.Milestone.ID
+			}
+			return id == *opts.Milestone
+		}},
+		{name: "the due date", set: opts.Deadline != nil || opts.RemoveDeadline != nil, stored: func(item Pull) bool {
+			if opts.Deadline == nil {
+				return !*opts.RemoveDeadline || item.Deadline == nil
+			}
+			if item.Deadline == nil {
+				return false
+			}
+			// gt sends the end of the day in UTC. Gitea keeps the end of that day in the offset it
+			// was sent with and answers in its own time zone, so the instants match; a server that
+			// kept the end of the day in its own time zone answers with that date in its offset.
+			due, err := time.Parse(time.RFC3339, *item.Deadline)
+			want := opts.Deadline.UTC()
+			return err == nil && (due.Equal(want) || due.Format(time.DateOnly) == want.Format(time.DateOnly))
+		}},
+		{name: "the state", set: opts.State != nil, stored: func(item Pull) bool { return item.State == *opts.State }},
+		{name: "the base branch", set: opts.Base != nil, stored: func(item Pull) bool { return item.Base == *opts.Base }},
+		{name: "whether maintainers can edit", set: opts.AllowMaintainerEdit != nil, stored: func(item Pull) bool {
+			return item.AllowMaintainerEdit == *opts.AllowMaintainerEdit
+		}},
+	}
+}
+
+// editFieldNames names the changes that opts asks for.
+func editFieldNames(opts PullEdit) []string {
+	var names []string
+	for _, field := range editFields(opts) {
+		if field.set {
+			names = append(names, field.name)
+		}
+	}
+	if opts.Labels != nil {
+		names = append(names, "the labels")
+	}
+	return names
+}
+
+// editOutcome names the changes to the fields of the pull request that opts asks for and after
+// holds, and those it lacks, leaving out those that before held already.
+func editOutcome(opts PullEdit, before, after Pull) (stored, missed []string) {
+	for _, field := range editFields(opts) {
+		switch {
+		case !field.set || field.stored(before):
+		case field.stored(after):
+			stored = append(stored, field.name)
+		default:
+			missed = append(missed, field.name)
+		}
+	}
+	return stored, missed
+}
+
+// sameLabels reports whether labels are those of ids, ignoring order.
+func sameLabels(labels []Label, ids []int64) bool {
+	held := make([]int64, len(labels))
+	for i, label := range labels {
+		held[i] = label.ID
+	}
+	slices.Sort(held)
+	return slices.Equal(slices.Compact(held), slices.Compact(slices.Sorted(slices.Values(ids))))
+}
+
+// sameFold reports whether a and b hold the same names, ignoring case and order.
+func sameFold(a, b []string) bool {
+	in := func(names []string) func(string) bool {
+		return func(name string) bool {
+			return !slices.ContainsFunc(names, func(other string) bool { return strings.EqualFold(other, name) })
+		}
+	}
+	return !slices.ContainsFunc(a, in(b)) && !slices.ContainsFunc(b, in(a))
 }
 
 func editPullOption(opts PullEdit) gitea.EditPullRequestOption {
@@ -386,7 +937,7 @@ func (s Pulls) Diff(ctx context.Context, n int64) (io.ReadCloser, error) {
 		return c.PullRequests.GetPullRequestDiff(ctx, owner, name, n, gitea.PullRequestDiffOptions{})
 	})
 	if err != nil {
-		return nil, err
+		return nil, repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
 	}
 	return io.NopCloser(bytes.NewReader(diff)), nil
 }
@@ -405,13 +956,15 @@ func (s Pulls) DeleteHead(ctx context.Context, item Pull) error {
 
 // Files lists the paths of the files a pull request changes.
 func (s Pulls) Files(ctx context.Context, n int64) ([]string, error) {
-	files, err := listAll(func(page int) ([]*gitea.ChangedFile, error) {
-		return repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.ChangedFile, *gitea.Response, error) {
-			return c.PullRequests.ListPullRequestFiles(ctx, owner, name, n, gitea.ListPullRequestFilesOptions{ListOptions: listOptions(100, page)})
-		})
-	})
+	owner, name, err := splitRepository(s.Repository)
 	if err != nil {
 		return nil, err
+	}
+	files, err := callAll(ctx, s.Client, 100, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.ChangedFile, *gitea.Response, error) {
+		return c.PullRequests.ListPullRequestFiles(ctx, owner, name, n, gitea.ListPullRequestFilesOptions{ListOptions: list})
+	})
+	if err != nil {
+		return nil, repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
 	}
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
@@ -469,9 +1022,15 @@ func (s Pulls) MergeSettings(ctx context.Context) (MergeSettings, error) {
 	return settings, nil
 }
 
+// mergeRecheckDelay is how long Merge waits before it retries a merge that Gitea refused while
+// it checks whether the pull request can be merged.
+var mergeRecheckDelay = 2 * time.Second
+
 // Merge merges the pull request's head opts.HeadSHA, else its current head, with the selected
 // strategy. When Gitea refuses the merge, the error names the reason derived from the pull
-// request, since Gitea reports conflicts only as "try again later".
+// request, since Gitea reports conflicts only as "try again later". Gitea answers the same while
+// it checks the pull request again after its base branch moved, so such a refusal of an open
+// pull request is retried once after a short delay.
 func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 	pull, err := s.get(ctx, n)
 	if err != nil {
@@ -484,10 +1043,24 @@ func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 	if option.HeadCommitId = opts.HeadSHA; option.HeadCommitId == "" && pull.Head != nil {
 		option.HeadCommitId = pull.Head.Sha
 	}
-	err = repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
-		_, resp, err := c.PullRequests.MergePullRequest(ctx, owner, name, n, option)
-		return resp, err
-	})
+	merge := func() error {
+		return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
+			_, resp, err := c.PullRequests.MergePullRequest(ctx, owner, name, n, option)
+			return resp, err
+		})
+	}
+	open := !pull.HasMerged && pull.State != gitea.StateClosed && !pull.Draft
+	err = merge()
+	later := func() bool {
+		refused, ok := errors.AsType[*transport.APIError](err)
+		return ok && refused.Status == http.StatusMethodNotAllowed && strings.Contains(strings.ToLower(refused.Message), "try again later")
+	}
+	if open && later() {
+		if err := sleepCtx(ctx, mergeRecheckDelay); err != nil {
+			return err
+		}
+		err = merge()
+	}
 	key := "#" + strconv.FormatInt(n, 10)
 	if refused, ok := errors.AsType[*transport.APIError](err); !ok || refused.Status != http.StatusMethodNotAllowed {
 		return Classify(err, "pull request", key, s.Repository)
@@ -500,6 +1073,10 @@ func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 		reason = "is closed"
 	case pull.Draft:
 		reason = "is a draft; mark it ready for review first"
+	case later() && !pull.Mergeable:
+		reason = "has conflicting files, or Gitea is still checking whether it can be merged; retry in a moment"
+	case later():
+		reason = "cannot be merged yet: Gitea is still checking whether it can be merged; retry in a moment"
 	case !pull.Mergeable:
 		reason = "has conflicting files or is otherwise not mergeable"
 	default:

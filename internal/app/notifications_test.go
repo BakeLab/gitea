@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
 
@@ -97,6 +99,19 @@ func TestNotificationWatchStreamsOneJSONObjectPerLine(t *testing.T) {
 	require.Equal(t, "{\"id\":1,\"title\":\"First\"}\n{\"id\":2,\"title\":\"Second\"}\n", out.String())
 }
 
+func TestNotificationWatchFailsWhenTheInstanceDoesNotAnswer(t *testing.T) {
+	release := make(chan struct{})
+	server := newAuthenticatedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	defer server.Close()
+	defer close(release)
+	deps, out, _ := serverDeps(t, server.URL)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_HTTP_TIMEOUT": "50ms"})
+	err := Execute(context.Background(), deps, []string{"notification", "watch", "--json", "id", "--interval", "20ms", "--timeout", "10s"})
+	require.ErrorIs(t, err, transport.ErrTimeout, "a request that runs out of http_timeout is not the end of --timeout")
+	require.Equal(t, clierr.Canceled, clierr.ExitCode(err))
+	require.Empty(t, out.String())
+}
+
 func TestNotificationMutationsReportWhatChanged(t *testing.T) {
 	var marks []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +126,8 @@ func TestNotificationMutationsReportWhatChanged(t *testing.T) {
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/notifications":
 			marks = append(marks, "all "+r.URL.Query().Get("to-status"))
 			_, _ = w.Write([]byte(`[{"id":12},{"id":3}]`))
+		case r.URL.Path == "/api/v1/notifications/threads/999":
+			w.WriteHeader(http.StatusNotFound)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -132,6 +149,7 @@ func TestNotificationMutationsReportWhatChanged(t *testing.T) {
 		require.Equal(t, tc.want, withoutANSI(diagnostics.String()), tc.args)
 	}
 	require.Equal(t, []string{"pinned", "read", "read", "all read"}, marks)
+	require.EqualError(t, Execute(context.Background(), deps, []string{"notification", "pin", "999"}), "notification 999: not found in your inbox")
 	prompt := &scriptedPrompter{accept: true}
 	deps.Prompter, deps.Streams.InTTY, deps.Streams.ErrTTY = prompt, true, true
 	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "pin", "--all"}))

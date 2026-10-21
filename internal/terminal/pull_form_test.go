@@ -38,7 +38,7 @@ func TestPullFormAsksTitleBodyThenWhatsNext(t *testing.T) {
 		{
 			name: "submit", input: "Seeded\n\n1\n", choices: known,
 			want:     PullFormValues{IssueFormValues: IssueFormValues{Title: "Seeded", Body: "Seeded body"}, Base: "main", Head: "feature", Topic: "feature", AllowMaintainerEdits: true},
-			rendered: []string{"Creating pull request for feature into main in alice/x", "Title (required):", BodyTitle, "What's next?", "Change branches"},
+			rendered: []string{"Creating pull request for feature into main in alice/x", "Title (required) [Seeded]:", BodyTitle, "What's next?", "Change branches"},
 			hidden:   []string{"Base branch", "AGit", "Issue", "Add metadata"},
 		},
 		{
@@ -49,7 +49,7 @@ func TestPullFormAsksTitleBodyThenWhatsNext(t *testing.T) {
 		{
 			name: "unknown head asks the branches first", input: "main\nn\nbob\nfix-typo\n\n\nFix Typo\n\n1\n", choices: PullFormChoices{Repo: "alice/x", BaseOwner: "alice", Base: "main"},
 			want:     PullFormValues{IssueFormValues: IssueFormValues{Title: "Fix Typo"}, Base: "main", Head: "bob:fix-typo"},
-			rendered: []string{"Base branch (required):", "Push through AGit", "Head branch (required):", "Creating pull request for bob:fix-typo into main in alice/x"},
+			rendered: []string{"Base branch (required) [main]:", "Push through AGit", "Head branch (required):", "Creating pull request for bob:fix-typo into main in alice/x"},
 		},
 		{
 			name: "metadata", input: "Seeded\n\n3\n2\n2026-12-24\n1\n", choices: func() PullFormChoices {
@@ -101,4 +101,18 @@ func TestCreatePullPreservesDraftOnEditorFailure(t *testing.T) {
 	require.True(t, called)
 	require.ErrorContains(t, err, "editor failed")
 	require.Equal(t, path, values.Draft.Path)
+}
+
+func TestCreatePullInlineBodyKeepsTabsAndCRLFOfUnchangedLines(t *testing.T) {
+	body := "intro\r\n```make\r\nall:\r\n\techo hi\r\n```\r\n"
+	choices := PullFormChoices{BaseOwner: "alice", Base: "main", HeadOwner: "alice", HeadBranch: "feature", Body: body}
+	p, _, ctx := screenPrompter(t, keyStep{"enter next", "\r"}, keyStep{"new line", "top\n\r"}, keyStep{"What's next?", "\r"})
+	values, err := p.CreatePull(ctx, choices)
+	require.NoError(t, err)
+	require.Equal(t, "top\r\n"+body, values.Body)
+
+	p, _, ctx = screenPrompter(t, keyStep{"enter next", "\r"}, keyStep{"new line", "\r"}, keyStep{"What's next?", "\r"})
+	values, err = p.CreatePull(ctx, choices)
+	require.NoError(t, err)
+	require.Equal(t, body, values.Body)
 }

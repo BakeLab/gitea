@@ -321,7 +321,11 @@ gt team member add ORG/TEAM USER.`}
 	var limit, page int
 	list := &cobra.Command{
 		Use: "list <org>", Short: "List organization members", Args: argsExact(1), ValidArgsFunction: a.completeOrgs(),
-		Long: "List the members of an organization and whether each membership is public or concealed.",
+		Long: `List the members of an organization and whether each membership is public or concealed.
+
+Gitea lists every membership as public to administrators, so for them gt checks the visibility
+of each membership with one request per member. JSON output without the visibility field
+skips those checks (see gt help formatting).`,
 		Example: `$ gt org member list acme
 # list only the members everyone can see
 $ gt org member list acme --public`,
@@ -331,7 +335,9 @@ $ gt org member list acme --public`,
 				return err
 			}
 			org := args[0]
-			members, err := (services.Organizations{Client: target.client}).Members(cmd.Context(), org, services.MemberListOptions{Public: public, Visibility: true, Limit: limit, Page: page})
+			// Visibility can cost a request per member; read it only when the output shows it.
+			visibility := a.options.json == "" || a.jsonSelects("visibility")
+			members, err := (services.Organizations{Client: target.client}).Members(cmd.Context(), org, services.MemberListOptions{Public: public, Visibility: visibility, Limit: limit, Page: page})
 			if err != nil {
 				return err
 			}

@@ -98,7 +98,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.Equal(t, []string{strings.SplitN(repo.FullName, "/", 2)[0]}, pull.Assignees)
 	require.Equal(t, &services.IssueMilestone{ID: milestone.ID, Title: milestone.Title}, pull.Milestone)
 	require.NotNil(t, pull.Deadline)
-	require.Equal(t, "2028-01-15T00:00:00Z", *pull.Deadline)
+	require.Equal(t, "2028-01-15T23:59:59Z", *pull.Deadline)
 	n := fmt.Sprint(pull.Number)
 	require.Equal(t, "[]\n", string(execute("pr", "attachment", "list", n, "-R", repo.FullName, "--json")))
 	verifyResourceBrowser(t, deps, pull.URL, "pr", "view", n, "--repo", repo.FullName)

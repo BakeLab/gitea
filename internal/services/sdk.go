@@ -70,6 +70,9 @@ func sdkError(ctx context.Context, resp *gitea.Response, err error, captured fun
 		return transport.RequestError(ctx, "API request failed", err)
 	case errors.As(err, &syntaxErr), errors.As(err, &typeErr):
 		return errInvalidJSON
+	case resp != nil && resp.Response != nil:
+		// The answer started but its body could not be read.
+		return transport.ResponseError(ctx, resp.Response, err)
 	}
 	return err
 }

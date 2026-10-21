@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -50,6 +51,10 @@ func TestReviewPromptAndFlagsReachIdenticalOptions(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/1" {
 			_, _ = w.Write([]byte(`{"number":1,"title":"Add login","user":{"login":"bob"}}`))
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/1/reviews" {
+			_, _ = w.Write([]byte(`[]`))
 			return
 		}
 		require.Equal(t, http.MethodPost, r.Method)
@@ -137,6 +142,367 @@ func TestReviewCreateIsTheReviewCommand(t *testing.T) {
 	deps, _, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "create", "#13", "-R", "alice/x", "-a"}))
 	require.Equal(t, "APPROVED", event)
+}
+
+func TestReviewAsksBeforeFoldingAPendingReview(t *testing.T) {
+	var bodies []any
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews" && r.URL.Query().Get("page") > "1":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
+			_, _ = w.Write([]byte(`[{"id":9,"state":"PENDING","body":"Draft notes","comments_count":1,"user":{"login":"alice"}}]`))
+		case r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(pullJSON("bob")))
+		default:
+			var payload map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			bodies = append(bodies, payload["body"])
+			_, _ = fmt.Fprintf(w, `{"id":9,"state":%q}`, payload["event"])
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"pr", "review", "13", "-R", "alice/x", "-a", "-b", "LGTM", "--no-input"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.ErrorContains(t, err, "publish your pending review 9 on alice/x#13 and its inline comment with this approval (or submit it with gt pr review submit 13)")
+	require.Empty(t, bodies)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "13", "-R", "alice/x", "-a", "-b", "LGTM", "--yes"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "13", "-R", "alice/x", "-a", "--yes"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "13", "-R", "alice/x", "--pending", "-b", "More", "--no-input"}))
+	require.Equal(t, []any{"LGTM", "Draft notes", "More"}, bodies)
+}
+
+func TestReviewKeepsThePendingBodyWithoutANewOne(t *testing.T) {
+	for _, mode := range []string{"editor", "form"} {
+		t.Run(mode, func(t *testing.T) {
+			var bodies []any
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews" && r.URL.Query().Get("page") > "1":
+					_, _ = w.Write([]byte(`[]`))
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
+					_, _ = w.Write([]byte(`[{"id":9,"state":"PENDING","body":"Draft notes","user":{"login":"alice"}}]`))
+				case r.Method == http.MethodGet:
+					_, _ = w.Write([]byte(pullJSON("bob")))
+				default:
+					var payload map[string]any
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+					bodies = append(bodies, payload["body"])
+					_, _ = fmt.Fprintf(w, `{"id":9,"state":%q}`, payload["event"])
+				}
+			}))
+			defer server.Close()
+			deps, _, diagnostics := serverDeps(t, server.URL)
+			args := []string{"pr", "review", "13", "-R", "alice/x", "--yes"}
+			if mode == "editor" {
+				editor, _ := newDraftEditor(t, "")
+				deps.Editor = editor
+				deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "editor"})
+				args = append(args, "-a", "-e")
+			} else {
+				deps.ReviewForm = reviewFormFunc(func(context.Context, terminal.ReviewFormChoices) (terminal.ReviewFormValues, error) {
+					return terminal.ReviewFormValues{Event: "APPROVED"}, nil
+				})
+				deps.Prompter = &scriptedPrompter{accept: true}
+				deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+				args = []string{"pr", "review", "13", "-R", "alice/x", "--interactive"}
+			}
+			require.NoError(t, Execute(context.Background(), deps, args))
+			require.Equal(t, []any{"Draft notes"}, bodies)
+			require.NotContains(t, diagnostics.String(), "Replaced")
+		})
+	}
+}
+
+func TestCommentNeedsNoBodyToPublishAPendingReview(t *testing.T) {
+	for _, mode := range []string{"flags", "editor", "form", "no pending review"} {
+		t.Run(mode, func(t *testing.T) {
+			var events, bodies []any
+			pending := `[{"id":9,"state":"PENDING","body":"Draft notes","comments_count":1,"user":{"login":"alice"}}]`
+			if mode == "no pending review" {
+				pending = `[]`
+			}
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
+					writeFirstPage(w, r, pending)
+				case r.Method == http.MethodGet:
+					_, _ = w.Write([]byte(pullJSON("bob")))
+				default:
+					var payload map[string]any
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+					events, bodies = append(events, payload["event"]), append(bodies, payload["body"])
+					_, _ = fmt.Fprintf(w, `{"id":9,"state":%q}`, payload["event"])
+				}
+			}))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			args := []string{"pr", "review", "13", "-R", "alice/x", "-c", "--yes"}
+			var draft string
+			switch mode {
+			case "editor", "no pending review":
+				var editor *draftEditor
+				editor, draft = newDraftEditor(t, "")
+				deps.Editor = editor
+				deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "editor"})
+				args = append(args, "-e")
+			case "form":
+				deps.ReviewForm = reviewFormFunc(func(_ context.Context, choices terminal.ReviewFormChoices) (terminal.ReviewFormValues, error) {
+					require.True(t, choices.Pending, "the pending review gives the comment its content")
+					return terminal.ReviewFormValues{Event: "COMMENT"}, nil
+				})
+				deps.Prompter = &scriptedPrompter{accept: true}
+				deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+				args = []string{"pr", "review", "13", "-R", "alice/x", "--interactive"}
+			}
+			err := Execute(context.Background(), deps, args)
+			if mode == "no pending review" {
+				require.EqualError(t, err, "a comment needs a body, and the editor left it empty")
+				require.Empty(t, events)
+				requireDraft(t, draft, false)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []any{"COMMENT"}, events)
+			require.Equal(t, []any{"Draft notes"}, bodies, "the pending body is kept")
+		})
+	}
+}
+
+func TestCommentPublishesAPendingReviewThatHasOnlyInlineComments(t *testing.T) {
+	for _, mode := range []string{"flags", "editor", "editor refused", "form"} {
+		t.Run(mode, func(t *testing.T) {
+			var posts []string
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
+					writeFirstPage(w, r, `[{"id":9,"state":"PENDING","body":"","comments_count":1,"user":{"login":"alice"}}]`)
+				case r.Method == http.MethodGet:
+					_, _ = w.Write([]byte(pullJSON("bob")))
+				default:
+					var payload map[string]any
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+					posts = append(posts, fmt.Sprintf("%s %s %v %q", r.Method, r.URL.Path, payload["event"], payload["body"]))
+					if mode == "editor refused" {
+						w.WriteHeader(http.StatusUnprocessableEntity)
+						_, _ = w.Write([]byte(`{"message":"refused"}`))
+						return
+					}
+					_, _ = fmt.Fprintf(w, `{"id":9,"state":%q}`, payload["event"])
+				}
+			}))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			args := []string{"pr", "review", "13", "-R", "alice/x", "-c", "--yes"}
+			var draft string
+			switch mode {
+			case "editor", "editor refused":
+				var editor *draftEditor
+				editor, draft = newDraftEditor(t, "")
+				deps.Editor = editor
+				deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "editor"})
+				args = append(args, "-e")
+			case "form":
+				deps.ReviewForm = reviewFormFunc(func(_ context.Context, choices terminal.ReviewFormChoices) (terminal.ReviewFormValues, error) {
+					require.True(t, choices.Pending, "the pending review gives the comment its content")
+					return terminal.ReviewFormValues{Event: "COMMENT"}, nil
+				})
+				deps.Prompter = &scriptedPrompter{accept: true}
+				deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+				args = []string{"pr", "review", "13", "-R", "alice/x", "--interactive"}
+			}
+			err := Execute(context.Background(), deps, args)
+			if mode == "editor refused" {
+				require.ErrorContains(t, err, "refused")
+				require.NotContains(t, err.Error(), "draft saved", "an empty draft is not kept")
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, []string{`POST /api/v1/repos/alice/x/pulls/13/reviews/9 COMMENT ""`}, posts, "the pending review is submitted")
+			if draft != "" {
+				requireDraft(t, draft, false)
+			}
+		})
+	}
+}
+
+func TestCommentWithAnEmptyBodyPublishesAPendingReviewWithInlineComments(t *testing.T) {
+	for _, tc := range []struct {
+		name, pending string
+		want          string
+	}{
+		{"inline comments", `[{"id":9,"state":"PENDING","body":"Draft notes","comments_count":1,"user":{"login":"alice"}}]`, ""},
+		// The empty body replaces the pending one, which leaves nothing to publish.
+		{"only a body", `[{"id":9,"state":"PENDING","body":"Draft notes","user":{"login":"alice"}}]`, `-b "" would clear the body of pending review 9 and leave it empty; leave out --body to keep its body`},
+		{"no pending review", `[]`, "a comment needs a body; pass --body, --body-file or --editor"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var posts []string
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
+					writeFirstPage(w, r, tc.pending)
+				case r.Method == http.MethodGet:
+					_, _ = w.Write([]byte(pullJSON("bob")))
+				default:
+					var payload map[string]any
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+					posts = append(posts, fmt.Sprintf("%s %s %v %q", r.Method, r.URL.Path, payload["event"], payload["body"]))
+					_, _ = fmt.Fprintf(w, `{"id":9,"state":%q}`, payload["event"])
+				}
+			}))
+			defer server.Close()
+			deps, _, diagnostics := serverDeps(t, server.URL)
+			err := Execute(context.Background(), deps, []string{"pr", "review", "13", "-R", "alice/x", "-c", "-b", "", "--yes"})
+			if tc.want != "" {
+				require.EqualError(t, err, tc.want)
+				require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+				require.Empty(t, posts)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []string{`POST /api/v1/repos/alice/x/pulls/13/reviews/9 COMMENT ""`}, posts, "the pending review is submitted")
+			require.Contains(t, diagnostics.String(), "Replaced the earlier body of your pending review 9")
+		})
+	}
+}
+
+func TestReviewWarnsWhenItReplacesThePendingBody(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews" && r.URL.Query().Get("page") > "1":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
+			_, _ = w.Write([]byte(`[{"id":9,"state":"PENDING","body":"Draft notes","user":{"login":"alice"}}]`))
+		case r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(pullJSON("bob")))
+		default:
+			_, _ = w.Write([]byte(`{"id":9,"state":"PENDING"}`))
+		}
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		args []string
+		warn bool
+	}{
+		{[]string{"--pending", "-b", "More"}, true},
+		{[]string{"-c", "-b", "More", "--yes"}, true},
+		{[]string{"--pending", "-b", "Draft notes"}, false},
+	} {
+		deps, _, diagnostics := serverDeps(t, server.URL)
+		require.NoError(t, Execute(context.Background(), deps, append([]string{"pr", "review", "13", "-R", "alice/x"}, tc.args...)))
+		if tc.warn {
+			require.Contains(t, diagnostics.String(), "Replaced the earlier body of your pending review 9", tc.args)
+		} else {
+			require.NotContains(t, diagnostics.String(), "Replaced", tc.args)
+		}
+	}
+}
+
+func TestReviewExplainsAnUnknownCommit(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(pullJSON("bob")))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"message":""}`))
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"pr", "review", "13", "-R", "alice/x", "-a", "--commit", "deadbeef"})
+	require.EqualError(t, err, "commit deadbeef not found in pull request #13")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+}
+
+func TestReviewViewNamesTheMissingReviewOrPullRequest(t *testing.T) {
+	for _, tc := range []struct {
+		message    string
+		repoExists bool
+		want       string
+	}{
+		{"review does not exist [id: 1]", false, "review 1 not found in pull request #20"},
+		{"pull request does not exist [id: 0, issue_id: 0, head_repo_id: 0, base_repo_id: 83, head_branch: , base_branch: ]", false, "pull request #20 not found in alice/x"},
+		// Gitea answers a missing repository and a review of another pull request alike.
+		{"not found", false, "repository alice/x not found"},
+		{"not found", true, "review 1 not found in pull request #20"},
+	} {
+		server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/repos/alice/x" && tc.repoExists {
+				_, _ = w.Write([]byte(`{"full_name":"alice/x"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"` + tc.message + `"}`))
+		}))
+		deps, _, _ := serverDeps(t, server.URL)
+		err := Execute(context.Background(), deps, []string{"pr", "review", "view", "20", "1", "-R", "alice/x"})
+		server.Close()
+		require.EqualError(t, err, tc.want)
+	}
+}
+
+func TestReviewCommentCommandsNameTheMissingCommentOrRepository(t *testing.T) {
+	for _, tc := range []struct {
+		args       []string
+		message    string
+		repoExists bool
+		want       string
+	}{
+		{[]string{"pr", "review", "resolve", "9"}, "comment does not exist [id: 9, issue_id: 0]", true, "review comment 9 not found in alice/x"},
+		{[]string{"pr", "review", "unresolve", "9"}, "comment does not exist [id: 9, issue_id: 0]", true, "review comment 9 not found in alice/x"},
+		{[]string{"pr", "review", "resolve", "9"}, "not found", false, "repository alice/x not found"},
+	} {
+		t.Run(strings.Join(tc.args, " ")+" "+tc.message, func(t *testing.T) {
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/repos/alice/x" && tc.repoExists {
+					_, _ = w.Write([]byte(`{"full_name":"alice/x"}`))
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"` + tc.message + `"}`))
+			}))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			err := Execute(context.Background(), deps, append(tc.args, "-R", "alice/x"))
+			require.EqualError(t, err, tc.want)
+		})
+	}
+}
+
+func TestReviewReplyNamesTheMissingPullRequestOrComment(t *testing.T) {
+	for _, tc := range []struct {
+		repoExists, pullExists bool
+		want                   string
+	}{
+		{true, true, "review comment 9 not found in pull request #20 of alice/x"},
+		{true, false, "pull request #20 not found in alice/x"},
+		{false, false, "repository alice/x not found"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/api/v1/repos/alice/x" && tc.repoExists:
+					_, _ = w.Write([]byte(`{"full_name":"alice/x"}`))
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/20" && tc.pullExists:
+					_, _ = w.Write([]byte(pullJSON("bob")))
+				default:
+					// Gitea answers a reply to a missing comment, to a comment on another pull
+					// request and on a missing pull request alike.
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = w.Write([]byte(`{"message":"not found"}`))
+				}
+			}))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			err := Execute(context.Background(), deps, []string{"pr", "review", "reply", "20", "9", "-b", "x", "-R", "alice/x"})
+			require.EqualError(t, err, tc.want)
+		})
+	}
 }
 
 func TestReviewUsageErrors(t *testing.T) {
@@ -229,6 +595,100 @@ func TestReviewSubmitFindsThePendingReview(t *testing.T) {
 	}
 }
 
+func TestReviewSubmitCommentWithAnEmptyBody(t *testing.T) {
+	for _, tc := range []struct {
+		name, review, want string
+	}{
+		{"only a body", `{"id":9,"state":"PENDING","body":"Draft notes"}`, `-b "" would clear the body of pending review 9 and leave it empty; leave out --body to keep its body`},
+		{"inline comments", `{"id":9,"state":"PENDING","body":"Draft notes","comments_count":1}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var posts []string
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/api/v1/repos/alice/x/pulls/13":
+					_, _ = w.Write([]byte(pullJSON("bob")))
+				case r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews/9" && r.Method == http.MethodGet:
+					_, _ = w.Write([]byte(tc.review))
+				case r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews/9":
+					var payload map[string]any
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+					posts = append(posts, fmt.Sprintf("%v %q", payload["event"], payload["body"]))
+					_, _ = w.Write([]byte(`{"id":9,"state":"COMMENT"}`))
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL)
+				}
+			}))
+			defer server.Close()
+			deps, _, diagnostics := serverDeps(t, server.URL)
+			err := Execute(context.Background(), deps, []string{"pr", "review", "submit", "13", "9", "-R", "alice/x", "--comment", "-b", ""})
+			if tc.want != "" {
+				require.EqualError(t, err, tc.want)
+				require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+				require.Empty(t, posts, "the empty review is refused before the request")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []string{`COMMENT ""`}, posts)
+			require.Contains(t, diagnostics.String(), "Replaced the earlier body of your pending review 9", "as gt pr review warns")
+		})
+	}
+}
+
+func TestReviewSubmitCommentRefusesABlankBodyThatClearsAPendingReview(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		editor string
+		want   string
+	}{
+		{"blank body", []string{"-b", "   "}, "", `a blank --body would clear the body of pending review 9 and leave it empty; leave out --body to keep its body`},
+		{"emptied in the editor", []string{"-e"}, "", "the editor left the body empty, which would clear the body of pending review 9 and leave it empty; keep its body to submit it"},
+		{"blanked in the editor", []string{"-e"}, " \n", "the editor left the body empty, which would clear the body of pending review 9 and leave it empty; keep its body to submit it"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13":
+					_, _ = w.Write([]byte(pullJSON("bob")))
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews/9":
+					_, _ = w.Write([]byte(`{"id":9,"state":"PENDING","body":"Draft notes"}`))
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL)
+				}
+			}))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			editor, path := newDraftEditor(t, tc.editor)
+			deps.Editor = editor
+			deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "editor"})
+			err := Execute(context.Background(), deps, append([]string{"pr", "review", "submit", "13", "9", "-R", "alice/x", "--comment"}, tc.args...))
+			require.EqualError(t, err, tc.want, "the empty review is refused before the request")
+			if tc.args[0] == "-e" {
+				requireDraft(t, path, false)
+			}
+		})
+	}
+}
+
+func TestCommentWithABlankBodyNamesItBlank(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
+			writeFirstPage(w, r, `[{"id":9,"state":"PENDING","body":"Draft notes","user":{"login":"alice"}}]`)
+		case r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(pullJSON("bob")))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"pr", "review", "13", "-R", "alice/x", "-c", "-b", "  ", "--yes"})
+	require.EqualError(t, err, `a blank --body would clear the body of pending review 9 and leave it empty; leave out --body to keep its body`)
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+}
+
 func TestReviewListTable(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/repos/alice/x/pulls/13/reviews", r.URL.Path)
@@ -262,6 +722,55 @@ func TestReviewCommentsFileValidatedBeforeRequests(t *testing.T) {
 			file := filepath.Join(t.TempDir(), "comments.json")
 			require.NoError(t, os.WriteFile(file, []byte(tc.content), 0o600))
 			requireUsageBeforeRequests(t, tc.want, "pr", "review", "1", "--comments-file", file, "--comment", "--body", "Supplied")
+		})
+	}
+}
+
+func TestReviewCommentsFileMustBeOnTheDiff(t *testing.T) {
+	const diff = "diff --git a/e.txt b/e.txt\n--- a/e.txt\n+++ b/e.txt\n@@ -1,2 +1,2 @@\n same\n-old\n+new\n" +
+		"diff --git a/gone.txt b/gone.txt\n--- a/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n" +
+		"diff --git \"a/\\303\\244.txt\" \"b/\\303\\244.txt\"\n--- \"a/\\303\\244.txt\"\n+++ \"b/\\303\\244.txt\"\n@@ -0,0 +1 @@\n+hi\n"
+	for _, tc := range []struct{ comment, want string }{
+		{`{"path":"e.txt","body":"x","new_position":2}`, ""},
+		{`{"path":"e.txt","body":"x","old_position":1}`, ""},
+		{`{"path":"gone.txt","body":"x","old_position":1}`, ""},
+		{`{"path":"ä.txt","body":"x","new_position":1}`, ""},
+		{`{"path":"nosuch.txt","body":"x","new_position":1}`, `inline comment on "nosuch.txt": pull request #13 does not change that file`},
+		{`{"path":"e.txt","body":"x","new_position":99}`, `inline comment on "e.txt": new_position 99 is not a line of the diff of pull request #13`},
+		{`{"path":"e.txt","body":"x","old_position":2,"new_position":0}`, ""},
+		{`{"path":"e.txt","body":"x","old_position":3}`, `inline comment on "e.txt": old_position 3 is not a line of the diff of pull request #13`},
+	} {
+		t.Run(tc.comment, func(t *testing.T) {
+			created := false
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/api/v1/repos/alice/x/pulls/13":
+					_, _ = w.Write([]byte(`{"number":13,"user":{"login":"bob"}}`))
+				case r.URL.Path == "/api/v1/repos/alice/x/pulls/13.diff":
+					_, _ = w.Write([]byte(diff))
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
+					_, _ = w.Write([]byte(`[]`))
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
+					created = true
+					_, _ = w.Write([]byte(`{"id":1,"state":"COMMENT"}`))
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			file := filepath.Join(t.TempDir(), "comments.json")
+			require.NoError(t, os.WriteFile(file, []byte("["+tc.comment+"]"), 0o600))
+			deps, _, _ := serverDeps(t, server.URL)
+			err := Execute(context.Background(), deps, []string{"pr", "review", "13", "-R", "alice/x", "--comment", "--comments-file", file})
+			if tc.want == "" {
+				require.NoError(t, err)
+				require.True(t, created)
+				return
+			}
+			require.EqualError(t, err, tc.want)
+			require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+			require.False(t, created, "nothing is created")
 		})
 	}
 }
@@ -322,4 +831,12 @@ func TestReviewDeleteAndDismissRequireYesWithoutInput(t *testing.T) {
 		require.EqualError(t, err, tc.want)
 	}
 	require.Zero(t, mutations)
+}
+
+func TestCommentFlagHelpNamesThePendingReview(t *testing.T) {
+	for _, args := range [][]string{{"pr", "review"}, {"pr", "review", "create"}, {"pr", "review", "submit"}} {
+		deps, out, _ := testDeps(t)
+		require.NoError(t, Execute(context.Background(), deps, append(args, "--help")))
+		require.Contains(t, out.String(), "Comment without approving (requires a body or inline comments, which can be those of the pending review it publishes; an empty --body clears that review's body when it has inline comments, and is refused otherwise)", args)
+	}
 }

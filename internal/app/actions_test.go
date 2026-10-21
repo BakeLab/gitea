@@ -232,14 +232,28 @@ func TestWorkflowRunFollowStreamsTheLogsOfItsJobs(t *testing.T) {
 		"GET contents/.gitea/workflows/ci.yml":     contentsOf("on: workflow_dispatch\n"),
 		"POST actions/workflows/ci.yml/dispatches": `{"workflow_run_id":11,"html_url":"https://gitea.test/alice/project/actions/runs/11"}`,
 		"GET actions/runs/11/jobs":                 failedJobsFixture,
+		"GET actions/runs/11":                      `{"id":11,"path":"ci.yml@refs/heads/main","status":"completed","conclusion":"failure"}`,
 		"GET actions/jobs/30/logs":                 "compiled\n",
 		"GET actions/jobs/31/logs":                 "boom\n",
 	})
 	deps, out, diagnostics := actionsDeps(t, server.URL, false)
-	require.NoError(t, Execute(context.Background(), deps, []string{"workflow", "run", "ci", "-R", "alice/project", "--ref", "main", "--follow", "--interval=1ms"}))
+	// Like gt run watch, following a run that fails fails.
+	err := Execute(context.Background(), deps, []string{"workflow", "run", "ci", "-R", "alice/project", "--ref", "main", "--follow", "--interval=1ms"})
+	require.EqualError(t, err, "run 11 (CI) completed with failure")
+	require.Equal(t, 1, clierr.ExitCode(err))
 	require.Equal(t, "https://gitea.test/alice/project/actions/runs/11\nbuild\tcompiled\ntest\tboom\n", out.String())
 	require.Equal(t, "build (job 30)\ntest (job 31)\n", diagnostics.String())
-	err := Execute(context.Background(), deps, []string{"workflow", "run", "ci.yml", "-R", "alice/project", "--ref", "main", "--follow", "--json"})
+	succeeded, _ := actionsAPI(t, map[string]string{
+		"GET actions/workflows":                    workflowsFixture,
+		"GET contents/.gitea/workflows/ci.yml":     contentsOf("on: workflow_dispatch\n"),
+		"POST actions/workflows/ci.yml/dispatches": `{"workflow_run_id":11}`,
+		"GET actions/runs/11/jobs":                 `{"total_count":1,"jobs":[{"id":30,"name":"build","status":"completed","conclusion":"success","started_at":"2028-01-01T11:00:05Z"}]}`,
+		"GET actions/runs/11":                      `{"id":11,"status":"completed","conclusion":"success"}`,
+		"GET actions/jobs/30/logs":                 "compiled\n",
+	})
+	deps, _, _ = actionsDeps(t, succeeded.URL, false)
+	require.NoError(t, Execute(context.Background(), deps, []string{"workflow", "run", "ci", "-R", "alice/project", "--ref", "main", "--follow", "--interval=1ms"}))
+	err = Execute(context.Background(), deps, []string{"workflow", "run", "ci.yml", "-R", "alice/project", "--ref", "main", "--follow", "--json"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.ErrorContains(t, err, "--follow cannot be combined with --json")
 }

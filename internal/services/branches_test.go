@@ -34,12 +34,13 @@ func TestBranchListMapsServerFields(t *testing.T) {
 		assert.Equal(t, "/api/v1/repos/owner/repo/branches", r.URL.Path)
 		assert.Equal(t, "20", r.URL.Query().Get("limit"))
 		assert.Equal(t, "3", r.URL.Query().Get("page"))
-		_, _ = w.Write([]byte(`[{"name":"main","commit":{"id":"abc","message":"Fix\n\nbody","timestamp":"2026-10-01T12:00:00Z"},"protected":true,"required_approvals":2,"user_can_push":true,"user_can_merge":true},{"name":"orphan","commit":null}]`))
+		_, _ = w.Write([]byte(`[{"name":"main","commit":{"id":"abc","message":"Fix\n\nbody","timestamp":"2026-10-01T12:00:00Z"},"protected":true,"required_approvals":2,"user_can_push":true,"user_can_merge":true},{"name":"dev","commit":{"id":"def","message":"Wip","timestamp":"2026-10-01T14:30:00+02:00"}},{"name":"orphan","commit":null}]`))
 	}))
 	items, err := (Branches{Client: client}).ListPage(context.Background(), "owner/repo", 20, 3)
 	require.NoError(t, err)
 	require.Equal(t, []Branch{
 		{Name: "main", SHA: "abc", Message: "Fix\n\nbody", UpdatedAt: "2026-10-01T12:00:00Z", Protected: true, RequiredApprovals: 2, CanPush: true, CanMerge: true},
+		{Name: "dev", SHA: "def", Message: "Wip", UpdatedAt: "2026-10-01T12:30:00Z"}, // in UTC, whatever the committer's zone
 		{Name: "orphan"},
 	}, items.Items)
 }
@@ -82,6 +83,51 @@ func TestBranchCreateFromATagOrCommitSendsOldRefName(t *testing.T) {
 	item, err := (Branches{Client: client}).Create(context.Background(), "owner/repo", "hotfix", "v1.0.0")
 	require.NoError(t, err)
 	require.Equal(t, Branch{Name: "hotfix", SHA: "abc"}, item)
+}
+
+func TestEditProtectionChangesOnlyTheNamedSettings(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "PATCH /api/v1/repos/owner/repo/branch_protections/release%2F%2A", r.Method+" "+r.URL.EscapedPath())
+		payload := requestJSON(t, r)
+		for key, value := range payload {
+			switch key {
+			case "status_check_contexts", "enable_status_check", "enable_push", "enable_push_whitelist", "push_whitelist_usernames", "push_whitelist_teams":
+			default:
+				require.Nil(t, value, key)
+			}
+		}
+		require.Equal(t, []any{"ci"}, payload["status_check_contexts"])
+		require.Equal(t, true, payload["enable_status_check"])
+		require.Equal(t, []any{"alice", "bob"}, payload["push_whitelist_usernames"])
+		require.Equal(t, []any{}, payload["push_whitelist_teams"], "an empty list replaces the teams; null would keep them")
+		// Gitea leaves out users that cannot write to the repository.
+		_, _ = w.Write([]byte(`{"rule_name":"release/*","push_whitelist_usernames":["alice"]}`))
+	}))
+	err := (Branches{Client: client}).EditProtection(context.Background(), "owner/repo",
+		Protection{Rule: "release/*", RequiredApprovals: 5, PushUsers: []string{"alice", "bob"}, StatusChecks: []string{"ci"}},
+		ProtectionChanges{Pushers: true, StatusChecks: true})
+	require.EqualError(t, err, "the rule was updated without bob among those who may push, as only users and teams with write access to owner/repo can push; "+
+		"to retry, grant them write access and protect again with the same --allow-push")
+}
+
+func TestEditProtectionReplacesThePushersAndTellsWhoCanStillPush(t *testing.T) {
+	saved := `{"rule_name":"main","push_whitelist_usernames":[],"push_whitelist_teams":[]}`
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload := requestJSON(t, r)
+		require.Equal(t, []any{}, payload["push_whitelist_usernames"], "users left out of --allow-push lose push access")
+		require.Equal(t, []any{"devs"}, payload["push_whitelist_teams"])
+		_, _ = w.Write([]byte(saved))
+	}))
+	edit := func() error {
+		return (Branches{Client: client}).EditProtection(context.Background(), "acme/repo", Protection{Rule: "main", PushTeams: []string{"devs"}}, ProtectionChanges{Pushers: true})
+	}
+	err := edit()
+	require.ErrorContains(t, err, "nobody can push to main now")
+	// Who can push is read from the saved rule, not from the request.
+	saved = `{"rule_name":"main","push_whitelist_usernames":["alice"],"push_whitelist_teams":[]}`
+	err = edit()
+	require.ErrorContains(t, err, "the rule was updated without team acme/devs")
+	require.NotContains(t, err.Error(), "nobody can push")
 }
 
 func TestBranchProtectionIsIdempotent(t *testing.T) {

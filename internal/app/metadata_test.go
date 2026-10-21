@@ -148,10 +148,17 @@ func TestMilestonesAcceptTitlesOrIDs(t *testing.T) {
 		case "POST /api/v1/repos/alice/project/issues":
 			requirePayload(t, `{"title":"x","milestone":3}`, r.Body)
 			calls = append(calls, r.Method+" "+r.URL.Path)
-			_, _ = w.Write([]byte(`{"number":8}`))
+			_, _ = w.Write([]byte(`{"number":8,"milestone":{"id":3}}`))
 		case "PATCH /api/v1/repos/alice/project/issues/8":
-			calls = append(calls, r.Method+" "+r.URL.Path+" milestone="+payloadField(t, r, "milestone"))
-			_, _ = w.Write([]byte(`{"number":8}`))
+			milestone := payloadField(t, r, "milestone")
+			calls = append(calls, r.Method+" "+r.URL.Path+" milestone="+milestone)
+			if milestone == "0" {
+				_, _ = w.Write([]byte(`{"number":8}`))
+				return
+			}
+			_, _ = fmt.Fprintf(w, `{"number":8,"milestone":{"id":%s}}`, milestone)
+		case "GET /api/v1/repos/alice/project/issues/8/dependencies", "GET /api/v1/repos/alice/project/issues/8/blocks":
+			writeFirstPage(w, r, `[]`)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -246,6 +253,10 @@ func TestBulkMilestoneStateContinuesAfterFailureAndKeepsJSONClean(t *testing.T) 
 func TestMilestoneCreateDescriptionFileAndEditor(t *testing.T) {
 	var createBody map[string]any
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeFirstPage(w, r, `[]`)
+			return
+		}
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Equal(t, "/api/v1/repos/alice/project/milestones", r.URL.Path)
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&createBody))
@@ -306,6 +317,10 @@ func TestMilestoneCreateInteractiveForm(t *testing.T) {
 	var body map[string]any
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/repos/alice/project/milestones", r.URL.Path)
+		if r.Method == http.MethodGet {
+			writeFirstPage(w, r, `[]`)
+			return
+		}
 		require.Equal(t, http.MethodPost, r.Method)
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		_, _ = w.Write([]byte(`{"id":9,"title":"Release","description":"Ship it","state":"open","due_on":"2026-12-31T00:00:00Z"}`))
@@ -322,7 +337,7 @@ func TestMilestoneCreateInteractiveForm(t *testing.T) {
 	require.Empty(t, diagnostics.String())
 	require.Equal(t, "Release", body["title"])
 	require.Equal(t, "Ship it", body["description"])
-	require.Equal(t, "2026-12-31T00:00:00Z", body["due_on"])
+	require.Equal(t, "2026-12-31T23:59:59Z", body["due_on"])
 
 	out.Reset()
 	deps.MilestoneForm = milestoneFormFunc(func(context.Context) (terminal.MilestoneFormValues, error) {
@@ -337,6 +352,10 @@ func TestMilestoneCreateInteractiveForm(t *testing.T) {
 func TestMilestoneCreateState(t *testing.T) {
 	var payload map[string]any
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeFirstPage(w, r, `[]`)
+			return
+		}
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Equal(t, "/api/v1/repos/alice/project/milestones", r.URL.Path)
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
@@ -347,6 +366,68 @@ func TestMilestoneCreateState(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "create", "-R", "alice/project", "--title", "Done", "--state", "closed", "--json=id,state", "--no-input"}))
 	require.Equal(t, "closed", payload["state"])
 	require.JSONEq(t, `{"id":9,"state":"closed"}`, out.String())
+}
+
+func TestMilestoneCreateRefusesAnExistingTitleUnlessForced(t *testing.T) {
+	var changes []string
+	var patched map[string]any
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/milestones":
+			writeFirstPage(w, r, `[{"id":3,"title":"v1.0","state":"closed"}]`)
+		case "GET /api/v1/repos/alice/project/milestones/3":
+			_, _ = w.Write([]byte(`{"id":3,"title":"v1.0","state":"closed"}`))
+		case "PATCH /api/v1/repos/alice/project/milestones/3":
+			changes = append(changes, r.Method)
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&patched))
+			_, _ = w.Write([]byte(`{"id":3,"title":"v1.0","description":"First","state":"closed"}`))
+		default:
+			changes = append(changes, r.Method)
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"milestone", "create", "V1.0", "-R", "alice/project", "--no-input"})
+	require.EqualError(t, err, `milestone "v1.0" already exists in alice/project; pass --force to update it`)
+	require.Empty(t, changes)
+	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "create", "v1.0", "-R", "alice/project", "--description", "First", "--force", "--json=id,description", "--no-input"}))
+	require.Equal(t, []string{http.MethodPatch}, changes)
+	require.Equal(t, "First", patched["description"])
+	require.Nil(t, patched["state"], "--force keeps the state without --state")
+	require.JSONEq(t, `{"id":3,"description":"First"}`, out.String())
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "create", "v1.0", "-R", "alice/project", "--description", "First", "--force", "--no-input"}))
+	require.Equal(t, server.URL+"/alice/project/milestone/3\n", out.String(), "an update prints the URL like a creation")
+}
+
+func TestMilestoneEditRefusesTheTitleOfAnotherMilestone(t *testing.T) {
+	var changes []string
+	listings := 0
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/milestones":
+			if r.URL.Query().Get("page") == "1" {
+				listings++
+			}
+			writeFirstPage(w, r, `[{"id":3,"title":"v1.0"},{"id":4,"title":"v2.0"}]`)
+		case "GET /api/v1/repos/alice/project/milestones/3":
+			_, _ = w.Write([]byte(`{"id":3,"title":"v1.0"}`))
+		case "PATCH /api/v1/repos/alice/project/milestones/3":
+			changes = append(changes, r.Method)
+			_, _ = w.Write([]byte(`{"id":3,"title":"V1.0"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"milestone", "edit", "v1.0", "--title", "V2.0", "-R", "alice/project", "--no-input"})
+	require.EqualError(t, err, `milestone "v2.0" already exists in alice/project`)
+	require.Empty(t, changes)
+	require.Equal(t, 1, listings, "one listing finds the milestone and checks the title")
+	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "edit", "v1.0", "--title", "V1.0", "-R", "alice/project", "--no-input"}))
+	require.Equal(t, []string{http.MethodPatch}, changes)
 }
 
 func TestMilestoneTablesViewsAndDoneLines(t *testing.T) {
@@ -395,6 +476,9 @@ func TestMilestoneTablesViewsAndDoneLines(t *testing.T) {
 	require.Equal(t, "✓ Added #1, #2 to milestone \"v1.0\" in alice/project\n", diagnostics.String())
 	run(true, "milestone", "issue", "remove", "v0.9", "1")
 	require.Equal(t, "✓ Removed #1 from milestone \"v0.9\" in alice/project\n", diagnostics.String())
+	// Like adding an issue that is in the milestone already, removing one that is not is no failure.
+	run(true, "milestone", "issue", "remove", "v1.0", "1")
+	require.Equal(t, "! #1 is not in milestone \"v1.0\"\n", diagnostics.String())
 	run(false, "milestone", "create", "v2.0")
 	require.Equal(t, server.URL+"/alice/project/milestone/3\n", out.String())
 	require.Equal(t, []string{
@@ -409,11 +493,16 @@ func TestMilestoneTablesViewsAndDoneLines(t *testing.T) {
 
 func TestMilestoneEditFormStartsFromTheMilestone(t *testing.T) {
 	var edited map[string]any
+	patches := 0
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/repos/alice/project/milestones":
-			writeFirstPage(w, r, `[{"id":3,"title":"v1.0","description":"First","due_on":"2026-12-31T00:00:00Z"}]`)
+			writeFirstPage(w, r, `[{"id":3,"title":"v1.0","description":"First","due_on":"2026-12-31T15:30:00Z"}]`)
+		case "GET /api/v1/repos/alice/project/milestones/3":
+			_, _ = w.Write([]byte(`{"id":3,"title":"v1.0","description":"First","due_on":"2026-12-31T15:30:00Z"}`))
 		case "PATCH /api/v1/repos/alice/project/milestones/3":
+			patches++
+			edited = nil
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&edited))
 			_, _ = w.Write([]byte(`{"id":3,"title":"v1.0.0"}`))
 		default:
@@ -421,20 +510,33 @@ func TestMilestoneEditFormStartsFromTheMilestone(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	deps, _, _ := serverDeps(t, server.URL)
+	deps, _, diagnostics := serverDeps(t, server.URL)
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	var heading string
 	var current terminal.MilestoneFormValues
+	title := "v1.0.0"
 	deps.MilestoneForm = milestoneFormEditor(func(h string, c terminal.MilestoneFormValues) terminal.MilestoneFormValues {
 		heading, current = h, c
-		return terminal.MilestoneFormValues{Title: "v1.0.0", Description: c.Description}
+		// The form gives the deadline back as the date it shows.
+		due, err := time.Parse(time.DateOnly, c.Deadline.Format(time.DateOnly))
+		require.NoError(t, err)
+		return terminal.MilestoneFormValues{Title: title, Description: c.Description, Deadline: &due}
 	})
 	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "edit", "v1.0", "-R", "alice/project"}))
 	require.Equal(t, "Editing milestone \"v1.0\" in alice/project", heading)
 	require.Equal(t, "First", current.Description)
 	require.Equal(t, "2026-12-31", current.Deadline.Format(time.DateOnly))
+	// Only what the form changed is sent, and the deadline keeps its time of day.
 	require.Equal(t, "v1.0.0", edited["title"])
-	require.Equal(t, "First", edited["description"])
+	require.Nil(t, edited["description"])
+	require.Equal(t, "2026-12-31T15:30:00Z", edited["due_on"])
+	// A form submitted unchanged sends nothing, so the deadline keeps its time of day.
+	title = "v1.0"
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "edit", "v1.0", "-R", "alice/project"}))
+	require.Equal(t, 1, patches)
+	require.Equal(t, "! No changes to milestone \"v1.0\" in alice/project\n", withoutANSI(diagnostics.String()))
+	title = "v1.0.0"
 	// --by-name only says how to read the argument, so the form still opens.
 	heading = ""
 	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "edit", "v1.0", "--by-name", "-R", "alice/project"}))

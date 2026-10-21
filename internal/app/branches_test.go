@@ -63,6 +63,10 @@ func TestBranchProtectChecksTheBranchAndIsIdempotent(t *testing.T) {
 				return
 			}
 			_, _ = w.Write([]byte(`{"rule_name":"dev"}`))
+		case "PATCH /api/v1/repos/alice/x/branch_protections/main":
+			// Only the settings the flags name change.
+			requirePayload(t, `{"required_approvals":3,"enable_push":true,"enable_push_whitelist":true,"push_whitelist_usernames":["bob"],"push_whitelist_teams":[]}`, r.Body)
+			_, _ = w.Write([]byte(`{"rule_name":"main","push_whitelist_usernames":["bob"]}`))
 		case "DELETE /api/v1/repos/alice/x/branch_protections/dev":
 			w.WriteHeader(http.StatusNotFound)
 		case "GET /api/v1/repos/alice/x":
@@ -77,8 +81,13 @@ func TestBranchProtectChecksTheBranchAndIsIdempotent(t *testing.T) {
 	require.EqualError(t, err, `protect nope: branch "nope" not found in alice/x`)
 	require.Equal(t, []string{"GET /api/v1/repos/alice/x/branches/nope", "GET /api/v1/repos/alice/x"}, requests)
 	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "protect", "main", "dev", "-R", "alice/x"}))
-	require.Equal(t, "! main is already protected in alice/x; change its rule on the web\n"+
+	require.Equal(t, "! main is already protected in alice/x; pass the settings to change\n"+
 		"✓ Protected dev in alice/x (1 approval required, no direct pushes)\n", diagnostics.String())
+	diagnostics.Reset()
+	requests = nil
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "protect", "main", "--required-approvals", "3", "--allow-push", "bob", "-R", "alice/x"}))
+	require.Equal(t, "✓ Updated the protection of main in alice/x\n", diagnostics.String())
+	require.Contains(t, requests, "PATCH /api/v1/repos/alice/x/branch_protections/main")
 	diagnostics.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "unprotect", "dev", "-R", "alice/x", "--yes"}))
 	require.Equal(t, "! dev is not protected in alice/x\n", diagnostics.String())
@@ -99,8 +108,17 @@ func TestBranchCreateFromATag(t *testing.T) {
 func TestBranchDeleteTakesSeveralBranches(t *testing.T) {
 	var deleted []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/alice/x/branches/")
+		if r.Method == http.MethodGet {
+			if name == "nope" || name == "gone" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write([]byte(`{"name":"` + name + `"}`))
+			return
+		}
 		require.Equal(t, http.MethodDelete, r.Method)
-		deleted = append(deleted, strings.TrimPrefix(r.URL.Path, "/api/v1/repos/alice/x/branches/"))
+		deleted = append(deleted, name)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
@@ -111,6 +129,11 @@ func TestBranchDeleteTakesSeveralBranches(t *testing.T) {
 	require.Equal(t, []string{"Delete 2 branches (old-a, old-b) from alice/x?"}, prompt.confirmations)
 	require.Equal(t, []string{"old-a", "old-b"}, deleted)
 	require.Equal(t, "✓ Deleted branch old-a from alice/x\n✓ Deleted branch old-b from alice/x\n", diagnostics.String())
+	// A missing branch among several deletes none of them.
+	deleted = nil
+	err := Execute(context.Background(), deps, []string{"branch", "rm", "old-a", "nope", "gone", "-R", "alice/x", "--yes"})
+	require.EqualError(t, err, "branch \"nope\" not found in alice/x\nbranch \"gone\" not found in alice/x")
+	require.Empty(t, deleted)
 }
 
 func TestBranchListPipedKeepsPlainNamesAndFullCommits(t *testing.T) {
@@ -165,4 +188,50 @@ func TestBranchProtectRejectsATeamOfAnotherOrganization(t *testing.T) {
 	deps, _, _ := repoTTYDeps(t, server.URL)
 	err := Execute(context.Background(), deps, []string{"branch", "protect", "main", "--allow-push", "other/devs", "-R", "acme/x"})
 	require.EqualError(t, err, "team other/devs is not in acme, the owner of acme/x")
+}
+
+func TestBranchProtectRejectsEmptyNameLists(t *testing.T) {
+	for _, tc := range []struct{ flag, want string }{
+		{"--status-check=", "status check names cannot be empty"},
+		{"--status-check=ci,", "status check names cannot be empty"},
+		{"--allow-push=", "pusher names cannot be empty"},
+	} {
+		requireUsageBeforeRequests(t, tc.want, "branch", "protect", "main", tc.flag, "-R", "acme/x")
+	}
+}
+
+func TestBranchProtectFailsWhenGiteaDropsPushers(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/acme/x/branches/main":
+			_, _ = w.Write([]byte(`{"name":"main"}`))
+		case "POST /api/v1/repos/acme/x/branch_protections":
+			// Gitea leaves out users and teams that cannot write to the repository.
+			_, _ = w.Write([]byte(`{"rule_name":"main","push_whitelist_usernames":["alice"],"push_whitelist_teams":["devs"]}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, _, diagnostics := repoTTYDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"branch", "protect", "main", "--allow-push", "Alice,bob,acme/devs,acme/ops", "-R", "acme/x"})
+	require.EqualError(t, err, "protect main: the rule was created without bob, team acme/ops among those who may push, as only users and teams with write access to acme/x can push; "+
+		"to retry, grant them write access and protect again with the same --allow-push")
+	require.Empty(t, diagnostics.String())
+}
+
+func TestBranchProtectSaysWhenNobodyCanPush(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "POST /api/v1/repos/acme/x/branch_protections":
+			_, _ = w.Write([]byte(`{"rule_name":"release/*","enable_push":true,"enable_push_whitelist":true}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := repoTTYDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"branch", "protect", "--pattern", "release/*", "--allow-push", "bob", "-R", "acme/x"})
+	require.EqualError(t, err, "protect release/*: the rule was created without bob among those who may push, as only users and teams with write access to acme/x can push; "+
+		"nobody can push to release/* now; to retry, grant them write access and protect again with the same --allow-push")
 }

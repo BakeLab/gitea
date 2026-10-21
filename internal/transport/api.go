@@ -6,9 +6,14 @@ package transport
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"encoding/base64"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -72,14 +77,50 @@ func (t captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, err
 	}
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
-	failure := newAPIError(resp.StatusCode, req.Method, req.URL.Path, t.token, data)
+	// The request as sent carries the secrets that the transports below marked on it, such as
+	// the values of configured headers.
+	sent := req
+	if resp.Request != nil {
+		sent = resp.Request
+	}
+	failure := newAPIError(sent.Context(), resp.StatusCode, req.Method, req.URL.Path, t.token, data)
 	failure.bind(req.URL)
+	if redirect(resp.StatusCode) {
+		failure.Moved = movedRepository(req.URL, resp.Header.Get("Location"))
+	}
 	holder.Store(failure)
 	resp.Body = struct {
 		io.Reader
 		io.Closer
 	}{io.MultiReader(bytes.NewReader(data), resp.Body), resp.Body}
 	return resp, nil
+}
+
+// movedRepository returns the OWNER/REPO that location moves the repository of an API request
+// at from to, or "" when location moves no repository.
+func movedRepository(from *url.URL, location string) string {
+	to, err := from.Parse(location)
+	if err != nil || !strings.EqualFold(to.Host, from.Host) {
+		return ""
+	}
+	repository := func(u *url.URL) string {
+		_, rest, ok := strings.Cut(u.EscapedPath(), "/api/v1/repos/")
+		parts := strings.SplitN(rest, "/", 3)
+		if !ok || len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+			return ""
+		}
+		owner, ownerErr := url.PathUnescape(parts[0])
+		name, nameErr := url.PathUnescape(parts[1])
+		if ownerErr != nil || nameErr != nil {
+			return ""
+		}
+		return owner + "/" + name
+	}
+	old, moved := repository(from), repository(to)
+	if old == "" || moved == "" || old == moved {
+		return ""
+	}
+	return moved
 }
 
 type retryTransport struct {
@@ -91,7 +132,7 @@ func (t retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	safe := (req.Method == http.MethodGet || req.Method == http.MethodHead) && (req.Body == nil || req.Body == http.NoBody)
 	for attempt := 0; ; attempt++ {
 		resp, err := t.base.RoundTrip(req)
-		if !safe || attempt >= t.retries || (err == nil && resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode != http.StatusGatewayTimeout) {
+		if !safe || attempt >= t.retries || (err != nil && !transient(err)) || (err == nil && resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode != http.StatusGatewayTimeout) {
 			return resp, err
 		}
 		if resp != nil {
@@ -105,6 +146,26 @@ func (t retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		case <-timer.C:
 		}
 	}
+}
+
+// transient reports whether a request failed in a way that another attempt may not: a refused
+// connection or one dropped before the answer. A timeout, which another attempt would only
+// multiply, and a TLS or client certificate failure or a host name that does not exist, which
+// recur, are not transient.
+func transient(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
+		return false
+	}
+	if dnsErr, ok := errors.AsType[*net.DNSError](err); ok && dnsErr.IsNotFound {
+		return false
+	}
+	if opErr, ok := errors.AsType[*net.OpError](err); ok && opErr.Op == "dial" {
+		return true
+	}
+	return connectionReset(err) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 type authTransport struct {
@@ -135,26 +196,33 @@ func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(signed)
 }
 
-// signingBody returns the request body to sign, buffering a body that cannot be replayed.
+// signingBody returns the request body to sign. A body that can be read again is hashed as it is
+// read into the SHA-512 Digest header that HTTPSign signs, so that a large upload is not held in
+// memory, and nil is returned; any other body is buffered and returned.
 func signingBody(req *http.Request) ([]byte, error) {
 	if req.Body == nil || req.Body == http.NoBody {
 		return nil, nil
 	}
-	body := req.Body
 	if req.GetBody != nil {
-		var err error
-		if body, err = req.GetBody(); err != nil {
+		body, err := req.GetBody()
+		if err != nil {
 			return nil, errors.New("cannot read API request body for signing")
 		}
+		digest := sha512.New()
+		_, err = io.Copy(digest, body)
+		_ = body.Close()
+		if err != nil {
+			return nil, errors.New("cannot read API request body for signing")
+		}
+		req.Header.Set("Digest", "SHA-512="+base64.StdEncoding.EncodeToString(digest.Sum(nil)))
+		return nil, nil
 	}
-	data, err := io.ReadAll(body)
-	_ = body.Close()
+	data, err := io.ReadAll(req.Body)
+	_ = req.Body.Close()
 	if err != nil {
 		return nil, errors.New("cannot read API request body for signing")
 	}
-	if req.GetBody == nil {
-		req.Body = io.NopCloser(bytes.NewReader(data))
-		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(data)), nil }
-	}
+	req.Body = io.NopCloser(bytes.NewReader(data))
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(data)), nil }
 	return data, nil
 }

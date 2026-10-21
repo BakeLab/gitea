@@ -227,6 +227,13 @@ $ gt webhook view 3 --org acme --reveal-url`,
 	return cmd
 }
 
+// webhookEditFlags are the flags of webhook edit that change a webhook; the hidden secret flags
+// are among them so that their own error explains why they cannot.
+var webhookEditFlags = []string{
+	"events", "active", "url", "branch-filter", "config", "secret", "secret-file",
+	"authorization-header", "authorization-header-file", "clear-authorization",
+}
+
 // webhookChangeCommand creates or edits a webhook.
 func (a *application) webhookChangeCommand(scope *webhookScope, create bool) *cobra.Command {
 	var endpoint, kind, secret, secretFile, authorization, authorizationFile, filter string
@@ -239,8 +246,9 @@ func (a *application) webhookChangeCommand(scope *webhookScope, create bool) *co
 
 Gitea drops the stored authorization header of a webhook on every edit and never shows it, so
 pass it again with --authorization-header-file. On a terminal, gt asks for it instead; leave
-the answer empty for a webhook without one. Signing secrets cannot be changed: recreate the
-webhook to rotate one.`,
+the answer empty for a webhook without one. Elsewhere, an edit without one of the
+authorization flags is refused before gt contacts Gitea. Signing secrets cannot be changed:
+recreate the webhook to rotate one.`,
 		Example: `# pause deliveries of a webhook without an authorization header
 $ gt webhook edit 3 --active=false --clear-authorization
 # keep the authorization header while changing the events
@@ -252,12 +260,9 @@ $ gt webhook edit 3 --events push,release --authorization-header-file header.txt
 		command.Args = usageArgs(cobra.MaximumNArgs(1))
 		command.Long = `Create a webhook that delivers events to a URL, by default as JSON for push events.
 
-Events: ` + strings.Join(services.WebhookEvents, ", ") + `; issues and pull_request
-include every issue or pull request event.
+` + wrap("Events: "+strings.Join(services.WebhookEvents, ", ")+"; issues and pull_request include every issue or pull request event.", 95) + `
 
-Types: ` + strings.Join(services.WebhookTypes, ", ") + `. Slack webhooks need
---config channel=#name (username, icon_url and color are optional). Gitea reads no other
-settings from --config, so set up discord, matrix and packagist webhooks in the web UI.`
+` + wrap("Types: "+strings.Join(services.WebhookTypes, ", ")+". Slack webhooks need --config channel=#name (username, icon_url and color are optional). Gitea reads no other settings from --config, so set up discord, matrix and packagist webhooks in the web UI.", 95)
 		command.Example = `$ gt webhook create https://ci.example.com/hooks/gitea --events push,pull_request
 # sign deliveries with a secret read from a file
 $ gt webhook create https://ci.example.com/hooks/gitea --secret-file secret.txt
@@ -291,6 +296,9 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 		if !create {
 			if id, err = number(args[0]); err != nil {
 				return err
+			}
+			if !slices.ContainsFunc(webhookEditFlags, cmd.Flags().Changed) {
+				return clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --events or --active (see --help)"))
 			}
 		}
 		if cmd.Flags().Changed("secret") && cmd.Flags().Changed("secret-file") {

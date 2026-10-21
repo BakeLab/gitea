@@ -5,10 +5,12 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,7 +65,7 @@ func (s Labels) List(ctx context.Context, limit, page int) ([]Label, error) {
 
 // ListPage is List with the number of labels in the scope, as the server counts them.
 func (s Labels) ListPage(ctx context.Context, limit, page int) (Page[Label], error) {
-	labels, err := listPage(limit, page, func(limit, page int) ([]*gitea.Label, http.Header, error) {
+	labels, err := instancePage(ctx, s.Client, limit, page, func(limit, page int) ([]*gitea.Label, http.Header, error) {
 		labels, resp, err := s.list(ctx, limit, page)
 		return labels, headerOf(resp), err
 	})
@@ -71,7 +73,7 @@ func (s Labels) ListPage(ctx context.Context, limit, page int) (Page[Label], err
 }
 
 func (s Labels) list(ctx context.Context, limit, page int) ([]*gitea.Label, *gitea.Response, error) {
-	return call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Label, *gitea.Response, error) {
+	labels, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Label, *gitea.Response, error) {
 		if s.Organization != "" {
 			return c.Organizations.ListOrgLabels(ctx, s.Organization, gitea.ListOrgLabelsOptions{ListOptions: listOptions(limit, page)})
 		}
@@ -81,11 +83,15 @@ func (s Labels) list(ctx context.Context, limit, page int) ([]*gitea.Label, *git
 		}
 		return c.Repositories.ListRepoLabels(ctx, owner, repo, gitea.ListLabelsOptions{ListOptions: listOptions(limit, page)})
 	})
+	if s.Organization != "" {
+		return labels, resp, Classify(err, "organization", strconv.Quote(s.Organization), "")
+	}
+	return labels, resp, Classify(err, "repository", s.Repository, "")
 }
 
 // All returns every label in the scope.
 func (s Labels) All(ctx context.Context) ([]Label, error) {
-	return listAll(func(page int) ([]Label, error) { return s.List(ctx, 100, page) })
+	return listEvery(100, func(limit, page int) (Page[Label], error) { return s.ListPage(ctx, limit, page) })
 }
 
 // Create creates one label.
@@ -216,7 +222,8 @@ func (s Milestones) List(ctx context.Context, state string, limit, page int) ([]
 		return c.Repositories.ListMilestones(ctx, owner, repo, gitea.ListMilestoneOption{ListOptions: listOptions(limit, page), State: gitea.StateType(state)})
 	})
 	if err != nil {
-		return nil, err
+		// A 404 here can only mean the repository is missing or invisible.
+		return nil, Classify(err, "repository", s.Repository, "")
 	}
 	return convertAll(milestones, milestoneFrom), nil
 }
@@ -320,20 +327,30 @@ func (s Issues) Edit(ctx context.Context, n int64, opts IssueEdit) (Issue, error
 		opts.Assignees = &names
 	}
 	if opts.Labels != nil {
-		if err := s.replaceLabels(ctx, n, append([]int64{}, (*opts.Labels)...)); err != nil {
-			return Issue{}, err
-		}
+		// The other fields go first: Gitea refuses label changes from people who cannot write
+		// to the issues, and still takes a title or body from the author.
+		ids := append([]int64{}, (*opts.Labels)...)
 		opts.Labels = nil
 		var item Issue
-		var err error
-		if opts == (IssueEdit{}) {
-			item, err = s.View(ctx, n)
-		} else {
-			item, err = s.Edit(ctx, n, opts)
+		edited := opts != (IssueEdit{})
+		if edited {
+			var err error
+			if item, err = s.Edit(ctx, n, opts); err != nil {
+				return Issue{}, err
+			}
 		}
+		labels, err := s.replaceLabels(ctx, n, ids)
 		if err != nil {
-			return Issue{}, fmt.Errorf("labels were updated, but completing the issue edit failed: %w", err)
+			saved := ""
+			if edited {
+				saved = otherChangesSent
+			}
+			return item, s.labelsError(ctx, n, item.Kind, saved, err)
 		}
+		if !edited {
+			return s.View(ctx, n)
+		}
+		item.Labels = labels
 		return item, nil
 	}
 	edit := gitea.EditIssueOption{
@@ -346,24 +363,72 @@ func (s Issues) Edit(ctx context.Context, n int64, opts IssueEdit) (Issue, error
 	return s.edit(ctx, n, edit)
 }
 
-func (s Issues) replaceLabels(ctx context.Context, n int64, ids []int64) error {
-	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
-		_, resp, err := c.Issues.ReplaceIssueLabels(ctx, owner, repo, n, gitea.IssueLabelsOption{Labels: ids})
-		return resp, err
+func (s Issues) replaceLabels(ctx context.Context, n int64, ids []int64) ([]Label, error) {
+	labels, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.Label, *gitea.Response, error) {
+		return c.Issues.ReplaceIssueLabels(ctx, owner, repo, n, gitea.IssueLabelsOption{Labels: ids})
 	})
+	return convertAll(labels, labelFrom), err
+}
+
+// otherChangesSent words, in a refused label change, that the other changes of an edit were sent.
+const otherChangesSent = "the other changes were sent"
+
+// labelsError words a failed label change of issue n of kind, or "" when unknown. saved says
+// which changes were saved before, such as "the other changes were sent", or is empty when there
+// were none.
+func (s Issues) labelsError(ctx context.Context, n int64, kind, saved string, err error) error {
+	refusal := s.labelsRefusal(ctx, n, kind, err)
+	if refusal == "" {
+		if saved != "" {
+			return fmt.Errorf("%s, but changing the labels failed: %w", saved, err)
+		}
+		return err
+	}
+	text := refusal
+	if saved != "" {
+		text = saved + ", but the labels were left unchanged: " + text
+	} else {
+		text += "; nothing was changed"
+	}
+	return &RefusedError{Text: text, Err: err}
+}
+
+// labelsRefusal words why Gitea refused a label change of issue n of kind with err, or returns
+// "" when err is no such refusal. Gitea answers a 403 to people who cannot write to the issues,
+// or pull requests, of the repository, without naming the labels.
+func (s Issues) labelsRefusal(ctx context.Context, n int64, kind string, err error) string {
+	apiErr, ok := errors.AsType[*transport.APIError](err)
+	if !ok || apiErr.Status != http.StatusForbidden || strings.Contains(apiErr.Message, "required scope") {
+		return ""
+	}
+	if kind == "" {
+		if current, viewErr := s.View(ctx, n); viewErr == nil {
+			kind = current.Kind
+		}
+	}
+	noun := "issues"
+	if kind == KindPull {
+		noun = "pull requests"
+	}
+	return fmt.Sprintf("Gitea refuses label changes from people who cannot write to the %s of %s", noun, s.Repository)
 }
 
 // applyChanges replaces incremental changes with the full label and assignee sets Gitea
 // expects, read from the issue's current state; Gitea cannot add or remove single assignees.
 func (s Issues) applyChanges(ctx context.Context, n int64, opts IssueEdit) (IssueEdit, error) {
-	changes := *opts.Changes
-	opts.Changes = nil
 	current, err := s.View(ctx, n)
 	if err != nil {
 		return opts, err
 	}
+	return s.applyChangesTo(ctx, current.Labels, current.Assignees, opts)
+}
+
+// applyChangesTo is applyChanges for an issue that holds labels and assignees.
+func (s Issues) applyChangesTo(ctx context.Context, labels []Label, assignees []string, opts IssueEdit) (IssueEdit, error) {
+	changes := *opts.Changes
+	opts.Changes = nil
 	if len(changes.AddLabels)+len(changes.RemoveLabels) > 0 {
-		kept, err := s.withoutReplacedExclusive(ctx, current.Labels, changes.AddLabels)
+		kept, err := s.withoutReplacedExclusive(ctx, labels, changes.AddLabels)
 		if err != nil {
 			return opts, err
 		}
@@ -375,7 +440,7 @@ func (s Issues) applyChanges(ctx context.Context, n int64, opts IssueEdit) (Issu
 		opts.Labels = &ids
 	}
 	if len(changes.AddAssignees)+len(changes.RemoveAssignees) > 0 {
-		names := mergeUnique(current.Assignees, changes.AddAssignees, changes.RemoveAssignees, strings.EqualFold)
+		names := mergeUnique(assignees, changes.AddAssignees, changes.RemoveAssignees, strings.EqualFold)
 		opts.Assignees = &names
 	}
 	return opts, nil
@@ -431,14 +496,26 @@ func mergeUnique[T any](current, add, remove []T, equal func(T, T) bool) []T {
 	return result
 }
 
-// RemoveMilestone refuses to clear an issue belonging to another milestone.
+// NotInMilestoneError reports an issue that RemoveMilestone left unchanged, as it is not in the
+// milestone.
+type NotInMilestoneError struct {
+	Number    int64
+	Milestone string
+}
+
+func (e *NotInMilestoneError) Error() string {
+	return fmt.Sprintf("#%d is not in milestone %q", e.Number, e.Milestone)
+}
+
+// RemoveMilestone clears the milestone of issue n when it is milestone. It refuses to clear an
+// issue belonging to another milestone or to none, returning it with a *NotInMilestoneError.
 func (s Issues) RemoveMilestone(ctx context.Context, n int64, milestone Milestone) (Issue, error) {
 	current, err := s.View(ctx, n)
 	if err != nil {
 		return Issue{}, err
 	}
 	if current.Milestone == nil || current.Milestone.ID != milestone.ID {
-		return Issue{}, fmt.Errorf("#%d is not in milestone %q", n, milestone.Title)
+		return current, &NotInMilestoneError{Number: n, Milestone: milestone.Title}
 	}
 	cleared := int64(0)
 	return s.Edit(ctx, n, IssueEdit{Milestone: &cleared})

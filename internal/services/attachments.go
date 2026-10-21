@@ -4,6 +4,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"gitea.dev/cli/internal/transport"
@@ -32,41 +34,102 @@ type IssueAttachment ReleaseAsset
 
 func assetFrom(attachment *gitea.Attachment) ReleaseAsset {
 	return ReleaseAsset{
-		ID: attachment.ID, Name: attachment.Name, Size: attachment.Size, URL: attachment.DownloadURL,
+		ID: attachment.ID, Name: attachment.Name, Size: attachment.Size, URL: assetURL(attachment),
 		CreatedAt: timestamp(attachment.Created), DownloadCount: attachment.DownloadCount,
 	}
+}
+
+// assetURL returns the URL an attachment is downloaded from at its instance,
+// .../attachments/<uuid>. Gitea lists the assets of a release with the URL
+// .../owner/repo/releases/download/<tag>/<name>, which breaks once the tag or the asset is
+// renamed, but answers every other endpoint, such as an upload, with the attachment URL, so that
+// one is used throughout. Other URLs, such as of an asset stored elsewhere, are kept.
+func assetURL(attachment *gitea.Attachment) string {
+	index := strings.LastIndex(attachment.DownloadURL, "/releases/download/")
+	if index < 0 || attachment.UUID == "" {
+		return attachment.DownloadURL
+	}
+	// Drop owner/repo to keep the instance URL.
+	instance := attachment.DownloadURL[:index]
+	for range 2 {
+		slash := strings.LastIndex(instance, "/")
+		if slash < 0 {
+			return attachment.DownloadURL
+		}
+		instance = instance[:slash]
+	}
+	if !strings.Contains(instance, "://") {
+		return attachment.DownloadURL
+	}
+	return instance + "/attachments/" + url.PathEscape(attachment.UUID)
 }
 
 // uploadAttachment streams a multipart upload to an attachment collection endpoint without
 // buffering the file in memory.
 // TODO(sdk): CreateReleaseAttachment and CreateIssueAttachment buffer the whole file.
 func uploadAttachment(ctx context.Context, client *transport.Client, endpoint, name string, input io.Reader) (ReleaseAsset, error) {
-	reader, writer := io.Pipe()
-	multipartWriter := multipart.NewWriter(writer)
-	defer reader.Close()
-	go func() {
-		part, err := multipartWriter.CreateFormFile("attachment", name)
-		if err == nil {
-			_, err = io.Copy(part, input)
-		}
-		if err == nil {
-			err = multipartWriter.Close()
-		}
-		_ = writer.CloseWithError(err)
-	}()
-	response, err := client.Do(ctx, http.MethodPost, endpoint, reader, http.Header{"Content-Type": {multipartWriter.FormDataContentType()}})
+	body, contentType, err := fileUpload(name, input)
+	if err != nil {
+		return ReleaseAsset{}, err
+	}
+	if body == nil {
+		reader, writer := io.Pipe()
+		multipartWriter := multipart.NewWriter(writer)
+		defer reader.Close()
+		go func() {
+			part, err := multipartWriter.CreateFormFile("attachment", name)
+			if err == nil {
+				_, err = io.Copy(part, input)
+			}
+			if err == nil {
+				err = multipartWriter.Close()
+			}
+			_ = writer.CloseWithError(err)
+		}()
+		body, contentType = reader, multipartWriter.FormDataContentType()
+	}
+	response, err := client.Do(ctx, http.MethodPost, endpoint, body, http.Header{"Content-Type": {contentType}})
 	if err != nil {
 		return ReleaseAsset{}, err
 	}
 	defer response.Body.Close()
 	var attachment gitea.Attachment
 	if err := json.NewDecoder(response.Body).Decode(&attachment); err != nil {
-		if ctx.Err() != nil {
-			return ReleaseAsset{}, ctx.Err()
-		}
-		return ReleaseAsset{}, errInvalidJSON
+		return ReleaseAsset{}, decodeError(ctx, response, err)
 	}
 	return assetFrom(&attachment), nil
+}
+
+// fileUpload returns the multipart upload of input when it is a regular file, read in place from
+// its current offset and readable again from the start, so that signing it for HTTPSign hashes
+// the file in a first pass instead of buffering it, and a nil body for any other input.
+func fileUpload(name string, input io.Reader) (io.Reader, string, error) {
+	file, ok := input.(*os.File)
+	if !ok {
+		return nil, "", nil
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, "", nil
+	}
+	start, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return nil, "", nil
+	}
+	var buffer bytes.Buffer
+	multipartWriter := multipart.NewWriter(&buffer)
+	if _, err := multipartWriter.CreateFormFile("attachment", name); err != nil {
+		return nil, "", err
+	}
+	head := bytes.Clone(buffer.Bytes())
+	buffer.Reset()
+	if err := multipartWriter.Close(); err != nil {
+		return nil, "", err
+	}
+	tail, size := buffer.Bytes(), info.Size()-start
+	return transport.Replayable(func() io.Reader {
+		return io.MultiReader(bytes.NewReader(head), io.NewSectionReader(file, start, size), bytes.NewReader(tail))
+	}), multipartWriter.FormDataContentType(), nil
 }
 
 // downloadAttachment opens the content of an attachment read from its owning release or issue,
@@ -76,6 +139,21 @@ func downloadAttachment(ctx context.Context, client *transport.Client, attachmen
 		return nil, errors.New("invalid attachment identifier from Gitea")
 	}
 	response, err := client.DownloadSigned(ctx, strings.TrimRight(client.BaseURL, "/")+"/attachments/"+url.PathEscape(attachment.UUID))
+	if err != nil {
+		return nil, err
+	}
+	return response.Body, nil
+}
+
+// downloadAPI opens the content an API endpoint serves, following one signed storage redirect,
+// such as Gitea's to object storage that serves files directly, without credentials. The SDK's
+// readers send that redirect's request through the instance client, which refuses another host.
+func downloadAPI(ctx context.Context, client *transport.Client, endpoint string) (io.ReadCloser, error) {
+	resolved, err := client.URL(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	response, err := client.DownloadSigned(ctx, resolved)
 	if err != nil {
 		return nil, err
 	}

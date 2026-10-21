@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // Download opens an instance-scoped file URL, following redirects only within the instance API.
@@ -79,5 +80,9 @@ func (c *Client) DownloadSigned(ctx context.Context, raw string) (*http.Response
 	}
 	unsigned := *c
 	unsigned.Token, unsigned.Signer, unsigned.Sudo = "", nil, ""
-	return unsigned.get(ctx, location, false)
+	response, err = unsigned.get(ctx, location, false)
+	if failure, ok := errors.AsType[*APIError](err); ok && !strings.EqualFold(location.Host, base.Host) {
+		failure.Storage = location.Host
+	}
+	return response, err
 }

@@ -38,7 +38,7 @@ func (s Actions) Artifacts(ctx context.Context, run int64, limit, page int) (Pag
 	if err != nil {
 		return Page[Artifact]{}, err
 	}
-	result, err := listPage(limit, page, func(limit, page int) ([]Artifact, http.Header, error) {
+	result, err := instancePage(ctx, s.Client, limit, page, func(limit, page int) ([]Artifact, http.Header, error) {
 		response, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.ActionsArtifactsResponse, *gitea.Response, error) {
 			return c.Actions.ListRepoRunArtifacts(ctx, owner, repo, run, gitea.ListActionsArtifactsOptions{ListOptions: listOptions(limit, page)})
 		})
@@ -77,13 +77,9 @@ func (s Actions) AllArtifacts(ctx context.Context, run int64) ([]Artifact, error
 
 // DownloadArtifact streams an artifact ZIP, accepting a scoped signed redirect.
 func (s Actions) DownloadArtifact(ctx context.Context, id int64) (io.ReadCloser, error) {
-	endpoint, err := s.Client.URL(fmt.Sprintf("%sartifacts/%d/zip", s.endpoint(), id))
-	if err != nil {
-		return nil, err
-	}
-	response, err := s.Client.DownloadSigned(ctx, endpoint)
+	body, err := downloadAPI(ctx, s.Client, fmt.Sprintf("%sartifacts/%d/zip", s.endpoint(), id))
 	if err != nil {
 		return nil, Classify(err, "artifact", strconv.FormatInt(id, 10), s.Repository)
 	}
-	return response.Body, nil
+	return body, nil
 }

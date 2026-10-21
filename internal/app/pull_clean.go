@@ -42,10 +42,8 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		if pull.State == "open" {
 			return errors.New("pull request is still open; close or merge it before cleaning branches")
 		}
-		// AGit pull requests have no head branch; their local branch is found by its commit.
-		if pull.Head == "" && ignoreSHA {
-			return errors.New("Gitea did not return the pull request head branch; clean it without --ignore-sha")
-		}
+		// AGit pull requests have no head branch; their local branch is found by its commit, or
+		// with --ignore-sha by what pr checkout or pr create --agit recorded, or as pr/NUMBER.
 		if !ignoreSHA && pull.HeadSHA == "" {
 			return errors.New("Gitea did not return the pull request head commit; retry with --ignore-sha")
 		}
@@ -65,7 +63,7 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		if err != nil {
 			return clierr.Wrap(clierr.Usage, err)
 		}
-		deleteRemote := !pull.HeadRemoteDeleted && pull.HeadCanPush
+		deleteRemote := pull.Head != "" && !pull.HeadRemoteDeleted && pull.HeadCanPush
 		if deleteRemote && remote == "" {
 			switch len(matchingRemotes) {
 			case 0:
@@ -111,6 +109,8 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		}
 		a.done(cmd, "Deleted local branch %s", result.LocalBranch)
 		switch {
+		case pull.Head == "":
+			// An AGit pull request has no remote branch.
 		case result.RemoteDeleted:
 			a.done(cmd, "Deleted remote branch %s/%s", result.Remote, result.RemoteBranch)
 		case pull.HeadRemoteDeleted:

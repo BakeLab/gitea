@@ -5,9 +5,8 @@ package services
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"gitea.dev/cli/internal/transport"
@@ -41,7 +40,14 @@ func (s Repositories) Generate(ctx context.Context, source string, opts Reposito
 	// TODO(sdk): CreateRepoFromTemplateOption has no default_branch.
 	var response gitea.Repository
 	if err := sendJSON(ctx, s.Client, http.MethodPost, "repos/"+source+"/generate", opts, &response); err != nil {
-		return Repository{}, err
+		// Gitea answers a missing template and a missing owner with the same 404.
+		if IsNotFound(err) {
+			if missingRepository(ctx, s.Client, source) != nil {
+				return Repository{}, &NotFoundError{Kind: "template repository", Key: source, Err: err}
+			}
+			return Repository{}, &NotFoundError{Kind: "organization", Key: strconv.Quote(opts.Owner), Err: err}
+		}
+		return Repository{}, Classify(err, "repository", "", "")
 	}
 	return repositoryFrom(&response), nil
 }
@@ -98,41 +104,20 @@ type RepositoryMigrationOptions struct {
 func (s Repositories) Migrate(ctx context.Context, opts RepositoryMigrationOptions) (Repository, error) {
 	// Gitea answers a migration only once the clone is done, which --timeout alone bounds.
 	ctx = transport.UnboundedResponse(ctx)
+	// The server may echo source credentials in its error message, also within the clone URL;
+	// the client redacts them before it cuts the message short.
+	ctx = transport.WithSecrets(ctx, opts.AuthPassword, opts.AuthToken)
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 	}
-	// TODO(sdk): MigrateRepoOption.Validate counts the description in bytes, but Gitea allows 2048
-	// characters; a longer one is set by an edit once the (synchronous) migration is done.
-	description := opts.Description
-	later := len(description) > sdkDescriptionLimit
-	if later {
-		opts.Description = ""
-	}
-	item, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Repository, *gitea.Response, error) {
-		return c.Repositories.MigrateRepo(ctx, gitea.MigrateRepoOption{
-			RepoName: opts.Name, RepoOwner: opts.Owner, CloneAddr: opts.CloneURL, Service: gitea.GitServiceType(opts.Service),
-			AuthUsername: opts.AuthUser, AuthPassword: opts.AuthPassword, AuthToken: opts.AuthToken, Mirror: opts.Mirror,
-			Private: opts.Private, Description: opts.Description, Wiki: opts.Wiki, Milestones: opts.Milestones,
-			Labels: opts.Labels, Issues: opts.Issues, PullRequests: opts.PullRequests, Releases: opts.Releases,
-			MirrorInterval: opts.MirrorInterval, LFS: opts.LFS, LFSEndpoint: opts.LFSEndpoint,
-		})
-	})
-	if err != nil {
-		// The server may echo source credentials in its error message.
-		if failure, ok := errors.AsType[*transport.APIError](err); ok && (opts.AuthPassword != "" || opts.AuthToken != "") {
-			failure.Message = ""
-		}
+	// TODO(sdk): MigrateRepoOption.Validate demands a token for every forge service, though Gitea
+	// also imports with a username and password or anonymously, and counts the description in bytes
+	// where Gitea allows 2048 characters.
+	var item gitea.Repository
+	if err := sendJSON(ctx, s.Client, http.MethodPost, "repos/migrate", opts, &item); err != nil {
 		return Repository{}, err
 	}
-	migrated := repositoryFrom(item)
-	if later {
-		edited, err := s.Edit(ctx, migrated.FullName, RepositoryEdit{Description: &description})
-		if err != nil {
-			return migrated, fmt.Errorf("repository %s was imported, but setting its description failed: %w", migrated.FullName, err)
-		}
-		return edited, nil
-	}
-	return migrated, nil
+	return repositoryFrom(&item), nil
 }

@@ -26,7 +26,7 @@ func linePrompter(t *testing.T, input string) (*FormPrompter, *strings.Builder) 
 
 func TestCreateReviewAbortsWhenDiffReviewFails(t *testing.T) {
 	failure := errors.New("editor failed")
-	p, _ := linePrompter(t, "1\nLooks good\ny\n")
+	p, _ := linePrompter(t, "1\nLooks good\n.\ny\n")
 	_, err := p.CreateReview(context.Background(), ReviewFormChoices{
 		ReviewDiff: func(context.Context) ([]ReviewCommentDraft, error) { return nil, failure },
 	})
@@ -42,10 +42,12 @@ func TestReviewFormAsksTypeThenBody(t *testing.T) {
 		hidden      []string
 	}{
 		{name: "approve without body", input: "1\n\n", want: ReviewFormValues{Event: "APPROVED"}, title: "Body (markdown, optional):"},
-		{name: "request changes", input: "2\nPlease add tests\n", want: ReviewFormValues{Event: "REQUEST_CHANGES", Body: "Please add tests"}, title: "Body (markdown, required):"},
-		{name: "comment needs a body", input: "3\n\n", err: errEmptyComment.Error(), title: "Body (markdown, required):"},
-		{name: "author can only comment", input: "1\nSelf note\n", choices: ReviewFormChoices{Author: true}, want: ReviewFormValues{Event: "COMMENT", Body: "Self note"}, hidden: []string{"Approve", "Request changes"}},
-		{name: "editor shortcut", input: "1\n\n", choices: ReviewFormChoices{Editor: "vi"}, want: ReviewFormValues{Event: "APPROVED"}, title: "Body (markdown, optional, ctrl+e opens your editor):"},
+		{name: "request changes", input: "2\nPlease add tests\n.\n", want: ReviewFormValues{Event: "REQUEST_CHANGES", Body: "Please add tests"}, title: "Body (markdown, required):"},
+		{name: "comment needs a body", input: "3\n\n\n", err: "canceled", title: "input cannot be empty"},
+		{name: "comment publishing a pending review", input: "3\n\n", choices: ReviewFormChoices{Pending: true}, want: ReviewFormValues{Event: "COMMENT"}, title: "Body (markdown, optional):"},
+		{name: "author can only comment", input: "1\nSelf note\n.\n", choices: ReviewFormChoices{Author: true}, want: ReviewFormValues{Event: "COMMENT", Body: "Self note"}, hidden: []string{"Approve", "Request changes"}},
+		// No key opens an editor in accessible mode.
+		{name: "no editor shortcut", input: "1\n\n", choices: ReviewFormChoices{Editor: "vi"}, want: ReviewFormValues{Event: "APPROVED"}, title: "Body (markdown, optional):", hidden: []string{"ctrl+e"}},
 		{name: "header", input: "1\n\n", choices: ReviewFormChoices{Header: "Reviewing #1 \"Add\x1b[31m one\" (feat/one → main) in alice/x"}, want: ReviewFormValues{Event: "APPROVED"}, title: "Reviewing #1 \"Add[31m one\" (feat/one → main) in alice/x"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,7 +68,7 @@ func TestReviewFormAsksTypeThenBody(t *testing.T) {
 }
 
 func TestReviewFormCommentMayBeInlineOnly(t *testing.T) {
-	p, _ := linePrompter(t, "3\n\ny\n")
+	p, rendered := linePrompter(t, "3\n\ny\n")
 	values, err := p.CreateReview(context.Background(), ReviewFormChoices{
 		ReviewDiff: func(context.Context) ([]ReviewCommentDraft, error) {
 			return []ReviewCommentDraft{{Path: "one.txt", Body: "nit", NewLine: 1}}, nil
@@ -74,4 +76,5 @@ func TestReviewFormCommentMayBeInlineOnly(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, ReviewFormValues{Event: "COMMENT", Comments: []ReviewCommentDraft{{Path: "one.txt", Body: "nit", NewLine: 1}}}, values)
+	require.Contains(t, rendered.String(), "Found 1 inline comment in the annotated diff\n")
 }

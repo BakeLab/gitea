@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -94,6 +95,12 @@ func TestTeamEditRefusesToRenameTheOwnerTeam(t *testing.T) {
 	err := Execute(context.Background(), deps, []string{"team", "edit", "3", "--name", "Admins"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
 	require.ErrorContains(t, err, "owner team and cannot be renamed")
+	require.Zero(t, patched)
+	err = Execute(context.Background(), deps, []string{"team", "edit", "3", "--permission", "read", "--unit", "repo.wiki=read"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.EqualError(t, err, "team acme/Owners is the organization's owner team, whose access cannot be changed; drop --permission and --unit")
+	err = Execute(context.Background(), deps, []string{"team", "edit", "3", "--all-repositories=false"})
+	require.ErrorContains(t, err, "drop --all-repositories")
 	require.Zero(t, patched)
 	require.NoError(t, Execute(context.Background(), deps, []string{"team", "edit", "3", "--description", "Owners", "--json"}))
 	require.Equal(t, 1, patched)
@@ -191,6 +198,23 @@ func TestTeamListShowsAccessAndSizes(t *testing.T) {
 	require.Equal(t, "1\tOwners\towner\t1\tall\n2\tdevelopers\twrite (code, issues, pulls)\t3\t2\n", out.String())
 }
 
+func TestTeamListCountsOnlyShortPages(t *testing.T) {
+	teams := make([]string, teamCountLimit+1)
+	for i := range teams {
+		teams[i] = fmt.Sprintf(`{"id":%d,"name":"team%d","permission":"read"}`, i+1, i+1)
+	}
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		_, _ = w.Write([]byte("[" + strings.Join(teams, ",") + "]"))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"team", "list", "acme"}))
+	require.Equal(t, []string{"/api/v1/orgs/acme/teams"}, requests, "a long page reads no member or repository counts")
+	require.True(t, strings.HasPrefix(out.String(), "1\tteam1\tread\n"), out.String())
+}
+
 func TestTeamPermissionSetsEveryUnit(t *testing.T) {
 	var sent []map[string]any
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -226,6 +250,22 @@ func TestTeamPermissionSetsEveryUnit(t *testing.T) {
 	require.Equal(t, map[string]any{"permission": "read", "units_map": wikiWrite}, sent[2])
 }
 
+func TestTeamEditComparesTheEffectiveAccess(t *testing.T) {
+	// Gitea 28 reports permission none for a team whose units grant its access.
+	response := `{"id":5,"name":"devs","permission":"none","units_map":{"repo.code":"read","repo.issues":"read","repo.pulls":"read","repo.releases":"read","repo.wiki":"read","repo.projects":"read","repo.packages":"read","repo.actions":"read"}}`
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(response))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"team", "edit", "5", "--permission", "read", "--json", "permission,access"}))
+	require.JSONEq(t, `{"permission":"none","access":"read"}`, out.String())
+
+	response = `{"id":5,"name":"devs","permission":"admin"}`
+	err := Execute(context.Background(), deps, []string{"team", "edit", "5", "--permission", "write"})
+	require.ErrorContains(t, err, "its access is admin instead of the requested write")
+}
+
 func TestTeamMemberRemoveConfirmsOnce(t *testing.T) {
 	var removed []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -248,4 +288,40 @@ func TestTeamMemberRemoveConfirmsOnce(t *testing.T) {
 	require.Equal(t, []string{"Remove carol and dave from team acme/devs?"}, prompt.confirmations)
 	require.Equal(t, []string{"carol", "dave"}, removed)
 	require.Equal(t, "✓ Removed carol from team acme/devs\n✓ Removed dave from team acme/devs\n", withoutANSI(diagnostics.String()))
+}
+
+func TestTeamMembershipAndAccessChangesContinuePastFailures(t *testing.T) {
+	var changed []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/teams/5":
+			_, _ = w.Write([]byte(`{"id":5,"name":"devs","organization":{"username":"acme"}}`))
+		case path.Base(r.URL.Path) == "ghost":
+			http.NotFound(w, r)
+		default:
+			changed = append(changed, r.Method+" "+r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		args       []string
+		changed    string
+		done, fail string
+	}{
+		{[]string{"member", "add"}, "PUT /api/v1/teams/5/members/bob", "Added bob to team acme/devs", "user ghost: not found"},
+		{[]string{"member", "remove"}, "DELETE /api/v1/teams/5/members/bob", "Removed bob from team acme/devs", "user ghost: not found"},
+		{[]string{"repo", "add"}, "PUT /api/v1/teams/5/repos/acme/bob", "Granted team acme/devs access to acme/bob", "repository acme/ghost: not found"},
+		{[]string{"repo", "remove"}, "DELETE /api/v1/teams/5/repos/acme/bob", "Revoked team acme/devs access to acme/bob", "repository acme/ghost: not found"},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			changed = nil
+			deps, _, diagnostics := serverDeps(t, server.URL)
+			deps.Streams.OutTTY = true
+			err := Execute(context.Background(), deps, append([]string{"team"}, append(tc.args, "5", "ghost", "bob", "--yes")...))
+			require.ErrorContains(t, err, tc.fail)
+			require.Equal(t, []string{tc.changed}, changed, "the failure of ghost does not stop bob")
+			require.Equal(t, "✓ "+tc.done+"\n", diagnostics.String())
+		})
+	}
 }

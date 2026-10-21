@@ -4,6 +4,7 @@
 package app
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"strconv"
@@ -116,7 +117,7 @@ func (a *application) currentPullStatus(cmd *cobra.Command) (*services.Pull, pul
 		return nil, details, branch
 	}
 	if details.reviews, err = (services.Reviews{Client: t.client, Repository: t.Repo}).All(cmd.Context(), n); err == nil {
-		pull.ReviewDecision = services.ReviewDecision(details.reviews, len(pull.Reviewers)+len(pull.ReviewerTeams) > 0)
+		pull = pull.WithReviews(details.reviews)
 	}
 	if pull.HeadSHA != "" {
 		details.checks, _ = service.CommitChecks(cmd.Context(), pull.HeadSHA)
@@ -130,13 +131,15 @@ func currentBranchSection(d terminal.Display, branch string, pull *services.Pull
 	if branch == "" {
 		return ""
 	}
-	heading := terminal.Emphasis("Current branch", d.Color && d.TTY) + "\n"
+	heading := terminal.Emphasis("Current branch", d.Color) + "\n"
 	if pull == nil {
 		return heading + "  " + terminal.Colorize("muted", "There is no pull request associated with ["+terminal.SafeLine(branch)+"]", d.Color) + "\n\n"
 	}
 	state := pullState(*pull)
+	// An AGit pull request has no head branch; it was pushed from the checked-out one.
+	head := cmp.Or(pull.Head, branch)
 	row := terminal.Table([]terminal.Column{{Prefix: "#"}, {Flex: true}, {}}, [][]terminal.Cell{{
-		{Text: strconv.FormatInt(pull.Number, 10), Link: pull.URL, Color: stateColors[state]}, {Text: pull.Title}, {Text: "[" + pull.Head + "]", Color: "cyan"},
+		{Text: strconv.FormatInt(pull.Number, 10), Link: pull.URL, Color: stateColors[state]}, {Text: pull.Title}, {Text: "[" + head + "]", Color: "cyan"},
 	}}, indented(d))
 	facts := []string{}
 	if checks := checkSummary(details.checks); checks != "" {
@@ -177,7 +180,7 @@ func statusSection(d terminal.Display, heading string, items []services.SearchIt
 // section renders a bold heading over an indented table without header, or "Nothing here". The
 // last cell of a row is a URL that only piped output keeps.
 func section[T any](d terminal.Display, heading string, items []T, row func(T) []terminal.Cell) string {
-	text := terminal.Emphasis(heading, d.Color && d.TTY) + "\n"
+	text := terminal.Emphasis(heading, d.Color) + "\n"
 	if len(items) == 0 {
 		return text + "  " + terminal.Colorize("muted", "Nothing here", d.Color) + "\n\n"
 	}

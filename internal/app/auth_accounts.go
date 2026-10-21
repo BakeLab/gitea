@@ -49,7 +49,7 @@ asks which one on a terminal.`,
 				}
 				user = matched
 			case len(names) == 1:
-				return fmt.Errorf("%s is the only account on %s; log in to another with gt auth login --host %s", names[0], t.Host, t.Host)
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is the only account on %s; log in to another with gt auth login --host %s", names[0], t.Host, t.Host))
 			case len(names) == 2 && t.host.User != "":
 				user = names[0]
 				if user == t.host.User {

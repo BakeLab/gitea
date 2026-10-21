@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -62,6 +63,9 @@ $ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), Ru
 			if err := requireWebFlags(cmd, "state", "kind", "search", "no-assignee"); err != nil {
 				return err
 			}
+			if opts.Kind == "all" {
+				return clierr.Wrap(clierr.Usage, errors.New("--kind all cannot be combined with --web; the browser lists issues or pull requests, not both"))
+			}
 		}
 		target, err := a.resolve(cmd.Context(), true)
 		if err != nil {
@@ -85,7 +89,7 @@ $ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), Ru
 		return writeTable(a, cmd, page.Items, issueListSpec("in "+target.Repo, opts.State, opts.Kind, filtered), servicePage(page, opts.Page))
 	}}
 	enumFlag(cmd, &opts.State, "state", "s", "open", "Filter by state", "open", "closed", "all")
-	enumFlag(cmd, &opts.Kind, "kind", "", "issues", "List issues, pull requests or both", "issues", "pulls", "all")
+	enumFlag(cmd, &opts.Kind, "kind", "", "issues", "List issues, pull requests or both; the kind field of each reads issue or pull", "issues", "pulls", "all")
 	pageFlags(cmd, &opts.Limit, &opts.Page)
 	flags := cmd.Flags()
 	flags.StringVarP(&opts.Search, "search", "S", "", "Search issue titles and bodies")
@@ -169,7 +173,8 @@ func issueRow(item services.Issue) []terminal.Cell {
 func (a *application) issueViewCommand() *cobra.Command {
 	var web, comments bool
 	cmd := &cobra.Command{Use: "view {<number> | <url>}", Short: "View an issue", Long: `Display the title, body and other information about an issue. With --comments, the
-conversation follows the body.`, Example: `$ gt issue view 12
+conversation follows the body. The blocked_by and blocks JSON fields cost extra requests, made
+only when the output includes them (see gt help formatting).`, Example: `$ gt issue view 12
 $ gt issue view 12 --comments
 $ gt issue view https://gitea.com/OWNER/REPO/issues/12 --web`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if comments && a.options.json != "" {
@@ -206,7 +211,8 @@ $ gt issue view https://gitea.com/OWNER/REPO/issues/12 --web`, Annotations: map[
 }
 
 // issueDetails is the JSON of issue view: the issue with the issues it depends on and blocks,
-// which are read only when --json names blocked_by or blocks.
+// which are read only when the output includes them: all fields, as --json alone and --jq output,
+// or a --json naming blocked_by or blocks.
 type issueDetails struct {
 	services.Issue
 	BlockedBy []services.IssueReference `json:"blocked_by,omitzero"`
@@ -220,9 +226,18 @@ func (a *application) issueCreateCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "create", Aliases: []string{"new"}, Short: "Create an issue", Long: `Create an issue in a repository. Without flags on a terminal, a form asks for the title and
 body, then optionally for assignees, a milestone, labels and a due date.
 
---template starts from the body of a repository issue template; on a terminal the form opens with
-that body and an empty title. Without a terminal, --title is required, and --body or --body-file
-replace the template body.`, Example: `$ gt issue create
+Gitea sets labels, a milestone, assignees and a due date only for people who can write to the
+issues of the repository, and creates the issue without them for others: gt then names the
+flags or form fields it left out and fails, and warns about left-out labels of a template.
+Adding the issue to a project needs write access too; when that fails, the issue stays created
+and the error names the command that adds it later.
+
+--template starts from a repository issue template: its title, body, labels and ref. --title,
+--label, --body, --body-file and --ref replace them; labels the repository lacks are left out.
+A form (YAML) template starts with an empty body. On a terminal the form opens with the title
+and body, and a template picked in the form applies its labels too. The title of a template is
+a prefix to complete, so without the form --template requires --title. --web opens the
+new-issue page with the whole template applied.`, Example: `$ gt issue create
 $ gt issue create --title "Crash on start" --body "Steps to reproduce…" --label bug --milestone v1.0
 $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
 		var draft terminal.Draft
@@ -267,7 +282,8 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 			return a.createIssueInteractively(cmd, strings.TrimSpace(templateName))
 		}
 		var target target
-		var templateBody string
+		var templateBody, templateFile string
+		var templateLabels []string
 		if cmd.Flags().Changed("template") || web {
 			if target, err = a.resolve(cmd.Context(), true); err != nil {
 				return err
@@ -278,14 +294,36 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 			if err != nil {
 				return err
 			}
-			// Like gh, the template only seeds the body; its title is a placeholder, so --title is required.
-			templateBody = issueTemplateBody(template)
+			// --title and --label replace the title and labels of the template, as --body replaces its body.
+			// The title of a template is a prefix to complete, such as "[Bug]: ", so it only prefills
+			// the browser page; without a form, --title is required.
+			templateBody, templateFile = issueTemplateBody(template), template.FileName
+			if !cmd.Flags().Changed("title") && web && strings.TrimSpace(template.Title) != "" {
+				title = template.Title
+			}
+			if !cmd.Flags().Changed("label") {
+				templateLabels = template.Labels
+			}
+			if !cmd.Flags().Changed("ref") {
+				ref = template.Ref
+			}
 		}
 		if web {
 			if body, err = a.readBody(cmd, body, bodyFile); err != nil {
 				return err
 			}
 			query := url.Values{"title": {title}, "body": {cmp.Or(body, templateBody)}}
+			if templateFile != "" {
+				// The page applies the whole template, its labels, assignees and ref too; the
+				// title and body given here replace the template's.
+				query = url.Values{"template": {templateFile}}
+				if cmd.Flags().Changed("title") {
+					query.Set("title", title)
+				}
+				if body != "" {
+					query.Set("body", body)
+				}
+			}
 			return a.openBrowser(cmd, repositoryURL(target)+"/issues/new?"+query.Encode())
 		}
 		if bodyFile == "-" && title == "" {
@@ -318,8 +356,13 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 				return err
 			}
 		}
-		labelIDs, err := (services.Labels{Client: target.client, Repository: target.Repo}).ResolveIssueNames(cmd.Context(), labelNames)
+		labelService := services.Labels{Client: target.client, Repository: target.Repo}
+		labelIDs, err := labelService.ResolveIssueNames(cmd.Context(), labelNames)
 		if err != nil {
+			return err
+		}
+		requested := issueMetadata{labels: labelIDs, milestone: milestoneValue, deadline: due != nil}
+		if labelIDs, err = a.addTemplateLabels(cmd, labelService, labelIDs, templateLabels); err != nil {
 			return err
 		}
 		// Projects are resolved first, so that a missing one fails before the issue exists.
@@ -332,11 +375,13 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 		if err != nil {
 			return err
 		}
+		requested.assignees = assignees
+		a.warnTemplateLabelsLeftOut(cmd, target, item, requested, labelIDs)
 		failures := uploadAttachments(cmd.Context(), files, item.Number, service.UploadAttachment, nil)
-		if err := boards.apply(cmd.Context(), item.ID); err != nil {
-			failures = append(failures, err)
+		if _, err := boards.apply(cmd.Context(), item.ID); err != nil {
+			failures = append(failures, fmt.Errorf("%w; add it later with: gt issue edit %d %s%s", err, item.Number, projectFlags(boards.add), a.suggestedRepo(target)))
 		}
-		return errors.Join(followUpError(fmt.Sprintf("issue %d", item.Number), failures), a.issueCreated(cmd, target, item))
+		return errors.Join(requested.leftOut(item, target.Repo, issueMetadataFlags), followUpError(fmt.Sprintf("issue #%d", item.Number), "created", failures), a.issueCreated(cmd, target, item))
 	}}
 	flags := cmd.Flags()
 	flags.StringVarP(&title, "title", "t", "", "Issue title")
@@ -348,7 +393,7 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 	flags.StringVarP(&milestone, "milestone", "m", "", "Add the issue to a milestone by `title` or ID")
 	flags.StringVarP(&templateName, "template", "T", "", "Start from the repository issue template with this `name`")
 	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to")
-	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339, or Unix timestamp")
+	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339 or Unix timestamp; only the date counts, as the end of that day in UTC")
 	flags.StringArrayVar(&attachmentPaths, "attachment", nil, "`File` to attach after creation (repeatable)")
 	flags.StringArrayVarP(&projects, "project", "p", nil, "Add the issue to the project with this `title`, the repository's or its organization's (repeatable)")
 	flags.BoolVarP(&web, "web", "w", false, "Continue in the browser with the new-issue page")
@@ -359,13 +404,77 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 	return cmd
 }
 
+// issueMetadata is what issue create asks Gitea to set besides the title and body.
+type issueMetadata struct {
+	labels    []int64
+	milestone int64
+	assignees []string
+	deadline  bool
+}
+
+// issueMetadataNames name the labels, milestone, assignees and due date the way they were asked for.
+type issueMetadataNames struct{ labels, milestone, assignees, deadline string }
+
+var (
+	issueMetadataFlags  = issueMetadataNames{labels: "--label", milestone: "--milestone", assignees: "--assignee", deadline: "--deadline"}
+	issueMetadataFields = issueMetadataNames{labels: "labels", milestone: "milestone", assignees: "assignees", deadline: "due date"}
+)
+
+// leftOut fails when the created item lacks metadata that was asked for, named by names. Gitea
+// drops the labels, milestone, assignees and due date of people who cannot write to the issues of
+// repository without an error, and the permissions of a repository tell only about its code, not
+// its issues.
+func (m issueMetadata) leftOut(item services.Issue, repository string, names issueMetadataNames) error {
+	var missing []string
+	if slices.ContainsFunc(m.labels, func(id int64) bool { return !hasLabel(item, id) }) {
+		missing = append(missing, names.labels)
+	}
+	if m.milestone != 0 && (item.Milestone == nil || item.Milestone.ID != m.milestone) {
+		missing = append(missing, names.milestone)
+	}
+	if slices.ContainsFunc(m.assignees, func(login string) bool {
+		return !slices.ContainsFunc(item.Assignees, func(assignee string) bool { return strings.EqualFold(assignee, login) })
+	}) {
+		missing = append(missing, names.assignees)
+	}
+	if m.deadline && item.Deadline == nil {
+		missing = append(missing, names.deadline)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("issue #%d was created without %s: Gitea leaves them out for people who cannot write to the issues of %s", item.Number, strings.Join(missing, ", "), repository)
+}
+
+// warnTemplateLabelsLeftOut warns when the item lacks labels of the issue template, the labels
+// beyond those requested, which Gitea leaves out like the requested ones.
+func (a *application) warnTemplateLabelsLeftOut(cmd *cobra.Command, t target, item services.Issue, requested issueMetadata, labels []int64) {
+	if slices.ContainsFunc(labels, func(id int64) bool { return !slices.Contains(requested.labels, id) && !hasLabel(item, id) }) {
+		a.warn(cmd, "Gitea left out the labels of the issue template, as you cannot write to the issues of %s", t.Repo)
+	}
+}
+
+// hasLabel reports whether item has the label with id.
+func hasLabel(item services.Issue, id int64) bool {
+	return slices.ContainsFunc(item.Labels, func(label services.Label) bool { return label.ID == id })
+}
+
+// projectFlags are the issue edit flags that add an issue to boards.
+func projectFlags(boards []services.Board) string {
+	flags := make([]string, len(boards))
+	for i, board := range boards {
+		flags[i] = "--add-project " + strconv.Quote(board.Title)
+	}
+	return strings.Join(flags, " ")
+}
+
 // issueCreated reports a new issue: as JSON, or its URL on stdout after a ✓ line for people.
 func (a *application) issueCreated(cmd *cobra.Command, t target, item services.Issue) error {
 	a.done(cmd, "Created issue %s", refLabel(t.Repo, item.Number, item.Title))
 	return a.created(cmd, item, item.URL)
 }
 
-// createIssueInteractively runs the create form; a non-empty templateName pre-fills its body.
+// createIssueInteractively runs the create form; a non-empty templateName pre-fills its title and body.
 func (a *application) createIssueInteractively(cmd *cobra.Command, templateName string) (runErr error) {
 	target, err := a.resolve(cmd.Context(), true)
 	if err != nil {
@@ -376,13 +485,13 @@ func (a *application) createIssueInteractively(cmd *cobra.Command, templateName 
 	if err != nil {
 		return err
 	}
-	choices := terminal.IssueFormChoices{CanPush: selectables.CanPush, Assignees: selectables.Assignees}
+	choices := terminal.IssueFormChoices{Assignees: selectables.Assignees}
 	// Without an editor the body is a field of the form, asked for right after the title.
 	if preferences, err := a.preferences(); err != nil || preferences.Editor != "" {
 		choices.EditBody = a.bodyEditor(cmd, terminal.BodyTitle)
 	}
 	for _, template := range selectables.Templates {
-		choices.Templates = append(choices.Templates, terminal.IssueTemplateChoice{Name: template.Name, About: template.About, Title: template.Title, Body: issueTemplateBody(template)})
+		choices.Templates = append(choices.Templates, issueTemplateChoice(template))
 	}
 	choices.Milestones, choices.Labels = milestoneChoices(selectables.Milestones), labelChoices(selectables.Labels)
 	if templateName != "" {
@@ -390,28 +499,88 @@ func (a *application) createIssueInteractively(cmd *cobra.Command, templateName 
 		if err != nil {
 			return err
 		}
-		choices.Template = &terminal.IssueTemplateChoice{Name: template.Name, About: template.About, Body: issueTemplateBody(template)}
+		choice := issueTemplateChoice(template)
+		choices.Template = &choice
 	}
 	values, err := a.deps.IssueForm.CreateIssue(cmd.Context(), choices)
 	defer finishDraft(&values.Draft, &runErr)
 	if err != nil {
 		return err
 	}
+	created := false
+	defer func() {
+		// A body typed into the form has no draft of the editor; keep it when no issue was created.
+		if runErr != nil && !created && values.Draft.Path == "" {
+			values.Draft = keepDraft(values.Body)
+		}
+	}()
+	requested := issueMetadata{labels: values.Labels, milestone: values.Milestone, assignees: values.Assignees, deadline: values.Deadline != nil}
+	labelIDs, err := a.addTemplateLabels(cmd, services.Labels{Client: target.client, Repository: target.Repo}, values.Labels, values.TemplateLabels)
+	if err != nil {
+		return err
+	}
+	if values.Deadline != nil {
+		due := endOfDay(*values.Deadline)
+		values.Deadline = &due
+	}
 	item, err := service.Create(cmd.Context(), services.IssueOptions{
-		Title: values.Title, Body: values.Body, Assignees: values.Assignees, Milestone: values.Milestone, Labels: values.Labels, Deadline: values.Deadline,
+		Title: values.Title, Body: values.Body, Assignees: values.Assignees, Milestone: values.Milestone, Labels: labelIDs, Deadline: values.Deadline,
 	})
 	if err != nil {
 		return err
 	}
-	return a.issueCreated(cmd, target, item)
+	created = true
+	a.warnTemplateLabelsLeftOut(cmd, target, item, requested, labelIDs)
+	return errors.Join(requested.leftOut(item, target.Repo, issueMetadataFields), a.issueCreated(cmd, target, item))
 }
 
-// issueTemplateBody seeds a body from markdown content, or from the description of form templates.
+// issueTemplateChoice offers template in the create form, which applies its title, body and labels.
+func issueTemplateChoice(template services.IssueTemplate) terminal.IssueTemplateChoice {
+	return terminal.IssueTemplateChoice{Name: template.Name, About: template.About, Title: template.Title, Body: issueTemplateBody(template), Labels: template.Labels}
+}
+
+// issueTemplateBody seeds a body from markdown content. A form template has no content, and its
+// description is no body, so it seeds none.
 func issueTemplateBody(template services.IssueTemplate) string {
-	if template.Form && template.Content == "" {
-		return template.About
-	}
 	return template.Content
+}
+
+// addTemplateLabels adds the labels an issue template names to ids. Like Gitea's new-issue page,
+// it skips labels the repository lacks, with a warning, and picks the repository's label over the
+// organization's of the same name.
+func (a *application) addTemplateLabels(cmd *cobra.Command, service services.Labels, ids []int64, names []string) ([]int64, error) {
+	names = slices.DeleteFunc(slices.Clone(names), func(name string) bool { return strings.TrimSpace(name) == "" })
+	if len(names) == 0 {
+		return ids, nil
+	}
+	catalog, err := service.IssueCatalog(cmd.Context())
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range names {
+		found, err := catalog.Resolve([]string{name})
+		if _, ambiguous := errors.AsType[*services.AmbiguousError](err); ambiguous {
+			found, err = catalog.Resolve([]string{"repo:" + name})
+			if err != nil {
+				// The template, not the user, named the label, so it is skipped rather than refused.
+				a.warn(cmd, "label %q of the issue template matches several labels in %s; it was left out", name, service.Repository)
+				continue
+			}
+		}
+		if _, missing := errors.AsType[*services.NotFoundError](err); missing {
+			a.warn(cmd, "label %q of the issue template does not exist in %s; it was left out", name, service.Repository)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range found {
+			if !slices.Contains(ids, id) {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids, nil
 }
 
 // issueTemplate selects a repository issue template by case-insensitive name.
@@ -438,11 +607,13 @@ func issueTemplate(ctx context.Context, service services.Issues, name string) (s
 func (a *application) issueStateCommand(verb string) *cobra.Command {
 	var comment string
 	state, past, completeState, short := "closed", "Closed", "open", "Close issues"
+	commentExample, commentUsage := "Done in #14", "Leave a comment before closing the issue"
 	if verb == "reopen" {
 		state, past, completeState, short = "open", "Reopened", "closed", "Reopen issues"
+		commentExample, commentUsage = "Still happens on v1.2", "Leave a comment before reopening the issue"
 	}
 	cmd := &cobra.Command{Use: verb + " {<number> | <url>}...", Short: short, Example: fmt.Sprintf(`$ gt issue %[1]s 12
-$ gt issue %[1]s 12 13 --comment "Done in #14"`, verb), Annotations: map[string]string{"gt.arguments": issueArguments}, Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt issue %[1]s 12 13 --comment %[2]q`, verb, commentExample), Annotations: map[string]string{"gt.arguments": issueArguments}, Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
 		target, numbers, err := a.resolveRefs(cmd, args, issueRef)
 		if err != nil {
 			return err
@@ -476,7 +647,7 @@ $ gt issue %[1]s 12 13 --comment "Done in #14"`, verb), Annotations: map[string]
 		}, nil)
 		return errors.Join(append(failures, writeBatchJSON(a, cmd, len(numbers), results))...)
 	}}
-	cmd.Flags().StringVarP(&comment, "comment", "c", "", "Leave a comment before the issue is "+state)
+	cmd.Flags().StringVarP(&comment, "comment", "c", "", commentUsage)
 	cmd.ValidArgsFunction = a.completeIssues(completeState)
 	return cmd
 }
@@ -534,8 +705,11 @@ func labelChoices(items []services.Label) []terminal.IssueLabelChoice {
 func issueLabel(n int64) string { return fmt.Sprintf("issue %d", n) }
 
 // itemError words the failure of one item of a batch, which the batch prefixes with the item, such
-// as "issue 9: not found in alice/x".
+// as "issue 9: not found in alice/x". A missing repository keeps its own name.
 func itemError(err error, scope string) error {
+	if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Kind == "repository" {
+		return err
+	}
 	if services.IsNotFound(err) {
 		return explain(err, "not found in %s", scope)
 	}

@@ -4,6 +4,7 @@
 package terminal
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -51,10 +52,11 @@ type LoginForm interface {
 // on earlier answers.
 func (p *FormPrompter) Login(ctx context.Context, q LoginQuestions, a *LoginAnswers) error {
 	if q.Host {
-		input := huh.NewInput().Title("Gitea instance").Description("A URL or host name, such as gitea.com").Value(&a.Host).Validate(func(s string) error {
-			_, err := q.ResolveHost(strings.TrimSpace(s))
+		input := lineField("Gitea instance", &a.Host, false).Validate(func(s string) error {
+			_, err := q.ResolveHost(strings.TrimSpace(cmp.Or(s, a.Host)))
 			return err
 		})
+		input.Description("A URL or host name, such as gitea.com")
 		if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(input))); err != nil {
 			return err
 		}
@@ -77,15 +79,15 @@ func (p *FormPrompter) Login(ctx context.Context, q LoginQuestions, a *LoginAnsw
 	var fields []huh.Field
 	switch a.Method {
 	case LoginToken:
-		fields = append(fields, huh.NewInput().Title("Paste an access token").Description(q.TokenHint(a.Host)).EchoMode(huh.EchoModePassword).Value(&a.Token).Validate(func(s string) error {
+		fields = append(fields, secretField("Paste an access token", q.TokenHint(a.Host), &a.Token, func(s string) error {
 			if strings.TrimSpace(s) == "" {
 				return errors.New("paste the token")
 			}
 			return nil
 		}))
 	case LoginSSHKey:
-		fields = append(fields, huh.NewInput().Title("SSH private key").Value(&a.SSHKey).Validate(func(s string) error {
-			_, err := os.Stat(ExpandHome(strings.TrimSpace(s)))
+		fields = append(fields, lineField("SSH private key", &a.SSHKey, false).Validate(func(s string) error {
+			_, err := os.Stat(ExpandHome(strings.TrimSpace(cmp.Or(s, a.SSHKey))))
 			return err
 		}))
 	}

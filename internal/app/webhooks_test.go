@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/services"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -80,4 +81,15 @@ func TestWebhookEditAsksForTheAuthorizationHeaderOnATerminal(t *testing.T) {
 	require.Len(t, edits, 1)
 	require.Equal(t, "Bearer kept", edits[0]["authorization_header"])
 	require.Equal(t, false, edits[0]["active"])
+}
+
+func TestWebhookHelpWrapsLikeTheRest(t *testing.T) {
+	deps, _, _ := testDeps(t)
+	webhook, _, err := NewRoot(deps).Find([]string{"webhook"})
+	require.NoError(t, err)
+	walkCommands(webhook, func(cmd *cobra.Command) {
+		for line := range strings.SplitSeq(cmd.Long, "\n") {
+			require.LessOrEqual(t, len([]rune(line)), 95, "%s: %s", cmd.CommandPath(), line)
+		}
+	})
 }

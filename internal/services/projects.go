@@ -48,11 +48,8 @@ func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) 
 		if !slices.ContainsFunc(boards, func(b Board) bool { return b.Project == nil }) {
 			break
 		}
-		projects, err := listAll(func(page int) ([]*gitea.Project, error) {
-			items, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Project, *gitea.Response, error) {
-				return c.Projects.ListProjects(ctx, scope, gitea.ListProjectsOptions{ListOptions: listOptions(50, page)})
-			})
-			return items, err
+		projects, err := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Project, *gitea.Response, error) {
+			return c.Projects.ListProjects(ctx, scope, gitea.ListProjectsOptions{ListOptions: list})
 		})
 		// A user rather than an organization owns the repository, or projects are off.
 		if IsNotFound(err) {
@@ -90,11 +87,8 @@ func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) 
 
 // load reads the columns of board and, withIssues, the issues each holds.
 func (s Projects) load(ctx context.Context, board *Board, withIssues bool) error {
-	columns, err := listAll(func(page int) ([]*gitea.ProjectColumn, error) {
-		items, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.ProjectColumn, *gitea.Response, error) {
-			return c.Projects.ListProjectColumns(ctx, board.scope, board.ID, listOptions(50, page))
-		})
-		return items, err
+	columns, err := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.ProjectColumn, *gitea.Response, error) {
+		return c.Projects.ListProjectColumns(ctx, board.scope, board.ID, list)
 	})
 	if err != nil {
 		return err
@@ -109,11 +103,8 @@ func (s Projects) load(ctx context.Context, board *Board, withIssues bool) error
 	}
 	held := make([][]*gitea.Issue, len(columns))
 	err = concurrently(len(columns), func(i int) error {
-		issues, err := listAll(func(page int) ([]*gitea.Issue, error) {
-			items, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.Issue, *gitea.Response, error) {
-				return c.Projects.ListProjectColumnIssues(ctx, board.scope, board.ID, columns[i].ID, listOptions(50, page))
-			})
-			return items, err
+		issues, err := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Issue, *gitea.Response, error) {
+			return c.Projects.ListProjectColumnIssues(ctx, board.scope, board.ID, columns[i].ID, list)
 		})
 		held[i] = issues
 		return err
@@ -126,25 +117,25 @@ func (s Projects) load(ctx context.Context, board *Board, withIssues bool) error
 	return err
 }
 
-// Add puts the issue with the global ID issueID in the default column of board; an issue already
-// on the board keeps its column.
-func (s Projects) Add(ctx context.Context, board Board, issueID int64) error {
+// Add puts the issue with the global ID issueID in the default column of board, and reports
+// whether it sent the request: an issue already on the board keeps its column.
+func (s Projects) Add(ctx context.Context, board Board, issueID int64) (bool, error) {
 	if _, held := board.columns[issueID]; held {
-		return nil
+		return false, nil
 	}
-	return do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	return true, do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		return c.Projects.AddIssueToProjectColumn(ctx, board.scope, board.ID, board.defaultColumn, issueID)
 	})
 }
 
-// Remove takes the issue with the global ID issueID off board; an issue that is not on it is left
-// as it is.
-func (s Projects) Remove(ctx context.Context, board Board, issueID int64) error {
+// Remove takes the issue with the global ID issueID off board, and reports whether it sent the
+// request: an issue that is not on it is left as it is.
+func (s Projects) Remove(ctx context.Context, board Board, issueID int64) (bool, error) {
 	column, held := board.columns[issueID]
 	if !held {
-		return nil
+		return false, nil
 	}
-	return do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	return true, do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		return c.Projects.RemoveIssueFromProjectColumn(ctx, board.scope, board.ID, column, issueID)
 	})
 }

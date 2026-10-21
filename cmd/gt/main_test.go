@@ -145,6 +145,10 @@ func TestRunReportsWhereADeclinedReviewWasSaved(t *testing.T) {
 			_, _ = w.Write([]byte(`{"login":"alice"}`))
 			return
 		}
+		if r.URL.Path == "/api/v1/repos/alice/project/pulls/3/reviews" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"number":3,"title":"Add one","user":{"login":"alice"},"head":{"ref":"feat/one"},"base":{"ref":"main"}}`))
 	}))
 	defer server.Close()

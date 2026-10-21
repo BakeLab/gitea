@@ -38,10 +38,14 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"api", "user", "-X", "invalid/method"}, "invalid HTTP method"},
 		{[]string{"alias", "delete", "co", "--json"}, "alias deletion does not return a resource"},
 		{[]string{"auth", "status", "--json=token"}, "unknown JSON field \"token\""},
+		{[]string{"branch", "protect", "main", "--allow-push", " "}, "pusher names cannot be empty"},
+		{[]string{"branch", "protect", "main", "--status-check", " "}, "status check names cannot be empty"},
 		{[]string{"config", "set", "prompt", "invalid"}, "prompt must be enabled or disabled"},
 		{[]string{"doctor", "--json=secret"}, "unknown JSON field \"secret\""},
 		{[]string{"issue", "attachment", "download", "1", "1", "--json"}, "attachment downloads are binary"},
 		{[]string{"issue", "attachment", "download", "1", "1", "--output", "-", "--json=id"}, "attachment downloads are binary"},
+		{[]string{"issue", "attachment", "download", "1", "1", "--output", "-", "--clobber"}, "--clobber cannot be combined with --output -"},
+		{[]string{"issue", "attachment", "download", "https://example.test/alice/project/issues/1", "1", "--output", "-", "--skip-existing"}, "--skip-existing cannot be combined with --output -"},
 		{[]string{"issue", "close", "1", "bad"}, `invalid issue "bad": use a number, #number, OWNER/REPO#number or URL`},
 		{[]string{"issue", "close", "1", "#1", "--no-input"}, "#1 is selected more than once"},
 		{[]string{"issue", "reopen", "1", "01", "--no-input"}, "#1 is selected more than once"},
@@ -110,6 +114,7 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"pr", "create", "--label", "bug, "}, "label names cannot be empty"},
 		{[]string{"pr", "create", "--agit", "--json", "--title", "x", "--no-input"}, "--json/--jq cannot be combined with --agit"},
 		{[]string{"pr", "create", "--topic", "x", "--title", "x", "--no-input"}, "--topic requires --agit"},
+		{[]string{"pr", "create", "--agit", "--web", "--title", "x", "--no-input"}, "--web cannot be combined with --agit"},
 		{[]string{"pr", "create", "--reviewer", "bob, "}, "reviewer names cannot be empty"},
 		{[]string{"pr", "create", "--reviewer-team", " "}, "team names cannot be empty"},
 		{[]string{"pr", "create", "--reviewer", "bob,Bob"}, `reviewer "Bob" is duplicated`},
@@ -130,7 +135,6 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"pr", "list", "--state", "unknown"}, "--state must be open, closed, merged, or all"},
 		{[]string{"pr", "list", "--limit", "0"}, `"-L, --limit" flag: must be 1..1000`},
 		{[]string{"pr", "review", "1", "--no-input"}, "choose a review type: --approve, --request-changes, or --comment"},
-		{[]string{"pr", "review", "1", "--comment", "--body="}, "a comment needs a body; pass --body, --body-file or --editor"},
 		{[]string{"pr", "review", "1", "--request-changes", "--no-input"}, "a change request needs a body"},
 		{[]string{"pr", "review", "request", "1", "--team", " "}, "team names cannot be empty"},
 		{[]string{"pr", "review", "1", "--comments-file=-"}, "--comments-file requires a file"},
@@ -142,6 +146,9 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"pr", "status", "--json=title"}, "unknown JSON field \"title\""},
 		{[]string{"release", "asset", "download", "v1", "1", "--json"}, "asset downloads are files"},
 		{[]string{"release", "asset", "download", "v1", "1", "--archive", "zip"}, "--archive downloads the source code only"},
+		{[]string{"release", "download", "v1", "--output", "-", "--clobber"}, "--clobber cannot be combined with --output -"},
+		{[]string{"release", "download", "v1", "--archive", "zip", "--output", "-", "--skip-existing"}, "--skip-existing cannot be combined with --output -"},
+		{[]string{"release", "download", "v1", "--clobber", "--skip-existing"}, "--clobber and --skip-existing cannot be combined"},
 		{[]string{"release", "create", "--notes-file", "-"}, "--notes-file - requires a tag"},
 		{[]string{"release", "edit", "v1"}, "supply release fields to edit"},
 		{[]string{"release", "edit", "v1", "--notes", ""}, "release notes cannot be cleared"},
@@ -183,6 +190,8 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"repo", "migrate", "https://source.test/repo", "--name", "new", "--timeout", "0s"}, "--timeout must be positive"},
 		{[]string{"repo", "migrate", "--server-path", "relative/path", "--name", "new"}, "--server-path must be an absolute path on the Gitea server"},
 		{[]string{"repo", "migrate", "--server-path", "/server/repo", "--name", "new", "--auth-user", "account"}, "server path imports use --service git without remote credentials"},
+		{[]string{"run", "download", "1", "--zip", "--name", "build", "--output", "-", "--clobber"}, "--clobber cannot be combined with --output -"},
+		{[]string{"run", "download", "1", "--clobber", "--skip-existing"}, "--clobber and --skip-existing cannot be combined"},
 		{[]string{"run", "list", "--since=-1h"}, "invalid --since: relative duration cannot be negative"},
 		{[]string{"run", "list", "--until="}, "invalid --until: use a date, RFC3339 timestamp, or duration such as 24h"},
 		{[]string{"run", "list", "--since=1h", "--until=2h"}, "--since must not be later than --until"},
@@ -195,6 +204,7 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"search", "issue", "--since="}, "invalid --since: use a date"},
 		{[]string{"search", "repo", "query", "--sort", "invalid"}, "--sort must be alpha, created, updated, size, or id"},
 		{[]string{"search", "repo", "query", "--order", "invalid"}, "--order must be asc or desc"},
+		{[]string{"search", "repo", "query", "--order", "desc"}, "--order requires --sort"},
 		{[]string{"secret", "set", "BUILD_TOKEN", "--body", "text", "--body-file", "-"}, "--body and --body-file are mutually exclusive"},
 		{[]string{"secret", "set", "BUILD_TOKEN", "--body= ", "--json=value"}, "unknown JSON field \"value\""},
 		{[]string{"secret", "set", "BUILD_TOKEN", "--no-input"}, "missing value: pass --body, --body-file or standard input"},
@@ -236,6 +246,7 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"webhook", "create", "https://host/path", "--authorization-header", "first\nsecond"}, "authorization header must be a single line"},
 		{[]string{"webhook", "create", "https://host/path", "--events", ""}, "--events needs at least one trigger"},
 		{[]string{"webhook", "create", "https://host/path", "--config", "secret=private"}, "--config cannot override the URL, secret, or webhook scope"},
+		{[]string{"webhook", "edit", "1"}, "nothing to edit; pass a flag such as --events or --active (see --help)"},
 		{[]string{"webhook", "edit", "1", "--active=false"}, "editing a webhook drops its stored authorization header unless it is sent again, and Gitea never returns it: pass --authorization-header-file or --authorization-header (use --clear-authorization only for a hook without one)"},
 		{[]string{"webhook", "delete", "not-an-id"}, "invalid resource number \"not-an-id\""},
 		{[]string{"webhook", "list", "--org", "organization", "--account"}, "--org, --account, --global, and --repo select mutually exclusive scopes"},
@@ -356,6 +367,9 @@ func TestExplicitValuesSkipInteractiveForms(t *testing.T) {
 					return
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/1":
 					_, _ = w.Write([]byte(`{"number":1,"user":{"login":"bob"}}`))
+					return
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/1/reviews":
+					_, _ = w.Write([]byte(`[]`))
 					return
 				}
 				require.Equal(t, tc.method, r.Method)

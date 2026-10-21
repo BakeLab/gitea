@@ -8,6 +8,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"path"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -61,7 +65,7 @@ func TestWikiEmptyListDoesNotHideRepositoryErrors(t *testing.T) {
 			}))
 			items, err := (Wiki{Client: client, Repository: "alice/project"}).ListPage(context.Background(), 30, 1)
 			if !wikiEnabled {
-				require.Error(t, err)
+				require.EqualError(t, err, "the wiki of alice/project is disabled; turn it on with: gt repo edit --enable-wiki -R alice/project")
 				return
 			}
 			require.NoError(t, err)
@@ -88,12 +92,16 @@ func TestWikiListAndRevisionsMapCommits(t *testing.T) {
 	pages, err := service.ListPage(context.Background(), 2, 1)
 	require.NoError(t, err)
 	require.Equal(t, Page[WikiPage]{Items: []WikiPage{
-		{Title: "Other"},
-		{Title: "Home", URL: "https://gitea.test/wiki/Home", SHA: "abc", Author: "Alice", UpdatedAt: "2026-10-04T00:00:00Z"},
+		{Title: "Other", listed: true},
+		{Title: "Home", URL: "https://gitea.test/wiki/Home", SHA: "abc", Author: "Alice", UpdatedAt: "2026-10-04T00:00:00Z", listed: true},
 	}, More: true, Total: 3, Counted: true}, pages)
 	last, err := service.ListPage(context.Background(), 2, 2)
 	require.NoError(t, err)
-	require.Equal(t, []WikiPage{{Title: "Draft"}}, last.Items)
+	require.Equal(t, []WikiPage{{Title: "Draft", listed: true}}, last.Items)
+	// A listed page has no content to report, so its JSON leaves the content fields out.
+	data, err := json.Marshal(pages.Items[1])
+	require.NoError(t, err)
+	require.JSONEq(t, `{"title":"Home","url":"https://gitea.test/wiki/Home","sha":"abc","author":"Alice","updated_at":"2026-10-04T00:00:00Z"}`, string(data))
 	revisions, err := service.Revisions(context.Background(), "Home", 3)
 	require.NoError(t, err)
 	require.Equal(t, []WikiRevision{{SHA: "abc", Message: "Edit", Author: "Alice", CreatedAt: "2026-10-04T00:00:00Z"}, {SHA: "def"}}, revisions.Items)
@@ -119,7 +127,49 @@ func TestWikiCreateAndDelete(t *testing.T) {
 	page, err := service.Create(context.Background(), WikiOptions{Title: "New", Body: "body", Message: "Add"})
 	require.NoError(t, err)
 	require.Equal(t, WikiPage{Title: "New", Body: "body", CommitCount: 1, Sidebar: "side", Footer: "foot"}, page)
+	data, err := json.Marshal(page)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"title":"New","body":"body","url":"","sha":"","author":"","updated_at":"","commit_count":1,"sidebar":"side","footer":"foot"}`, string(data))
 	require.NoError(t, service.Delete(context.Background(), "Old page"))
+}
+
+func TestWikiAddressesPagesByTheirGiteaPath(t *testing.T) {
+	var paths []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.EscapedPath())
+		// Gitea reads Getting-Started as the title Getting Started, but Getting-Started.- as the
+		// title Getting-Started, which no page has.
+		title := map[string]string{"A B-C.-": "A B-C", "notes.md.-": "notes.md", "Plain page": "Plain page", "Getting-Started": "Getting Started", "Getting Started": "Getting Started"}[path.Base(r.URL.Path)]
+		switch {
+		case title == "":
+			http.NotFound(w, r)
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		case strings.Contains(r.URL.Path, "/revisions/"):
+			_, _ = w.Write([]byte(`{"commits":[],"count":0}`))
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]string{"title": title})
+		}
+	}))
+	service := Wiki{Client: client, Repository: "alice/project"}
+	ctx := context.Background()
+	for _, name := range []string{"A B-C", "notes.md", "Plain page", "Getting-Started"} {
+		_, err := service.View(ctx, name)
+		require.NoError(t, err, name)
+	}
+	_, _, err := service.Edit(ctx, "Getting-Started", WikiOptions{Body: "body"})
+	require.NoError(t, err)
+	require.NoError(t, service.Delete(ctx, "A B-C"))
+	_, err = service.Revisions(ctx, "A B-C", 1)
+	require.NoError(t, err)
+	const page = "/api/v1/repos/alice/project/wiki/page/"
+	require.Equal(t, []string{
+		"GET " + page + "A%20B-C.-", "GET " + page + "notes.md.-", "GET " + page + "Plain%20page",
+		"GET " + page + "Getting-Started.-", "GET " + page + "Getting-Started",
+		"GET " + page + "Getting-Started.-", "GET " + page + "Getting-Started", "PATCH " + page + "Getting%20Started",
+		"DELETE " + page + "A%20B-C.-",
+		"GET /api/v1/repos/alice/project/wiki/revisions/A%20B-C.-",
+	}, paths)
 }
 
 func TestWikiCreateExplainsADisabledWiki(t *testing.T) {
@@ -152,4 +202,67 @@ func TestWikiViewEditAndDeleteExplainADisabledWiki(t *testing.T) {
 		require.ErrorContains(t, err, "gt repo edit --enable-wiki")
 		require.NotErrorAs(t, err, new(*NotFoundError))
 	}
+}
+
+func TestWikiAddressesTitlesWithReservedCharacters(t *testing.T) {
+	titles := []string{"C++", "a+b c", "Plain page", "A B-C", "dash-ed", "a/b", "ünïcode", "notes.md", "100%", "what?", "#1"}
+	var requests []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Gitea reads the page path like a query value, so a "+" in it is a space.
+		raw, ok := strings.CutPrefix(r.URL.EscapedPath(), "/api/v1/repos/alice/project/wiki/page/")
+		if !ok {
+			raw, ok = strings.CutPrefix(r.URL.EscapedPath(), "/api/v1/repos/alice/project/wiki/revisions/")
+		}
+		if !assert.True(t, ok, r.URL.EscapedPath()) {
+			return
+		}
+		if trimmed, marked := strings.CutSuffix(raw, ".-"); marked {
+			raw = trimmed
+		} else {
+			raw = strings.ReplaceAll(raw, "-", " ")
+		}
+		title, err := url.QueryUnescape(raw)
+		assert.NoError(t, err)
+		requests = append(requests, r.Method+" "+title)
+		if !slices.Contains(titles, title) {
+			http.NotFound(w, r)
+			return
+		}
+		switch {
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		case strings.Contains(r.URL.Path, "/revisions/"):
+			_, _ = w.Write([]byte(`{"commits":[{"sha":"abc"}],"count":1}`))
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]string{"title": title})
+		}
+	}))
+	service := Wiki{Client: client, Repository: "alice/project"}
+	ctx := context.Background()
+	for _, title := range titles {
+		requests = nil
+		page, err := service.View(ctx, title)
+		require.NoError(t, err, title)
+		require.Equal(t, title, page.Title)
+		_, _, err = service.Edit(ctx, title, WikiOptions{Body: "body"})
+		require.NoError(t, err, title)
+		revisions, err := service.Revisions(ctx, title, 1)
+		require.NoError(t, err, title)
+		require.Len(t, revisions.Items, 1)
+		require.NoError(t, service.Delete(ctx, title), title)
+		require.Equal(t, []string{"GET " + title, "GET " + title, "PATCH " + title, "GET " + title, "DELETE " + title}, requests)
+	}
+}
+
+func TestWikiRevisionsNameTheMissingPage(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_wiki":true}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"no such file or directory"}`))
+	}))
+	_, err := (Wiki{Client: client, Repository: "alice/project"}).Revisions(context.Background(), "nosuch", 1)
+	require.EqualError(t, err, `wiki page "nosuch" not found in alice/project`)
 }

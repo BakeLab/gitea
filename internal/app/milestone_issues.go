@@ -41,7 +41,7 @@ $ gt milestone issue list v1.0 --state all --kind issues`, Annotations: map[stri
 	}}
 	pageFlags(list, &opts.Limit, &opts.Page)
 	enumFlag(list, &opts.State, "state", "s", "open", "Filter by state", "open", "closed", "all")
-	enumFlag(list, &opts.Kind, "kind", "", "all", "List issues, pull requests or both", "issues", "pulls", "all")
+	enumFlag(list, &opts.Kind, "kind", "", "all", "List issues, pull requests or both; the kind field of each reads issue or pull", "issues", "pulls", "all")
 	list.Flags().BoolVar(&byName, "by-name", false, "Match a numeric argument as a milestone title rather than an ID")
 	list.ValidArgsFunction = firstArg(a.completeMilestonesIn("all"))
 	group.AddCommand(list)
@@ -62,19 +62,28 @@ $ gt milestone issue %[1]s v1.0 12 13 '#14'`, verb), Annotations: map[string]str
 				return err
 			}
 			service := services.Issues{Client: target.client, Repository: target.Repo}
+			unchanged := map[int64]bool{}
 			results, failures := applyBatch(cmd, numbers, issueLabel, func(n int64) (item services.Issue, err error) {
 				if verb == "remove" {
 					item, err = service.RemoveMilestone(cmd.Context(), n, milestone)
+					// Like adding an issue that is in the milestone already, this is no failure.
+					if notIn, ok := errors.AsType[*services.NotInMilestoneError](err); ok {
+						a.warn(cmd, "%s", notIn)
+						unchanged[n] = true
+						return item, nil
+					}
 				} else {
 					item, err = service.Edit(cmd.Context(), n, services.IssueEdit{Milestone: &milestone.ID})
 				}
 				return item, itemError(err, target.Repo)
 			}, nil)
-			if len(results) > 0 {
-				changed := make([]string, len(results))
-				for i, item := range results {
-					changed[i] = "#" + strconv.FormatInt(item.Number, 10)
+			var changed []string
+			for _, item := range results {
+				if !unchanged[item.Number] {
+					changed = append(changed, "#"+strconv.FormatInt(item.Number, 10))
 				}
+			}
+			if len(changed) > 0 {
 				a.done(cmd, "%s %s %s %s", past, strings.Join(changed, ", "), preposition, milestoneName(target, milestone))
 			}
 			return errors.Join(append(failures, writeBatchJSON(a, cmd, len(numbers), results))...)

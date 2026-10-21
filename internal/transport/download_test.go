@@ -4,11 +4,14 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -160,18 +163,53 @@ func TestSignedDownloadRejectsInvalidInstanceURL(t *testing.T) {
 
 func TestDownloadsOutlastTheRequestTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.(http.Flusher).Flush()
-		time.Sleep(100 * time.Millisecond)
-		_, _ = w.Write([]byte("slow"))
+		for range 10 {
+			w.(http.Flusher).Flush()
+			time.Sleep(30 * time.Millisecond)
+			_, _ = w.Write([]byte("x"))
+		}
 	}))
 	defer server.Close()
-	client := New(server.URL, "", false).WithResponseTimeout(20 * time.Millisecond)
+	// The download takes 300ms, but data never stops arriving for the timeout.
+	client := New(server.URL, "", false).WithResponseTimeout(100 * time.Millisecond)
 	response, err := client.Download(context.Background(), server.URL+"/attachments/x")
 	require.NoError(t, err)
 	defer response.Body.Close()
 	data, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
-	require.Equal(t, "slow", string(data))
+	require.Equal(t, "xxxxxxxxxx", string(data))
+}
+
+func TestResponseTimeoutBoundsABodyThatStalls(t *testing.T) {
+	stalled := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("x"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-stalled:
+		case <-r.Context().Done():
+		case <-time.After(time.Second):
+		}
+	}))
+	defer server.Close()
+	defer close(stalled)
+	client := New(server.URL, "", false).WithResponseTimeout(50 * time.Millisecond)
+	response, err := client.Download(context.Background(), server.URL+"/attachments/x")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	data, err := io.ReadAll(response.Body)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorContains(t, err, "no data received within 50ms")
+	require.Equal(t, "x", string(data))
+	// A body that is read slowly does not run out of time while it is not read.
+	response, err = client.Send(context.Background(), http.MethodGet, "version", nil, nil)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	time.Sleep(100 * time.Millisecond)
+	buffer := make([]byte, 1)
+	n, err := response.Body.Read(buffer)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
 }
 
 func TestConfiguredHeadersReachOnlyTheInstance(t *testing.T) {
@@ -193,6 +231,20 @@ func TestConfiguredHeadersReachOnlyTheInstance(t *testing.T) {
 	_ = response.Body.Close()
 	require.Equal(t, "secret", instanceHeader)
 	require.Empty(t, storageHeader)
+}
+
+func TestConfiguredHeaderValuesAreRedactedWhenEchoed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"proxy rejected secret ` + r.Header.Get("X-Proxy-Secret") + ` for tenant ` + r.Header.Get("X-Tenant") + `"}`))
+	}))
+	defer server.Close()
+	var log bytes.Buffer
+	client := New(server.URL, "", false).Debug(&log).WithHeaders(http.Header{"X-Proxy-Secret": {"hdrsecret"}, "X-Tenant": {"acme"}})
+	_, err := client.Do(context.Background(), http.MethodGet, "version", nil, nil)
+	require.EqualError(t, err, "permission denied by the Gitea instance: proxy rejected secret [REDACTED] for tenant acme")
+	require.Contains(t, log.String(), "proxy rejected secret [REDACTED] for tenant acme")
+	require.NotContains(t, log.String(), "hdrsecret")
 }
 
 func TestConfiguredHeadersYieldToTheRequestsOwn(t *testing.T) {
@@ -221,4 +273,115 @@ func TestResponseTimeoutBoundsOnlyTheWaitForAnAnswer(t *testing.T) {
 	response, err := client.Send(UnboundedResponse(context.Background()), http.MethodGet, "version", nil, nil)
 	require.NoError(t, err)
 	_ = response.Body.Close()
+}
+
+// slowReader yields one byte per read after a pause, like a large upload on a slow link.
+type slowReader struct {
+	chunks int
+	pause  time.Duration
+}
+
+func (r *slowReader) Read(p []byte) (int, error) {
+	if r.chunks == 0 {
+		return 0, io.EOF
+	}
+	r.chunks--
+	time.Sleep(r.pause)
+	p[0] = 'x'
+	return 1, nil
+}
+
+func TestResponseTimeoutStartsOnceTheBodyIsSent(t *testing.T) {
+	var delay atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		time.Sleep(time.Duration(delay.Load()))
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+	client := New(server.URL, "", false).WithResponseTimeout(50 * time.Millisecond)
+	upload := func() (string, error) {
+		response, err := client.Send(context.Background(), http.MethodPost, "repos/a/b/releases/1/assets", &slowReader{chunks: 8, pause: 20 * time.Millisecond}, nil)
+		if err != nil {
+			return "", err
+		}
+		defer response.Body.Close()
+		data, err := io.ReadAll(response.Body)
+		return string(data), err
+	}
+	// The upload takes longer than the timeout, which bounds only the wait for the answer.
+	data, err := upload()
+	require.NoError(t, err)
+	require.Equal(t, "xxxxxxxx", data)
+	delay.Store(int64(200 * time.Millisecond))
+	_, err = upload()
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorContains(t, err, "no answer within 50ms")
+}
+
+func TestResponseTimeoutBoundsAnUploadThatStopsGoingOut(t *testing.T) {
+	// A stalled proxy accepts the connection but never reads the body.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+		}
+	}()
+	client := New("http://"+listener.Addr().String(), "", false).WithResponseTimeout(100 * time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(5*time.Second, cancel)
+	_, err = client.Send(ctx, http.MethodPost, "repos/a/b/releases/1/assets", io.LimitReader(zeros{}, 64<<20), nil)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorContains(t, err, "no progress sending the request within 100ms")
+}
+
+// zeros yields zero bytes forever.
+type zeros struct{}
+
+func (zeros) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+func TestResponseTimeoutWaitsWhileTheConnectionSendsTheBody(t *testing.T) {
+	// Once the body has been read, the connection still holds 1 MB of it, which a slow link sends
+	// in 900ms, three times the timeout, before the server can answer.
+	const drain = 900 * time.Millisecond
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		time.Sleep(drain)
+		_, _ = w.Write([]byte("done"))
+	}))
+	defer server.Close()
+	for name, stalls := range map[string]bool{"draining": false, "stalled": true} {
+		t.Run(name, func(t *testing.T) {
+			var sent atomic.Int64
+			defer func(original func(net.Conn) (int, bool)) { unsentBytes = original }(unsentBytes)
+			unsentBytes = func(net.Conn) (int, bool) {
+				if sent.CompareAndSwap(0, time.Now().UnixNano()) || stalls {
+					return 1 << 20, true
+				}
+				left := drain - time.Since(time.Unix(0, sent.Load()))
+				return int(max(0, left) / (100 * time.Millisecond) * (100 << 10)), true
+			}
+			client := New(server.URL, "", false).WithResponseTimeout(300 * time.Millisecond)
+			response, err := client.Send(context.Background(), http.MethodPost, "repos/a/b/releases/1/assets", strings.NewReader("upload"), nil)
+			if stalls {
+				require.ErrorContains(t, err, "no progress sending the request within 300ms")
+				return
+			}
+			require.NoError(t, err)
+			defer response.Body.Close()
+			data, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			require.Equal(t, "done", string(data))
+		})
+	}
 }

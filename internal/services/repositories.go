@@ -43,7 +43,7 @@ type Repository struct {
 	OpenPulls      int         `json:"open_pr_count"`
 	Topics         []string    `json:"topics"`
 	UpdatedAt      string      `json:"updated_at"`
-	Parent         *Repository `json:"parent,omitempty"`
+	Parent         *Repository `json:"parent"`
 	// OriginalURL stays out of JSON output: migration sources may embed credentials.
 	OriginalURL string `json:"-"`
 }
@@ -289,7 +289,13 @@ func (s Repositories) Edit(ctx context.Context, repo string, opts RepositoryEdit
 			DefaultDeleteBranchAfterMerge: opts.DeleteBranch,
 		})
 	})
-	return item, Classify(err, "repository", repo, "")
+	err = Classify(err, "repository", repo, "")
+	// A rename onto a taken name clashes with the repository that has that name.
+	if conflict, ok := errors.AsType[*ConflictError](err); ok && conflict.Reason == ReasonExists && opts.Name != nil {
+		owner, _, _ := strings.Cut(repo, "/")
+		conflict.Key = owner + "/" + *opts.Name
+	}
+	return item, err
 }
 
 // Topics lists the topics of the repository. Gitea allows at most 25, so one page holds them all.
@@ -332,6 +338,9 @@ func (s Repositories) Fork(ctx context.Context, repo string, opts ForkOptions) (
 		return c.Repositories.CreateFork(ctx, owner, name, options)
 	})
 	apiErr, ok := errors.AsType[*transport.APIError](err)
+	if ok && apiErr.Status == http.StatusNotFound {
+		return fork, false, Classify(err, "repository", repo, "")
+	}
 	if !ok || apiErr.Status != http.StatusConflict || !strings.Contains(apiErr.Message, "already forked") {
 		return fork, false, err
 	}
@@ -341,10 +350,12 @@ func (s Repositories) Fork(ctx context.Context, repo string, opts ForkOptions) (
 			return Repository{}, false, err
 		}
 	}
-	forks, listErr := listAll(func(page int) ([]*gitea.Repository, error) {
-		return repoCall(ctx, s.Client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.Repository, *gitea.Response, error) {
-			return c.Repositories.ListForks(ctx, owner, name, gitea.ListForksOptions{ListOptions: listOptions(50, page)})
-		})
+	parentOwner, parentName, err := splitRepository(repo)
+	if err != nil {
+		return Repository{}, false, err
+	}
+	forks, listErr := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Repository, *gitea.Response, error) {
+		return c.Repositories.ListForks(ctx, parentOwner, parentName, gitea.ListForksOptions{ListOptions: list})
 	})
 	if listErr != nil {
 		return Repository{}, false, listErr

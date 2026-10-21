@@ -25,7 +25,7 @@ func TestSSHKeyValidationPrecedesTargetResolution(t *testing.T) {
 	for _, tc := range []struct{ content, want string }{
 		{"", "must hold exactly one valid SSH public key"},
 		{"not a public key", "must hold exactly one valid SSH public key"},
-		{"-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n", "holds a private key; add its public key instead: gt ssh-key add "},
+		{"-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n", "holds a private key; add its public key instead: gt ssh-key create "},
 	} {
 		t.Run(tc.content, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "id_ed25519")
@@ -33,6 +33,12 @@ func TestSSHKeyValidationPrecedesTargetResolution(t *testing.T) {
 			requireUsageBeforeRequests(t, tc.want, "ssh-key", "create", path)
 		})
 	}
+}
+
+func TestDeployKeyAddPointsToThePublicHalfOfAPrivateKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deploy")
+	require.NoError(t, os.WriteFile(path, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n"), 0o600))
+	requireUsageBeforeRequests(t, "holds a private key; add its public key instead: gt repo deploy-key add "+path+".pub", "repo", "deploy-key", "add", path, "-R", "alice/x")
 }
 
 // testPublicKey returns a new public key in authorized_keys format with comment, and its fingerprint.
@@ -62,7 +68,7 @@ func TestSSHKeyAddTitlesKeysByTheirComment(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 			_, _ = fmt.Fprintf(w, `{"id":3,"title":%q,"fingerprint":%q}`, body["title"], fingerprint)
 		case http.MethodGet:
-			_, _ = fmt.Fprintf(w, `[{"id":3,"title":"alice@laptop","fingerprint":%q}]`, fingerprint)
+			writeFirstPage(w, r, fmt.Sprintf(`[{"id":3,"title":"alice@laptop","fingerprint":%q}]`, fingerprint))
 		}
 	}))
 	defer server.Close()
@@ -121,6 +127,30 @@ func TestSSHKeyAddAcceptsRFC4716KeysAndExplicitStdinOnATerminal(t *testing.T) {
 
 	err = Execute(context.Background(), deps, []string{"ssh-key", "create"})
 	require.ErrorContains(t, err, "supply a public key file")
+}
+
+func TestSSHKeyAddFindsTheRegisteredKeyPastTheFirstPage(t *testing.T) {
+	key, fingerprint := testPublicKey(t, "alice@laptop")
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"Key content has been used as non-deploy key"}`))
+			return
+		}
+		switch r.URL.Query().Get("page") {
+		case "1":
+			_, _ = w.Write([]byte(`[{"id":1,"title":"desktop","fingerprint":"SHA256:other"}]`))
+		case "2":
+			_, _ = fmt.Fprintf(w, `[{"id":7,"title":"laptop","fingerprint":%q}]`, fingerprint)
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Streams.In = bytes.NewBufferString(key)
+	err := Execute(context.Background(), deps, []string{"ssh-key", "add", "--title", "again"})
+	require.EqualError(t, err, `this SSH key is already registered; it is your SSH key "laptop" (ID 7)`)
 }
 
 func TestSSHKeyAddExplainsATakenTitle(t *testing.T) {

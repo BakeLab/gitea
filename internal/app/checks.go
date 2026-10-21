@@ -8,14 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
-	"strings"
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
-	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +22,8 @@ func (a *application) pullChecksCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "checks [<number> | <url> | <branch>]", Short: "Show the status checks of a pull request", Long: `Show the latest status of each check of a pull request's head commit.
 
 gt exits with 8 while checks are pending and with 1 when a check failed, like gh. With
---watch, it waits until every check finished, or one failed.`, Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+--watch, it waits until every check finished, or one failed, and polls on through an outage of
+the instance of up to 5 minutes.`, Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
 		if interval <= 0 || timeout <= 0 {
 			return clierr.Wrap(clierr.Usage, errors.New("--interval and --timeout must be positive"))
 		}
@@ -45,22 +43,26 @@ gt exits with 8 while checks are pending and with 1 when a check failed, like gh
 		if watch {
 			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 			defer cancel()
-			redraw := a.checksRedraw(cmd, interval)
+			redraw, leave := a.checksRedraw(cmd, interval)
+			defer leave()
 			var latest []services.Check
 			items, err = service.WatchChecks(ctx, n, interval, func(current []services.Check) error {
 				latest = current
 				return redraw(current)
 			})
+			live := leave()
 			if err != nil {
 				waiting := "checks to be reported"
 				if len(latest) > 0 {
 					_, pending, _ := services.Tally(latest)
 					waiting = terminal.Plural(pending, "pending check")
+					if live && expired(err) {
+						// The live view left with the alternate screen; not through the pager, which
+						// would stop the command at its end.
+						_, _ = io.WriteString(cmd.OutOrStdout(), a.checksText(latest))
+					}
 				}
 				return timeoutError(err, timeout, "waiting for %s", waiting)
-			}
-			if a.deps.Streams.OutTTY && a.options.json == "" {
-				return checksOutcome(items)
 			}
 		} else if items, err = service.Checks(cmd.Context(), n); err != nil {
 			return err
@@ -77,7 +79,16 @@ gt exits with 8 while checks are pending and with 1 when a check failed, like gh
 			}
 			return err
 		}
-		if err := a.writeHuman(cmd, a.checksText(items)); err != nil {
+		write := a.writeHuman
+		if watch {
+			// Not through the pager, which would stop the command at its end, as in
+			// gt pr checks --watch && gt pr merge.
+			write = func(cmd *cobra.Command, text string) error {
+				_, err := io.WriteString(cmd.OutOrStdout(), text)
+				return err
+			}
+		}
+		if err := write(cmd, a.checksText(items)); err != nil {
 			return err
 		}
 		return checksOutcome(items)
@@ -124,9 +135,13 @@ func (a *application) checksText(items []services.Check) string {
 	}
 	rows := make([][]terminal.Cell, len(items))
 	for i, item := range items {
-		rows[i] = []terminal.Cell{terminal.StatusIcon(item.State, ""), {Text: item.Name}, {Text: item.State}, {Text: item.Description}, {Text: item.URL}}
+		icon := terminal.StatusIcon(item.State, "")
+		icon.Link = item.URL
+		rows[i] = []terminal.Cell{icon, {Text: item.Name}, {Text: item.State}, {Text: item.Description}, {Text: item.URL}}
 	}
-	columns := []terminal.Column{{TTYOnly: true}, {Header: "Name", Flex: true, Min: 16}, {Header: "Status"}, {Header: "Description", Flex: true}, {Header: "Link"}}
+	// With hyperlinks the status icon links to the check, and a terminal leaves out the long URLs
+	// that would wrap every row; without them the URL is the only way to the check.
+	columns := []terminal.Column{{TTYOnly: true}, {Header: "Name", Flex: true, Min: 16}, {Header: "Status"}, {Header: "Description", Flex: true}, {Header: "Link", PipedOnly: d.Links}}
 	table := terminal.Table(columns, rows, d)
 	if !d.TTY {
 		return table
@@ -134,47 +149,44 @@ func (a *application) checksText(items []services.Check) string {
 	return terminal.Colorize(color, verdict, d.Color) + "\n" + checkCounts(items) + "\n\n" + table
 }
 
+// liveRedraw reports whether a watch redraws its view in place: stdout is a terminal that
+// interprets escape sequences and is not dumb, and no JSON is requested.
+func (a *application) liveRedraw() bool {
+	return a.deps.Streams.OutEscapes() && a.deps.Getenv("TERM") != "dumb" && a.options.json == ""
+}
+
 // checksRedraw reports each change of the checks while --watch waits: on a terminal it redraws the
-// summary in place; otherwise it writes a line of counts to stderr.
-func (a *application) checksRedraw(cmd *cobra.Command, interval time.Duration) func([]services.Check) error {
-	if !a.deps.Streams.OutTTY || a.options.json != "" {
+// summary on the alternate screen, like run watch, so a resize or a summary taller than the screen
+// leaves nothing behind; otherwise it writes a line of counts to stderr. leave restores the screen
+// and reports whether it was redrawing, once.
+func (a *application) checksRedraw(cmd *cobra.Command, interval time.Duration) (redraw func([]services.Check) error, leave func() bool) {
+	if !a.liveRedraw() {
 		return func(items []services.Check) error {
 			_, err := fmt.Fprintf(cmd.ErrOrStderr(), "checks: %s\n", checkCounts(items))
 			return err
-		}
+		}, func() bool { return false }
 	}
-	lines := 0
+	out := cmd.OutOrStdout()
+	live := false
 	return func(items []services.Check) error {
-		text := "Refreshing every " + shortDuration(interval) + ". Press Ctrl+C to quit.\n\n"
-		if len(items) == 0 {
-			text += "Waiting for checks to be reported…\n"
-		} else {
-			text += a.checksText(items)
+			if !live {
+				live = true
+				fmt.Fprint(out, "\x1b[?1049h")
+			}
+			text := "Refreshing every " + shortDuration(interval) + ". Press Ctrl+C to quit.\n\n"
+			if len(items) == 0 {
+				text += "Waiting for checks to be reported…\n"
+			} else {
+				text += a.checksText(items)
+			}
+			_, err := io.WriteString(out, "\x1b[H\x1b[J"+text)
+			return err
+		}, func() bool {
+			was := live
+			if live {
+				fmt.Fprint(out, "\x1b[?1049l")
+				live = false
+			}
+			return was
 		}
-		clear := ""
-		if lines > 0 {
-			clear = fmt.Sprintf("\x1b[%dA\x1b[J", lines)
-		}
-		lines = screenRows(text, a.deps.Streams.Width)
-		_, err := io.WriteString(cmd.OutOrStdout(), clear+text)
-		return err
-	}
-}
-
-// displayEscapes matches the color and hyperlink sequences that take no room on screen.
-var displayEscapes = regexp.MustCompile("\x1b\\[[0-9;]*m|\x1b\\]8;[^\x07\x1b]*(?:\x07|\x1b\\\\)")
-
-// screenRows counts the rows the cursor sits below the start of text on a terminal width columns wide,
-// where a line wider than the terminal wraps onto more rows; a width of 0 means unlimited.
-func screenRows(text string, width int) int {
-	rows := strings.Count(text, "\n")
-	if width <= 0 {
-		return rows
-	}
-	for _, line := range strings.Split(text, "\n") {
-		if cells := runewidth.StringWidth(displayEscapes.ReplaceAllString(line, "")); cells > width {
-			rows += (cells - 1) / width
-		}
-	}
-	return rows
 }

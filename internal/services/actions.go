@@ -64,7 +64,7 @@ func (s Actions) Workflows(ctx context.Context) ([]Workflow, error) {
 		return c.Actions.ListRepoWorkflows(ctx, owner, repo)
 	})
 	if err != nil {
-		return nil, err
+		return nil, Classify(err, "repository", s.Repository, "")
 	}
 	return convertAll(response.Workflows, workflowFrom), nil
 }

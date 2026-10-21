@@ -10,8 +10,6 @@ charm.land/lipgloss/v2 v2.0.5 h1:kbNxgeeUOYv5J0YdpxFjfvf3dFvqH8Aci4zB6xqFtrY=
 charm.land/lipgloss/v2 v2.0.5/go.mod h1:9oqhxt4yxIMe6q5A4kHr44DremZk7J9UNh74GlWa5nc=
 code.gitea.io/gitea-vet v0.2.3 h1:gdFmm6WOTM65rE8FUBTRzeQZYzXePKSSB1+r574hWwI=
 code.gitea.io/gitea-vet v0.2.3/go.mod h1:zcNbT/aJEmivCAhfmkHOlT645KNOf9W2KnkLgFjGGfE=
-gitea.com/noerw/unidiff-comments v0.0.0-20220822113322-50f4daa0e35c h1:8fTkq2UaVkLHZCF+iB4wTxINmVAToe2geZGayk9LMbA=
-gitea.com/noerw/unidiff-comments v0.0.0-20220822113322-50f4daa0e35c/go.mod h1:Fc8iyPm4NINRWujeIk2bTfcbGc4ZYY29/oMAAGcr4qI=
 gitea.dev/sdk v1.3.0 h1:4U95+Ou6WHCQiRPDEyAzvl1Q7cxg5RUTWkqmOXr5w4I=
 gitea.dev/sdk v1.3.0/go.mod h1:85EBqSAqUn1KlFCk40y3sTjWjBsB/KouL3slGXMA/2o=
 github.com/42wim/httpsig v1.3.0 h1:HK2bieeZ99X9IvOoc1ST6yrhLek0f4MqlEGES2JCP3g=
@@ -116,8 +114,6 @@ github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUc
 github.com/russross/blackfriday/v2 v2.1.0 h1:JIOH55/0cWyOuilr9/qlrm0BSXldqnqwMsf35Ld67mk=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/scylladb/termtables v0.0.0-20191203121021-c4c0b6d42ff4/go.mod h1:C1a7PQSMz9NShzorzCiG2fk9+xuCgLkPeCvMHYR2OWg=
-github.com/seletskiy/tplutil v0.0.0-20200921103632-f880f6245597 h1:nZY1S2jo+VtDrUfjO9XYI137O41hhRkxZNV5Fb5ixCA=
-github.com/seletskiy/tplutil v0.0.0-20200921103632-f880f6245597/go.mod h1:F8CBHSOjnzjx9EeXyWJTAzJyVxN+Y8JH2WjLMn4utiw=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
 github.com/spf13/cobra v1.10.2/go.mod h1:7C1pvHqHw5A4vrJfjNwvOdzYu0Gml16OCs2GRiTUUS4=
 github.com/spf13/pflag v1.0.9/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=

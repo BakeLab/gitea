@@ -155,6 +155,10 @@ func TestCreationEditorSubmitsTypedBodyAndCleansDraft(t *testing.T) {
 					_, _ = w.Write([]byte(`{"number":3}`))
 					return
 				}
+				if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3/reviews" {
+					_, _ = w.Write([]byte(`[]`))
+					return
+				}
 				require.Equal(t, tc.path, r.URL.Path)
 				var options struct{ Event, Body string }
 				require.NoError(t, json.NewDecoder(r.Body).Decode(&options))
@@ -315,13 +319,13 @@ func TestReviewLifecycleEditorRejectsEmptyRequiredText(t *testing.T) {
 			err := Execute(context.Background(), deps, args)
 			require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 			require.ErrorContains(t, err, "needs a")
-			require.ErrorContains(t, err, "draft saved at "+path)
+			require.NotContains(t, err.Error(), "draft saved", "an empty draft holds nothing to keep")
 			if verb == "submit" {
 				require.Equal(t, "Saved draft", editor.initial)
 			} else {
 				require.Empty(t, editor.initial)
 			}
-			requireDraft(t, path, true)
+			requireDraft(t, path, false)
 			require.Empty(t, out.String())
 		})
 	}

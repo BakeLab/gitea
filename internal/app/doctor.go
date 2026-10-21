@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,9 +57,10 @@ func (a *application) doctorCommand() *cobra.Command {
 		Use: "doctor", Short: "Check gt's setup for this directory", Args: argsExact(0),
 		// doctor loads the settings itself, to report a broken file instead of failing on it.
 		Annotations: map[string]string{"gt.offline": "true"},
-		Long: `Check the setup that commands in this directory use: the settings files, the instance
-and whether it answers, the account and its credential, the repository, and Git. Each
-problem comes with the command that fixes it. gt doctor fails when a check fails.`,
+		Long: `Check the setup that commands in this directory use: the settings files, the instance,
+its configured headers and whether it answers, the account and its credential, the
+repository, and Git. Each problem comes with the command that fixes it. gt doctor fails
+when a check fails.`,
 		Example: "$ gt doctor\n# Check another repository and instance\n$ gt doctor -R gitea.com/gitea/cli\n$ gt doctor --jq '.checks[] | select(.status == \"failed\")'",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			report := a.diagnose(cmd.Context())
@@ -107,6 +110,9 @@ func (a *application) diagnose(ctx context.Context) doctorReport {
 	}
 	if t.host.ClientCert != "" {
 		add(clientCertificateCheck(t.host))
+	}
+	if len(t.host.Headers) > 0 {
+		add(a.headersCheck(t))
 	}
 	resolveCtx, cancel := context.WithTimeout(ctx, doctorTimeout)
 	authenticated, accountErr := a.resolveTarget(resolveCtx, t.Repo != "", true)
@@ -261,6 +267,47 @@ func doctorTable(checks []doctorCheck, d terminal.Display) string {
 		}
 	}
 	return terminal.Table([]terminal.Column{{TTYOnly: true}, {PipedOnly: true}, {}, {}, {PipedOnly: true}}, rows, d)
+}
+
+// headersCheck checks that the instance's configured headers are sent: one whose value names an
+// environment variable that is unset or empty is left out of every request.
+func (a *application) headersCheck(t target) doctorCheck {
+	unsent := a.unsentHeaders(t.host)
+	if len(unsent) == 0 {
+		return doctorCheck{"Headers", checkPassed, strings.Join(slices.Sorted(maps.Keys(t.host.Headers)), ", "), ""}
+	}
+	details := make([]string, len(unsent))
+	removals := make([]string, len(unsent))
+	for i, name := range unsent {
+		details[i] = a.unsentHeader(t.host, name)
+		removals[i] = fmt.Sprintf("gt config set headers %q --host %s", name+":", t.Host)
+	}
+	if len(unsent) == 1 {
+		return doctorCheck{"Headers", checkWarning, details[0], "set the variable, or remove the header: " + removals[0]}
+	}
+	return doctorCheck{"Headers", checkWarning, strings.Join(details, "; "), "set the variables, or remove the headers: " + strings.Join(removals, "; ")}
+}
+
+// unsentHeaders returns the names of the configured headers of host that are not sent because
+// their value names an environment variable that is unset or empty.
+func (a *application) unsentHeaders(host settings.Host) []string {
+	var unsent []string
+	for _, name := range slices.Sorted(maps.Keys(host.Headers)) {
+		if variable, ok := headerVariable(host.Headers[name]); ok && a.deps.Getenv(variable) == "" {
+			unsent = append(unsent, name)
+		}
+	}
+	return unsent
+}
+
+// unsentHeader says why the configured header name of host is not sent, such as
+// "X-Proxy-Secret is not sent: $PROXY_SECRET is not set" or "... is empty".
+func (a *application) unsentHeader(host settings.Host, name string) string {
+	variable, _ := headerVariable(host.Headers[name])
+	if _, set := a.deps.LookupEnv(variable); set {
+		return name + " is not sent: " + host.Headers[name] + " is empty"
+	}
+	return name + " is not sent: " + host.Headers[name] + " is not set"
 }
 
 // clientCertificateCheck checks that the instance's TLS client certificate and key can be loaded.

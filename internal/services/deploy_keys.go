@@ -48,7 +48,7 @@ func (s DeployKeys) View(ctx context.Context, id int64) (DeployKey, error) {
 	key, err := repoConvert(ctx, s.Client, s.Repository, deployKeyFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.DeployKey, *gitea.Response, error) {
 		return c.Repositories.GetDeployKey(ctx, owner, repo, id)
 	})
-	return key, Classify(err, "deploy key", strconv.FormatInt(id, 10), s.Repository)
+	return key, repositoryItemError(ctx, s.Client, s.Repository, err, "deploy key", strconv.FormatInt(id, 10))
 }
 
 // Create adds a deploy key, which can push unless readOnly.
@@ -56,6 +56,10 @@ func (s DeployKeys) Create(ctx context.Context, title, key string, readOnly bool
 	created, err := repoConvert(ctx, s.Client, s.Repository, deployKeyFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.DeployKey, *gitea.Response, error) {
 		return c.Repositories.CreateDeployKey(ctx, owner, repo, gitea.CreateKeyOption{Title: title, Key: key, ReadOnly: readOnly})
 	})
+	// A 404 here can only mean the repository is missing or invisible.
+	if IsNotFound(err) {
+		return created, Classify(err, "repository", s.Repository, "")
+	}
 	return created, Classify(err, "deploy key", "", s.Repository)
 }
 
@@ -64,5 +68,5 @@ func (s DeployKeys) Delete(ctx context.Context, id int64) error {
 	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
 		return c.Repositories.DeleteDeployKey(ctx, owner, repo, id)
 	})
-	return Classify(err, "deploy key", strconv.FormatInt(id, 10), s.Repository)
+	return repositoryItemError(ctx, s.Client, s.Repository, err, "deploy key", strconv.FormatInt(id, 10))
 }

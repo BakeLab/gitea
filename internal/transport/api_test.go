@@ -5,11 +5,22 @@ package transport
 
 import (
 	"context"
+	"crypto/sha512"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -45,6 +56,47 @@ func TestAPIRetriesOnlyBodyFreeReads(t *testing.T) {
 			require.Equal(t, tc.calls, calls)
 		})
 	}
+}
+
+func TestAPIRetriesOnlyTransientFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		err   error
+		calls int
+	}{
+		{"refused", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}, 3},
+		{"reset", &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}, 3},
+		{"dropped", io.EOF, 3},
+		{"lookup failed", &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "server misbehaving", Name: "gitea.test", IsTemporary: true}}, 3},
+		{"no such host", &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "gitea.test", IsNotFound: true}}, 1},
+		{"no answer", fmt.Errorf("no answer within 1s: %w", context.DeadlineExceeded), 1},
+		{"dial timeout", &net.OpError{Op: "dial", Net: "tcp", Err: os.ErrDeadlineExceeded}, 1},
+		{"untrusted", &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}, 1},
+		{"rejected certificate", &net.OpError{Op: "remote error", Err: errors.New("tls: certificate required")}, 1},
+		{"unreadable certificate", fmt.Errorf("cannot load the client certificate a.pem with key a.pem: %w", os.ErrNotExist), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			retry := retryTransport{base: roundTripFunc(func(*http.Request) (*http.Response, error) { calls++; return nil, tc.err }), retries: 2}
+			req, err := http.NewRequest(http.MethodGet, "https://example.test/api/v1/user", nil)
+			require.NoError(t, err)
+			_, err = retry.RoundTrip(req)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.calls, calls)
+		})
+	}
+}
+
+func TestAPIDoesNotRetryAReadWithoutAnswer(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		time.Sleep(100 * time.Millisecond)
+	}))
+	defer server.Close()
+	_, err := New(server.URL, "", false).WithResponseTimeout(20*time.Millisecond).Do(context.Background(), http.MethodGet, "user", nil, nil)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, int32(1), calls.Load())
 }
 
 func TestAPIRetryRecoversAndStopsOnCancellation(t *testing.T) {
@@ -98,10 +150,11 @@ func TestAPIAuthenticatesEveryAttempt(t *testing.T) {
 	require.Equal(t, []seen{{"token secret", "bob"}, {"token secret", "bob"}}, requests)
 }
 
-type bodySigner struct{ bodies []string }
+type bodySigner struct{ bodies, digests []string }
 
 func (s *bodySigner) SignRequest(r *http.Request, contents []byte) error {
 	s.bodies = append(s.bodies, string(contents))
+	s.digests = append(s.digests, r.Header.Get("Digest"))
 	r.Header.Set("Signature", "signed")
 	return nil
 }
@@ -126,8 +179,52 @@ func TestAPISignsRequestBodies(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, resp.Body.Close())
 	}
-	require.Equal(t, []string{`{"replayable":true}`, `{"streamed":true}`, ""}, signer.bodies)
-	require.Equal(t, signer.bodies, received)
+	// A body that can be read again is hashed into the Digest header rather than buffered.
+	digest := sha512.Sum512([]byte(`{"replayable":true}`))
+	require.Equal(t, []string{"", `{"streamed":true}`, ""}, signer.bodies)
+	require.Equal(t, []string{"SHA-512=" + base64.StdEncoding.EncodeToString(digest[:]), "", ""}, signer.digests)
+	require.Equal(t, []string{`{"replayable":true}`, `{"streamed":true}`, ""}, received)
+}
+
+// readCounter counts the bytes read through it.
+type readCounter struct {
+	io.Reader
+	n *int
+}
+
+func (r readCounter) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	*r.n += n
+	return n, err
+}
+
+func TestAPISignsReplayableBodiesWithoutBuffering(t *testing.T) {
+	const size = 4 << 20
+	var received int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, err := io.Copy(io.Discard, r.Body)
+		require.NoError(t, err)
+		received = int(n)
+	}))
+	defer server.Close()
+	signer := &bodySigner{}
+	client := New(server.URL, "", false)
+	client.Signer = signer
+	opened, read := 0, 0
+	body := Replayable(func() io.Reader {
+		opened++
+		return readCounter{io.LimitReader(zeros{}, size), &read}
+	})
+	resp, err := client.Send(context.Background(), http.MethodPost, "upload", body, nil)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	digest := sha512.New()
+	_, _ = io.Copy(digest, io.LimitReader(zeros{}, size))
+	require.Equal(t, []string{""}, signer.bodies, "the signer gets no buffered body")
+	require.Equal(t, []string{"SHA-512=" + base64.StdEncoding.EncodeToString(digest.Sum(nil))}, signer.digests)
+	require.Equal(t, 2, opened, "the body is read once to hash it and once to send it")
+	require.Equal(t, 2*size, read)
+	require.Equal(t, size, received)
 }
 
 func TestAPIDoesNotFollowRedirectsOffTheInstance(t *testing.T) {
@@ -245,4 +342,21 @@ func TestAPIFollowsRedirectsWithinTheInstanceAPI(t *testing.T) {
 			require.Equal(t, tc.body, string(data))
 		}
 	}
+}
+
+func TestAPINamesTheRepositoryAWriteWasRedirectedTo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/old/labels":
+			http.Redirect(w, r, "/api/v1/repos/bob/new%20name/labels?x=1", http.StatusMovedPermanently)
+		default:
+			http.Redirect(w, r, "/api/v1/elsewhere", http.StatusMovedPermanently)
+		}
+	}))
+	defer server.Close()
+	client := New(server.URL, "", false)
+	_, err := client.Do(context.Background(), http.MethodPost, "repos/alice/old/labels", strings.NewReader(`{}`), nil)
+	require.EqualError(t, err, "repository moved to bob/new name; address it by its new name to change it")
+	_, err = client.Do(context.Background(), http.MethodDelete, "repos/alice/old/topics/x", nil, nil)
+	require.EqualError(t, err, "Gitea API returned HTTP 301 for DELETE /api/v1/repos/alice/old/topics/x")
 }

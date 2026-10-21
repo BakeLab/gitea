@@ -138,6 +138,14 @@ func TestRepoSetDefaultViewAndUnset(t *testing.T) {
 	require.Equal(t, "http://gitea.test/alice/project\n", out.String())
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "set-default", "-u"}))
 	require.Equal(t, "✓ Removed the default repository http://gitea.test/alice/project from this clone\n", diagnostics.String())
+	// Without a saved repository, both say so the same way, and stdout stays empty.
+	deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "config --local --get gt.repository": ""}}
+	out.Reset()
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "set-default", "--view"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "set-default", "--unset"}))
+	require.Empty(t, out.String())
+	require.Equal(t, "! No default repository is set for this clone; set one with gt repo set-default OWNER/REPO\n! No default repository is set for this clone\n", diagnostics.String())
 	deps.Git = &fakeGit{}
 	err := Execute(context.Background(), deps, []string{"repo", "set-default", "-v"})
 	require.ErrorContains(t, err, "set-default must run inside a Git clone")

@@ -7,8 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
 )
 
@@ -71,6 +74,11 @@ func (s Reviews) changeRequests(ctx context.Context, n int64, changes ReviewRequ
 			return err
 		}
 	}
+	// Gitea refuses an unknown user with a 404 that does not say whether other requests were applied.
+	users := append(append([]string{}, changes.Add.Users...), changes.Remove.Users...)
+	if err := (Pulls{Client: s.Client, Repository: s.Repository}).CheckUsers(ctx, nil, users); err != nil {
+		return err
+	}
 	mutated := false
 	for _, action := range []struct {
 		remove bool
@@ -87,14 +95,40 @@ func (s Reviews) changeRequests(ctx context.Context, n int64, changes ReviewRequ
 			return c.PullRequests.CreateReviewRequests(ctx, owner, name, n, option)
 		})
 		if err != nil {
+			err = s.requestError(ctx, n, err)
 			if mutated {
 				return fmt.Errorf("reviewer removals succeeded, but adding reviewers failed: %w", err)
+			}
+			// Gitea checks the pull request and every name before it applies any request.
+			if _, ok := errors.AsType[*NotFoundError](err); ok {
+				return err
 			}
 			return fmt.Errorf("review request update failed; Gitea may have applied some requests: %w", err)
 		}
 		mutated = true
 	}
 	return nil
+}
+
+// requestError names what a refused review request change on pull request n is missing: a
+// reviewer or team, which Gitea names as "user doesn't exist: NAME" (a reviewer named by email
+// is left to it) or "team doesn't exist: NAME", or else the pull request or the repository.
+func (s Reviews) requestError(ctx context.Context, n int64, err error) error {
+	apiErr, ok := errors.AsType[*transport.APIError](err)
+	if !ok {
+		return err
+	}
+	if name, found := strings.CutPrefix(apiErr.Message, "user doesn't exist: "); found {
+		return &NotFoundError{Kind: "user", Key: strconv.Quote(name), Err: err}
+	}
+	if name, found := strings.CutPrefix(apiErr.Message, "team doesn't exist: "); found {
+		owner, _, _ := strings.Cut(s.Repository, "/")
+		return &NotFoundError{Kind: "team", Key: strconv.Quote(name), Scope: owner, Err: err}
+	}
+	if apiErr.Status == http.StatusNotFound && (apiErr.Message == "not found" || strings.HasPrefix(apiErr.Message, "pull request does not exist")) {
+		return repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
+	}
+	return err
 }
 
 // CheckRequestTeams verifies that every named team exists in the repository's organization. Gitea

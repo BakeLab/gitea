@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"gitea.dev/cli/internal/transport"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,6 +106,10 @@ func TestFollowLogsWaitsForQueuedJobAndRejectsChangedSnapshots(t *testing.T) {
 
 func TestJobsPageMapsJobsAndSendsPagination(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/settings/api" {
+			_, _ = w.Write([]byte(`{"max_response_items":50}`))
+			return
+		}
 		require.Equal(t, "/api/v1/repos/owner/repo/actions/runs/7/jobs", r.URL.Path)
 		require.Equal(t, "20", r.URL.Query().Get("limit"))
 		require.Equal(t, "3", r.URL.Query().Get("page"))
@@ -132,6 +139,26 @@ func TestRunLogsArchiveStreams(t *testing.T) {
 	data, err := io.ReadAll(body)
 	require.NoError(t, err)
 	require.NoError(t, body.Close())
+	require.Equal(t, "PK archive", string(data))
+}
+
+func TestRunLogsArchiveFollowsObjectStorageRedirect(t *testing.T) {
+	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte("PK archive"))
+	}))
+	defer storage.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/repos/owner/repo/actions/runs/7/logs", r.URL.Path)
+		assert.Equal(t, "token secret", r.Header.Get("Authorization"))
+		http.Redirect(w, r, storage.URL+"/bucket/logs.zip?X-Amz-Signature=value", http.StatusFound)
+	}))
+	defer server.Close()
+	body, err := (Actions{Client: transport.New(server.URL, "secret", false), Repository: "owner/repo"}).RunLogsArchive(context.Background(), 7)
+	require.NoError(t, err)
+	defer body.Close()
+	data, err := io.ReadAll(body)
+	require.NoError(t, err)
 	require.Equal(t, "PK archive", string(data))
 }
 

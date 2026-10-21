@@ -168,6 +168,13 @@ func TestRepoForkReportsAnExistingFork(t *testing.T) {
 	require.Equal(t, "! alice/project-fork already exists\n", diagnostics.String())
 	require.Equal(t, "https://gitea.test/alice/project-fork\n", out.String())
 	require.Equal(t, "GET /api/v1/repos/alice/project-fork", requests[len(requests)-1])
+	// The existing fork has another name than --fork-name asks for, so it is not the fork asked for.
+	err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "other", "--clone"})
+	require.EqualError(t, err, "--fork-name other was not applied: alice already forked bob/project as alice/project-fork, and Gitea allows one fork per owner")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "Project-Fork"}))
+	require.Equal(t, "! alice/project-fork already exists\n", diagnostics.String())
 }
 
 func TestRepoForkRefusesTheOwnersRepository(t *testing.T) {
@@ -245,18 +252,23 @@ func TestRepoArchiveTakesSeveralRepositories(t *testing.T) {
 			_, _ = w.Write([]byte(`{"login":"alice"}`))
 			return
 		}
+		name := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/")
+		if r.Method == http.MethodGet {
+			_, _ = fmt.Fprintf(w, `{"full_name":%q,"archived":%t}`, name, name == "acme/old")
+			return
+		}
 		require.Equal(t, http.MethodPatch, r.Method)
 		var edit map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&edit))
 		require.Equal(t, true, edit["archived"])
-		name := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/")
 		archived = append(archived, name)
 		_, _ = w.Write([]byte(`{"full_name":"` + name + `","archived":true}`))
 	}))
 	defer server.Close()
-	deps, _, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "archive", "acme/one", "acme/two", "--yes"}))
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "archive", "acme/one", "acme/old", "acme/two", "--yes"}))
 	require.Equal(t, []string{"acme/one", "acme/two"}, archived)
 	require.Equal(t, 1, users, "the GITEA_TOKEN account is checked once")
+	require.Equal(t, "! acme/old is already archived\n", withoutANSI(diagnostics.String()))
 	requireUsageBeforeRequests(t, "--yes", "repo", "archive", "acme/one", "acme/two")
 }

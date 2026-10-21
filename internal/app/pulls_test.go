@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -74,24 +75,66 @@ ID   TITLE             BRANCH            AUTHOR  CREATED
 }
 
 func TestPullListFillsReviewersWhenSelected(t *testing.T) {
-	views := 0
+	views, reviews := 0, 0
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/repos/alice/project/pulls/13" {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/pulls/13":
 			views++
-			_, _ = w.Write([]byte(`{"number":13,"requested_reviewers":[{"login":"bob"}]}`))
-			return
+			_, _ = w.Write([]byte(`{"number":13}`))
+		case "/api/v1/repos/alice/project/pulls/13/reviews":
+			if r.URL.Query().Get("page") > "1" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			reviews++
+			_, _ = w.Write([]byte(`[{"id":1,"state":"COMMENT","user":{"login":"carol"}},{"id":2,"state":"REQUEST_REVIEW","user":{"login":"bob"}},
+				{"id":3,"state":"REQUEST_REVIEW","team":{"name":"core"}}]`))
+		default:
+			_, _ = w.Write([]byte(`[{"number":13,"requested_reviewers":[{"login":"carol"},{"login":"bob"}]}]`))
 		}
-		_, _ = w.Write([]byte(`[{"number":13,"requested_reviewers":[]}]`))
 	}))
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--json", "number,draft"}))
 	require.JSONEq(t, `[{"number":13,"draft":false}]`, out.String())
+	require.Zero(t, views+reviews)
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--json", "number,reviewers,reviewer_teams,review_decision"}))
+	require.JSONEq(t, `[{"number":13,"reviewers":["bob"],"reviewer_teams":["core"],"review_decision":"review_required"}]`, out.String())
+	require.Equal(t, 1, reviews)
+	require.Zero(t, views, "the reviews alone give the reviewers")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--jq", ".[].number"}))
+	require.Equal(t, "13\n", out.String())
+	require.Equal(t, 1, reviews, "a --jq filter that names no review field reads no reviews")
 	require.Zero(t, views)
 	out.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--json", "number,reviewers"}))
-	require.JSONEq(t, `[{"number":13,"reviewers":["bob"]}]`, out.String())
-	require.Equal(t, 1, views)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--jq", ".[].reviewers"}))
+	require.Equal(t, 2, reviews)
+	require.Zero(t, views)
+}
+
+func TestPullViewIgnoresReviewersWithoutAnOutstandingRequest(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/pulls/8":
+			// Gitea lists everyone who reviewed as a requested reviewer.
+			_, _ = w.Write([]byte(`{"number":8,"state":"open","requested_reviewers":[{"login":"carol"},{"login":"dave"}]}`))
+		case "/api/v1/repos/alice/project/pulls/8/reviews":
+			if r.URL.Query().Get("page") > "1" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"id":1,"state":"COMMENT","user":{"login":"carol"}},{"id":2,"state":"APPROVED","user":{"login":"dave"},"dismissed":true}]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "view", "8", "-R", "alice/project", "--json", "reviewers,reviewer_teams,review_decision"}))
+	require.JSONEq(t, `{"reviewers":[],"reviewer_teams":[],"review_decision":""}`, out.String())
 }
 
 func TestPullListFillsReviewDecisionWhenSelected(t *testing.T) {
@@ -113,6 +156,34 @@ func TestPullListFillsReviewDecisionWhenSelected(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--json", "number,review_decision"}))
 	require.JSONEq(t, `[{"number":13,"review_decision":"approved"}]`, out.String())
+}
+
+func TestPullListFillsReviewFieldsWhenSelectingEveryField(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/pulls/13/reviews":
+			if r.URL.Query().Get("page") > "1" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"id":1,"state":"APPROVED","user":{"login":"bob"}}]`))
+		case "/api/v1/repos/alice/project/pulls/13":
+			_, _ = w.Write([]byte(`{"number":13,"merged":true,"merged_by":{"login":"carol"}}`))
+		default:
+			_, _ = w.Write([]byte(`[{"number":13}]`))
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--state", "all", "--json"}))
+	var items []map[string]any
+	require.NoError(t, json.Unmarshal(out.Bytes(), &items))
+	require.Len(t, items, 1)
+	require.Equal(t, "carol", items[0]["merged_by"])
+	require.Equal(t, "approved", items[0]["review_decision"])
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--state", "all", "--jq", ".[0] | {merged_by, review_decision}"}))
+	require.JSONEq(t, `{"merged_by":"carol","review_decision":"approved"}`, out.String())
 }
 
 func TestPullViewResolvesCurrentBranch(t *testing.T) {

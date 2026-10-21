@@ -50,7 +50,7 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 	if err := requireWorkTree(run, "PR clean"); err != nil {
 		return "", "", err
 	}
-	refs, err := run("for-each-ref", "--format=%(objectname)%09%(refname:short)%09%(upstream:remotename)", "refs/heads/")
+	refs, err := run("for-each-ref", "--format=%(objectname)%09%(refname:lstrip=2)%09%(upstream:remotename)", "refs/heads/")
 	if err != nil {
 		return "", "", err
 	}
@@ -71,6 +71,8 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 	preferred := setOf(opts.PreferredNames)
 	matching := setOf(opts.MatchingRemotes)
 	candidates := []candidate{}
+	// named tells whether a branch would match by name, which --ignore-sha selects by.
+	named := false
 	for line := range strings.SplitSeq(refs, "\n") {
 		if line == "" {
 			continue
@@ -88,15 +90,18 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 			upstream = parts[2]
 		}
 		recorded := opts.PullNumber > 0 && pullNumbers[name] == opts.PullNumber
+		byName := (opts.HeadBranch != "" && name == opts.HeadBranch) || preferred[name] || recorded
+		named = named || byName
 		if opts.IgnoreSHA {
-			if name != opts.HeadBranch && !preferred[name] && !recorded {
+			if !byName {
 				continue
 			}
 		} else if opts.HeadSHA == "" || sha != opts.HeadSHA {
 			continue
 		}
 		remoteName, matched := upstream, matching[upstream]
-		if !matched {
+		// An AGit pull request has no head branch to look up among the remote-tracking branches.
+		if !matched && opts.HeadBranch != "" {
 			for remote := range matching {
 				tracking, trackErr := run("rev-parse", "--verify", "refs/remotes/"+remote+"/"+opts.HeadBranch+"^{commit}")
 				if trackErr == nil && (opts.IgnoreSHA || tracking == sha) {
@@ -113,8 +118,15 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 		candidates = append(candidates, candidate{name: name, remote: remoteName, matched: matched, recorded: recorded})
 	}
 	if len(candidates) == 0 {
-		if opts.IgnoreSHA {
+		switch {
+		case opts.IgnoreSHA && opts.HeadBranch == "":
+			return "", "", errors.New("no local branch was recorded for this AGit pull request; it has no head branch to select by name")
+		case opts.IgnoreSHA:
 			return "", "", fmt.Errorf("local branch %q was not found for the selected pull request", opts.HeadBranch)
+		case opts.HeadBranch == "" && !named:
+			// An AGit pull request has no head branch name to retry with.
+			return "", "", fmt.Errorf(`local branch for commit %s was not found.
+Either this pull request was never checked out, or the local branch diverged`, opts.HeadSHA)
 		}
 		return "", "", fmt.Errorf(`local branch for commit %s was not found.
 Either this pull request was never checked out, or the local branch diverged.
@@ -205,7 +217,7 @@ func CleanPull(ctx context.Context, runner Runner, opts CleanOptions) (CleanResu
 		return result, nil
 	}
 	push := append([]string{}, opts.CredentialArgs...)
-	push = append(push, "push", "--delete", "--", opts.Remote, opts.RemoteBranch)
+	push = append(push, "push", "--delete", "--", opts.Remote, "refs/heads/"+opts.RemoteBranch)
 	if _, err := run(push...); err != nil {
 		return result, fmt.Errorf("deleted local branch %s, but deleting remote branch %s failed: %w", opts.LocalBranch, opts.RemoteBranch, err)
 	}

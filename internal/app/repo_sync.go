@@ -25,7 +25,9 @@ func (a *application) repositorySyncCommand() *cobra.Command {
 the repository's Git remote, without switching branches. Diverged branches are left unchanged.
 
 Given a repository without a Git remote here, sync updates it on the server instead: a fork
-fast-forwards to its parent, and a pull mirror fetches its source.`,
+fast-forwards to its parent, and a pull mirror fetches its source. Gitea updates a mirror as a
+whole and in the background, so --branch is refused for a mirror, and the JSON result names
+only the source, as remote.`,
 		Example: `# Fast-forward the default branch from the repository's remote
 $ gt repo sync
 
@@ -115,11 +117,14 @@ func (a *application) syncOnServer(cmd *cobra.Command, t target, branch string) 
 	}
 	switch {
 	case item.Mirror:
+		if cmd.Flags().Changed("branch") {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--branch cannot be used for the mirror %s: Gitea updates a mirror as a whole", item.FullName))
+		}
 		if err := repositories.MirrorSync(cmd.Context(), item.FullName); err != nil {
 			return err
 		}
 		a.done(cmd, "Started updating the mirror %s from its source", item.FullName)
-		return a.jsonResult(cmd, git.SyncResult{Remote: mirrorSourceURL(item)})
+		return a.jsonResult(cmd, git.SyncResult{Remote: mirrorSource(item)})
 	case !item.Fork || item.Parent == nil:
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is neither a fork nor a mirror, and has no Git remote here; run gt repo sync inside a clone of it", item.FullName))
 	}
@@ -143,6 +148,18 @@ func (a *application) syncOnServer(cmd *cobra.Command, t target, branch string) 
 		a.done(cmd, "Synced %s %s from %s (fast-forward %s..%s)", item.FullName, branch, item.Parent.FullName, shortSHA(result.Previous), shortSHA(result.Commit))
 	}
 	return a.jsonResult(cmd, result)
+}
+
+// mirrorSource names the source of a pull mirror for the sync result: its URL without
+// credentials, or the path of a source on the server's disk, which carries none.
+func mirrorSource(item services.Repository) string {
+	if source := mirrorSourceURL(item); source != "" {
+		return source
+	}
+	if strings.HasPrefix(item.OriginalURL, "/") && !strings.ContainsAny(item.OriginalURL, "@ \t\r\n") {
+		return item.OriginalURL
+	}
+	return ""
 }
 
 // reportSync tells how a sync from source, such as origin/main, changed the branch.

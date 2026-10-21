@@ -15,15 +15,20 @@ import (
 func (a *application) timelineCommand(kind refKind) *cobra.Command {
 	words := commentWords(kind)
 	var limit, page int
+	// pr timeline takes the pull request like other single pull request commands.
+	operand, arguments, operandArgs := "{<number> | <url>}", words.arguments, argsExact(1)
+	if kind == pullRef {
+		operand, arguments, operandArgs = "[<number> | <url> | <branch>]", pullArguments, usageArgs(cobra.MaximumNArgs(1))
+	}
 	cmd := &cobra.Command{
-		Use: "timeline {<number> | <url>}", Short: "Show the activity on " + kind.article(),
+		Use: "timeline " + operand, Short: "Show the activity on " + kind.article(),
 		Long: fmt.Sprintf(`Show what happened on %s, oldest first: comments, and changes such as labels,
 milestones, titles, assignees, references and state changes.`, kind.article()),
 		Example: fmt.Sprintf(`$ gt %[1]s timeline %[2]s
 $ gt %[1]s timeline %[2]s --json type,author,created_at`, words.group, words.example),
-		Annotations: map[string]string{"gt.arguments": words.arguments}, Args: argsExact(1), ValidArgsFunction: firstArg(a.completeDiscussions(kind)),
+		Annotations: map[string]string{"gt.arguments": arguments}, Args: operandArgs, ValidArgsFunction: firstArg(a.completeDiscussions(kind)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			t, n, err := a.resolveRef(cmd, args[0], kind)
+			t, n, err := a.discussionRef(cmd, args, kind)
 			if err != nil {
 				return err
 			}
@@ -40,7 +45,7 @@ $ gt %[1]s timeline %[2]s --json type,author,created_at`, words.group, words.exa
 			return writeTable(a, cmd, result.Items, listSpec[services.TimelineEvent]{
 				Columns: []terminal.Column{{Header: "When"}, {Header: "Author"}, {Header: "Event", Flex: true}},
 				Row: func(event services.TimelineEvent) []terminal.Cell {
-					return []terminal.Cell{{Time: terminal.ParseTime(event.CreatedAt)}, {Text: event.Author, Bold: true}, {Text: timelineText(event), Link: event.URL}}
+					return []terminal.Cell{{Time: terminal.ParseTime(event.CreatedAt)}, {Text: event.Author, Bold: true}, {Text: timelineText(event, t.Repo), Link: event.URL}}
 				},
 				Empty: "no activity on " + ref, Context: "activity on " + ref,
 			}, servicePage(result, page))
@@ -50,25 +55,31 @@ $ gt %[1]s timeline %[2]s --json type,author,created_at`, words.group, words.exa
 	return jsonOutput(cmd, jsonFields[services.TimelineEvent]())
 }
 
-// timelineText words a timeline event, such as `added label "bug"` or a comment's first line.
-func timelineText(event services.TimelineEvent) string {
+// timelineText words a timeline event in repository repo, such as `added label "bug"` or a
+// comment's first line.
+func timelineText(event services.TimelineEvent, repo string) string {
+	text := func(value *string) string {
+		if value == nil {
+			return ""
+		}
+		return *value
+	}
 	switch event.Type {
 	case "comment":
-		first, _, _ := strings.Cut(strings.TrimSpace(event.Body), "\n")
+		first, _, _ := strings.Cut(strings.TrimSpace(text(event.Body)), "\n")
 		return "commented: " + first
 	case "label":
-		// Gitea records an added label with the body "1".
-		if event.Body == "1" {
-			return fmt.Sprintf("added label %q", event.Label)
+		if event.LabelAdded != nil && *event.LabelAdded {
+			return fmt.Sprintf("added label %q", text(event.Label))
 		}
-		return fmt.Sprintf("removed label %q", event.Label)
+		return fmt.Sprintf("removed label %q", text(event.Label))
 	case "milestone":
-		if event.Milestone == "" {
-			return fmt.Sprintf("removed milestone %q", event.OldMilestone)
+		if event.Milestone == nil {
+			return fmt.Sprintf("removed milestone %q", text(event.OldMilestone))
 		}
-		return fmt.Sprintf("set milestone %q", event.Milestone)
+		return fmt.Sprintf("set milestone %q", *event.Milestone)
 	case "change_title":
-		return fmt.Sprintf("renamed %q to %q", event.OldTitle, event.NewTitle)
+		return fmt.Sprintf("renamed %q to %q", text(event.OldTitle), text(event.NewTitle))
 	case "close":
 		return "closed"
 	case "reopen":
@@ -78,7 +89,41 @@ func timelineText(event services.TimelineEvent) string {
 	case "review":
 		return "reviewed"
 	case "assignees":
-		return "changed the assignees"
+		switch {
+		case event.Assignee == nil:
+			return "changed the assignees"
+		case event.RemovedAssignee != nil && *event.RemovedAssignee:
+			return "unassigned " + *event.Assignee
+		}
+		return "assigned " + *event.Assignee
+	case "review_request":
+		switch {
+		case event.Assignee == nil:
+			return "changed the review requests"
+		case event.RemovedAssignee != nil && *event.RemovedAssignee:
+			return "removed the review request for " + *event.Assignee
+		}
+		return "requested a review from " + *event.Assignee
+	case "added_deadline":
+		return "set the due date to " + text(event.Deadline)
+	case "modified_deadline":
+		return fmt.Sprintf("changed the due date from %s to %s", text(event.OldDeadline), text(event.Deadline))
+	case "removed_deadline":
+		return "removed the due date " + text(event.OldDeadline)
+	case "add_dependency", "remove_dependency":
+		verb := "added"
+		if event.Type == "remove_dependency" {
+			verb = "removed"
+		}
+		if event.DependentIssue == nil {
+			return verb + " a dependency"
+		}
+		// An issue of the same repository is named by its number alone.
+		name := *event.DependentIssue
+		if number, ok := strings.CutPrefix(name, repo+"#"); ok {
+			name = "#" + number
+		}
+		return verb + " dependency " + name
 	case "commit_ref", "comment_ref", "issue_ref", "pull_ref":
 		return "referenced this from elsewhere"
 	case "pull_push":

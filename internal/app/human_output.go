@@ -23,19 +23,28 @@ func (a *application) preferences() (settings.Preferences, error) {
 	return preferences, err
 }
 
+// colorEnabled reports whether output on stdout is colored.
 func (a *application) colorEnabled() bool {
 	preferences, _ := a.preferences()
-	return terminal.ColorEnabled(preferences.Color, a.deps.Streams.OutTTY, a.deps.Getenv)
+	return a.deps.Streams.OutColor(preferences.Color, a.deps.Getenv)
+}
+
+// errColorEnabled reports whether diagnostics on stderr are colored, which depends on stderr alone:
+// `gt issue close 5 2>log` writes no color codes to log.
+func (a *application) errColorEnabled() bool {
+	preferences, _ := a.preferences()
+	return a.deps.Streams.ErrColor(preferences.Color, a.deps.Getenv)
 }
 
 // display describes stdout for tables and views under the color, hyperlinks and markdown preferences.
+// Piped output stays plain even when color is forced, so no caller has to check TTY itself.
 func (a *application) display() terminal.Display {
 	preferences, _ := a.preferences()
 	streams := a.deps.Streams
 	return terminal.Display{
 		TTY:      streams.OutTTY,
-		Color:    terminal.ColorEnabled(preferences.Color, streams.OutTTY, a.deps.Getenv),
-		Links:    terminal.HyperlinksEnabled(preferences.Hyperlinks, streams.OutTTY, a.deps.Getenv),
+		Color:    streams.OutTTY && streams.OutColor(preferences.Color, a.deps.Getenv),
+		Links:    !streams.OutPlain && terminal.HyperlinksEnabled(preferences.Hyperlinks, streams.OutEscapes(), a.deps.Getenv),
 		Markdown: terminal.MarkdownEnabled(preferences.Markdown, streams.OutTTY),
 		Width:    streams.Width,
 		Now:      a.deps.Now(),
@@ -43,9 +52,23 @@ func (a *application) display() terminal.Display {
 }
 
 // writeHuman pages human list and view text; --no-input does not disable paging.
+// A failing pager is named by where it was configured.
 func (a *application) writeHuman(cmd *cobra.Command, text string) error {
-	preferences, _ := a.preferences()
-	return terminal.WriteHuman(cmd.Context(), a.deps.Streams, preferences.Pager, a.deps.Pager, text)
+	var preferences settings.Preferences
+	var sources map[string]string
+	if snapshot, err := a.settings(); err == nil {
+		preferences, sources, _ = a.effectivePreferences(snapshot)
+	}
+	err := terminal.WriteHuman(cmd.Context(), a.deps.Streams, preferences.Pager, a.deps.Pager, text)
+	var pagerErr *terminal.PagerError
+	if !errors.As(err, &pagerErr) {
+		return err
+	}
+	source := sources["pager"]
+	if source == "config.yml" {
+		source = "pager in config.yml"
+	}
+	return fmt.Errorf("pager failed; check %s: %w", source, pagerErr.Err)
 }
 
 // writeJSON writes v as JSON, filtered by --json fields and --jq.
@@ -151,7 +174,7 @@ func (a *application) warn(cmd *cobra.Command, format string, args ...any) {
 }
 
 func (a *application) feedback(cmd *cobra.Command, icon, color, format string, args ...any) {
-	fmt.Fprintln(cmd.ErrOrStderr(), terminal.Colorize(color, icon, a.colorEnabled())+" "+terminal.SafeLine(fmt.Sprintf(format, args...)))
+	fmt.Fprintln(cmd.ErrOrStderr(), terminal.Colorize(color, icon, a.errColorEnabled())+" "+terminal.SafeLine(fmt.Sprintf(format, args...)))
 }
 
 // jsonResult writes the result of a mutation when --json asks for it; people get a done line instead.

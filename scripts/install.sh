@@ -47,10 +47,13 @@ platform() {
   case $(uname -m) in
     x86_64 | amd64) arch=amd64 ;;
     aarch64 | arm64) arch=arm64 ;;
-    armv7*) arch=arm-7 ;;
+    armv8l | armv7*) arch=arm-7 ;;
     armv6*) arch=arm-6 ;;
     armv5*) arch=arm-5 ;;
     *) fail "unsupported architecture $(uname -m); download gt from $download_url" ;;
+  esac
+  case $os-$arch in
+    freebsd-arm*) fail "no gt build for FreeBSD on $(uname -m); download gt from $download_url" ;;
   esac
   echo "$os-$arch"
 }

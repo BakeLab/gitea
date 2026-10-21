@@ -10,7 +10,8 @@ import (
 	"gitea.dev/cli/internal/transport"
 )
 
-// CreateSelectables are the metadata choices offered by create forms; the lists stay empty unless CanPush.
+// CreateSelectables are the metadata choices offered by forms. Where they depend on push access, the
+// lists stay empty unless CanPush.
 type CreateSelectables struct {
 	CanPush    bool
 	Assignees  []string
@@ -50,30 +51,27 @@ func (s Pulls) CreateChoices(ctx context.Context) (PullCreateChoices, error) {
 	return result, nil
 }
 
-func loadCreateSelectables(ctx context.Context, client *transport.Client, repository string) (CreateSelectables, error) {
-	permissions, err := (Repositories{Client: client}).viewPermissions(ctx, repository)
-	if err != nil {
-		return CreateSelectables{Assignees: []string{}, Milestones: []Milestone{}, Labels: []Label{}}, err
-	}
-	return createSelectablesFor(ctx, client, repository, permissions.Push)
-}
-
 // createSelectablesFor loads assignees, milestones, and labels concurrently when canPush.
 func createSelectablesFor(ctx context.Context, client *transport.Client, repository string, canPush bool) (CreateSelectables, error) {
-	result := CreateSelectables{Assignees: []string{}, Milestones: []Milestone{}, Labels: []Label{}}
 	if !canPush {
-		return result, nil
+		return CreateSelectables{Assignees: []string{}, Milestones: []Milestone{}, Labels: []Label{}}, nil
 	}
+	result, err := loadMetadataChoices(ctx, client, repository)
 	result.CanPush = true
+	return result, err
+}
+
+// loadMetadataChoices loads assignees, milestones, and labels concurrently, whatever the user may
+// do with them; CanPush stays false.
+func loadMetadataChoices(ctx context.Context, client *transport.Client, repository string) (CreateSelectables, error) {
+	result := CreateSelectables{Assignees: []string{}, Milestones: []Milestone{}, Labels: []Label{}}
 	err := loadTogether(
 		func() (err error) {
 			result.Assignees, err = (Repositories{Client: client}).assignees(ctx, repository)
 			return err
 		},
 		func() (err error) {
-			result.Milestones, err = listAll(func(page int) ([]Milestone, error) {
-				return (Milestones{Client: client, Repository: repository}).List(ctx, "open", 100, page)
-			})
+			result.Milestones, err = (Milestones{Client: client, Repository: repository}).AllIn(ctx, "open")
 			return err
 		},
 		func() (err error) {

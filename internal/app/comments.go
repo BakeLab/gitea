@@ -30,7 +30,7 @@ func commentWords(kind refKind) commentNouns {
 	return commentNouns{group: "issue", arguments: issueArguments, example: "12"}
 }
 
-// pullNumberArguments is the ARGUMENTS help of pr comment and pr attachment commands, which take pull
+// pullNumberArguments is the ARGUMENTS help of pr attachment commands, which take pull
 // request numbers like issue commands take issue numbers.
 const pullNumberArguments = `A pull request can be supplied as argument in any of the following formats:
 - by number, e.g. "13" or "#13"
@@ -48,6 +48,9 @@ func requirePull(cmd *cobra.Command, t target, n int64) error {
 // refuse issues, which Gitea would otherwise serve through the same endpoints.
 func discussion(cmd *cobra.Command, t target, n int64, kind refKind) (services.Issue, error) {
 	item, err := (services.Issues{Client: t.client, Repository: t.Repo}).View(cmd.Context(), n)
+	if missing, ok := errors.AsType[*services.NotFoundError](err); ok && kind == pullRef && missing.Kind == "issue" {
+		missing.Kind = "pull request"
+	}
 	if err == nil && kind == pullRef && item.Kind != services.KindPull {
 		err = fmt.Errorf("#%d in %s is an issue, not a pull request; use %s %d", n, t.Repo, issueCommandPath(cmd), n)
 	}
@@ -150,7 +153,7 @@ func (a *application) commentOn(cmd *cobra.Command, t target, n int64, kind refK
 	}
 	a.done(cmd, "Commented on %s", refLabel(t.Repo, n, item.Title))
 	failures := uploadAttachments(cmd.Context(), files, comment.ID, service.UploadAttachment, nil)
-	return errors.Join(followUpError("the comment", failures), a.created(cmd, comment, comment.URL))
+	return errors.Join(followUpError("the comment", "created", failures), a.created(cmd, comment, comment.URL))
 }
 
 func lastComment(cmd *cobra.Command, t target, n int64) (services.Comment, error) {
@@ -282,19 +285,27 @@ func (a *application) writeComments(cmd *cobra.Command, t target, n int64, items
 
 func (a *application) commentCommand(kind refKind) *cobra.Command {
 	words := commentWords(kind)
+	// pr comments take the pull request like other single pull request commands.
+	operand, arguments, operandArgs := "{<number> | <url>}", words.arguments, argsExact(1)
+	if kind == pullRef {
+		operand, arguments, operandArgs = "[<number> | <url> | <branch>]", pullArguments, usageArgs(cobra.MaximumNArgs(1))
+	}
 	var flags commentFlags
 	var editLast, deleteLast bool
-	group := &cobra.Command{Use: "comment {<number> | <url>}", Short: "Add a comment to " + kind.article(), Long: fmt.Sprintf(`Add a comment to %[1]s, or edit or delete your last comment on it.
+	group := &cobra.Command{Use: "comment " + operand, Short: "Add a comment to " + kind.article(), Long: fmt.Sprintf(`Add a comment to %[1]s, or edit or delete your last comment on it.
 
 Without --body, --body-file or --editor, the configured editor opens, or a multi-line prompt
 asks for the comment. The subcommands list, view, edit and delete comments by their ID.`, kind.article()), Example: fmt.Sprintf(`$ gt %[1]s comment %[2]s --body "Fixed in #14"
 $ gt %[1]s comment %[2]s --edit-last --body "Fixed in #15"
-$ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments, "gt.confirm": "true"}, Args: commentArgs(kind), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[string]string{"gt.arguments": arguments, "gt.confirm": "true"}, Args: commentArgs(kind), RunE: func(cmd *cobra.Command, args []string) error {
+		// Without flags, the group shows its help; a pr comment then is on the current branch's.
 		if len(args) == 0 {
-			if localFlagsChanged(cmd) {
+			if !localFlagsChanged(cmd) {
+				return cmd.Help()
+			}
+			if kind != pullRef {
 				return clierr.Wrap(clierr.Usage, &argumentError{problem: "missing " + kind.noun() + " number", cmd: cmd})
 			}
-			return cmd.Help()
 		}
 		if err := flags.validate(cmd); err != nil {
 			return err
@@ -311,7 +322,7 @@ $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[st
 		if deleteLast && a.options.json != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("comment deletion does not return a resource; --json and --jq are not supported"))
 		}
-		t, n, err := a.resolveRef(cmd, args[0], kind)
+		t, n, err := a.discussionRef(cmd, args, kind)
 		if err != nil {
 			return err
 		}
@@ -338,9 +349,9 @@ $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[st
 	group.ValidArgsFunction = a.completeDiscussions(kind)
 
 	var limit, page int
-	list := &cobra.Command{Use: "list {<number> | <url>}", Short: "List the comments on " + kind.article(), Example: fmt.Sprintf(`$ gt %[1]s comment list %[2]s
-$ gt %[1]s comment list %[2]s --json id,author,body`, words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		t, n, err := a.resolveRef(cmd, args[0], kind)
+	list := &cobra.Command{Use: "list " + operand, Short: "List the comments on " + kind.article(), Example: fmt.Sprintf(`$ gt %[1]s comment list %[2]s
+$ gt %[1]s comment list %[2]s --json id,author,body`, words.group, words.example), Annotations: map[string]string{"gt.arguments": arguments}, Args: operandArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		t, n, err := a.discussionRef(cmd, args, kind)
 		if err != nil {
 			return err
 		}
@@ -370,12 +381,12 @@ $ gt %[1]s comment list %[2]s --json id,author,body`, words.group, words.example
 	}}
 
 	var createFlags commentFlags
-	create := &cobra.Command{Use: "create {<number> | <url>}", Aliases: []string{"add"}, Short: "Add a comment to " + kind.article(), Example: fmt.Sprintf(`$ gt %[1]s comment create %[2]s --body "Looks good"
-$ gt %[1]s comment add %[2]s --editor`, words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+	create := &cobra.Command{Use: "create " + operand, Aliases: []string{"add"}, Short: "Add a comment to " + kind.article(), Example: fmt.Sprintf(`$ gt %[1]s comment create %[2]s --body "Looks good"
+$ gt %[1]s comment add %[2]s --editor`, words.group, words.example), Annotations: map[string]string{"gt.arguments": arguments}, Args: operandArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if err := createFlags.validate(cmd); err != nil {
 			return err
 		}
-		t, n, err := a.resolveRef(cmd, args[0], kind)
+		t, n, err := a.discussionRef(cmd, args, kind)
 		if err != nil {
 			return err
 		}
@@ -408,6 +419,16 @@ $ gt %[1]s comment edit 81`, words.group), Args: argsExact(1), RunE: func(cmd *c
 	}}
 	group.AddCommand(list, view, create, edit, remove)
 	return jsonOutput(group, jsonFields[services.Comment]())
+}
+
+// discussionRef resolves the issue or pull request a comment command addresses: an issue by
+// number or URL, a pull request also by branch, or, without an argument, as the pull request of
+// the current branch.
+func (a *application) discussionRef(cmd *cobra.Command, args []string, kind refKind) (target, int64, error) {
+	if kind == pullRef {
+		return a.pullSelectorAny(cmd, args)
+	}
+	return a.resolveRef(cmd, args[0], kind)
 }
 
 // commentArgs accepts at most an issue or pull request, and reports a misspelled subcommand, such

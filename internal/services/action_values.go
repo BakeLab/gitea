@@ -46,9 +46,20 @@ func ActionValueName(name string) string { return strings.ToUpper(name) }
 // answers a plain "not found" when the repository or organization itself does not exist.
 func classifyValue(err error, kind, name string, scope ActionScope) error {
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusNotFound && !strings.Contains(apiErr.Message, kind) {
-		return err
+		return classifyScope(err, scope)
 	}
 	return Classify(err, kind, ActionValueName(name), scope.String())
+}
+
+// classifyScope reports a 404 as the repository or organization of scope not being found.
+func classifyScope(err error, scope ActionScope) error {
+	switch {
+	case scope.Account:
+		return err
+	case scope.Organization != "":
+		return Classify(err, "organization", scope.Organization, "")
+	}
+	return Classify(err, "repository", scope.Repository, "")
 }
 
 func secretFrom(secret *gitea.Secret) ActionSecret {
@@ -87,7 +98,7 @@ func (s ActionSecrets) ListPage(ctx context.Context, limit, page int) (Page[Acti
 		}
 		return c.Actions.ListRepoSecrets(ctx, owner, repo, gitea.ListRepoActionsSecretOption{ListOptions: list})
 	})
-	return convertPage(window, secretFrom), err
+	return convertPage(window, secretFrom), classifyScope(err, s.Scope)
 }
 
 // Set creates or replaces a secret; the API's PUT operation defines upsert semantics. The result
@@ -107,7 +118,7 @@ func (s ActionSecrets) Set(ctx context.Context, name, value, description string)
 		}
 		return c.Actions.CreateRepoSecret(ctx, owner, repo, name, option)
 	})
-	return ActionSecret{Name: ActionValueName(name), Description: description}, err
+	return ActionSecret{Name: ActionValueName(name), Description: description}, classifyValue(err, "secret", name, s.Scope)
 }
 
 // Delete removes only the named secret in the selected scope.
@@ -160,7 +171,7 @@ func (s ActionVariables) ListPage(ctx context.Context, limit, page int) (Page[Ac
 	} else {
 		window, err = rawPage[*gitea.ActionsVariable](ctx, s.Client, s.repoVariables(""), nil, limit, page)
 	}
-	return convertPage(window, variableFrom), err
+	return convertPage(window, variableFrom), classifyScope(err, s.Scope)
 }
 
 // View retrieves one variable.
@@ -191,7 +202,8 @@ func (s ActionVariables) Set(ctx context.Context, name, value string, newDescrip
 	exists := true
 	current, err := s.View(ctx, name)
 	if err != nil {
-		if !errors.As(err, new(*NotFoundError)) {
+		// A missing repository or organization is no missing variable.
+		if notFound, ok := errors.AsType[*NotFoundError](err); !ok || notFound.Kind != "variable" {
 			return ActionVariable{}, err
 		}
 		exists = false
@@ -224,7 +236,7 @@ func (s ActionVariables) Set(ctx context.Context, name, value string, newDescrip
 		}
 		err = sendJSON(ctx, s.Client, method, s.repoVariables(name), update, nil)
 	}
-	return ActionVariable{Name: ActionValueName(name), Value: value, Description: description}, err
+	return ActionVariable{Name: ActionValueName(name), Value: value, Description: description}, classifyValue(err, "variable", name, s.Scope)
 }
 
 // Delete removes only the named variable in the selected scope.

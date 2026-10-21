@@ -119,6 +119,45 @@ func TestDoctorReportsEveryCheckInsteadOfFailingFirst(t *testing.T) {
 	}
 }
 
+func TestDoctorWarnsOfHeadersWhoseVariableIsUnset(t *testing.T) {
+	server := newAuthenticatedServer(doctorServer(t))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	deps.Git = doctorGit(server.URL)
+	configureHost(t, deps, server.URL, settings.Host{Headers: map[string]string{"X-Proxy-Secret": "$PROXY_SECRET", "X-Tenant": "acme"}})
+	headers := func(env map[string]string) doctorCheck {
+		t.Helper()
+		out.Reset()
+		deps.Getenv = serverEnv(server.URL, env)
+		deps.LookupEnv = func(key string) (string, bool) {
+			value, set := env[key]
+			return value, set
+		}
+		require.NoError(t, Execute(context.Background(), deps, []string{"doctor", "--json=checks"}))
+		var report doctorReport
+		require.NoError(t, json.Unmarshal(out.Bytes(), &report), out.String())
+		for _, check := range report.Checks {
+			if check.Name == "Headers" {
+				return check
+			}
+		}
+		t.Fatalf("no Headers check in %s", out.String())
+		return doctorCheck{}
+	}
+	require.Equal(t, doctorCheck{"Headers", checkWarning, "X-Proxy-Secret is not sent: $PROXY_SECRET is not set", `set the variable, or remove the header: gt config set headers "X-Proxy-Secret:" --host ` + server.URL}, headers(nil))
+	require.Equal(t, doctorCheck{"Headers", checkPassed, "X-Proxy-Secret, X-Tenant", ""}, headers(map[string]string{"PROXY_SECRET": "secret"}))
+
+	// ${NAME} is read like $NAME, a variable set to "" is called empty, and the hint removes every
+	// header that is not sent.
+	configureHost(t, deps, server.URL, settings.Host{Headers: map[string]string{"X-Braced": "${PROXY_SECRET}", "X-Empty": "$GT_TEST_EMPTY_SECRET", "X-Proxy-Secret": "$PROXY_SECRET"}})
+	require.Equal(t, doctorCheck{"Headers", checkPassed, "X-Braced, X-Empty, X-Proxy-Secret", ""}, headers(map[string]string{"PROXY_SECRET": "secret", "GT_TEST_EMPTY_SECRET": "set"}))
+	unsent := headers(map[string]string{"GT_TEST_EMPTY_SECRET": ""})
+	require.Equal(t, checkWarning, unsent.Status)
+	require.Equal(t, "X-Braced is not sent: ${PROXY_SECRET} is not set; X-Empty is not sent: $GT_TEST_EMPTY_SECRET is empty; X-Proxy-Secret is not sent: $PROXY_SECRET is not set", unsent.Detail)
+	remove := ` --host ` + server.URL
+	require.Equal(t, `set the variables, or remove the headers: gt config set headers "X-Braced:"`+remove+`; gt config set headers "X-Empty:"`+remove+`; gt config set headers "X-Proxy-Secret:"`+remove, unsent.Fix)
+}
+
 func TestDoctorReportsBrokenSettingsFile(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	deps.Git = &fakeGit{results: map[string]string{"--version": "git version 2.50.1"}}

@@ -94,10 +94,12 @@ func (s Pulls) CommitChecks(ctx context.Context, sha string) ([]Check, error) {
 }
 
 func (s Pulls) checksForCommit(ctx context.Context, sha string) ([]Check, error) {
-	statuses, err := listAll(func(page int) ([]*gitea.Status, error) {
-		return repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.Status, *gitea.Response, error) {
-			return c.Repositories.ListStatusesBySHA(ctx, owner, name, sha, gitea.ListStatusesOption{ListOptions: listOptions(100, page)})
-		})
+	owner, name, err := splitRepository(s.Repository)
+	if err != nil {
+		return nil, err
+	}
+	statuses, err := callAll(ctx, s.Client, 100, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Status, *gitea.Response, error) {
+		return c.Repositories.ListStatusesBySHA(ctx, owner, name, sha, gitea.ListStatusesOption{ListOptions: list})
 	})
 	if err != nil {
 		return nil, err
@@ -125,12 +127,19 @@ func (s Pulls) WatchChecks(ctx context.Context, n int64, interval time.Duration,
 	}
 	var previous []Check
 	reported := false
+	var failures outage
 	for {
 		sha, err := s.checkHead(ctx, n)
-		if err != nil {
-			return nil, err
+		var items []Check
+		if err == nil {
+			items, err = s.checksForCommit(ctx, sha)
 		}
-		items, err := s.checksForCommit(ctx, sha)
+		if failures.retry(ctx, err) {
+			if err := sleepCtx(ctx, interval); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -147,6 +156,12 @@ func (s Pulls) WatchChecks(ctx context.Context, n int64, interval time.Duration,
 		failing, pending, _ := Tally(items)
 		if failing > 0 || (pending == 0 && len(items) > 0) {
 			current, err := s.checkHead(ctx, n)
+			if failures.retry(ctx, err) {
+				if err := sleepCtx(ctx, interval); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -154,6 +169,7 @@ func (s Pulls) WatchChecks(ctx context.Context, n int64, interval time.Duration,
 				return items, nil
 			}
 		}
+		failures.passed()
 		if err := sleepCtx(ctx, interval); err != nil {
 			return nil, err
 		}

@@ -25,7 +25,7 @@ func TestDiscussionSearchTeamRequiresOwnerAndInstanceScope(t *testing.T) {
 	items, err := service.Search(context.Background(), DiscussionSearchOptions{Owner: "team-org", Team: "devs", Pulls: true, State: "open", Limit: 30, Page: 1})
 	require.NoError(t, err)
 	require.Len(t, items, 1)
-	require.Equal(t, "pr", items[0].Type)
+	require.Equal(t, "pull", items[0].Type)
 	repoService := Issues{Client: client, Repository: "team-org/repo"}
 	_, err = repoService.Search(context.Background(), DiscussionSearchOptions{Owner: "team-org", Team: "devs", State: "open", Limit: 30, Page: 1})
 	require.ErrorContains(t, err, "instance-wide")

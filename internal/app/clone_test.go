@@ -99,6 +99,7 @@ func TestCloneAddsUpstreamRemoteForForks(t *testing.T) {
 		prefix + "clone -- " + remote + " destination": "",
 		"remote":                                   "origin",
 		"remote add -- upstream " + parent:         "",
+		prefix + "fetch --quiet -- upstream":       "",
 		"config branch.main.remote upstream":       "",
 		"config branch.main.merge refs/heads/main": "",
 		"config branch.main.pushRemote origin":     "",
@@ -110,12 +111,13 @@ func TestCloneAddsUpstreamRemoteForForks(t *testing.T) {
 		prefix + "clone -- " + remote + " destination",
 		"remote",
 		"remote add -- upstream " + parent,
+		prefix + "fetch --quiet -- upstream",
 		"config branch.main.remote upstream",
 		"config branch.main.merge refs/heads/main",
 		"config branch.main.pushRemote origin",
 	}, runner.calls)
 	clone := filepath.Join(cwd, "destination")
-	require.Equal(t, []string{cwd, clone, clone, clone, clone, clone}, runner.dirs)
+	require.Equal(t, []string{cwd, clone, clone, clone, clone, clone, clone}, runner.dirs)
 	require.JSONEq(t, `{"id":8,"full_name":"bob/project","fork":true}`, out.String())
 }
 
@@ -189,13 +191,15 @@ func TestClonePassesGitFlagsAndNamesTheUpstreamRemote(t *testing.T) {
 	deps, _, diagnostics := repoTTYDeps(t, server.URL)
 	clone := credentialCall(t, deps, server.URL, "alice", "clone", "--branch", "dev", "--", server.URL+"/bob/project.git")
 	parent := server.URL + "/alice/project.git"
+	fetch := credentialCall(t, deps, server.URL, "alice", "fetch", "--quiet", "--depth", "1", "--", "parent")
+	shallow := credentialCall(t, deps, server.URL, "alice", "clone", "--depth", "1", "--branch", "dev", "--", server.URL+"/bob/project.git")
 	runner := &fakeGit{results: map[string]string{
-		clone: "", "remote": "fork", "remote add -- parent " + parent: "", "config branch.main.remote parent": "",
+		clone: "", shallow: "", "remote": "fork", "remote add -- parent " + parent: "", fetch: "", "config branch.main.remote parent": "",
 		"config branch.main.merge refs/heads/main": "", "config branch.main.pushRemote fork": "",
 	}}
 	deps.Git = runner
-	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "-u", "parent", "--", "--branch", "dev"}))
-	require.Equal(t, []string{clone, "remote", "remote add -- parent " + parent, "config branch.main.remote parent", "config branch.main.merge refs/heads/main", "config branch.main.pushRemote fork"}, runner.calls)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "-u", "parent", "--depth", "1", "--", "--branch", "dev"}))
+	require.Equal(t, []string{shallow, "remote", "remote add -- parent " + parent, fetch, "config branch.main.remote parent", "config branch.main.merge refs/heads/main", "config branch.main.pushRemote fork"}, runner.calls)
 	require.Equal(t, "✓ Cloned bob/project into project\n✓ Added remote parent for alice/project; gt commands in the clone target it (change with gt repo set-default)\n", diagnostics.String())
 	runner.calls = nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "--no-upstream", "--", "--branch", "dev"}))

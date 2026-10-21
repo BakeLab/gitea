@@ -4,16 +4,20 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
@@ -270,6 +274,27 @@ func TestAPIFiltersAndFormatsJSONResponses(t *testing.T) {
 	requireUsageBeforeRequests(t, `invalid HTTP method ""`, "api", "version", "-X", "")
 }
 
+func TestAPIMaxPagesStopsWithTheAllowedPages(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		page := cmp.Or(r.URL.Query().Get("page"), "1")
+		next, _ := strconv.Atoi(page)
+		w.Header().Set("Link", fmt.Sprintf(`<?page=%d>; rel="next"`, next+1))
+		_, _ = fmt.Fprintf(w, `[{"page":%s}]`, page)
+	}))
+	defer server.Close()
+	deps, out, errOut := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "repos", "--paginate", "--max-pages", "2"}))
+	require.Equal(t, "[{\"page\":1}]\n[{\"page\":2}]\n", out.String())
+	require.Contains(t, errOut.String(), "Stopped after 2 pages as --max-pages asks; more pages exist")
+
+	// Only an explicit --max-pages makes a partial result complete; the default limit fails.
+	deps, out, _ = serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"api", "repos", "--paginate", "--jq", "length"})
+	require.EqualError(t, err, "--paginate stopped after 1000 pages and more pages exist; raise --max-pages")
+	require.Equal(t, 1000, strings.Count(out.String(), "1\n"))
+}
+
 func TestAPIVerboseShowsRequestAndResponseWithoutCredentials(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Gt-Test", "response")
@@ -285,6 +310,48 @@ func TestAPIVerboseShowsRequestAndResponseWithoutCredentials(t *testing.T) {
 	}
 	require.NotContains(t, head, "secret")
 	require.NotContains(t, head, "token token")
+}
+
+func TestAPIIncludeRedactsSignedURLsInResponseHeaders(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Link", `<http://storage.test/a?page=2&sig=link-secret>; rel="next"`)
+		w.Header().Set("Location", "http://storage.test/lfs/blob?X-Amz-Credential=key-secret&X-Amz-Signature=sig-secret&X-Amz-Expires=300")
+		w.WriteHeader(http.StatusSeeOther)
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	require.Error(t, Execute(context.Background(), deps, []string{"api", "repos/alice/project/media/big.bin", "--include", "--silent"}))
+	head := diagnostics.String()
+	require.Contains(t, head, "Location: http://storage.test/lfs/blob?X-Amz-Credential=REDACTED&X-Amz-Expires=300&X-Amz-Signature=REDACTED\n")
+	require.Contains(t, head, `Link: <http://storage.test/a?page=2&sig=REDACTED>; rel="next"`+"\n")
+	require.NotContains(t, head, "secret")
+}
+
+func TestAPIVerboseHidesConfiguredHeaders(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cf-Access-Client-Secret") != "proxy-secret" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	deps, _, diagnostics := testDeps(t)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"PROXY_SECRET": "proxy-secret"})
+	configureHost(t, deps, server.URL, settings.Host{Headers: map[string]string{"Cf-Access-Client-Secret": "$PROXY_SECRET", "X-Tenant": "acme"}})
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "version", "--verbose", "-H", "X-Tenant: mine"}))
+	head := diagnostics.String()
+	require.Contains(t, head, "> Cf-Access-Client-Secret: (hidden)\n")
+	require.Contains(t, head, "> X-Tenant: mine\n", "a header of -H replaces the configured one and is shown")
+	require.NotContains(t, head, "proxy-secret")
+	require.NotContains(t, head, "is not sent")
+
+	// A header whose variable is unset is left out, and --verbose says so.
+	diagnostics.Reset()
+	deps.Getenv = serverEnv(server.URL, nil)
+	err := Execute(context.Background(), deps, []string{"api", "version", "--verbose"})
+	require.Error(t, err, "the server requires the header")
+	require.Contains(t, diagnostics.String(), "! Cf-Access-Client-Secret is not sent: $PROXY_SECRET is not set\n")
 }
 
 func TestAPIHelpShowsJQ(t *testing.T) {
@@ -309,4 +376,39 @@ func TestAPIIncludeSanitizesTheStatusLine(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"api", "version", "--include"}))
 	require.NotContains(t, diagnostics.String(), "\x1b")
 	require.NotContains(t, diagnostics.String(), "\x07")
+}
+
+func TestAPIEndpointOutsideTheInstanceIsAUsageError(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	for _, endpoint := range []string{"http://other.test/api/v1/version", server.URL + "/login", "repos/../user"} {
+		err := Execute(context.Background(), deps, []string{"api", endpoint})
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err), endpoint)
+	}
+	err := Execute(context.Background(), deps, []string{"api", "http://other.test/api/v1/version"})
+	require.EqualError(t, err, "API URL must belong to the selected instance and its API base path")
+}
+
+func TestAPIInputFileCanBeReadAgainForSigning(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "body.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"title":"x"}`), 0o600))
+	file, err := os.Open(path)
+	require.NoError(t, err)
+	defer file.Close()
+	// A body that can be read again is hashed for an HTTP signature as it is read, instead of
+	// being held in memory.
+	body, ok := inputBody(file).(*transport.ReplayableBody)
+	require.True(t, ok, "a regular --input file is replayable")
+	data, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"title":"x"}`, string(data))
+
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	defer reader.Close()
+	defer writer.Close()
+	require.Equal(t, io.Reader(reader), inputBody(reader), "a pipe is sent as it is read")
 }

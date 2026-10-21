@@ -103,6 +103,8 @@ func TestDownloadDestinations(t *testing.T) {
 		{name: "a file named dash stays a file", file: "-", want: "." + string(filepath.Separator) + "-"},
 		{name: "--output and --dir", flags: downloadFlags{output: "x", dir: "dl"}, file: "notes.txt", err: "--output and --dir cannot be combined"},
 		{name: "--clobber and --skip-existing", flags: downloadFlags{clobber: true, skipExisting: true}, file: "notes.txt", err: "--clobber and --skip-existing cannot be combined"},
+		{name: "--clobber to standard output", flags: downloadFlags{output: "-", clobber: true}, file: "notes.txt", err: "--clobber cannot be combined with --output -"},
+		{name: "--skip-existing to standard output", flags: downloadFlags{output: "-", skipExisting: true}, file: "notes.txt", err: "--skip-existing cannot be combined with --output -"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path, skip, err := tc.flags.destination(tc.file)

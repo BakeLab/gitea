@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gitea.dev/cli/internal/transport"
@@ -44,20 +45,28 @@ func loadTogether(loaders ...func() error) error {
 	return concurrently(len(loaders), func(i int) error { return loaders[i]() })
 }
 
-// listAll collects pages until the server returns an empty one.
-func listAll[T any](fetch func(page int) ([]T, error)) ([]T, error) {
+// listEvery collects every item of a collection from fetch, which reads a window of limit items
+// with instancePage. It stops at an empty window, or at the window that reaches the size the server
+// counts, without asking for an empty page after it. A server that counts nothing, or counts
+// fewer items than it lists, is read until an empty window.
+func listEvery[T any](limit int, fetch func(limit, page int) (Page[T], error)) ([]T, error) {
 	result := []T{}
 	for page := 1; page <= maxListPages; page++ {
-		items, err := fetch(page)
+		window, err := fetch(limit, page)
 		if err != nil {
 			return nil, err
 		}
-		if len(items) == 0 {
+		result = append(result, window.Items...)
+		if len(window.Items) == 0 || window.Counted && !window.More && len(result) == window.Total {
 			return result, nil
 		}
-		result = append(result, items...)
 	}
 	return nil, fmt.Errorf("listing exceeded %d pages", maxListPages)
+}
+
+// callAll is listEvery over an SDK list call.
+func callAll[T any](ctx context.Context, client *transport.Client, limit int, list func(context.Context, *gitea.Client, gitea.ListOptions) ([]T, *gitea.Response, error)) ([]T, error) {
+	return listEvery(limit, func(limit, page int) (Page[T], error) { return callPage(ctx, client, limit, page, list) })
 }
 
 // filterPageSize is the page size filteredPage reads, Gitea's default maximum.
@@ -116,8 +125,48 @@ type Page[T any] struct {
 	Counted bool
 }
 
-// listPage is listWindow that also reports the collection size the server counted.
-func listPage[T any](limit, page int, fetch func(limit, page int) ([]T, http.Header, error)) (Page[T], error) {
+// instancePage reads the window of limit items at page from fetch, even when client's instance
+// caps its page size below limit, and reports what the server counted. The instance's largest
+// page tells a page it capped from the last one.
+func instancePage[T any](ctx context.Context, client *transport.Client, limit, page int, fetch func(limit, page int) ([]T, http.Header, error)) (Page[T], error) {
+	return cappedPage(limit, page, func() int { return maxPageSize(ctx, client) }, fetch)
+}
+
+// pageSizes holds the page sizes each client's instance reports, as instancePageSizes.
+var pageSizes sync.Map
+
+// instancePageSizes are the largest page an instance answers, its MAX_RESPONSE_ITEMS, and the
+// page it answers without a limit, its DEFAULT_PAGING_NUM; each is 0 when it does not say.
+type instancePageSizes struct{ max, standard int }
+
+// pageSizesOf returns the page sizes of client's instance. It asks once per client.
+func pageSizesOf(ctx context.Context, client *transport.Client) instancePageSizes {
+	if sizes, ok := pageSizes.Load(client); ok {
+		return sizes.(instancePageSizes)
+	}
+	settings, _, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) (*gitea.GlobalAPISettings, *gitea.Response, error) {
+		return c.Settings.GetGlobalAPISettings(ctx)
+	})
+	if ctx.Err() != nil {
+		return instancePageSizes{}
+	}
+	sizes := instancePageSizes{}
+	if err == nil && settings != nil {
+		sizes = instancePageSizes{max: settings.MaxResponseItems, standard: settings.DefaultPagingNum}
+	}
+	pageSizes.Store(client, sizes)
+	return sizes
+}
+
+// maxPageSize returns the largest page client's instance answers, its MAX_RESPONSE_ITEMS, or 0
+// when it does not say. It asks once per client.
+func maxPageSize(ctx context.Context, client *transport.Client) int {
+	return pageSizesOf(ctx, client).max
+}
+
+// cappedPage is instancePage; maxSize returns the largest page the server answers, or 0 when it
+// is unknown.
+func cappedPage[T any](limit, page int, maxSize func() int, fetch func(limit, page int) ([]T, http.Header, error)) (Page[T], error) {
 	items, headers, err := fetch(limit, page)
 	if err != nil {
 		return Page[T]{}, err
@@ -128,8 +177,13 @@ func listPage[T any](limit, page int, fetch func(limit, page int) ([]T, http.Hea
 		return Page[T]{Items: items, More: next || (counted && total > page*limit), Total: total, Counted: counted}, nil
 	}
 	// A short final page has no next link and accounts for the whole remainder; anything else
-	// means the server capped the page size. Pages of the returned size are never capped again.
-	if !next && (!counted || total == (page-1)*limit+size) {
+	// means the server capped the page size. Past page 1 the size of a capped page can account
+	// for the remainder too, so a page as large as the largest the server answers is a capped
+	// one, unless the server sent links without a next one: its links count pages of the size it
+	// answers, so a capped page past page 1 always has a next link. Pages of the returned size
+	// are never capped again.
+	linked := len(headers.Values("Link")) > 0
+	if !next && (!counted || total == (page-1)*limit+size && (page == 1 || linked || size != maxSize())) {
 		return Page[T]{Items: items, Total: total, Counted: counted}, nil
 	}
 	offset := (page - 1) * limit
@@ -151,9 +205,9 @@ func listPage[T any](limit, page int, fetch func(limit, page int) ([]T, http.Hea
 	return Page[T]{Items: result[:min(len(result), limit)], More: more, Total: total, Counted: counted}, nil
 }
 
-// callPage is listPage over an SDK list call.
+// callPage is instancePage over an SDK list call.
 func callPage[T any](ctx context.Context, client *transport.Client, limit, page int, list func(context.Context, *gitea.Client, gitea.ListOptions) ([]T, *gitea.Response, error)) (Page[T], error) {
-	return listPage(limit, page, func(limit, page int) ([]T, http.Header, error) {
+	return instancePage(ctx, client, limit, page, func(limit, page int) ([]T, http.Header, error) {
 		items, resp, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) ([]T, *gitea.Response, error) {
 			return list(ctx, c, listOptions(limit, page))
 		})
@@ -161,13 +215,13 @@ func callPage[T any](ctx context.Context, client *transport.Client, limit, page 
 	})
 }
 
-// rawPage is listPage over a raw JSON collection endpoint; it sets limit and page on query.
+// rawPage is instancePage over a raw JSON collection endpoint; it sets limit and page on query.
 func rawPage[T any](ctx context.Context, client *transport.Client, endpoint string, query url.Values, limit, page int) (Page[T], error) {
 	query = maps.Clone(query)
 	if query == nil {
 		query = url.Values{}
 	}
-	return listPage(limit, page, func(limit, page int) ([]T, http.Header, error) {
+	return instancePage(ctx, client, limit, page, func(limit, page int) ([]T, http.Header, error) {
 		query.Set("limit", strconv.Itoa(limit))
 		query.Set("page", strconv.Itoa(page))
 		var response []T
@@ -177,7 +231,7 @@ func rawPage[T any](ctx context.Context, client *transport.Client, endpoint stri
 }
 
 // NameOrID addresses one kind of resource by name or ID: a numeric value is an ID first, then a
-// name; any other value is an exact name, then a unique case-insensitive name.
+// name; any other value is an exact name, then a unique case-insensitive name unless Exact is set.
 type NameOrID[T any] struct {
 	// Kind and Scope name the resources in errors, such as "label" in "alice/project".
 	Kind, Scope string
@@ -185,6 +239,9 @@ type NameOrID[T any] struct {
 	Name        func(T) string
 	// ByName matches numeric values as names only, for --by-name.
 	ByName bool
+	// Exact matches names case-sensitively only, for resources such as release assets whose
+	// names may differ only in case.
+	Exact bool
 }
 
 // Find returns the item among items that raw addresses. It fails with a *NotFoundError when
@@ -200,6 +257,9 @@ func (n NameOrID[T]) Find(items []T, raw string) (T, error) {
 		}
 	}
 	for _, fold := range []bool{false, true} {
+		if fold && n.Exact {
+			break
+		}
 		var matches []T
 		for _, item := range items {
 			name := n.Name(item)

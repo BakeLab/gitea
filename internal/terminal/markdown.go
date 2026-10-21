@@ -46,19 +46,24 @@ func dropControlReference(reference string) string {
 	return reference
 }
 
-// glamourSequences matches the escape sequences glamour writes itself: colors and OSC 8 hyperlinks.
-var glamourSequences = regexp.MustCompile("\x1b\\[[0-9;]*m|\x1b\\]8;[^\x07\x1b]*(?:\x07|\x1b\\\\)")
+// glamourSequence matches an escape sequence glamour writes itself, a color or an OSC 8 hyperlink,
+// at the start of the text.
+var glamourSequence = regexp.MustCompile("^(?:\x1b\\[[0-9;]*m|\x1b\\]8;[^\x07\x1b]*(?:\x07|\x1b\\\\))")
 
 // stripControls removes every control and format character, such as bidirectional marks that
 // entities like &rlm; decode to, from rendered output except newlines and the sequences glamour
-// writes, which markdown cannot smuggle in after the input was sanitized.
+// writes, which markdown cannot smuggle in after the input was sanitized. It only tries to match
+// a sequence at an escape character, so it stays linear in the length of the text.
 func stripControls(text string) string {
 	var b strings.Builder
+	b.Grow(len(text))
 	for i := 0; i < len(text); {
-		if loc := glamourSequences.FindStringIndex(text[i:]); loc != nil && loc[0] == 0 {
-			b.WriteString(text[i : i+loc[1]])
-			i += loc[1]
-			continue
+		if text[i] == 0x1b {
+			if loc := glamourSequence.FindStringIndex(text[i:]); loc != nil {
+				b.WriteString(text[i : i+loc[1]])
+				i += loc[1]
+				continue
+			}
 		}
 		r, size := utf8.DecodeRuneInString(text[i:])
 		if r == '\n' || r == '\t' || !(r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || unicode.Is(unicode.Cf, r)) {

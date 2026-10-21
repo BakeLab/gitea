@@ -45,9 +45,10 @@ func (a *application) repoMigrateCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "migrate [<clone-url>]",
 		Short: "Import a repository from another server",
-		Long: `Import a repository from a Git URL, or from another forge with --service (which needs an access
-token and can also copy issues, pull requests, releases and more). --mirror creates a pull mirror
-instead. The name defaults to the last segment of the URL.`,
+		Long: `Import a repository from a Git URL, or from another forge with --service (which can also copy
+issues, pull requests, releases and more). A private source needs --auth-token or --auth-user and
+--auth-password. --mirror creates a pull mirror instead. The name defaults to the last segment of
+the URL.`,
 		Example: `# Import a public Git repository
 $ gt repo migrate https://github.com/go-gitea/gitea.git
 
@@ -112,9 +113,6 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 			}
 			if opts.AuthPassword != "" && opts.AuthUser == "" {
 				return clierr.Wrap(clierr.Usage, errors.New("--auth-password requires --auth-user"))
-			}
-			if opts.Service != "git" && opts.AuthToken == "" {
-				return clierr.Wrap(clierr.Usage, fmt.Errorf("importing from %s needs --auth-token or --auth-token-file; use --service git to import only the Git data", opts.Service))
 			}
 			target, err := a.resolve(cmd.Context(), false)
 			if err != nil {

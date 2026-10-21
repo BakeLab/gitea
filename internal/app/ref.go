@@ -38,6 +38,8 @@ type ref struct {
 	// Repo is the repository the reference names, as a repository argument (a URL,
 	// [HOST/]OWNER/REPO or NAME); it is empty for N and #N.
 	Repo string
+	// Job is the job ID that a run's job URL names, or 0.
+	Job int64
 }
 
 // errNotRef marks an argument that is not a number, URL or OWNER/REPO#N, such as a branch name.
@@ -100,9 +102,12 @@ func parseRefURL(raw string, kind refKind) (ref, error) {
 		result := ref{}
 		switch {
 		case kind == runRef && at(i) == "actions" && at(i+1) == "runs" && positive(i+2) > 0:
-			// Since Gitea 1.26 the web URL holds the run ID, which the API takes too; a trailing
-			// /jobs/M only selects a job on the web page.
+			// Since Gitea 1.26 the web URL holds the run ID, which the API takes too, and a
+			// trailing /jobs/M the job ID.
 			result.Number = positive(i + 2)
+			if at(i+3) == "jobs" {
+				result.Job = positive(i + 4)
+			}
 		case kind != runRef && (at(i) == "issues" || at(i) == "pulls") && positive(i+1) > 0:
 			result.Number = positive(i + 1)
 		default:

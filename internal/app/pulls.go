@@ -19,7 +19,7 @@ func (a *application) prCommand() *cobra.Command {
 	group := &cobra.Command{Use: "pr", Short: "Manage pull requests", Long: `Work with Gitea pull requests: list, view, create, review, check out and merge them.
 
 Commands that act on one pull request take a number, a URL or a branch name, and without
-one select the pull request of the current branch.`}
+one select the pull request of the current branch. pr attachment takes a number or a URL.`}
 	group.Annotations = pullArgumentsAnnotation(nil)
 	group.Example = `$ gt pr list --author @me
 $ gt pr create --fill
@@ -40,8 +40,10 @@ func (a *application) pullListCommand() *cobra.Command {
 	var web bool
 	cmd := &cobra.Command{Use: "list", Short: "List pull requests", Long: `List the pull requests of a repository, newest first.
 
-The reviewers, reviewer_teams, review_decision and merged_by JSON fields come from separate requests for
-each pull request, which gt only makes when --json names them.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+The reviewers, reviewer_teams and review_decision JSON fields come from the reviews of each pull
+request, and merged_by from reading each pull request again. gt only makes these requests when --json
+names the fields, or selects every field and a --jq expression names them (see gt help formatting).
+--limit bounds how many requests it makes.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 1 {
 			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
 		}
@@ -83,14 +85,11 @@ each pull request, which gt only makes when --json names them.`, Args: argsExact
 			return err
 		}
 		items := window.Items
-		switch {
-		case a.jsonSelects("review_decision"):
-			items, err = service.DecideAll(cmd.Context(), items)
-		case a.jsonSelects("reviewers", "reviewer_teams", "merged_by"):
-			items, err = service.ViewAll(cmd.Context(), items)
-		}
-		if err != nil {
-			return err
+		view, reviews := a.jsonSelects("merged_by"), a.jsonSelects("reviewers", "reviewer_teams", "review_decision")
+		if view || reviews {
+			if items, err = service.Detail(cmd.Context(), items, view, reviews); err != nil {
+				return err
+			}
 		}
 		noun := map[string]string{"open": "open pull requests", "closed": "closed pull requests", "merged": "merged pull requests", "all": "pull requests"}[state]
 		what := noun + " in " + t.Repo
@@ -139,8 +138,13 @@ $ gt pr list --json number,title,head --jq '.[] | select(.head == "feature/login
 	return cmd
 }
 
-// jsonSelects reports whether --json names one of fields, rather than selecting every field.
+// jsonSelects reports whether the JSON output includes one of fields: --json names it, or selects
+// every field and --jq, if given, names it too, so that a filter that never reads it costs no
+// requests.
 func (a *application) jsonSelects(fields ...string) bool {
+	if a.options.json == "*" {
+		return a.options.jq == "" || slices.ContainsFunc(fields, func(field string) bool { return strings.Contains(a.options.jq, field) })
+	}
 	for field := range strings.SplitSeq(a.options.json, ",") {
 		if slices.Contains(fields, strings.TrimSpace(field)) {
 			return true
@@ -171,7 +175,7 @@ func (a *application) pullViewCommand() *cobra.Command {
 		if details.reviews, err = (services.Reviews{Client: t.client, Repository: t.Repo}).All(cmd.Context(), n); err != nil {
 			return err
 		}
-		item.ReviewDecision = services.ReviewDecision(details.reviews, len(item.Reviewers)+len(item.ReviewerTeams) > 0)
+		item = item.WithReviews(details.reviews)
 		if a.options.json != "" {
 			return a.writeJSON(cmd, item)
 		}

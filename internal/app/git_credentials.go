@@ -128,12 +128,33 @@ $ gt auth setup-git --local --user alice`,
 			if err != nil {
 				return err
 			}
+			if err := a.requireGitAccount(t); err != nil {
+				return err
+			}
 			return a.setupGit(cmd, t.Host, local, keepHelpers)
 		},
 	}
 	command.Flags().BoolVar(&local, "local", false, "Configure only the current Git repository instead of global Git configuration")
 	command.Flags().BoolVar(&keepHelpers, "keep-helpers", false, "Keep other credential helpers for the instance; they are asked first and store gt's token")
 	return command
+}
+
+// requireGitAccount fails like gt auth token unless the credential helper can answer for the
+// target's instance: with the account that --user or GITEA_CLI_USER pins, with an active account,
+// or with GITEA_TOKEN for the instance. A helper for nothing would break later pushes silently.
+func (a *application) requireGitAccount(t target) error {
+	if a.deps.Getenv("GITEA_TOKEN") != "" {
+		if s, err := a.settings(); err == nil {
+			if instance, err := settings.ResolveHost(a.tokenInstance(), s.Hosts.Hosts); err == nil && instance == t.Host {
+				return nil
+			}
+		}
+	}
+	pinned, _ := a.selectedUser()
+	if _, ok := findAccountKey(t.host.Users, pinned); ok || (pinned == "" && len(t.host.Users) > 0) {
+		return nil
+	}
+	return clierr.Wrap(clierr.Authentication, t.accountError(pinned))
 }
 
 // setupGit configures Git to ask gt for the credentials of instance, globally or in the repository.

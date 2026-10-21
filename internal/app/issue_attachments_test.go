@@ -172,6 +172,8 @@ func TestAttachmentListViewAndDownloadOrdering(t *testing.T) {
 	// Usage errors and skipped downloads never request the file.
 	t.Chdir(t.TempDir())
 	require.ErrorContains(t, run(true, "issue", "attachment", "download", "1", "9", "--clobber", "--skip-existing"), "cannot be combined")
+	require.EqualError(t, run(false, "issue", "attachment", "download", "1", "9", "-O", "-", "--clobber"), "--clobber cannot be combined with --output -")
+	require.EqualError(t, run(false, "issue", "attachment", "download", "1", "9", "-O", "-", "--skip-existing"), "--skip-existing cannot be combined with --output -")
 	require.NoError(t, os.WriteFile("crash.log", []byte("old"), 0o600))
 	require.NoError(t, run(true, "issue", "attachment", "download", "1", "9", "--skip-existing"))
 	require.ErrorContains(t, run(true, "issue", "attachment", "download", "1", "9"), "already exists")

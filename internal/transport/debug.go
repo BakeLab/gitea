@@ -5,10 +5,13 @@ package transport
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -24,7 +27,12 @@ func (t debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.base.RoundTrip(req)
 	var outcome, message string
 	if err != nil {
-		outcome = "error: " + err.Error()
+		// A request canceled for running out of time, by WithResponseTimeout, says so in its cause.
+		if cause := context.Cause(req.Context()); cause != nil && !errors.Is(err, cause) {
+			outcome = "error: " + cause.Error()
+		} else {
+			outcome = "error: " + err.Error()
+		}
 	} else {
 		outcome = plainText(resp.Status)
 		message = failureMessage(req, resp)
@@ -33,7 +41,7 @@ func (t debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if message != "" {
 		line += ": " + message
 	}
-	_, _ = fmt.Fprintln(t.out, line)
+	_, _ = fmt.Fprintln(t.out, RedactSecrets(req.Context(), line))
 	return resp, err
 }
 
@@ -55,8 +63,37 @@ func failureMessage(req *http.Request, resp *http.Response) string {
 		io.Closer
 	}{io.MultiReader(bytes.NewReader(data), resp.Body), resp.Body}
 	token := strings.TrimPrefix(req.Header.Get("Authorization"), "token ")
-	return newAPIError(resp.StatusCode, req.Method, req.URL.Path, token, data).Message
+	return newAPIError(req.Context(), resp.StatusCode, req.Method, req.URL.Path, token, data).Message
 }
+
+type secrets struct{}
+
+// WithSecrets marks ctx with secrets that a request carries in its body, such as source
+// credentials of a migration, so that whatever echoes them is redacted with RedactSecrets.
+func WithSecrets(ctx context.Context, values ...string) context.Context {
+	known, _ := ctx.Value(secrets{}).([]string)
+	for _, value := range values {
+		if value != "" {
+			known = append(known[:len(known):len(known)], value)
+		}
+	}
+	return context.WithValue(ctx, secrets{}, known)
+}
+
+// RedactSecrets replaces each secret marked on ctx in message, as is or escaped for a URL query,
+// path or userinfo, and the password of each URL with [REDACTED].
+func RedactSecrets(ctx context.Context, message string) string {
+	known, _ := ctx.Value(secrets{}).([]string)
+	for _, secret := range known {
+		for _, form := range []string{secret, url.QueryEscape(secret), url.PathEscape(secret), url.User(secret).String()} {
+			message = strings.ReplaceAll(message, form, "[REDACTED]")
+		}
+	}
+	return urlPassword.ReplaceAllString(message, "${1}[REDACTED]@")
+}
+
+// urlPassword matches the user and password of a URL, such as "https://user:password@".
+var urlPassword = regexp.MustCompile(`(\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s/?#@:]*:)[^\s/?#@]+@`)
 
 // redactURL drops userinfo and the values of query parameters that can carry credentials or
 // signatures, keeping filters such as limit, page and state readable.
@@ -74,6 +111,30 @@ func redactURL(u *url.URL) string {
 	}
 	return clean.String()
 }
+
+// RedactHeader returns the value of a response header named name with the URLs it carries, such
+// as a Location of signed storage or the pages of a Link header, redacted like the URLs --debug
+// logs. Other headers are returned unchanged.
+func RedactHeader(name, value string) string {
+	redact := func(raw string) string {
+		if u, err := url.Parse(raw); err == nil {
+			return redactURL(u)
+		}
+		return raw
+	}
+	switch http.CanonicalHeaderKey(name) {
+	case "Location", "Content-Location":
+		return redact(value)
+	case "Link":
+		return linkTarget.ReplaceAllStringFunc(value, func(target string) string {
+			return "<" + redact(target[1:len(target)-1]) + ">"
+		})
+	}
+	return value
+}
+
+// linkTarget matches the target URL of a Link header entry, such as "<https://…?page=2>".
+var linkTarget = regexp.MustCompile(`<[^>]*>`)
 
 // sensitiveQuery reports query parameters whose values can authenticate a request: tokens,
 // passwords, secrets, signatures and credentials of signed storage URLs, and OAuth codes and state.
@@ -94,8 +155,8 @@ func sensitiveQuery(path, key string) bool {
 }
 
 // Debug returns a copy of c that logs the method, redacted URL, status, and duration of each
-// request to w, plus the sanitized server message of a failed response. Headers and bodies are
-// never logged.
+// request to w, plus the sanitized server message of a failed response, with the secrets marked
+// by WithSecrets redacted. Headers and bodies are never logged.
 func (c *Client) Debug(w io.Writer) *Client {
 	clone := *c
 	httpClient := *c.HTTP
