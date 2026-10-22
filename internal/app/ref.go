@@ -305,7 +305,7 @@ func (a *application) currentPull(ctx context.Context, closed bool) (target, int
 	if branch.Merge != "" {
 		owner := ""
 		if remoteURL, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", branch.Remote); err == nil {
-			if _, repo, err := settings.RepositoryURL(remoteURL, t.hosts()); err == nil {
+			if _, repo, err := settings.RemoteRepository(remoteURL, t.hosts()); err == nil {
 				owner, _, _ = strings.Cut(repo, "/")
 			}
 		}

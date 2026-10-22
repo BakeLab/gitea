@@ -244,6 +244,24 @@ func (s Organizations) memberPage(ctx context.Context, name string, limit, page 
 	return convertPage(users, memberFrom), Classify(err, "organization", strconv.Quote(name), "")
 }
 
+// CanGrantTeamAccess reports whether the account may grant the teams of org access to a
+// repository, which Gitea allows owners of org and site administrators.
+func (s Organizations) CanGrantTeamAccess(ctx context.Context, org string) (bool, error) {
+	user, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
+		return c.Users.GetMyUserInfo(ctx)
+	})
+	if err != nil || user.IsAdmin {
+		return err == nil, err
+	}
+	permissions, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.OrgPermissions, *gitea.Response, error) {
+		return c.Organizations.GetOrgPermissions(ctx, org, login(user))
+	})
+	if err != nil {
+		return false, Classify(err, "organization", strconv.Quote(org), "")
+	}
+	return permissions.IsOwner, nil
+}
+
 // publicListExact reports whether Gitea lists exactly the public memberships to the caller; it
 // lists every membership as public to an administrator. A caller that cannot be read counts as one.
 func (s Organizations) publicListExact(ctx context.Context) bool {

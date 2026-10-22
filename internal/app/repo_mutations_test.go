@@ -208,6 +208,14 @@ func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
 	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", "remote rename origin upstream", "remote add -- origin " + fork}, runner.calls)
 	require.Equal(t, "✓ Forked bob/project to alice/mine\n✓ Renamed Git remote origin to upstream\n✓ Added Git remote origin for alice/mine\n", diagnostics.String())
 	require.Equal(t, "https://gitea.test/alice/mine\n", out.String())
+	// A second run finds origin pointing to the fork.
+	runner.results["remote get-url origin"], runner.calls = fork, nil
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"}))
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin"}, runner.calls)
+	require.Equal(t, "✓ Forked bob/project to alice/mine\n! Git remote origin already points to alice/mine\n", diagnostics.String())
+	runner.results["remote get-url origin"] = server.URL + "/alice/other.git"
+	require.ErrorContains(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"}), "Git remote origin points to alice/other, not the fork alice/mine; pass --remote-name")
 }
 
 func TestRepoForkRemoteChecksTheCloneBeforeForking(t *testing.T) {

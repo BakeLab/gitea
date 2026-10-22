@@ -158,6 +158,16 @@ func TestDoctorWarnsOfHeadersWhoseVariableIsUnset(t *testing.T) {
 	require.Equal(t, `set the variables, or remove the headers: gt config set headers "X-Braced:"`+remove+`; gt config set headers "X-Empty:"`+remove+`; gt config set headers "X-Proxy-Secret:"`+remove, unsent.Fix)
 }
 
+func TestDoctorExplainsSSHRemoteOnAnotherPort(t *testing.T) {
+	server := newAuthenticatedServer(doctorServer(t))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	configureHost(t, deps, server.URL, settings.Host{})
+	deps.Git = &fakeGit{results: map[string]string{"--version": "git version 2.50.1", "remote": "origin", "remote get-url origin": "ssh://git@127.0.0.1:2222/alice/project.git"}}
+	require.NoError(t, Execute(context.Background(), deps, []string{"doctor", "--json=checks"}))
+	require.Contains(t, out.String(), `{"detail":"the Git remote connects to 127.0.0.1:2222, which is no instance's SSH host","fix":"gt config set ssh_host 127.0.0.1:2222 --host `+server.URL+`","name":"SSH","status":"warning"}`)
+}
+
 func TestDoctorReportsBrokenSettingsFile(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	deps.Git = &fakeGit{results: map[string]string{"--version": "git version 2.50.1"}}

@@ -107,6 +107,34 @@ func TestRepositoryCreateReportsMissingOrganization(t *testing.T) {
 	require.EqualError(t, err, `organization "acme-typo" not found`)
 }
 
+func TestRepositoryCreateForAnotherUserNeedsASiteAdministrator(t *testing.T) {
+	admin := true
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "POST /api/v1/orgs/bob/repos":
+			w.WriteHeader(http.StatusNotFound)
+		case "POST /api/v1/admin/users/bob/repos":
+			if !admin {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			assert.Equal(t, "tool", requestJSON(t, r)["name"])
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":3,"name":"tool","full_name":"bob/tool"}`))
+		case "GET /api/v1/users/bob":
+			_, _ = w.Write([]byte(`{"id":2,"login":"bob"}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	item, err := (Repositories{Client: client}).Create(context.Background(), "bob", RepositoryOptions{Name: "tool"})
+	require.NoError(t, err)
+	require.Equal(t, "bob/tool", item.FullName)
+	admin = false
+	_, err = (Repositories{Client: client}).Create(context.Background(), "bob", RepositoryOptions{Name: "tool"})
+	require.EqualError(t, err, "bob is a user, not an organization; only site administrators can create repositories for other users")
+}
+
 func TestRepositoryReadme(t *testing.T) {
 	dirEntry := func(name string) string { return `{"name":"` + name + `","path":"` + name + `","type":"dir"}` }
 	fileEntry := func(dir, name string) string {

@@ -243,11 +243,12 @@ func (s Repositories) Create(ctx context.Context, org string, opts RepositoryOpt
 		}
 		return c.Repositories.CreateRepo(ctx, options)
 	})
-	if err != nil {
-		if org != "" && IsNotFound(err) {
-			// The repository cannot be missing before it exists: the organization is.
-			return Repository{}, &NotFoundError{Kind: "organization", Key: strconv.Quote(org), Err: err}
+	if org != "" && IsNotFound(err) {
+		if item, err = s.createForUser(ctx, org, options, err); err != nil {
+			return Repository{}, err
 		}
+	}
+	if err != nil {
 		return Repository{}, Classify(err, "repository", "", "")
 	}
 	created := repositoryFrom(item)
@@ -259,6 +260,29 @@ func (s Repositories) Create(ctx context.Context, org string, opts RepositoryOpt
 		return edited, nil
 	}
 	return created, nil
+}
+
+// createForUser creates a repository for owner, which is no organization, through the admin API:
+// only site administrators may create repositories for other users.
+func (s Repositories) createForUser(ctx context.Context, owner string, options gitea.CreateRepoOption, orgErr error) (*gitea.Repository, error) {
+	item, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Repository, *gitea.Response, error) {
+		return c.Admin.CreateRepo(ctx, owner, options)
+	})
+	switch {
+	case err == nil:
+		return item, nil
+	case IsForbidden(err):
+		_, _, userErr := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
+			return c.Users.GetUserInfo(ctx, owner)
+		})
+		if userErr == nil {
+			return nil, fmt.Errorf("%s is a user, not an organization; only site administrators can create repositories for other users", owner)
+		}
+	case !IsNotFound(err):
+		return nil, Classify(err, "repository", "", "")
+	}
+	// The repository cannot be missing before it exists: the organization is.
+	return nil, &NotFoundError{Kind: "organization", Key: strconv.Quote(owner), Err: orgErr}
 }
 
 // sdkDescriptionLimit is the length in bytes that the SDK accepts for a new repository's description.

@@ -4,6 +4,7 @@
 package settings
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net/url"
@@ -48,13 +49,7 @@ func RepositoryURL(raw string, hosts map[string]Host) (string, string, error) {
 	remoteSSH, remoteErr := SSHEndpoint(u.Host)
 	for instance, host := range hosts {
 		base, _ := url.Parse(instance)
-		sshHost := host.SSHHost
-		if sshHost == "" {
-			sshHost = base.Hostname()
-			if strings.Contains(sshHost, ":") {
-				sshHost = "[" + sshHost + "]"
-			}
-		}
+		sshHost := cmp.Or(host.SSHHost, DefaultSSHHost(instance))
 		prefix := strings.Trim(base.Path, "/")
 		configuredSSH, configuredErr := SSHEndpoint(sshHost)
 		match := (u.Scheme == "ssh" && remoteErr == nil && configuredErr == nil && remoteSSH == configuredSSH) || (u.Scheme == base.Scheme && strings.EqualFold(u.Host, base.Host))
@@ -86,7 +81,7 @@ func RepositoryURL(raw string, hosts map[string]Host) (string, string, error) {
 		return bestHost, bestRepo, nil
 	}
 	if u.Scheme == "ssh" {
-		return "", "", errors.New("SSH remote does not match a configured instance")
+		return "", "", sshRemoteError(u, remoteSSH, hosts)
 	}
 	if matchedHost {
 		return "", "", errors.New("repository URL path is ambiguous; use owner/repository or a clone URL")
@@ -104,6 +99,76 @@ func RepositoryURL(raw string, hosts map[string]Host) (string, string, error) {
 	u.RawPath, u.RawQuery, u.Fragment, u.User = "", "", "", nil
 	instance, err := NormalizeHost(u.String())
 	return instance, repo, err
+}
+
+// RemoteRepository resolves a Git remote like RepositoryURL, ignoring the credentials of a remote
+// such as https://user:token@host/owner/name.git, which repository arguments must not embed.
+func RemoteRepository(raw string, hosts map[string]Host) (string, string, error) {
+	return RepositoryURL(WithoutCredentials(raw), hosts)
+}
+
+// WithoutCredentials removes the user information of an HTTP(S) URL and the password of an
+// ssh:// URL.
+func WithoutCredentials(raw string) string {
+	u, err := url.Parse(raw)
+	if !strings.Contains(raw, "://") || err != nil || u.User == nil {
+		return raw
+	}
+	if u.Scheme == "ssh" {
+		u.User = url.User(u.User.Username())
+	} else {
+		u.User = nil
+	}
+	return u.String()
+}
+
+// DefaultSSHHost returns the SSH host of an instance without ssh_host: its web host on port 22.
+func DefaultSSHHost(instance string) string {
+	base, _ := url.Parse(instance)
+	if host := base.Hostname(); strings.Contains(host, ":") {
+		return "[" + host + "]"
+	}
+	return base.Hostname()
+}
+
+// SSHRemoteError is an SSH remote that matches no instance's SSH host.
+type SSHRemoteError struct {
+	// Endpoint is the remote's host:port; Instance is the only instance with the remote's host
+	// name, or "".
+	Endpoint, Instance string
+}
+
+func (e *SSHRemoteError) Error() string {
+	if e.Endpoint == "" {
+		return "SSH remote does not match a configured instance"
+	}
+	if e.Instance != "" {
+		return fmt.Sprintf("SSH remote does not match a configured instance; if %s is the SSH host of %s, run %s", e.Endpoint, e.Instance, e.Fix())
+	}
+	return fmt.Sprintf("SSH remote does not match a configured instance; if %s is an instance's SSH host, run %s, or set GITEA_INSTANCE_SSH_HOST with GITEA_TOKEN", e.Endpoint, e.Fix())
+}
+
+// Fix returns the command that configures the remote's endpoint as an instance's SSH host.
+func (e *SSHRemoteError) Fix() string {
+	return "gt config set ssh_host " + e.Endpoint + " --host " + cmp.Or(e.Instance, "URL")
+}
+
+func sshRemoteError(u *url.URL, endpoint string, hosts map[string]Host) error {
+	if endpoint == "" {
+		return &SSHRemoteError{}
+	}
+	var named []string
+	for instance, host := range hosts {
+		configured, err := url.Parse("ssh://" + cmp.Or(host.SSHHost, DefaultSSHHost(instance)))
+		if err == nil && strings.EqualFold(configured.Hostname(), u.Hostname()) {
+			named = append(named, instance)
+		}
+	}
+	e := &SSHRemoteError{Endpoint: endpoint}
+	if len(named) == 1 {
+		e.Instance = named[0]
+	}
+	return e
 }
 
 // looksLikeWebResourcePath detects Gitea HTML routes such as owner/repo/issues/7, which have a

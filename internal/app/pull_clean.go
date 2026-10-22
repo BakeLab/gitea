@@ -157,7 +157,7 @@ func (a *application) remotesForRepositoryURLs(ctx context.Context, hosts map[st
 		if err != nil {
 			return nil, err
 		}
-		host, repo, err := settings.RepositoryURL(raw, hosts)
+		host, repo, err := settings.RemoteRepository(raw, hosts)
 		if err != nil {
 			continue
 		}

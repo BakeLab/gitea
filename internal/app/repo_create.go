@@ -39,7 +39,8 @@ func (a *application) repoCreateCommand() *cobra.Command {
 		Use:     "create [<name>]",
 		Aliases: []string{"new"},
 		Short:   "Create a repository",
-		Long: `Create a repository for your account, or for an organization as ORG/NAME or with --org.
+		Long: `Create a repository for your account, or for an organization as ORG/NAME or with --org. Site
+administrators can also create one for another user as USER/NAME.
 
 --auto-init adds a first commit with a README, .gitignore and license; --template copies another
 repository. --source adds the new repository as a remote of a local Git repository, and --push
@@ -118,7 +119,7 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 		if !filepath.IsAbs(f.localSource) {
 			f.localSource = filepath.Join(a.options.cwd, f.localSource)
 		}
-		if err := a.checkPublishSource(cmd.Context(), f.localSource, f.remote); err != nil {
+		if err := a.checkPublishSource(cmd.Context(), f.localSource, f.remote, f.push); err != nil {
 			return err
 		}
 	}
@@ -164,6 +165,14 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 		match, ok := teams[strings.ToLower(f.team)]
 		if !ok {
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("team %q not found in organization %s", f.team, f.org))
+		}
+		// Checked before creating, so that the repository is not left without the team.
+		allowed, err := (services.Organizations{Client: target.client}).CanGrantTeamAccess(cmd.Context(), f.org)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return fmt.Errorf("--team requires an owner of %s or a site administrator", f.org)
 		}
 		teamID = match.ID
 	}
@@ -276,13 +285,20 @@ func (a *application) completeTemplates(list func(services.Repositories, context
 	})
 }
 
-// checkPublishSource fails unless dir is a Git working tree without a remote named remote.
-func (a *application) checkPublishSource(ctx context.Context, dir, remote string) error {
+// checkPublishSource fails unless dir is a Git working tree without a remote named remote and,
+// for push, with a commit to push.
+func (a *application) checkPublishSource(ctx context.Context, dir, remote string, push bool) error {
 	if inside, _ := a.gitProbe().Output(ctx, dir, false, "rev-parse", "--is-inside-work-tree"); inside != "true" {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("--source %s is not a Git repository; run git init first", dir))
 	}
 	if _, err := a.gitProbe().Output(ctx, dir, false, "remote", "get-url", remote); err == nil {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("--source %s already has a remote %s; pass --remote-name", dir, remote))
+	}
+	if !push {
+		return nil
+	}
+	if _, err := a.gitProbe().Output(ctx, dir, false, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err != nil {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("--push requires a commit in --source %s; commit first", dir))
 	}
 	return nil
 }

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -124,6 +126,19 @@ func TestRepoSetDefaultValidatesTheRepository(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "set-default", "alice/project"}))
 	require.Contains(t, runner.calls, saved)
 	require.Equal(t, "✓ Set alice/project as the default repository for this clone\n", diagnostics.String())
+	// Without an argument, a terminal chooses among the repositories of the remotes.
+	runner.calls = nil
+	err = Execute(context.Background(), deps, []string{"repo", "set-default"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, "repo set-default requires a repository argument")
+	require.NotContains(t, runner.calls, saved)
+	runner.results[`config --get-regexp ^remote\..*\.url$`] = "remote.github.url https://github.com/example/project.git\nremote.origin.url " + server.URL + "/alice/project.git"
+	prompter := &choosingPrompter{}
+	deps.Prompter = prompter
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "set-default"}))
+	require.Equal(t, []terminal.Choice{{Label: "alice/project (origin)", Value: server.URL + "/alice/project"}}, prompter.choices)
+	require.Contains(t, runner.calls, saved)
 }
 
 func TestRepoSetDefaultViewAndUnset(t *testing.T) {

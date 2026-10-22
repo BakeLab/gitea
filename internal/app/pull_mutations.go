@@ -106,7 +106,7 @@ func (a *application) remoteRepository(ctx context.Context, t target, remote str
 	if err != nil {
 		return ""
 	}
-	host, repo, err := settings.RepositoryURL(raw, t.hosts())
+	host, repo, err := settings.RemoteRepository(raw, t.hosts())
 	if err != nil || host != t.Host {
 		return ""
 	}

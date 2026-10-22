@@ -330,7 +330,7 @@ func (a *application) defaultPullHead(ctx context.Context) (owner, branch string
 	if err != nil {
 		return "", branch
 	}
-	_, repo, err := settings.RepositoryURL(raw, snapshot.Hosts.Hosts)
+	_, repo, err := settings.RemoteRepository(raw, snapshot.Hosts.Hosts)
 	if err != nil {
 		return "", branch
 	}

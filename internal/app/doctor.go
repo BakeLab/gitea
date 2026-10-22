@@ -150,7 +150,7 @@ func (a *application) diagnose(ctx context.Context) doctorReport {
 		add(a.repositoryCheck(ctx, authenticated))
 	}
 	add(a.gitCheck(ctx, t.Host))
-	if check, ok := sshCheck(t); ok {
+	if check, ok := sshCheck(t, repoErr); ok {
 		add(check)
 	}
 	return report
@@ -239,9 +239,16 @@ func (a *application) gitCheck(ctx context.Context, instance string) doctorCheck
 	return doctorCheck{"Git", checkWarning, version + " · credential helper not configured for " + instance, "gt auth setup-git, if pushes over HTTPS should use this account"}
 }
 
-// sshCheck reports where SSH remotes connect when the instance uses SSH.
-func sshCheck(t target) (doctorCheck, bool) {
+// sshCheck reports where SSH remotes connect when the instance uses SSH, or the clone's remote does.
+func sshCheck(t target, repoErr error) (doctorCheck, bool) {
+	var remote *settings.SSHRemoteError
 	switch {
+	case t.Repo == "" && errors.As(repoErr, &remote) && remote.Endpoint != "":
+		fix := remote.Fix()
+		if remote.Instance == "" {
+			fix = "gt config set ssh_host " + remote.Endpoint + " --host " + t.Host + ", if it is the SSH host of " + t.Host
+		}
+		return doctorCheck{"SSH", checkWarning, "the Git remote connects to " + remote.Endpoint + ", which is no instance's SSH host", fix}, true
 	case t.host.SSHHost != "":
 		return doctorCheck{"SSH", checkPassed, "remotes connect to " + t.host.SSHHost + " (ssh_host)", ""}, true
 	case t.gitProtocol == "ssh":

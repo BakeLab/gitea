@@ -25,7 +25,8 @@ func TestRepositoryURL(t *testing.T) {
 		{raw: "https://example.org:3000/base/alice/project.git", hosts: ports, wantHost: "https://example.org:3000/base", wantRepo: "alice/project"},
 		{raw: "https://unconfigured.example.org/group/alice/project.git", wantHost: "https://unconfigured.example.org/group", wantRepo: "alice/project"},
 		{raw: "ssh://git@git.example.org:2223/alice/project.git", hosts: sshPorts, wantHost: "https://example.org/second", wantRepo: "alice/project"},
-		{raw: "git@git.example.org:alice/project.git", hosts: sshPorts, wantErr: "does not match"},
+		{raw: "git@git.example.org:alice/project.git", hosts: sshPorts, wantErr: "if git.example.org:22 is an instance's SSH host, run gt config set ssh_host git.example.org:22 --host URL"},
+		{raw: "ssh://git@example.org:2222/alice/project.git", hosts: map[string]Host{"https://example.org": {}}, wantErr: "does not match a configured instance; if example.org:2222 is the SSH host of https://example.org, run gt config set ssh_host example.org:2222 --host https://example.org"},
 		{raw: "git@example.org:owner/repo.git", hosts: bases, wantErr: "multiple instances"},
 		{raw: "https://example.org/alice/project/issues/7", hosts: bases, wantErr: "ambiguous"},
 		{raw: "https://example.org/alice/project/pulls/3", hosts: bases, wantErr: "ambiguous"},
@@ -37,6 +38,7 @@ func TestRepositoryURL(t *testing.T) {
 		{raw: "https://unconfigured.example.org/alice/project/src/branch/main", wantErr: "ambiguous"},
 		{raw: "https://unconfigured.example.org/group/alice/issues.git", wantHost: "https://unconfigured.example.org/group", wantRepo: "alice/issues"},
 		{raw: "ssh://git:private-test-password@example.org/alice/project.git", wantErr: "must not embed credentials"},
+		{raw: "https://alice:private-test-password@example.org/alice/project.git", wantErr: "must not embed credentials"},
 	} {
 		host, repo, err := RepositoryURL(test.raw, test.hosts)
 		if test.wantErr != "" {

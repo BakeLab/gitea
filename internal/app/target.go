@@ -372,6 +372,7 @@ func (a *application) discoverRepository(ctx context.Context, t *target, s setti
 		if err != nil {
 			return ""
 		}
+		raw = settings.WithoutCredentials(raw)
 		urls[name] = raw
 		instance, slug, err := settings.RepositoryURL(raw, hosts)
 		if err != nil || !a.canActOn(instance, hosts) {
@@ -391,6 +392,7 @@ func (a *application) discoverRepository(ctx context.Context, t *target, s setti
 		if raw, err = probe("remote", "get-url", remote); err != nil {
 			return "", fmt.Errorf("cannot read the URL of Git remote %q: %w", remote, err)
 		}
+		raw = settings.WithoutCredentials(raw)
 	}
 	t.RepoSource = "remote " + remote
 	return raw, nil

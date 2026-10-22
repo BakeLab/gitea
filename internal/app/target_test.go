@@ -309,6 +309,7 @@ func TestRepositoryDiscoveryFindsGiteaRemoteBesideAnotherForge(t *testing.T) {
 		{"--host selects its remote", map[string]string{"origin": "https://gitea.com/alice/project.git", "gitea": server.URL + "/bob/tool.git"}, []string{"--host", server.URL}, nil, "bob/tool"},
 		{"GITEA_TOKEN selects its instance", map[string]string{"origin": "https://gitea.com/carol/project.git", "gitea": server.URL + "/alice/project.git"}, nil, map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL}, "alice/project"},
 		{"remotes naming one repository", map[string]string{"origin": "https://github.com/example/project.git", "gitea": server.URL + "/alice/project.git", "gitea-ssh": "git@127.0.0.1:alice/project.git"}, nil, nil, "alice/project"},
+		{"remote with credentials", map[string]string{"origin": strings.Replace(server.URL, "://", "://alice:secret@", 1) + "/alice/project.git"}, nil, nil, "alice/project"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, out, _ := testDeps(t)

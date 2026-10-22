@@ -4,8 +4,10 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -71,8 +73,9 @@ $ gt repo set-default --view
 
 # Go back to the repository of the Git remotes
 $ gt repo set-default --unset`,
-		Annotations: map[string]string{"gt.arguments": repositoryArguments, "gt.text": "set-default configures Git"},
-		Args:        usageArgs(cobra.MaximumNArgs(1)),
+		Annotations: map[string]string{"gt.arguments": `A repository can be supplied as NAME (one of yours), OWNER/NAME, HOST/OWNER/NAME or a URL.
+Without an argument, a terminal asks for one of the repositories of the clone's Git remotes.`, "gt.text": "set-default configures Git"},
+		Args: usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
 			case view && unset:
@@ -102,6 +105,13 @@ $ gt repo set-default --unset`,
 				a.done(cmd, "Removed the default repository %s from this clone", saved)
 				return nil
 			}
+			if len(args) == 0 && a.options.repo == "" {
+				chosen, err := a.chooseRemoteRepository(ctx)
+				if err != nil {
+					return err
+				}
+				args = []string{chosen}
+			}
 			if err := a.repositoryArgument(args); err != nil {
 				return err
 			}
@@ -124,6 +134,33 @@ $ gt repo set-default --unset`,
 	command.Flags().BoolVarP(&unset, "unset", "u", false, "Remove the saved default repository")
 	command.ValidArgsFunction = a.completeRepos()
 	return command
+}
+
+// chooseRemoteRepository asks which repository of the clone's Git remotes set-default saves, on
+// instances gt can act on.
+func (a *application) chooseRemoteRepository(ctx context.Context) (string, error) {
+	required := clierr.Wrap(clierr.Usage, errors.New("repo set-default requires a repository argument"))
+	chooser, ok := a.chooser()
+	if !ok {
+		return "", required
+	}
+	snapshot, err := a.settings()
+	if err != nil {
+		return "", err
+	}
+	var choices []terminal.Choice
+	for _, remote := range a.gitRemotes(ctx) {
+		host, repo, err := settings.RemoteRepository(remote[1], snapshot.Hosts.Hosts)
+		value := host + "/" + repo
+		if err != nil || !a.canActOn(host, snapshot.Hosts.Hosts) || slices.ContainsFunc(choices, func(c terminal.Choice) bool { return c.Value == value }) {
+			continue
+		}
+		choices = append(choices, terminal.Choice{Label: repo + " (" + remote[0] + ")", Value: value})
+	}
+	if len(choices) == 0 {
+		return "", required
+	}
+	return chooser.Choose(ctx, "Default repository for this clone:", choices, "")
 }
 
 func (a *application) repoListCommand() *cobra.Command {

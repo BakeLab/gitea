@@ -32,15 +32,54 @@ func cloneURLForProtocol(cloneURL, sshURL, protocol string) (remote string, ssh 
 // apiSSHHost trusts the SSH authority of the API's ssh_url when the instance has no ssh_host,
 // so servers whose SSH host or port differ from the web host clone without extra configuration.
 func apiSSHHost(host settings.Host, sshURL string) settings.Host {
-	if host.SSHHost != "" || !settings.RemoteIsSSH(sshURL) {
+	if host.SSHHost != "" || apiSSHEndpoint(sshURL) == "" {
 		return host
 	}
-	if u, err := settings.ParseRemote(sshURL); err == nil {
-		if _, err := settings.SSHEndpoint(u.Host); err == nil {
-			host.SSHHost = u.Host
-		}
-	}
+	u, _ := settings.ParseRemote(sshURL)
+	host.SSHHost = u.Host
 	return host
+}
+
+// apiSSHEndpoint returns the normalized host:port of the API's ssh_url, or "" when it has none.
+func apiSSHEndpoint(sshURL string) string {
+	if !settings.RemoteIsSSH(sshURL) {
+		return ""
+	}
+	u, err := settings.ParseRemote(sshURL)
+	if err != nil {
+		return ""
+	}
+	endpoint, _ := settings.SSHEndpoint(u.Host)
+	return endpoint
+}
+
+// rememberSSHHost saves the SSH host learned from the API as the instance's ssh_host when it is not
+// the web host on port 22, so that gt finds the repository of the clone's SSH remotes.
+func (a *application) rememberSSHHost(cmd *cobra.Command, t target, sshHost string) {
+	learned, err := settings.SSHEndpoint(sshHost)
+	if standard, _ := settings.SSHEndpoint(settings.DefaultSSHHost(t.Host)); err != nil || learned == standard {
+		return
+	}
+	if a.deps.Getenv("GITEA_TOKEN") != "" {
+		a.warn(cmd, "gt commands in the clone need the SSH host of %s: set GITEA_INSTANCE_SSH_HOST=%s", t.Host, sshHost)
+		return
+	}
+	saved := false
+	err = a.deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
+		host, exists := s.Hosts.Hosts[t.Host]
+		if !exists || host.SSHHost != "" {
+			return nil
+		}
+		host.SSHHost, saved = sshHost, true
+		s.Hosts.Hosts[t.Host] = host
+		return nil
+	})
+	switch {
+	case err != nil:
+		a.warn(cmd, "could not save the SSH host of %s: %v; run gt config set ssh_host %s --host %s", t.Host, err, sshHost, t.Host)
+	case saved:
+		a.done(cmd, "Set ssh_host of %s to %s", t.Host, sshHost)
+	}
 }
 
 // mirrorSourceURL returns a mirror's credential-free network source URL, or "" when there is none to add.
@@ -73,8 +112,8 @@ func (a *application) repoCloneCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "clone <repository> [<directory>] [-- <gitflags>...]",
 		Short: "Clone a repository locally",
-		Long: `Clone a repository with the configured Git protocol and gt's credentials. Git flags can
-follow --. A fork's parent is added as the "upstream" remote, and gt commands in the clone then
+		Long: `Clone a repository with gt's credentials, over the protocol of a URL argument, else the
+configured Git protocol. Git flags can follow --. A fork's parent is added as the "upstream" remote, and gt commands in the clone then
 target the parent. A pull mirror's source is added as the "source" remote; gt commands keep
 targeting the mirror.`,
 		Example: `# Clone a repository into ./project
@@ -82,6 +121,9 @@ $ gt repo clone alice/project
 
 # Clone into another directory with the last commit only
 $ gt repo clone alice/project src --depth 1
+
+# Clone over SSH whatever the configured Git protocol
+$ gt repo clone git@gitea.com:alice/project.git
 
 # Pass flags to git clone
 $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
@@ -104,6 +146,15 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 			}
 			a.options.repo = args[0]
 			t, err := a.resolve(cmd.Context(), true)
+			// An SSH URL on the web host of an instance without ssh_host is cloned when the API
+			// confirms its SSH endpoint.
+			var unknownSSH *settings.SSHRemoteError
+			if errors.As(err, &unknownSSH) && unknownSSH.Instance != "" {
+				if u, parseErr := settings.ParseRemote(args[0]); parseErr == nil {
+					a.options.repo = unknownSSH.Instance + "/" + strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
+					t, err = a.resolve(cmd.Context(), true)
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -111,8 +162,16 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 			if err != nil {
 				return err
 			}
+			if unknownSSH != nil && apiSSHEndpoint(item.SSHURL) != unknownSSH.Endpoint {
+				return clierr.Wrap(clierr.Usage, unknownSSH)
+			}
 			if len(args) == 2 {
 				opts.directory = args[1]
+			}
+			if settings.RemoteIsSSH(args[0]) {
+				t.gitProtocol = "ssh"
+			} else if strings.Contains(args[0], "://") {
+				t.gitProtocol = "https"
 			}
 			if _, err := a.cloneRepository(cmd, t, item, opts); err != nil {
 				return err
@@ -171,9 +230,9 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 			if strings.EqualFold(owner, cmp.Or(opts.Organization, t.User)) {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("cannot fork %s into %s: it already owns it; pass --org to fork it into an organization", t.Repo, owner))
 			}
-			rename := false
+			rename, current := false, ""
 			if addRemote {
-				if rename, err = a.checkForkRemote(cmd, t, remoteName); err != nil {
+				if rename, current, err = a.checkForkRemote(cmd, t, remoteName, cmp.Or(opts.Organization, t.User)); err != nil {
 					return err
 				}
 			}
@@ -196,7 +255,7 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 				}
 			}
 			if addRemote {
-				if err := a.addForkRemote(cmd, t, fork, remoteName, rename); err != nil {
+				if err := a.addForkRemote(cmd, t, fork, remoteName, rename, current); err != nil {
 					return err
 				}
 			}
@@ -214,26 +273,39 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 }
 
 // checkForkRemote reports, before anything is forked, whether the clone in the working directory
-// can take the fork as the remote name, and whether a remote of that name already points to the
-// forked repository and must be renamed to upstream first.
-func (a *application) checkForkRemote(cmd *cobra.Command, t target, name string) (rename bool, err error) {
+// can take the fork as the remote name: rename when a remote of that name points to the forked
+// repository and must be renamed to upstream first, and current when it already points to a
+// repository of owner on the instance, such as the fork of an earlier run.
+func (a *application) checkForkRemote(cmd *cobra.Command, t target, name, owner string) (rename bool, current string, err error) {
 	ctx := cmd.Context()
 	if inside, _ := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--is-inside-work-tree"); inside != "true" {
-		return false, clierr.Wrap(clierr.Usage, fmt.Errorf("--remote must run inside a Git clone of %s", t.Repo))
+		return false, "", clierr.Wrap(clierr.Usage, fmt.Errorf("--remote must run inside a Git clone of %s", t.Repo))
 	}
-	if existing, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", name); err == nil {
-		if !t.ownsRemote(existing) {
-			return false, clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %s points elsewhere; pass --remote-name", name))
-		}
-		return true, nil
+	existing, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", name)
+	if err != nil {
+		return false, "", nil
 	}
-	return false, nil
+	if t.ownsRemote(existing) {
+		return true, "", nil
+	}
+	if host, repo, err := settings.RemoteRepository(existing, t.hosts()); err == nil && host == t.Host && strings.EqualFold(strings.Split(repo, "/")[0], owner) {
+		return false, repo, nil
+	}
+	return false, "", clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %s points elsewhere; pass --remote-name", name))
 }
 
 // addForkRemote adds fork as the remote name of the clone in the working directory, after renaming
-// the remote of that name to upstream when rename is set.
-func (a *application) addForkRemote(cmd *cobra.Command, t target, fork services.Repository, name string, rename bool) error {
+// the remote of that name to upstream when rename is set. A remote current that already points to
+// the fork is kept.
+func (a *application) addForkRemote(cmd *cobra.Command, t target, fork services.Repository, name string, rename bool, current string) error {
 	ctx := cmd.Context()
+	if current != "" {
+		if !strings.EqualFold(current, fork.FullName) {
+			return fmt.Errorf("Git remote %s points to %s, not the fork %s; pass --remote-name", name, current, fork.FullName)
+		}
+		a.warn(cmd, "Git remote %s already points to %s", name, fork.FullName)
+		return nil
+	}
 	if rename {
 		if _, err := a.git(ctx, "remote", "rename", name, "upstream"); err != nil {
 			return fmt.Errorf("forked to %s, but could not rename Git remote %s to upstream: %w", fork.FullName, name, err)
@@ -321,6 +393,9 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 		clone = filepath.Join(a.options.cwd, clone)
 	}
 	a.done(cmd, "Cloned %s into %s", item.FullName, directory)
+	if host.SSHHost != t.host.SSHHost {
+		a.rememberSSHHost(cmd, t, host.SSHHost)
+	}
 	if item.Fork && item.Parent != nil && opts.upstream != "" {
 		upstream, upstreamSSH, err := cloneURLForProtocol(item.Parent.CloneURL, item.Parent.SSHURL, protocol)
 		if err != nil {

@@ -20,9 +20,12 @@ import (
 
 func TestRepositoryCreateGrantsTeamAccess(t *testing.T) {
 	var requests []string
+	owner := true
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.RequestURI())
 		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/users/alice/orgs/acme/permissions":
+			_, _ = fmt.Fprintf(w, `{"is_owner":%t,"is_admin":true}`, owner)
 		case "GET /api/v1/orgs/acme/teams":
 			// The server caps pages below the requested limit (MAX_RESPONSE_ITEMS=1).
 			pages := map[string]string{"1": `[{"id":4,"name":"Owners"}]`, "2": `[{"id":3,"name":"Developers"}]`}
@@ -39,11 +42,18 @@ func TestRepositoryCreateGrantsTeamAccess(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "create", "project", "--org", "acme", "--team", "developers", "--no-input", "--json=full_name"}))
 	teamPages := []string{"GET /api/v1/orgs/acme/teams?limit=50&page=1", "GET /api/v1/orgs/acme/teams?limit=50&page=2", "GET /api/v1/orgs/acme/teams?limit=50&page=3"}
-	require.Equal(t, append(teamPages, "POST /api/v1/orgs/acme/repos", "PUT /api/v1/teams/3/repos/acme/project"), requests)
+	permissions := "GET /api/v1/users/alice/orgs/acme/permissions"
+	require.Equal(t, append(teamPages, permissions, "POST /api/v1/orgs/acme/repos", "PUT /api/v1/teams/3/repos/acme/project"), requests)
 	require.JSONEq(t, `{"full_name":"acme/project"}`, out.String())
+	// An organization administrator who is no owner cannot grant teams access: nothing is created.
+	owner, requests = false, nil
+	out.Reset()
+	err := Execute(context.Background(), deps, []string{"repo", "create", "project", "--org", "acme", "--team", "developers", "--no-input"})
+	require.EqualError(t, err, "--team requires an owner of acme or a site administrator")
+	require.Equal(t, append(teamPages, permissions), requests)
 	requests = nil
 	out.Reset()
-	err := Execute(context.Background(), deps, []string{"repo", "create", "project", "--org", "acme", "--team", "missing", "--no-input"})
+	err = Execute(context.Background(), deps, []string{"repo", "create", "project", "--org", "acme", "--team", "missing", "--no-input"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.ErrorContains(t, err, `team "missing" not found in organization acme`)
 	require.Equal(t, teamPages, requests)
@@ -105,7 +115,9 @@ func TestRepositoryCreateValidatesTemplatesBeforeCreating(t *testing.T) {
 }
 
 func TestRepositoryCreatePublishesALocalRepository(t *testing.T) {
+	created := 0
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		created++
 		requirePayload(t, `{"name":"project"}`, r.Body)
 		_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","html_url":"https://gitea.test/alice/project","clone_url":"http://%s/alice/project.git"}`, r.Host)
 	}))
@@ -114,14 +126,24 @@ func TestRepositoryCreatePublishesALocalRepository(t *testing.T) {
 	dir := t.TempDir()
 	remote := server.URL + "/alice/project.git"
 	push := credentialCall(t, deps, server.URL, "alice", "push", "--quiet", "--set-upstream", "origin", "HEAD")
-	runner := &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote add -- origin " + remote: "", push: ""}}
+	head := "rev-parse --verify --quiet HEAD^{commit}"
+	runner := &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", head: "abc", "remote add -- origin " + remote: "", push: ""}}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "create", "project", "--public", "--source", dir, "--push"}))
-	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", "remote add -- origin " + remote, push}, runner.calls)
-	require.Equal(t, []string{dir, dir, dir, dir}, runner.dirs)
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", head, "remote add -- origin " + remote, push}, runner.calls)
+	require.Equal(t, []string{dir, dir, dir, dir, dir}, runner.dirs)
 	require.Equal(t, "✓ Created repository alice/project\n✓ Added Git remote origin for alice/project\n✓ Pushed the current branch to alice/project\n", diagnostics.String())
 	err := Execute(context.Background(), deps, []string{"repo", "create", "project", "--source", dir, "--auto-init"})
 	require.ErrorContains(t, err, "--source publishes a local repository")
+	// Without a commit, nothing is created.
+	delete(runner.results, head)
+	runner.calls = nil
+	created = 0
+	err = Execute(context.Background(), deps, []string{"repo", "create", "project", "--source", dir, "--push"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, "--push requires a commit in --source "+dir+"; commit first")
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", head}, runner.calls)
+	require.Zero(t, created)
 }
 
 func TestRepositoryMigrateAcceptsZeroMirrorInterval(t *testing.T) {

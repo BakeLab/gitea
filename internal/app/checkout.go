@@ -23,7 +23,7 @@ func (t target) hosts() map[string]settings.Host {
 
 // ownsRemote reports whether the Git remote URL raw names the target's instance and repository.
 func (t target) ownsRemote(raw string) bool {
-	host, repo, err := settings.RepositoryURL(raw, t.hosts())
+	host, repo, err := settings.RemoteRepository(raw, t.hosts())
 	return err == nil && host == t.Host && strings.EqualFold(repo, t.Repo)
 }
 

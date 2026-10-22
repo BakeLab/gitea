@@ -464,7 +464,7 @@ func (a *application) completeRepos() cobra.CompletionFunc {
 		}
 		values := []cobra.Completion{}
 		for _, remote := range a.gitRemotes(ctx) {
-			if host, repo, err := settings.RepositoryURL(remote[1], snapshot.Hosts.Hosts); err == nil && snapshot.Hosts.Hosts[host].Users != nil {
+			if host, repo, err := settings.RemoteRepository(remote[1], snapshot.Hosts.Hosts); err == nil && snapshot.Hosts.Hosts[host].Users != nil {
 				values = append(values, cobra.CompletionWithDesc(repo, "remote "+remote[0]))
 			}
 		}
