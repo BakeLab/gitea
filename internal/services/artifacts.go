@@ -56,6 +56,12 @@ func (s Actions) Artifacts(ctx context.Context, run int64, limit, page int) (Pag
 	if err != nil {
 		return Page[Artifact]{}, Classify(err, "run", strconv.FormatInt(run, 10), s.Repository)
 	}
+	// Gitea lists no artifacts for a missing run rather than failing.
+	if len(result.Items) == 0 && page <= 1 {
+		if _, err := s.Run(ctx, run); err != nil {
+			return Page[Artifact]{}, err
+		}
+	}
 	return result, nil
 }
 

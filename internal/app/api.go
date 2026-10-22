@@ -173,7 +173,7 @@ func (a *application) apiCommand() *cobra.Command {
 func (a *application) runAPI(cmd *cobra.Command, args []string, f *apiFlags) error {
 	usage := func(err error) error { return clierr.Wrap(clierr.Usage, err) }
 	if f.silent && a.options.jq != "" {
-		return usage(errors.New("--silent and --jq are mutually exclusive"))
+		return usage(errors.New("--silent cannot be combined with --jq"))
 	}
 	headers, err := apiHeaders(f.headerValues)
 	if err != nil {

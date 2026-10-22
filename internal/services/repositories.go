@@ -46,6 +46,9 @@ type Repository struct {
 	Parent         *Repository `json:"parent"`
 	// OriginalURL stays out of JSON output: migration sources may embed credentials.
 	OriginalURL string `json:"-"`
+	// Source is OriginalURL without credentials.
+	Source         string `json:"original_url"`
+	MirrorInterval string `json:"mirror_interval"`
 }
 
 // RepositoryOptions supplies repository creation input.

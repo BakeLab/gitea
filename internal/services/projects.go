@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -74,7 +75,7 @@ func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) 
 	}
 	for i, title := range titles {
 		if boards[i].Project == nil {
-			return nil, NotFound("project", strconv.Quote(title), s.Repository)
+			return nil, s.missing(ctx, title, owner, repo)
 		}
 	}
 	for i := range boards {
@@ -85,6 +86,23 @@ func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) 
 	return boards, nil
 }
 
+// missing reports the open project titled title as not found, or as closed when a closed one has
+// the title.
+func (s Projects) missing(ctx context.Context, title, owner, repo string) error {
+	for _, scope := range []gitea.ProjectScope{gitea.RepoProjectScope(owner, repo), gitea.OrgProjectScope(owner)} {
+		closed, err := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Project, *gitea.Response, error) {
+			return c.Projects.ListProjects(ctx, scope, gitea.ListProjectsOptions{ListOptions: list, State: gitea.StateClosed})
+		})
+		if err != nil && !IsNotFound(err) {
+			return err
+		}
+		if slices.ContainsFunc(closed, func(p *gitea.Project) bool { return strings.EqualFold(p.Title, title) }) {
+			return fmt.Errorf("project %q is closed", title)
+		}
+	}
+	return NotFound("project", strconv.Quote(title), s.Repository)
+}
+
 // load reads the columns of board and, withIssues, the issues each holds.
 func (s Projects) load(ctx context.Context, board *Board, withIssues bool) error {
 	columns, err := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.ProjectColumn, *gitea.Response, error) {
@@ -93,11 +111,11 @@ func (s Projects) load(ctx context.Context, board *Board, withIssues bool) error
 	if err != nil {
 		return err
 	}
+	board.columns = map[int64]int64{}
 	if len(columns) == 0 {
-		return fmt.Errorf("project %q has no columns", board.Title)
+		return nil
 	}
 	board.defaultColumn = columns[max(slices.IndexFunc(columns, func(c *gitea.ProjectColumn) bool { return c.Default }), 0)].ID
-	board.columns = map[int64]int64{}
 	if !withIssues {
 		return nil
 	}
@@ -118,14 +136,37 @@ func (s Projects) load(ctx context.Context, board *Board, withIssues bool) error
 }
 
 // Add puts the issue with the global ID issueID in the default column of board, and reports
-// whether it sent the request: an issue already on the board keeps its column.
-func (s Projects) Add(ctx context.Context, board Board, issueID int64) (bool, error) {
+// whether it sent the request: an issue already on the board keeps its column. A board without
+// columns first gets the default column Gitea creates for it on the web.
+func (s Projects) Add(ctx context.Context, board *Board, issueID int64) (bool, error) {
 	if _, held := board.columns[issueID]; held {
 		return false, nil
+	}
+	if board.defaultColumn == 0 {
+		if err := s.createDefaultColumn(ctx, board); err != nil {
+			return true, err
+		}
 	}
 	return true, do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		return c.Projects.AddIssueToProjectColumn(ctx, board.scope, board.ID, board.defaultColumn, issueID)
 	})
+}
+
+// createDefaultColumn adds the "Uncategorized" default column to board, which has none.
+func (s Projects) createDefaultColumn(ctx context.Context, board *Board) error {
+	column, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.ProjectColumn, *gitea.Response, error) {
+		return c.Projects.CreateProjectColumn(ctx, board.scope, board.ID, gitea.CreateProjectColumnOption{Title: "Uncategorized"})
+	})
+	if err != nil {
+		return err
+	}
+	if err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+		return c.Projects.SetDefaultProjectColumn(ctx, board.scope, board.ID, column.ID)
+	}); err != nil {
+		return err
+	}
+	board.defaultColumn = column.ID
+	return nil
 }
 
 // Remove takes the issue with the global ID issueID off board, and reports whether it sent the

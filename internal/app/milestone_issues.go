@@ -73,7 +73,14 @@ $ gt milestone issue %[1]s v1.0 12 13 '#14'`, verb), Annotations: map[string]str
 						return item, nil
 					}
 				} else {
-					item, err = service.Edit(cmd.Context(), n, services.IssueEdit{Milestone: &milestone.ID})
+					if item, err = service.View(cmd.Context(), n); err == nil && item.Milestone != nil && item.Milestone.ID == milestone.ID {
+						a.warn(cmd, "#%d is already in milestone %q", n, milestone.Title)
+						unchanged[n] = true
+						return item, nil
+					}
+					if err == nil {
+						item, err = service.Edit(cmd.Context(), n, services.IssueEdit{Milestone: &milestone.ID})
+					}
 				}
 				return item, itemError(err, target.Repo)
 			}, nil)

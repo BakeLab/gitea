@@ -12,7 +12,7 @@ import (
 )
 
 // projectServer serves an organization project "Board" with a default column 11, to which the issue
-// with the global ID 70 can be added.
+// with the global ID 70 can be added, a project "Empty" without columns and a closed project "Old".
 func projectServer(t *testing.T, mutations *[]string) http.Handler {
 	onBoard := false
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -22,7 +22,19 @@ func projectServer(t *testing.T, mutations *[]string) http.Handler {
 		case "GET /api/v1/repos/acme/app/projects":
 			writeFirstPage(w, r, `[]`)
 		case "GET /api/v1/orgs/acme/projects":
-			writeFirstPage(w, r, `[{"id":3,"title":"Board"}]`)
+			if r.URL.Query().Get("state") == "closed" {
+				writeFirstPage(w, r, `[{"id":5,"title":"Old","state":"closed"}]`)
+			} else {
+				writeFirstPage(w, r, `[{"id":3,"title":"Board"},{"id":4,"title":"Empty"}]`)
+			}
+		case "GET /api/v1/orgs/acme/projects/4/columns":
+			writeFirstPage(w, r, `[]`)
+		case "POST /api/v1/orgs/acme/projects/4/columns":
+			*mutations = append(*mutations, r.Method+" "+r.URL.Path)
+			_, _ = w.Write([]byte(`{"id":20,"title":"Uncategorized"}`))
+		case "POST /api/v1/orgs/acme/projects/4/columns/20/default", "POST /api/v1/orgs/acme/projects/4/columns/20/issues/70":
+			*mutations = append(*mutations, r.Method+" "+r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
 		case "GET /api/v1/orgs/acme/projects/3/columns":
 			writeFirstPage(w, r, `[{"id":10,"title":"Done"},{"id":11,"title":"Backlog","default":true}]`)
 		case "GET /api/v1/orgs/acme/projects/3/columns/10/issues":
@@ -56,6 +68,12 @@ func TestIssueEditAddsToAndRemovesFromProjects(t *testing.T) {
 	require.Equal(t, []string{"POST /api/v1/orgs/acme/projects/3/columns/11/issues/70", "DELETE /api/v1/orgs/acme/projects/3/columns/11/issues/70"}, mutations)
 	err := Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "Roadmap"})
 	require.ErrorContains(t, err, `project "Roadmap" not found`)
+	err = Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "old"})
+	require.ErrorContains(t, err, `project "old" is closed`)
+	// A board without columns gets the default column Gitea creates on the web.
+	mutations = nil
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "Empty"}))
+	require.Equal(t, []string{"POST /api/v1/orgs/acme/projects/4/columns", "POST /api/v1/orgs/acme/projects/4/columns/20/default", "POST /api/v1/orgs/acme/projects/4/columns/20/issues/70"}, mutations)
 	requireUsageBeforeRequests(t, "project names cannot be empty", "issue", "create", "--title", "x", "--project", " ")
 	requireUsageBeforeRequests(t, "--project cannot be combined with --web", "issue", "create", "--title", "x", "--project", "Board", "--web")
 }

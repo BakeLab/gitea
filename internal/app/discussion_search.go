@@ -32,7 +32,7 @@ $ gt search %[1]s crash -R alice/project --label bug --milestone v1.0`, noun)
 	command := &cobra.Command{Use: noun + " [<query>...]", Aliases: []string{alias}, Short: "Search " + nouns, Long: fmt.Sprintf(`Search the %[1]s of every repository you can access on the instance, or of one
 repository with --repo. Words of the query match titles and bodies.`, nouns), Example: example, RunE: func(cmd *cobra.Command, args []string) error {
 		if opts.Author != "" && opts.Authored {
-			return clierr.Wrap(clierr.Usage, errors.New("--author and --authored are mutually exclusive"))
+			return clierr.Wrap(clierr.Usage, errors.New("--author cannot be combined with --authored"))
 		}
 		var err error
 		if opts.Since, opts.Before, err = updated.parse(a.deps.Now()); err != nil {

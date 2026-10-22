@@ -105,6 +105,7 @@ func TestConfirmAction(t *testing.T) {
 		{name: "names the action without a terminal", c: deleteLabel, prompt: &askingPrompt{}, code: clierr.Usage, message: `confirmation required to delete label "bug" from alice/x; rerun with --yes`},
 		{name: "names the prompted action without a terminal", c: Confirmation{Prompt: "Delete alice/x? It becomes read-only."}, prompt: &askingPrompt{}, code: clierr.Usage, message: "confirmation required to delete alice/x; rerun with --yes"},
 		{name: "keeps a quoted question mark", c: Confirmation{Prompt: `Delete label "why? not" from alice/x?`}, prompt: &askingPrompt{}, code: clierr.Usage, message: `confirmation required to delete label "why? not" from alice/x; rerun with --yes`},
+		{name: "keeps the question mark of a URL", c: Confirmation{Prompt: "Delete webhook 3 (https://hooks.test/x?…) from alice/x?"}, prompt: &askingPrompt{}, code: clierr.Usage, message: "confirmation required to delete webhook 3 (https://hooks.test/x?…) from alice/x; rerun with --yes"},
 		{name: "drops escape sequences from server names", c: Confirmation{Prompt: "Delete attachment \"x\x1b]0;PWNED\x07\"?"}, prompt: &askingPrompt{}, code: clierr.Usage, message: `confirmation required to delete attachment "x]0;PWNED"; rerun with --yes`},
 		{name: "without a terminal or action", c: Confirmation{Prompt: "Go?", DefaultYes: true}, prompt: &askingPrompt{}, code: clierr.Usage, message: "confirmation required; rerun with --yes"},
 		{name: "accepted", c: deleteLabel, streams: terminal, prompt: &askingPrompt{accept: true}, defaults: []bool{false}},

@@ -327,6 +327,14 @@ func (s Teams) Members(ctx context.Context, id int64, limit, page int) (Page[Tea
 	return convertPage(users, teamMemberFrom), err
 }
 
+// IsMember reports whether username belongs to the team.
+func (s Teams) IsMember(ctx context.Context, id int64, username string) (bool, error) {
+	return Organizations{Client: s.Client}.check(ctx, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+		_, resp, err := c.Organizations.GetTeamMember(ctx, id, username)
+		return resp, err
+	})
+}
+
 // SetMember adds or removes one team membership.
 func (s Teams) SetMember(ctx context.Context, id int64, username string, add bool) error {
 	err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {

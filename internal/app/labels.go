@@ -35,7 +35,7 @@ addressed by name or ID.`}
 	_ = group.RegisterFlagCompletionFunc("org", a.completeOrgs())
 	scope := func(cmd *cobra.Command) (services.Labels, error) {
 		if org != "" && a.options.repo != "" {
-			return services.Labels{}, clierr.Wrap(clierr.Usage, errors.New("--org and --repo are mutually exclusive"))
+			return services.Labels{}, clierr.Wrap(clierr.Usage, errors.New("--org cannot be combined with --repo"))
 		}
 		t, err := a.resolve(cmd.Context(), org == "")
 		return services.Labels{Client: t.client, Repository: t.Repo, Organization: org}, err

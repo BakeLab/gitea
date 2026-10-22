@@ -61,7 +61,7 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 					return clierr.Wrap(clierr.Usage, errors.New("supply notification IDs or --all"))
 				}
 				if len(args) > 0 && all {
-					return clierr.Wrap(clierr.Usage, errors.New("notification IDs and --all are mutually exclusive"))
+					return clierr.Wrap(clierr.Usage, errors.New("--all cannot be combined with notification IDs"))
 				}
 				return nil
 			},
@@ -285,17 +285,16 @@ pinned.`,
 					return err
 				}
 			}
-			if err := writeView(a, cmd, item, func(item services.Notification) terminal.View { return notificationView(item, comment, a.display()) }); err != nil {
-				return err
-			}
 			// Marking is a side effect of viewing: a token without write:notification, or an
 			// administrator reading another user's thread, still gets the view.
 			if item.Unread && !item.Pinned {
 				if _, err := s.Mark(cmd.Context(), id, "read"); err != nil {
 					a.warn(cmd, "Could not mark notification %d as read: %v", id, err)
+				} else {
+					item.Unread = false
 				}
 			}
-			return nil
+			return writeView(a, cmd, item, func(item services.Notification) terminal.View { return notificationView(item, comment, a.display()) })
 		},
 	}
 }

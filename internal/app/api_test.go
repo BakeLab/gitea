@@ -268,7 +268,7 @@ func TestAPIFiltersAndFormatsJSONResponses(t *testing.T) {
 			require.Equal(t, tc.want, withoutANSI(out.String()))
 		})
 	}
-	requireUsageBeforeRequests(t, "--silent and --jq are mutually exclusive", "api", "version", "--silent", "--jq", ".")
+	requireUsageBeforeRequests(t, "--silent cannot be combined with --jq", "api", "version", "--silent", "--jq", ".")
 	requireUsageBeforeRequests(t, "api returns raw responses; --json is not supported", "api", "version", "--json")
 	requireUsageBeforeRequests(t, `invalid HTTP method "FOO"`, "api", "version", "-X", "foo")
 	requireUsageBeforeRequests(t, `invalid HTTP method ""`, "api", "version", "-X", "")

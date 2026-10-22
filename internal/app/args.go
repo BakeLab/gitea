@@ -219,6 +219,34 @@ func usageArgs(validate cobra.PositionalArgs) cobra.PositionalArgs {
 	}
 }
 
+// setFlags returns the names of the flags that are set, in order.
+func setFlags(names []string, set ...bool) []string {
+	var result []string
+	for i, name := range names {
+		if set[i] {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
+// nonBlankArgs is usageArgs(validate) that also rejects blank arguments before any request,
+// naming the argument at each position by names; the last name covers further arguments.
+func nonBlankArgs(validate cobra.PositionalArgs, names ...string) cobra.PositionalArgs {
+	validate = usageArgs(validate)
+	return func(cmd *cobra.Command, args []string) error {
+		if err := validate(cmd, args); err != nil {
+			return err
+		}
+		for i, arg := range args {
+			if strings.TrimSpace(arg) == "" {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be empty", names[min(i, len(names)-1)]))
+			}
+		}
+		return nil
+	}
+}
+
 // argumentError reports a positional argument problem followed by the command's usage.
 type argumentError struct {
 	problem string

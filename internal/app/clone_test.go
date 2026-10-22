@@ -220,7 +220,7 @@ func TestCloneAddsSourceRemoteForMirrors(t *testing.T) {
 	runner.calls = nil
 	require.NoError(t, Execute(context.Background(), deps, append(args, "--json")))
 	require.Equal(t, []string{clone, "remote add -- source " + original}, runner.calls)
-	require.NotContains(t, out.String(), "github.com")
+	require.Contains(t, out.String(), `"original_url": "https://github.com/upstream/project.git"`)
 	runner.calls = nil
 	require.NoError(t, Execute(context.Background(), deps, append(args, "--no-upstream")))
 	require.Equal(t, []string{clone}, runner.calls)
@@ -229,6 +229,10 @@ func TestCloneAddsSourceRemoteForMirrors(t *testing.T) {
 		require.NoError(t, Execute(context.Background(), deps, args), unsafe)
 		require.Equal(t, []string{clone}, runner.calls, unsafe)
 	}
+	out.Reset()
+	original = "https://user:secret@github.com/upstream/project.git"
+	require.NoError(t, Execute(context.Background(), deps, append(args, "--no-upstream", "--json=original_url")))
+	require.JSONEq(t, `{"original_url":"https://github.com/upstream/project.git"}`, out.String(), "credentials stay out of the output")
 }
 
 func TestClonePassesGitFlagsAndNamesTheUpstreamRemote(t *testing.T) {

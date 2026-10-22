@@ -40,6 +40,23 @@ func TestArtifactListingProjectsMetadataAndEmptyArrays(t *testing.T) {
 	require.NotNil(t, page.Items)
 }
 
+func TestMissingRunIsNotFound(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/actions/runs/8/artifacts":
+			_, _ = w.Write([]byte(`{"artifacts":[],"total_count":0}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"run with id 8: resource does not exist"}`))
+		}
+	}))
+	service := Actions{Client: client, Repository: "owner/repo"}
+	_, err := service.Artifacts(context.Background(), 8, 20, 1)
+	require.EqualError(t, err, "run 8 not found in owner/repo")
+	_, err = service.JobsPage(context.Background(), 8, 20, 1)
+	require.EqualError(t, err, "run 8 not found in owner/repo")
+}
+
 func TestArtifactFromMapsServerFields(t *testing.T) {
 	artifact := decode[gitea.ActionsArtifact](t, `{"id":9,"name":"build","size_in_bytes":128,"url":"https://example.test/artifact","expired":true,
 		"created_at":"2028-01-02T03:04:05Z","updated_at":"2028-01-02T03:04:05Z","expires_at":"2028-01-03T03:04:05Z"}`)

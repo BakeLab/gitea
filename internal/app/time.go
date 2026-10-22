@@ -70,8 +70,8 @@ func (a *application) timeListCommand() *cobra.Command {
 repositories with --mine. On a terminal, the total of the listed time follows the table.`, Example: `$ gt time list
 $ gt time list --issue 12
 $ gt time list --mine --since 168h`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		if (opts.Mine && (issue != "" || opts.Username != "")) || (issue != "" && opts.Username != "") {
-			return clierr.Wrap(clierr.Usage, errors.New("--mine, --issue and --username select mutually exclusive scopes"))
+		if scopes := setFlags([]string{"mine", "issue", "username"}, opts.Mine, issue != "", opts.Username != ""); len(scopes) > 1 {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --%s", scopes[0], scopes[1]))
 		}
 		if total && a.options.json != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--total is a human-output summary; use --jq 'map(.seconds) | add // 0' for JSON"))
@@ -224,8 +224,18 @@ func (a *application) timeResetCommand() *cobra.Command {
 			return err
 		}
 		subject := fmt.Sprintf("your time logged on %s#%d", target.Repo, n)
-		return a.deleteConfirmed(cmd, subject, func() error {
-			return (services.Times{Client: target.client, Repository: target.Repo}).Reset(cmd.Context(), n)
-		})
+		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + "?"}); err != nil {
+			return err
+		}
+		reset, err := (services.Times{Client: target.client, Repository: target.Repo}).Reset(cmd.Context(), n)
+		if err != nil {
+			return err
+		}
+		if !reset {
+			a.warn(cmd, "You have no time logged on %s#%d", target.Repo, n)
+			return nil
+		}
+		a.done(cmd, "Deleted %s", subject)
+		return nil
 	}}
 }

@@ -154,11 +154,15 @@ func validateTextSources(cmd *cobra.Command, textFlag, fileFlag string) error {
 			return err
 		}
 		if editor && (text || file) {
-			return clierr.Wrap(clierr.Usage, fmt.Errorf("--editor, --%s, and --%s are mutually exclusive", textFlag, fileFlag))
+			other := fileFlag
+			if text {
+				other = textFlag
+			}
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--editor cannot be combined with --%s", other))
 		}
 	}
 	if text && file {
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s and --%s are mutually exclusive", textFlag, fileFlag))
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --%s", textFlag, fileFlag))
 	}
 	if file {
 		path, err := cmd.Flags().GetString(fileFlag)

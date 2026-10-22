@@ -34,10 +34,10 @@ outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnot
 			return err
 		}
 		if draft && ready {
-			return clierr.Wrap(clierr.Usage, errors.New("--draft and --ready are mutually exclusive"))
+			return clierr.Wrap(clierr.Usage, errors.New("--draft cannot be combined with --ready"))
 		}
 		if removeMilestone && cmd.Flags().Changed("milestone") {
-			return clierr.Wrap(clierr.Usage, errors.New("--milestone and --remove-milestone are mutually exclusive"))
+			return clierr.Wrap(clierr.Usage, errors.New("--milestone cannot be combined with --remove-milestone"))
 		}
 		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 0 {
 			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID, or 0 for none"))

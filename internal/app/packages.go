@@ -97,7 +97,7 @@ $ gt package list --search tool --json name,version`,
 func (a *application) packageVersionsCommand(service packageService) *cobra.Command {
 	var limit, page int
 	cmd := &cobra.Command{
-		Use: "versions <type> <name>", Short: "List the versions of a package", Args: argsExact(2),
+		Use: "versions <type> <name>", Short: "List the versions of a package", Args: nonBlankArgs(cobra.ExactArgs(2), "package type", "package name"),
 		Example: "$ gt package versions generic tool",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, s, err := service(cmd)
@@ -123,7 +123,7 @@ type packageDetails struct {
 
 func (a *application) packageViewCommand(service packageService) *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "view <type> <name> [<version>]", Short: "View a package version and its files", Args: usageArgs(cobra.RangeArgs(2, 3)),
+		Use: "view <type> <name> [<version>]", Short: "View a package version and its files", Args: nonBlankArgs(cobra.RangeArgs(2, 3), "package type", "package name", "package version"),
 		Long: "Show a version of a package with its files; without a version, its latest version.",
 		Example: `$ gt package view generic tool
 $ gt package view npm @acme/ui 2.1.0 --json files`,
@@ -160,7 +160,7 @@ $ gt package view npm @acme/ui 2.1.0 --json files`,
 func (a *application) packageDeleteCommand(service packageService) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
-		Use: "delete <type> <name> [<version>]", Short: "Delete a package version, or with --all the whole package", Args: usageArgs(cobra.RangeArgs(2, 3)),
+		Use: "delete <type> <name> [<version>]", Short: "Delete a package version, or with --all the whole package", Args: nonBlankArgs(cobra.RangeArgs(2, 3), "package type", "package name", "package version"),
 		Example: `$ gt package delete generic tool 1.0.0
 $ gt package delete generic tool --all --yes`,
 		Annotations: map[string]string{"gt.text": "package deletion does not return a resource", "gt.confirm": "true"},
@@ -189,7 +189,7 @@ $ gt package delete generic tool --all --yes`,
 
 func (a *application) packageLinkCommand(service packageService, link bool) *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "link <type> <name> <repository>", Short: "Link a package to a repository of its owner", Args: argsExact(3),
+		Use: "link <type> <name> <repository>", Short: "Link a package to a repository of its owner", Args: nonBlankArgs(cobra.ExactArgs(3), "package type", "package name", "repository"),
 		Example:     "$ gt package link generic tool tool-source",
 		Annotations: textOutput("linking a package does not return a resource"),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -228,7 +228,7 @@ func (a *application) packageLinkCommand(service packageService, link bool) *cob
 
 func (a *application) packageUploadCommand(service packageService) *cobra.Command {
 	return &cobra.Command{
-		Use: "upload <name> <version> <file>...", Short: "Upload files to a generic package", Args: usageArgs(cobra.MinimumNArgs(3)),
+		Use: "upload <name> <version> <file>...", Short: "Upload files to a generic package", Args: nonBlankArgs(cobra.MinimumNArgs(3), "package name", "package version", "file"),
 		Long: `Upload files to a version of a generic package, creating the package and the version when
 they are new. Each file is stored under its base name; a version cannot hold two files of the same
 name.`,

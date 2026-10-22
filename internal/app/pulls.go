@@ -51,7 +51,7 @@ protection requires approvals, approved needs that many official approvals, as f
 			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
 		}
 		if options.NoAssignee && options.Assignee != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--assignee and --no-assignee are mutually exclusive"))
+			return clierr.Wrap(clierr.Usage, errors.New("--assignee cannot be combined with --no-assignee"))
 		}
 		if web {
 			if err := requireWebFlags(cmd, "state"); err != nil {

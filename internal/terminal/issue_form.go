@@ -13,11 +13,11 @@ import (
 	"charm.land/huh/v2"
 )
 
-// IssueTemplateChoice seeds title/body when selected in an interactive create form. Its labels are
-// returned as IssueFormValues.TemplateLabels for the caller to add.
+// IssueTemplateChoice seeds title/body when selected in an interactive create form. Its labels and
+// ref are returned as IssueFormValues.TemplateLabels and TemplateRef for the caller to apply.
 type IssueTemplateChoice struct {
-	Name, About, Title, Body string
-	Labels                   []string
+	Name, About, Title, Body, Ref string
+	Labels                        []string
 }
 
 // IssueMilestoneChoice identifies an open milestone for interactive selection.
@@ -59,6 +59,8 @@ type IssueFormValues struct {
 	Draft       Draft
 	// TemplateLabels are the label names of the chosen template, which the caller adds to Labels.
 	TemplateLabels []string
+	// TemplateRef is the branch or tag the chosen template sets on the issue.
+	TemplateRef string
 }
 
 // IssueForm collects interactive issue create input.
@@ -98,7 +100,7 @@ func (p *FormPrompter) CreateIssue(ctx context.Context, choices IssueFormChoices
 	}
 	choices.AskNext = true
 	values, err := p.collectIssueProperties(ctx, seed.Title, seed.Body, choices)
-	values.TemplateLabels = seed.Labels
+	values.TemplateLabels, values.TemplateRef = seed.Labels, seed.Ref
 	return values, err
 }
 

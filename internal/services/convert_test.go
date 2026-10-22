@@ -39,7 +39,7 @@ func TestRepositoryFromMapsParents(t *testing.T) {
 		"id":2,"name":"fork","full_name":"bob/fork","description":"Copy","html_url":"https://gitea.test/bob/fork",
 		"private":true,"default_branch":"main","clone_url":"https://gitea.test/bob/fork.git","ssh_url":"git@gitea.test:bob/fork.git",
 		"archived":true,"template":true,"fork":true,"mirror":true,"website":"https://example.test","has_actions":true,
-		"original_url":"https://source.test/repo","parent":{"id":1,"name":"project","full_name":"alice/project"},
+		"original_url":"https://source.test/repo","mirror_interval":"8h0m0s","parent":{"id":1,"name":"project","full_name":"alice/project"},
 		"empty":true,"stars_count":3,"forks_count":2,"open_issues_count":5,"open_pr_counter":1,"topics":["cli"],
 		"updated_at":"2026-10-02T12:00:00Z"}`)
 	require.Equal(t, Repository{
@@ -48,6 +48,7 @@ func TestRepositoryFromMapsParents(t *testing.T) {
 		SSHURL: "git@gitea.test:bob/fork.git", Archived: true, Template: true, Fork: true, Mirror: true,
 		Empty: true, Stars: 3, Forks: 2, OpenIssues: 5, OpenPulls: 1, Topics: []string{"cli"}, UpdatedAt: "2026-10-02T12:00:00Z",
 		Parent: &Repository{ID: 1, Name: "project", FullName: "alice/project"}, OriginalURL: "https://source.test/repo",
+		Source: "https://source.test/repo", MirrorInterval: "8h0m0s",
 	}, repositoryFrom(repo))
 }
 

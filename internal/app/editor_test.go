@@ -123,7 +123,7 @@ func TestBodySourcesRejectInvalidInputBeforeAuthentication(t *testing.T) {
 						input[i] = strings.Replace(arg, "--body", "--notes", 1)
 					}
 				}
-				want := "mutually exclusive"
+				want := "cannot be combined with"
 				if len(input) == 1 {
 					want = "--body-file must name a file or -"
 					if command[0] == "release" {

@@ -80,7 +80,7 @@ func (s Actions) JobsPage(ctx context.Context, run int64, limit, page int) (Page
 		return response.Jobs, headerOf(resp), nil
 	})
 	if err != nil {
-		return Page[Job]{}, err
+		return Page[Job]{}, Classify(err, "run", strconv.FormatInt(run, 10), s.Repository)
 	}
 	return convertPage(window, jobFrom), nil
 }

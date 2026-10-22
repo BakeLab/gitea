@@ -5,8 +5,10 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"gitea.dev/cli/internal/transport"
@@ -80,7 +82,18 @@ func (s Times) ListPage(ctx context.Context, opts TimeOptions) (Page[TrackedTime
 		return c.Issues.ListRepoTrackedTimes(ctx, owner, repo, query)
 	})
 	items := convertAll(records.Items, func(record *gitea.TrackedTime) TrackedTime { return trackedTimeFrom(record, s.Repository) })
+	switch {
+	case err == nil || opts.Mine:
+	case opts.Issue != 0:
+		err = s.issues().issueError(ctx, err, opts.Issue)
+	default:
+		err = Classify(err, "repository", s.Repository, "")
+	}
 	return Page[TrackedTime]{Items: items, More: records.More, Total: records.Total, Counted: records.Counted}, err
+}
+
+func (s Times) issues() Issues {
+	return Issues{Client: s.Client, Repository: s.Repository}
 }
 
 // Find returns the tracked time record id on issue n.
@@ -105,7 +118,7 @@ func (s Times) Create(ctx context.Context, n, seconds int64) (TrackedTime, error
 		return c.Issues.AddTime(ctx, owner, repo, n, gitea.AddTimeOption{Time: seconds})
 	})
 	if err != nil {
-		return TrackedTime{}, (Issues{Client: s.Client, Repository: s.Repository}).issueError(ctx, err, n)
+		return TrackedTime{}, s.issues().issueError(ctx, err, n)
 	}
 	result := trackedTimeFrom(record, s.Repository)
 	result.IssueNumber = n
@@ -114,14 +127,23 @@ func (s Times) Create(ctx context.Context, n, seconds int64) (TrackedTime, error
 
 // Delete removes one tracked time record from the selected issue.
 func (s Times) Delete(ctx context.Context, n, id int64) error {
-	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
 		return c.Issues.DeleteTime(ctx, owner, repo, n, id)
 	})
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && strings.Contains(apiErr.Message, "tracked_time does not exist") {
+		return NotFound("tracked time", strconv.FormatInt(id, 10), fmt.Sprintf("%s#%d", s.Repository, n))
+	}
+	return s.issues().issueError(ctx, err, n)
 }
 
-// Reset removes all tracked time records on the selected issue.
-func (s Times) Reset(ctx context.Context, n int64) error {
-	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+// Reset removes the tracked time records of the caller on the selected issue, and reports whether
+// there were any.
+func (s Times) Reset(ctx context.Context, n int64) (bool, error) {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
 		return c.Issues.ResetIssueTime(ctx, owner, repo, n)
 	})
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && strings.Contains(apiErr.Message, "tracked_time does not exist") {
+		return false, nil
+	}
+	return err == nil, s.issues().issueError(ctx, err, n)
 }

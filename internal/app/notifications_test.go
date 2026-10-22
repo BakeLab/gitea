@@ -160,6 +160,9 @@ func TestNotificationMutationsReportWhatChanged(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "view", "12"}))
 	require.Contains(t, withoutANSI(out.String()), "Latest comment: bob\n\n  Looks good to me\n\nView this pull request on Gitea: https://gitea.test/alice/project/pulls/17\n")
 	require.Equal(t, []string{"read"}, marks, "viewing marks an unread notification as read")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "view", "12", "--json=unread"}))
+	require.JSONEq(t, `{"unread":false}`, withoutANSI(out.String()), "the view shows the state after marking")
 }
 
 func TestNotificationMarkAllNamesTheBeforeCutoff(t *testing.T) {

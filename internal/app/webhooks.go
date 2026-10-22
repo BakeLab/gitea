@@ -56,14 +56,8 @@ type webhookScope struct {
 }
 
 func (s *webhookScope) service(a *application, cmd *cobra.Command) (target, services.Webhooks, error) {
-	scopes := 0
-	for _, selected := range []bool{s.org != "", s.account, s.global, a.options.repo != ""} {
-		if selected {
-			scopes++
-		}
-	}
-	if scopes > 1 {
-		return target{}, services.Webhooks{}, clierr.Wrap(clierr.Usage, errors.New("--org, --account, --global, and --repo select mutually exclusive scopes"))
+	if scopes := setFlags([]string{"org", "account", "global", "repo"}, s.org != "", s.account, s.global, a.options.repo != ""); len(scopes) > 1 {
+		return target{}, services.Webhooks{}, clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --%s", scopes[0], scopes[1]))
 	}
 	t, err := a.resolve(cmd.Context(), s.org == "" && !s.account && !s.global)
 	return t, services.Webhooks{Client: t.client, Scope: services.WebhookScope{Repository: t.Repo, Organization: s.org, Account: s.account, Global: s.global}}, err
@@ -302,7 +296,7 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 			}
 		}
 		if cmd.Flags().Changed("secret") && cmd.Flags().Changed("secret-file") {
-			return clierr.Wrap(clierr.Usage, errors.New("--secret and --secret-file are mutually exclusive"))
+			return clierr.Wrap(clierr.Usage, errors.New("--secret cannot be combined with --secret-file"))
 		}
 		authSources := 0
 		for _, set := range []bool{cmd.Flags().Changed("authorization-header"), cmd.Flags().Changed("authorization-header-file"), clearAuthorization} {

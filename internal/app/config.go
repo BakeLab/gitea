@@ -600,7 +600,7 @@ $ gt alias set il "issue list --assignee @me" --clobber`,
 				return clierr.Wrap(clierr.Usage, errors.New("name the aliases to delete, or pass --all"))
 			}
 			if len(args) > 0 && all {
-				return clierr.Wrap(clierr.Usage, errors.New("alias names and --all are mutually exclusive"))
+				return clierr.Wrap(clierr.Usage, errors.New("--all cannot be combined with alias names"))
 			}
 			return nil
 		},
@@ -643,7 +643,8 @@ $ gt alias set il "issue list --assignee @me" --clobber`,
 	group.AddCommand(remove)
 	group.AddCommand(&cobra.Command{
 		Use: "list", Short: "List shortcuts", Args: argsExact(0),
-		Example: "$ gt alias list\n# Print the expansion of one alias\n$ gt alias list --jq .il",
+		Example:     "$ gt alias list\n# Print the expansion of one alias\n$ gt alias list --jq .il",
+		Annotations: map[string]string{"gt.jsonfields": "The names of the aliases, each with its expansion."},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := a.settings()
 			if err != nil {

@@ -94,6 +94,7 @@ func TestMilestoneDeleteReturnsJSONSnapshotOnlyAfterSuccess(t *testing.T) {
 
 func TestMilestoneIssueCommandsSelectByName(t *testing.T) {
 	var calls []string
+	added := false
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
 		switch {
@@ -107,10 +108,17 @@ func TestMilestoneIssueCommandsSelectByName(t *testing.T) {
 			// Gitea matches a filter value by title first, so the unique title is sent.
 			require.Equal(t, "Release one", r.URL.Query().Get("milestones"))
 			_, _ = w.Write([]byte(`[]`))
+		case r.URL.Path == "/api/v1/repos/alice/project/issues/3" && r.Method == http.MethodGet:
+			if added {
+				_, _ = w.Write([]byte(`{"number":3,"milestone":{"id":9}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"number":3}`))
 		case r.URL.Path == "/api/v1/repos/alice/project/issues/3" && r.Method == http.MethodPatch:
 			var payload map[string]any
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
 			require.EqualValues(t, 9, payload["milestone"])
+			added = true
 			_, _ = w.Write([]byte(`{"number":3,"milestone":{"id":9}}`))
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
@@ -118,10 +126,14 @@ func TestMilestoneIssueCommandsSelectByName(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	deps, _, _ := serverDeps(t, server.URL)
+	deps, _, diagnostics := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "issue", "list", "Release one", "--by-name", "-R", "alice/project", "--json"}))
 	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "issue", "add", "Release one", "3", "--by-name", "-R", "alice/project", "--json=number"}))
 	require.NotContains(t, calls, "GET /api/v1/repos/alice/project/milestones/9")
+	require.Empty(t, diagnostics.String())
+	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "issue", "add", "Release one", "3", "--by-name", "-R", "alice/project", "--json=number"}))
+	require.Equal(t, "! #3 is already in milestone \"Release one\"\n", diagnostics.String())
+	require.Equal(t, 1, strings.Count(strings.Join(calls, "\n"), "PATCH /api/v1/repos/alice/project/issues/3"))
 	err := Execute(context.Background(), deps, []string{"milestone", "issue", "remove", " ", "3", "--by-name", "-R", "alice/project"})
 	require.ErrorContains(t, err, "milestone title or ID cannot be empty")
 }

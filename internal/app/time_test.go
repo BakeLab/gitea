@@ -108,6 +108,33 @@ func TestTimeTablesAndDoneLines(t *testing.T) {
 	}
 }
 
+func TestTimeNamesWhatIsMissing(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/issues/9/times", "DELETE /api/v1/repos/alice/project/issues/9/times":
+			_, _ = w.Write([]byte(`{"message":"issue does not exist [id: 0, repo_id: 1, index: 9]"}`))
+		case "DELETE /api/v1/repos/alice/project/issues/1/times":
+			_, _ = w.Write([]byte(`{"message":"tracked_time does not exist"}`))
+		case "GET /api/v1/repos/alice/gone/times", "GET /api/v1/repos/alice/gone":
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	run := func(args ...string) error {
+		return Execute(context.Background(), deps, append(args, "--no-input", "--yes"))
+	}
+	require.EqualError(t, run("time", "list", "--issue", "9", "-R", "alice/project"), "issue #9 not found in alice/project")
+	require.EqualError(t, run("time", "delete", "9", "8", "-R", "alice/project"), "issue #9 not found in alice/project")
+	require.EqualError(t, run("time", "reset", "9", "-R", "alice/project"), "issue #9 not found in alice/project")
+	require.EqualError(t, run("time", "list", "-R", "alice/gone"), "repository alice/gone not found")
+	require.NoError(t, run("time", "reset", "1", "-R", "alice/project"))
+	require.Equal(t, "! You have no time logged on alice/project#1\n", diagnostics.String())
+}
+
 func TestTimeListTotalPipedCoversEmptyAndPagedListings(t *testing.T) {
 	empty := true
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -24,6 +24,7 @@ import (
 //   - Example: unindented lines; "$ gt …" for commands and "# …" for comments above them.
 //   - Annotations["gt.arguments"]: the ARGUMENTS section, describing accepted argument formats.
 //   - Annotations["gt.confirm"]: "true" when the command asks for confirmation, which shows --yes.
+//   - Annotations["gt.jsonfields"]: the JSON FIELDS section of a command whose fields vary.
 
 const (
 	// topicAnnotation marks a hidden command that only holds a help topic.
@@ -80,7 +81,7 @@ func (a *application) writeHelp(cmd *cobra.Command, _ []string) {
 	}
 	section("ARGUMENTS", cmd.Annotations["gt.arguments"])
 	if outputsJSON(cmd) {
-		section("JSON FIELDS", wrap(strings.Join(commandOutputFields(cmd), ", "), 78))
+		section("JSON FIELDS", cmp.Or(cmd.Annotations["gt.jsonfields"], wrap(strings.Join(commandOutputFields(cmd), ", "), 78)))
 	}
 	if !cmd.HasParent() {
 		section("EXAMPLES", "$ gt issue create\n$ gt issue list --label bug\n$ gt pr checkout 13\n$ gt repo clone owner/name")
@@ -186,7 +187,7 @@ func helpFlags(cmd *cobra.Command) (local, inherited string) {
 
 // outputsJSON reports whether the --json flag applies to cmd.
 func outputsJSON(cmd *cobra.Command) bool {
-	return cmd.Annotations["gt.text"] == "" && cmd.Annotations["gt.group"] == "" && commandOutputFields(cmd) != nil
+	return cmd.Annotations["gt.text"] == "" && cmd.Annotations["gt.group"] == "" && (commandOutputFields(cmd) != nil || cmd.Annotations["gt.jsonfields"] != "")
 }
 
 // flagUsages renders flags in order as aligned usage lines without their common indentation. The

@@ -38,9 +38,17 @@ func (s Issues) IssueTemplates(ctx context.Context) ([]IssueTemplate, error) {
 	}
 	result := make([]IssueTemplate, 0, len(response))
 	for _, r := range response {
-		result = append(result, IssueTemplate{Name: r.Name, About: r.About, Title: r.Title, Content: r.MarkdownContent, Labels: r.Labels, Form: r.Form != nil, Ref: r.Ref, FileName: r.FileName})
+		result = append(result, IssueTemplate{Name: r.Name, About: r.About, Title: r.Title, Content: r.MarkdownContent, Labels: r.Labels, Form: r.Form != nil, Ref: templateRef(r.Ref), FileName: r.FileName})
 	}
 	return result, nil
+}
+
+// templateRef drops the bare prefix Gitea reports for a template without a ref.
+func templateRef(ref string) string {
+	if ref == "refs/heads/" || ref == "refs/tags/" {
+		return ""
+	}
+	return ref
 }
 
 // IssueCreateSelectables adds repository issue templates to the create form choices.

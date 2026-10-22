@@ -392,15 +392,16 @@ type Confirmation struct {
 	NonTTY string
 }
 
-// questionEnd returns the index of the first question mark outside double quotes, or -1, so a quoted
-// name such as "why? not" does not end the question.
+// questionEnd returns the index of the first question mark outside double quotes that ends the
+// prompt or a sentence, or -1, so neither a quoted name such as "why? not" nor a URL query ends
+// the question.
 func questionEnd(prompt string) int {
 	quoted := false
 	for i, r := range prompt {
 		switch {
 		case r == '"':
 			quoted = !quoted
-		case r == '?' && !quoted:
+		case r == '?' && !quoted && (i == len(prompt)-1 || prompt[i+1] == ' '):
 			return i
 		}
 	}

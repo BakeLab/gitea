@@ -67,7 +67,7 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 			}
 			if cmd.Flags().Changed("server-path") {
 				if len(args) > 0 {
-					return clierr.Wrap(clierr.Usage, errors.New("--server-path and clone URL inputs are mutually exclusive"))
+					return clierr.Wrap(clierr.Usage, errors.New("--server-path cannot be combined with a clone URL"))
 				}
 				if !path.IsAbs(serverPath) {
 					return clierr.Wrap(clierr.Usage, errors.New("--server-path must be an absolute path on the Gitea server"))
@@ -109,7 +109,7 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 				*field.value = value
 			}
 			if opts.AuthToken != "" && (opts.AuthUser != "" || opts.AuthPassword != "") {
-				return clierr.Wrap(clierr.Usage, errors.New("source token and username/password authentication are mutually exclusive"))
+				return clierr.Wrap(clierr.Usage, errors.New("--auth-token cannot be combined with --auth-user or --auth-password"))
 			}
 			if opts.AuthPassword != "" && opts.AuthUser == "" {
 				return clierr.Wrap(clierr.Usage, errors.New("--auth-password requires --auth-user"))

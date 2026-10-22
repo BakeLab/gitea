@@ -70,7 +70,7 @@ $ gt org list --username bob
 $ gt org list --all`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if all && username != "" {
-				return clierr.Wrap(clierr.Usage, errors.New("--all and --username are mutually exclusive"))
+				return clierr.Wrap(clierr.Usage, errors.New("--all cannot be combined with --username"))
 			}
 			target, err := a.resolve(cmd.Context(), false)
 			if err != nil {
@@ -105,7 +105,7 @@ $ gt org list --all`,
 
 func (a *application) organizationViewCommand() *cobra.Command {
 	return &cobra.Command{
-		Use: "view <org>", Short: "View an organization", Args: argsExact(1),
+		Use: "view <org>", Short: "View an organization", Args: nonBlankArgs(cobra.ExactArgs(1), "organization name"),
 		Example: `$ gt org view acme
 # print the description only
 $ gt org view acme --jq .description`,
@@ -212,7 +212,7 @@ func organizationName(raw string) (string, error) {
 
 func (a *application) organizationCreateCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "create <name>", Short: "Create an organization", Args: argsExact(1),
+		Use: "create <name>", Short: "Create an organization", Args: nonBlankArgs(cobra.ExactArgs(1), "organization name"),
 		Example: `$ gt org create acme --full-name "ACME Corp"
 # create a private organization
 $ gt org create acme-internal --visibility private`,
@@ -241,7 +241,7 @@ $ gt org create acme-internal --visibility private`,
 
 func (a *application) organizationEditCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "edit <org>", Short: "Edit an organization", Args: argsExact(1), ValidArgsFunction: a.completeOrgs(),
+		Use: "edit <org>", Short: "Edit an organization", Args: nonBlankArgs(cobra.ExactArgs(1), "organization name"), ValidArgsFunction: a.completeOrgs(),
 		Example: `$ gt org edit acme --description "Tools for everyone" --website https://acme.example
 $ gt org edit acme --visibility private`,
 	}
@@ -271,7 +271,7 @@ $ gt org edit acme --visibility private`,
 
 func (a *application) organizationDeleteCommand() *cobra.Command {
 	return &cobra.Command{
-		Use: "delete <org>", Short: "Delete an organization", Args: argsExact(1), ValidArgsFunction: a.completeOrgs(),
+		Use: "delete <org>", Short: "Delete an organization", Args: nonBlankArgs(cobra.ExactArgs(1), "organization name"), ValidArgsFunction: a.completeOrgs(),
 		Long: "Delete an organization with its teams. Gitea refuses while the organization owns repositories.",
 		Example: `$ gt org delete acme-old
 $ gt org delete acme-old --yes`,
@@ -320,7 +320,7 @@ gt team member add ORG/TEAM USER.`}
 	var public bool
 	var limit, page int
 	list := &cobra.Command{
-		Use: "list <org>", Short: "List organization members", Args: argsExact(1), ValidArgsFunction: a.completeOrgs(),
+		Use: "list <org>", Short: "List organization members", Args: nonBlankArgs(cobra.ExactArgs(1), "organization name"), ValidArgsFunction: a.completeOrgs(),
 		Long: `List the members of an organization and whether each membership is public or concealed.
 
 Gitea lists every membership as public to administrators, so for them gt checks the visibility
@@ -381,7 +381,7 @@ func (a *application) organizationVisibilityCommand(public bool) *cobra.Command 
 		verb, alias, short, state = "publicize", "public", "Make a membership public", "public"
 	}
 	return &cobra.Command{
-		Use: verb + " <org> <username>", Aliases: []string{alias}, Short: short, Args: argsExact(2),
+		Use: verb + " <org> <username>", Aliases: []string{alias}, Short: short, Args: nonBlankArgs(cobra.ExactArgs(2), "organization name", "username"),
 		Long:              fmt.Sprintf("Make the membership of a user %s. A public membership shows on the organization's profile.", state),
 		Example:           fmt.Sprintf("$ gt org member %s acme bob", verb),
 		Annotations:       textOutput("membership changes do not return a resource"),
@@ -423,7 +423,7 @@ func (a *application) organizationVisibilityCommand(public bool) *cobra.Command 
 
 func (a *application) organizationMemberRemoveCommand() *cobra.Command {
 	return &cobra.Command{
-		Use: "remove <org> <username>", Short: "Remove a member from an organization", Args: argsExact(2),
+		Use: "remove <org> <username>", Short: "Remove a member from an organization", Args: nonBlankArgs(cobra.ExactArgs(2), "organization name", "username"),
 		Long:              "Remove a user from an organization and from all of its teams.",
 		Example:           "$ gt org member remove acme bob",
 		Annotations:       map[string]string{"gt.text": "membership changes do not return a resource", "gt.confirm": "true"},

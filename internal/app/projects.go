@@ -37,10 +37,10 @@ func loadProjectChanges(ctx context.Context, t target, add, remove []string, exi
 func (c projectChanges) apply(ctx context.Context, issueID int64) (bool, error) {
 	var failures []error
 	sent := false
-	for _, board := range c.add {
-		added, err := c.service.Add(ctx, board, issueID)
+	for i := range c.add {
+		added, err := c.service.Add(ctx, &c.add[i], issueID)
 		if err != nil {
-			failures = append(failures, fmt.Errorf("add to project %q: %w", board.Title, err))
+			failures = append(failures, fmt.Errorf("add to project %q: %w", c.add[i].Title, err))
 		}
 		sent = sent || added
 	}

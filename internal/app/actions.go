@@ -83,7 +83,7 @@ $ gt workflow view CI
 $ gt workflow view ci.yml --yaml --ref feature/login
 # open the workflow file in the browser
 $ gt workflow view ci --web`,
-		Args:        argsExact(1),
+		Args:        nonBlankArgs(cobra.ExactArgs(1), "workflow"),
 		Annotations: map[string]string{"gt.arguments": workflowArguments},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if ref != "" && !showYAML {
@@ -183,7 +183,7 @@ $ gt workflow run CI
 $ gt workflow run ci.yml --ref main -f target=production -f dry_run=false
 # run it and follow the logs of its jobs
 $ gt workflow run nightly --follow`,
-		Args:        argsExact(1),
+		Args:        nonBlankArgs(cobra.ExactArgs(1), "workflow"),
 		Annotations: map[string]string{"gt.arguments": workflowArguments},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if follow && a.options.json != "" {
@@ -449,7 +449,7 @@ func (a *application) workflowStateCommand(enable bool) *cobra.Command {
 		Short: short,
 		Example: fmt.Sprintf(`# %s a workflow by name
 $ gt workflow %s Nightly`, verb, verb),
-		Args:              argsExact(1),
+		Args:              nonBlankArgs(cobra.ExactArgs(1), "workflow"),
 		Annotations:       map[string]string{"gt.arguments": workflowArguments},
 		ValidArgsFunction: firstArg(a.completeWorkflows()),
 		RunE: func(cmd *cobra.Command, args []string) error {

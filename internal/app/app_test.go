@@ -116,8 +116,11 @@ func TestJoinJSONFields(t *testing.T) {
 		{[]string{"issue", "list", "--json", "number,titel"}, []string{"issue", "list", "--json=number,titel"}},
 		{[]string{"run", "list", "--json", "workflow", "--limit", "5"}, []string{"run", "list", "--json=workflow", "--limit", "5"}},
 		{[]string{"issue", "view", "--json", "titel"}, []string{"issue", "view", "--json", "titel"}},
+		{[]string{"repo", "view", "--json", "fullname"}, []string{"repo", "view", "--json=fullname"}},
+		{[]string{"issue", "view", "--json", "Title"}, []string{"issue", "view", "--json=Title"}},
 		{[]string{"issue", "view", "5", "--json", "titel"}, []string{"issue", "view", "5", "--json=titel"}},
-		// A list that names a field is a field list, even where the command takes an argument.
+		// A list that names a field, but for case and underscores, is a field list, even where the
+		// command takes an argument.
 		{[]string{"issue", "view", "--json", "number,titel"}, []string{"issue", "view", "--json=number,titel"}},
 		{[]string{"search", "repo", "--json", "name,urll"}, []string{"search", "repo", "--json=name,urll"}},
 	} {
@@ -288,6 +291,10 @@ func TestCommandHelpShowsRelevantFlagsOnly(t *testing.T) {
 		require.Contains(t, out.String(), globalFlagsLine, args)
 	}
 	require.NotContains(t, out.String(), "--json fields", "version prints text")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"alias", "list", "--help"}))
+	require.Contains(t, out.String(), "--json fields")
+	require.Contains(t, out.String(), "\nJSON FIELDS\n  The names of the aliases, each with its expansion.\n")
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "--help"}))
 	require.NotContains(t, out.String(), "--repo")

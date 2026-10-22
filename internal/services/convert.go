@@ -3,7 +3,12 @@
 
 package services
 
-import gitea "gitea.dev/sdk"
+import (
+	"net/url"
+	"strings"
+
+	gitea "gitea.dev/sdk"
+)
 
 // convertAll maps SDK items onto gt results as a non-nil slice, skipping absent items.
 func convertAll[S, T any](items []*S, convert func(*S) T) []T {
@@ -27,13 +32,33 @@ func repositoryFrom(repo *gitea.Repository) Repository {
 		DefaultBranch: repo.DefaultBranch, CloneURL: repo.CloneURL, SSHURL: repo.SSHURL,
 		Archived: repo.Archived, Template: repo.Template, Fork: repo.Fork, Mirror: repo.Mirror, OriginalURL: repo.OriginalURL,
 		Empty: repo.Empty, Stars: repo.Stars, Forks: repo.Forks, OpenIssues: repo.OpenIssues, OpenPulls: repo.OpenPulls,
-		Topics: repo.Topics, UpdatedAt: timestamp(repo.Updated),
+		Topics: repo.Topics, UpdatedAt: timestamp(repo.Updated), Source: withoutCredentials(repo.OriginalURL), MirrorInterval: repo.MirrorInterval,
 	}
 	if repo.Parent != nil {
 		parent := repositoryFrom(repo.Parent)
 		result.Parent = &parent
 	}
 	return result
+}
+
+// withoutCredentials drops the user information of a URL, except the user of an SSH URL, and
+// returns "" for what does not parse but might hold credentials.
+func withoutCredentials(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		if strings.Contains(raw, "@") {
+			return ""
+		}
+		return raw
+	}
+	if u.User == nil {
+		return raw
+	}
+	if _, password := u.User.Password(); u.Scheme == "ssh" && !password {
+		return raw
+	}
+	u.User = nil
+	return u.String()
 }
 
 func organizationFrom(org *gitea.Organization) Organization {

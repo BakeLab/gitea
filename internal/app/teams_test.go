@@ -272,6 +272,11 @@ func TestTeamMemberRemoveConfirmsOnce(t *testing.T) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/teams/5":
 			_, _ = w.Write([]byte(`{"id":5,"name":"devs","organization":{"username":"acme"}}`))
+		case "GET /api/v1/teams/5/members/carol", "GET /api/v1/teams/5/members/dave":
+			_, _ = w.Write([]byte(`{"login":"` + path.Base(r.URL.Path) + `"}`))
+		case "GET /api/v1/teams/5/members/erin":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
 		case "DELETE /api/v1/teams/5/members/carol", "DELETE /api/v1/teams/5/members/dave":
 			removed = append(removed, path.Base(r.URL.Path))
 			w.WriteHeader(http.StatusNoContent)
@@ -284,10 +289,10 @@ func TestTeamMemberRemoveConfirmsOnce(t *testing.T) {
 	deps.Streams.InTTY, deps.Streams.ErrTTY, deps.Streams.OutTTY = true, true, true
 	prompt := &scriptedPrompter{accept: true}
 	deps.Prompter = prompt
-	require.NoError(t, Execute(context.Background(), deps, []string{"team", "member", "remove", "5", "carol", "dave"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"team", "member", "remove", "5", "carol", "erin", "dave"}))
 	require.Equal(t, []string{"Remove carol and dave from team acme/devs?"}, prompt.confirmations)
 	require.Equal(t, []string{"carol", "dave"}, removed)
-	require.Equal(t, "✓ Removed carol from team acme/devs\n✓ Removed dave from team acme/devs\n", withoutANSI(diagnostics.String()))
+	require.Equal(t, "! erin is not a member of team acme/devs\n✓ Removed carol from team acme/devs\n✓ Removed dave from team acme/devs\n", withoutANSI(diagnostics.String()))
 }
 
 func TestTeamMembershipAndAccessChangesContinuePastFailures(t *testing.T) {
@@ -310,7 +315,6 @@ func TestTeamMembershipAndAccessChangesContinuePastFailures(t *testing.T) {
 		done, fail string
 	}{
 		{[]string{"member", "add"}, "PUT /api/v1/teams/5/members/bob", "Added bob to team acme/devs", "user ghost: not found"},
-		{[]string{"member", "remove"}, "DELETE /api/v1/teams/5/members/bob", "Removed bob from team acme/devs", "user ghost: not found"},
 		{[]string{"repo", "add"}, "PUT /api/v1/teams/5/repos/acme/bob", "Granted team acme/devs access to acme/bob", "repository acme/ghost: not found"},
 		{[]string{"repo", "remove"}, "DELETE /api/v1/teams/5/repos/acme/bob", "Revoked team acme/devs access to acme/bob", "repository acme/ghost: not found"},
 	} {

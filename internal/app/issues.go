@@ -50,7 +50,7 @@ $ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), Ru
 			return err
 		}
 		if opts.NoAssignee && opts.Assignee != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--assignee and --no-assignee are mutually exclusive"))
+			return clierr.Wrap(clierr.Usage, errors.New("--assignee cannot be combined with --no-assignee"))
 		}
 		if err := requireNames("label", "", labels); err != nil {
 			return err
@@ -524,7 +524,7 @@ func (a *application) createIssueInteractively(cmd *cobra.Command, templateName 
 		values.Deadline = &due
 	}
 	item, err := service.Create(cmd.Context(), services.IssueOptions{
-		Title: values.Title, Body: values.Body, Assignees: values.Assignees, Milestone: values.Milestone, Labels: labelIDs, Deadline: values.Deadline,
+		Title: values.Title, Body: values.Body, Ref: values.TemplateRef, Assignees: values.Assignees, Milestone: values.Milestone, Labels: labelIDs, Deadline: values.Deadline,
 	})
 	if err != nil {
 		return err
@@ -534,9 +534,9 @@ func (a *application) createIssueInteractively(cmd *cobra.Command, templateName 
 	return errors.Join(requested.leftOut(item, target.Repo, issueMetadataFields), a.issueCreated(cmd, target, item))
 }
 
-// issueTemplateChoice offers template in the create form, which applies its title, body and labels.
+// issueTemplateChoice offers template in the create form, which applies its title, body, labels and ref.
 func issueTemplateChoice(template services.IssueTemplate) terminal.IssueTemplateChoice {
-	return terminal.IssueTemplateChoice{Name: template.Name, About: template.About, Title: template.Title, Body: issueTemplateBody(template), Labels: template.Labels}
+	return terminal.IssueTemplateChoice{Name: template.Name, About: template.About, Title: template.Title, Body: issueTemplateBody(template), Ref: template.Ref, Labels: template.Labels}
 }
 
 // issueTemplateBody seeds a body from markdown content. A form template has no content, and its

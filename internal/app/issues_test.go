@@ -27,7 +27,7 @@ func TestIssueCreateSeedsFromTemplate(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/repos/alice/project/issue_templates":
-			_, _ = w.Write([]byte(`[{"name":"Bug Report","title":"[bug] Crash","content":"Steps:","labels":["bug","gone"],"ref":"main","file_name":".gitea/ISSUE_TEMPLATE/bug.md"},{"name":"Feature","about":"Describe the idea","body":[{"type":"textarea"}]}]`))
+			_, _ = w.Write([]byte(`[{"name":"Bug Report","title":"[bug] Crash","content":"Steps:","labels":["bug","gone"],"ref":"main","file_name":".gitea/ISSUE_TEMPLATE/bug.md"},{"name":"Feature","about":"Describe the idea","ref":"refs/heads/","body":[{"type":"textarea"}]}]`))
 		case "/api/v1/orgs/alice":
 			w.WriteHeader(http.StatusNotFound)
 		case "/api/v1/repos/alice/project/labels":
@@ -113,12 +113,13 @@ func TestIssueCreateFormAddsLabelsOfPickedTemplate(t *testing.T) {
 		_, _ = w.Write([]byte(`{"number":9,"title":"Mine","labels":[{"id":3},{"id":2}]}`))
 	}))
 	defer server.Close()
-	form := &recordingIssueForm{values: terminal.IssueFormValues{Title: "Mine", Labels: []int64{3}, TemplateLabels: []string{"bug", "gone"}}}
+	form := &recordingIssueForm{values: terminal.IssueFormValues{Title: "Mine", Labels: []int64{3}, TemplateLabels: []string{"bug", "gone"}, TemplateRef: "main"}}
 	deps, _, diagnostics := serverDeps(t, server.URL)
 	deps.IssueForm = form
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--json=number", "--interactive"}))
 	require.Equal(t, []any{float64(3), float64(2)}, createPayload["labels"])
+	require.Equal(t, "main", createPayload["ref"])
 	require.Equal(t, "! label \"gone\" of the issue template does not exist in alice/project; it was left out\n", withoutANSI(diagnostics.String()))
 }
 

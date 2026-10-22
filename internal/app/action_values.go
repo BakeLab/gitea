@@ -23,11 +23,19 @@ var actionValueName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // checkActionValueName rejects names that Gitea refuses for secrets and variables.
 func checkActionValueName(name string) error {
-	if !actionValueName.MatchString(name) {
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid name %q: use letters, numbers and underscores, not starting with a number", name))
+	if err := checkActionValueSyntax(name); err != nil {
+		return err
 	}
 	if upper := strings.ToUpper(name); upper == "CI" || strings.HasPrefix(upper, "GITEA_") || strings.HasPrefix(upper, "GITHUB_") {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid name %q: CI and names starting with GITEA_ or GITHUB_ are reserved", name))
+	}
+	return nil
+}
+
+// checkActionValueSyntax rejects a name that no secret or variable can have.
+func checkActionValueSyntax(name string) error {
+	if !actionValueName.MatchString(name) {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid name %q: use letters, numbers and underscores, not starting with a number", name))
 	}
 	return nil
 }
@@ -195,7 +203,10 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 		Example: example,
 		Args:    usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if (len(args) == 1) == (envFile != "") {
+			if len(args) == 1 && envFile != "" {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("--env-file cannot be combined with a %s name", kind))
+			}
+			if len(args) == 0 && envFile == "" {
 				return clierr.Wrap(clierr.Usage, &argumentError{problem: "pass a " + kind + " name or --env-file", cmd: cmd})
 			}
 			if envFile != "" && (cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file")) {
@@ -376,6 +387,9 @@ $ gt %[1]s delete DEPLOY_TOKEN --org acme --yes`, kind),
 		Args:        argsExact(1),
 		Annotations: map[string]string{"gt.confirm": "true", "gt.text": kind + " deletion does not return a resource"},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkActionValueSyntax(args[0]); err != nil {
+				return err
+			}
 			name := services.ActionValueName(args[0])
 			selected, t, err := scope.resolve(a, cmd)
 			if err != nil {
@@ -410,6 +424,9 @@ func (a *application) variableViewCommand() *cobra.Command {
 $ gt variable view ENVIRONMENT`,
 		Args: argsExact(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkActionValueSyntax(args[0]); err != nil {
+				return err
+			}
 			selected, t, err := scope.resolve(a, cmd)
 			if err != nil {
 				return err
@@ -441,6 +458,9 @@ func (a *application) variableGetCommand() *cobra.Command {
 $ region=$(gt variable get REGION --org acme)`,
 		Args: argsExact(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkActionValueSyntax(args[0]); err != nil {
+				return err
+			}
 			selected, t, err := scope.resolve(a, cmd)
 			if err != nil {
 				return err

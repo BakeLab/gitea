@@ -101,7 +101,7 @@ for a team that grants its access per unit.`}
 func (a *application) teamListCommand() *cobra.Command {
 	var limit, page int
 	cmd := &cobra.Command{
-		Use: "list <org>", Short: "List organization teams", Args: argsExact(1), ValidArgsFunction: a.completeOrgs(),
+		Use: "list <org>", Short: "List organization teams", Args: nonBlankArgs(cobra.ExactArgs(1), "organization name"), ValidArgsFunction: a.completeOrgs(),
 		Long: fmt.Sprintf(`List the teams of an organization with their access to its repositories and, when the page
 holds at most %d teams, their member and repository counts. Gitea reports no counts with the
 teams, so each team costs two more requests; gt team view shows the counts of one team.`, teamCountLimit),
@@ -188,7 +188,7 @@ const teamViewNames = 20
 
 func (a *application) teamViewCommand() *cobra.Command {
 	return &cobra.Command{
-		Use: "view <team>", Short: "View a team", Args: argsExact(1), ValidArgsFunction: a.completeTeams(),
+		Use: "view <team>", Short: "View a team", Args: nonBlankArgs(cobra.ExactArgs(1), "team name"), ValidArgsFunction: a.completeTeams(),
 		Long: "View a team: its access to each repository unit, its members and its repositories.",
 		Example: `$ gt team view acme/developers
 $ gt team view 2 --json units`,
@@ -349,7 +349,7 @@ var completeTeamUnits = commaSeparated(func(_ *cobra.Command, _ []string, toComp
 func (a *application) teamCreateCommand() *cobra.Command {
 	var flags teamFlags
 	cmd := &cobra.Command{
-		Use: "create <org> [<name>]", Short: "Create a team", Args: usageArgs(cobra.RangeArgs(1, 2)),
+		Use: "create <org> [<name>]", Short: "Create a team", Args: nonBlankArgs(cobra.RangeArgs(1, 2), "organization name", "team name"),
 		Long: `Create a team in an organization. Name it as the second argument, as ORG/NAME, or with --name.
 
 --permission grants read or write access to every repository unit, or admin access. Use --unit
@@ -405,7 +405,7 @@ func (a *application) teamEditCommand() *cobra.Command {
 	var flags teamFlags
 	var replaceUnits bool
 	cmd := &cobra.Command{
-		Use: "edit <team>", Short: "Edit a team", Args: argsExact(1), ValidArgsFunction: a.completeTeams(),
+		Use: "edit <team>", Short: "Edit a team", Args: nonBlankArgs(cobra.ExactArgs(1), "team name"), ValidArgsFunction: a.completeTeams(),
 		Long: `Edit a team. --permission sets every repository unit to read or write, or grants admin
 access. --unit changes single units and keeps the others, unless --unit-replace is passed.
 Only the description of an organization's owner team can be edited.`,
@@ -481,7 +481,7 @@ $ gt team edit acme/developers --name devs --description "Core developers"`,
 func (a *application) teamDeleteCommand() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
-		Use: "delete <team>", Short: "Delete a team", Args: argsExact(1), ValidArgsFunction: a.completeTeams(),
+		Use: "delete <team>", Short: "Delete a team", Args: nonBlankArgs(cobra.ExactArgs(1), "team name"), ValidArgsFunction: a.completeTeams(),
 		Long: "Delete a team. Deleting an organization's owner team needs --force.",
 		Example: `$ gt team delete acme/reviewers
 $ gt team delete 7 --yes`,
@@ -538,7 +538,7 @@ func (a *application) teamMemberCommand() *cobra.Command {
 also makes them a member of the organization.`}
 	var limit, page int
 	list := &cobra.Command{
-		Use: "list <team>", Short: "List team members", Args: argsExact(1), ValidArgsFunction: a.completeTeams(),
+		Use: "list <team>", Short: "List team members", Args: nonBlankArgs(cobra.ExactArgs(1), "team name"), ValidArgsFunction: a.completeTeams(),
 		Example:     "$ gt team member list acme/developers",
 		Annotations: map[string]string{"gt.arguments": teamArguments},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -561,7 +561,7 @@ also makes them a member of the organization.`}
 	}
 	pageFlags(list, &limit, &page)
 	add := &cobra.Command{
-		Use: "add <team> <username>...", Short: "Add users to a team", Args: usageArgs(cobra.MinimumNArgs(2)),
+		Use: "add <team> <username>...", Short: "Add users to a team", Args: nonBlankArgs(cobra.MinimumNArgs(2), "team name", "username"),
 		Example: `$ gt team member add acme/developers bob
 $ gt team member add 2 bob carol`,
 		Annotations: map[string]string{"gt.text": "team membership changes do not return a resource", "gt.arguments": teamArguments},
@@ -582,7 +582,7 @@ $ gt team member add 2 bob carol`,
 		},
 	}
 	remove := &cobra.Command{
-		Use: "remove <team> <username>...", Short: "Remove users from a team", Args: usageArgs(cobra.MinimumNArgs(2)),
+		Use: "remove <team> <username>...", Short: "Remove users from a team", Args: nonBlankArgs(cobra.MinimumNArgs(2), "team name", "username"),
 		Example:     "$ gt team member remove acme/developers carol",
 		Annotations: map[string]string{"gt.text": "team membership changes do not return a resource", "gt.confirm": "true", "gt.arguments": teamArguments},
 		ValidArgsFunction: a.completeTeamThen(func(ctx context.Context, t target, team services.Team) ([]cobra.Completion, error) {
@@ -594,7 +594,21 @@ $ gt team member add 2 bob carol`,
 			if err != nil {
 				return err
 			}
-			members := args[1:]
+			var members []string
+			for _, username := range args[1:] {
+				member, err := service.IsMember(cmd.Context(), team.ID, username)
+				if err != nil {
+					return err
+				}
+				if !member {
+					a.warn(cmd, "%s is not a member of team %s", username, team.Slug())
+					continue
+				}
+				members = append(members, username)
+			}
+			if len(members) == 0 {
+				return nil
+			}
 			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Remove %s from team %s?", joinNames(members), team.Slug())}); err != nil {
 				return err
 			}
@@ -628,7 +642,7 @@ func (a *application) teamRepoCommand() *cobra.Command {
 its organization. Repositories are named alone, such as service, or as ORG/NAME.`}
 	var limit, page int
 	list := &cobra.Command{
-		Use: "list <team>", Short: "List team repositories", Args: argsExact(1), ValidArgsFunction: a.completeTeams(),
+		Use: "list <team>", Short: "List team repositories", Args: nonBlankArgs(cobra.ExactArgs(1), "team name"), ValidArgsFunction: a.completeTeams(),
 		Example:     "$ gt team repo list acme/developers",
 		Annotations: map[string]string{"gt.arguments": teamArguments},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -662,7 +676,7 @@ func (a *application) teamRepoAccessCommand(grant bool) *cobra.Command {
 		delete(annotations, "gt.confirm")
 	}
 	return &cobra.Command{
-		Use: verb + " <team> <repository>...", Short: short, Args: usageArgs(cobra.MinimumNArgs(2)), Example: example, Annotations: annotations,
+		Use: verb + " <team> <repository>...", Short: short, Args: nonBlankArgs(cobra.MinimumNArgs(2), "team name", "repository"), Example: example, Annotations: annotations,
 		Long: short + ` of its organization. Name the repositories alone, such as service, or as ORG/NAME;
 repositories of other owners cannot be granted to a team.`,
 		ValidArgsFunction: a.completeTeamThen(func(ctx context.Context, t target, team services.Team) ([]cobra.Completion, error) {

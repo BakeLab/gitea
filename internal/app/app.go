@@ -190,7 +190,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	}
 	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.labelCommand(), a.milestoneCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.browseCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.packageCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false))
 	root.AddCommand(a.manCommand())
-	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Example: "$ gt version", Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
+	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Example: "$ gt version", Args: argsExact(0), Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), version.Format())
 		return err
 	}})
@@ -403,8 +403,9 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 var jsonFieldList = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(,[A-Za-z][A-Za-z0-9_]*)*$`)
 
 // joinJSONFields accepts `--json number,title` like `--json=number,title`. The word stays a positional
-// argument only when the command neither outputs any of those fields nor rejects the argument, so a
-// misspelled field lists the available fields. Unknown commands, such as unexpanded aliases, are joined.
+// argument only when the command neither outputs any of those fields, nor one they resemble, nor
+// rejects the argument, so a misspelled field lists the available fields. Unknown commands, such as
+// unexpanded aliases, are joined.
 func joinJSONFields(root *cobra.Command, args []string) []string {
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--" {
@@ -418,7 +419,7 @@ func joinJSONFields(root *cobra.Command, args []string) []string {
 			continue
 		}
 		cmd, _, err := root.Find(slices.Concat(args[:i+1], args[i+2:]))
-		if fields := commandOutputFields(cmd); err == nil && terminal.ValidateOutput(args[i+1], "", fields) != nil && !namesField(args[i+1], fields) && acceptsArgs(args) {
+		if fields := commandOutputFields(cmd); err == nil && terminal.ValidateOutput(args[i+1], "", fields) != nil && !namesField(args[i+1], fields) && !resemblesField(args[i+1], fields) && acceptsArgs(args) {
 			continue
 		}
 		args = slices.Concat(args[:i], []string{"--json=" + args[i+1]}, args[i+2:])
@@ -430,6 +431,15 @@ func joinJSONFields(root *cobra.Command, args []string) []string {
 // of its names is misspelled, as in "number,titel".
 func namesField(list string, fields []string) bool {
 	return slices.ContainsFunc(strings.Split(list, ","), func(name string) bool { return slices.Contains(fields, name) })
+}
+
+// resemblesField reports whether list names a field of fields but for case and underscores, as
+// "fullname" does full_name. Closer guesses would take search words such as "foo" for fork.
+func resemblesField(list string, fields []string) bool {
+	plain := func(name string) string { return strings.ToLower(strings.ReplaceAll(name, "_", "")) }
+	return slices.ContainsFunc(strings.Split(list, ","), func(name string) bool {
+		return slices.ContainsFunc(fields, func(field string) bool { return plain(name) == plain(field) })
+	})
 }
 
 // acceptsArgs reports whether the command that args select accepts their positional arguments. It
