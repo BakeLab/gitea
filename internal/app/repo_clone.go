@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"github.com/spf13/cobra"
@@ -115,7 +116,8 @@ func (a *application) repoCloneCommand() *cobra.Command {
 		Long: `Clone a repository with gt's credentials, over the protocol of a URL argument, else the
 configured Git protocol. Git flags can follow --. A fork's parent is added as the "upstream" remote, and gt commands in the clone then
 target the parent. A pull mirror's source is added as the "source" remote; gt commands keep
-targeting the mirror.`,
+targeting the mirror. An HTTPS clone keeps the instance's TLS client certificate and --insecure
+setting in its Git configuration.`,
 		Example: `# Clone a repository into ./project
 $ gt repo clone alice/project
 
@@ -393,6 +395,11 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 		clone = filepath.Join(a.options.cwd, clone)
 	}
 	a.done(cmd, "Cloned %s into %s", item.FullName, directory)
+	if !remoteIsSSH {
+		if err := git.SetupTLS(cmd.Context(), a.deps.Git, clone, true, t.Host, host.ClientCert, host.ClientKey, host.Insecure); err != nil {
+			return clone, fmt.Errorf("cloned the repository, but could not configure its TLS settings: %w", err)
+		}
+	}
 	if host.SSHHost != t.host.SSHHost {
 		a.rememberSSHHost(cmd, t, host.SSHHost)
 	}

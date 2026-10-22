@@ -169,10 +169,37 @@ func TestCloneUsesTheInstanceTLSSettings(t *testing.T) {
 	}))
 	prefix := "-c http." + server.URL + ".sslCert=/certs/client.pem -c http." + server.URL + ".sslKey=/certs/client.pem -c http." + server.URL + ".sslVerify=false "
 	clone := prefix + credentialCall(t, deps, server.URL, "alice", "clone", "--", server.URL+"/alice/project.git")
+	persist := "config --local --replace-all http." + server.URL + "."
+	persisted := []string{persist + "sslCert /certs/client.pem", persist + "sslKey /certs/client.pem", persist + "sslVerify false"}
 	runner := &fakeGit{results: map[string]string{clone: ""}}
+	for _, call := range persisted {
+		runner.results[call] = ""
+	}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "alice/project"}))
-	require.Equal(t, []string{clone}, runner.calls)
+	require.Equal(t, append([]string{clone}, persisted...), runner.calls, "plain git fetch and push in the clone use the same TLS settings")
+	require.Equal(t, "project", filepath.Base(runner.dirs[1]))
+}
+
+func TestSSHURLCloneWithOnlyAnEnvironmentToken(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","clone_url":"http://%[1]s/alice/project.git","ssh_url":"ssh://git@127.0.0.1:2222/alice/project.git"}`, r.Host)
+	}))
+	defer server.Close()
+	deps, _, diagnostics := testDeps(t)
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": server.URL, "GITEA_TOKEN": "environment-token"})
+	sshArgs, err := git.SSHArguments("", false)
+	require.NoError(t, err)
+	call := strings.Join(append(sshArgs, "clone", "--", "ssh://git@127.0.0.1:2222/alice/project.git", "destination"), " ")
+	runner := &fakeGit{results: map[string]string{call: ""}}
+	deps.Git = runner
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "ssh://git@127.0.0.1:2222/alice/project.git", "destination", "--no-input"}))
+	require.Equal(t, []string{call}, runner.calls)
+	require.Equal(t, "! gt commands in the clone need the SSH host of "+server.URL+": set GITEA_INSTANCE_SSH_HOST=127.0.0.1:2222\n", diagnostics.String())
+	runner.calls = nil
+	err = Execute(context.Background(), deps, []string{"repo", "clone", "ssh://git@127.0.0.1:2223/alice/project.git", "--no-input"})
+	require.EqualError(t, err, "SSH remote does not match a configured instance; if 127.0.0.1:2223 is the SSH host of "+server.URL+", set GITEA_INSTANCE_SSH_HOST=127.0.0.1:2223")
+	require.Empty(t, runner.calls)
 }
 
 func TestSSHCloneSavesTheAPIEndpointAsSSHHost(t *testing.T) {

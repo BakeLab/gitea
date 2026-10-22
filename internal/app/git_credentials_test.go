@@ -12,6 +12,8 @@ import (
 
 	"gitea.dev/cli/internal/auth"
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/git/gittest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,6 +36,20 @@ func TestSetupGitRequiresAnAccountOfTheInstance(t *testing.T) {
 		require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
 		require.Empty(t, git.calls, "no helper is configured")
 	}
+}
+
+func TestSetupGitConfiguresTheInstanceTLSSettings(t *testing.T) {
+	gittest.Isolate(t)
+	deps, _, _ := testDeps(t)
+	deps.Git = git.System{}
+	instance := "https://example.test/gitea"
+	options := auth.HostOptions{Insecure: true, ClientCert: "/certs/client.pem", ClientKey: "/certs/client.key"}
+	require.NoError(t, testManager(t, deps).Register(instance, "alice", "file", "token", options, auth.Credential{AccessToken: "alice-token"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", instance, "--no-input"}))
+	values, err := deps.Git.Output(context.Background(), "", false, "config", "--global", "--get-regexp", `^http\.`)
+	require.NoError(t, err)
+	prefix := "http." + instance + "."
+	require.Equal(t, prefix+"sslcert /certs/client.pem\n"+prefix+"sslkey /certs/client.key\n"+prefix+"sslverify false", values)
 }
 
 func TestGitCredentialHelperSelectsAccountsAndDoesNotMutateFromGit(t *testing.T) {
@@ -110,7 +126,9 @@ func TestGitCredentialEnvironmentTokenAcceptsABareHost(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Fatalf("unexpected request %s", r.URL.Path) }))
 	defer server.Close()
 	deps, out, _ := testDeps(t)
-	require.NoError(t, testManager(t, deps).Register(server.URL, "alice", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "stored-token"}))
+	manager := testManager(t, deps)
+	require.NoError(t, manager.Register(server.URL, "alice", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "stored-token"}))
+	require.NoError(t, manager.Register(server.URL, "bob", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "bob-token"}))
 	host := strings.TrimPrefix(server.URL, "http://")
 	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": host, "GITEA_TOKEN": "environment-token"})
 	deps.Streams.In = strings.NewReader("protocol=http\nhost=" + host + "\npath=alice/project.git\n\n")

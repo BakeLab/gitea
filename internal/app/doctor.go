@@ -245,7 +245,7 @@ func sshCheck(t target, repoErr error) (doctorCheck, bool) {
 	switch {
 	case t.Repo == "" && errors.As(repoErr, &remote) && remote.Endpoint != "":
 		fix := remote.Fix()
-		if remote.Instance == "" {
+		if remote.Instance == "" && !remote.Environment {
 			fix = "gt config set ssh_host " + remote.Endpoint + " --host " + t.Host + ", if it is the SSH host of " + t.Host
 		}
 		return doctorCheck{"SSH", checkWarning, "the Git remote connects to " + remote.Endpoint + ", which is no instance's SSH host", fix}, true

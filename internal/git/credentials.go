@@ -61,6 +61,34 @@ func CredentialArguments(instance, executable, user, configDir string) ([]string
 // keyFile or else in certFile, and skip certificate verification when insecure, as gt's API requests
 // do. They apply only to the instance's URLs.
 func TLSArguments(instance, certFile, keyFile string, insecure bool) ([]string, error) {
+	values, err := tlsSettings(instance, certFile, keyFile, insecure)
+	var args []string
+	for _, value := range values {
+		args = append(args, "-c", value[0]+"="+value[1])
+	}
+	return args, err
+}
+
+// SetupTLS writes the settings of TLSArguments to the global Git configuration, or with local to
+// the configuration of the repository in dir, so that plain git fetch and push reach the instance.
+func SetupTLS(ctx context.Context, runner Runner, dir string, local bool, instance, certFile, keyFile string, insecure bool) error {
+	values, err := tlsSettings(instance, certFile, keyFile, insecure)
+	if err != nil {
+		return err
+	}
+	scope := "--global"
+	if local {
+		scope = "--local"
+	}
+	for _, value := range values {
+		if _, err := runner.Output(ctx, dir, false, "config", scope, "--replace-all", value[0], value[1]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func tlsSettings(instance, certFile, keyFile string, insecure bool) ([][2]string, error) {
 	normalized, err := settings.NormalizeHost(instance)
 	if err != nil {
 		return nil, err
@@ -69,14 +97,14 @@ func TLSArguments(instance, certFile, keyFile string, insecure bool) ([]string, 
 		return nil, errors.New("client certificate paths cannot contain NUL or line breaks")
 	}
 	prefix := "http." + normalized + "."
-	var args []string
+	var values [][2]string
 	if certFile != "" {
-		args = append(args, "-c", prefix+"sslCert="+certFile, "-c", prefix+"sslKey="+cmp.Or(keyFile, certFile))
+		values = append(values, [2]string{prefix + "sslCert", certFile}, [2]string{prefix + "sslKey", cmp.Or(keyFile, certFile)})
 	}
 	if insecure {
-		args = append(args, "-c", prefix+"sslVerify=false")
+		values = append(values, [2]string{prefix + "sslVerify", "false"})
 	}
-	return args, nil
+	return values, nil
 }
 
 // CredentialSetup specifies an explicit persistent helper installation.

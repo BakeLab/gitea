@@ -136,11 +136,17 @@ type SSHRemoteError struct {
 	// Endpoint is the remote's host:port; Instance is the only instance with the remote's host
 	// name, or "".
 	Endpoint, Instance string
+	// Environment says that the instance is the GITEA_TOKEN instance without stored settings, whose
+	// SSH host only GITEA_INSTANCE_SSH_HOST sets.
+	Environment bool
 }
 
 func (e *SSHRemoteError) Error() string {
 	if e.Endpoint == "" {
 		return "SSH remote does not match a configured instance"
+	}
+	if e.Environment {
+		return fmt.Sprintf("SSH remote does not match a configured instance; if %s is the SSH host of %s, %s", e.Endpoint, cmp.Or(e.Instance, "the GITEA_TOKEN instance"), e.Fix())
 	}
 	if e.Instance != "" {
 		return fmt.Sprintf("SSH remote does not match a configured instance; if %s is the SSH host of %s, run %s", e.Endpoint, e.Instance, e.Fix())
@@ -150,6 +156,9 @@ func (e *SSHRemoteError) Error() string {
 
 // Fix returns the command that configures the remote's endpoint as an instance's SSH host.
 func (e *SSHRemoteError) Fix() string {
+	if e.Environment {
+		return "set GITEA_INSTANCE_SSH_HOST=" + e.Endpoint
+	}
 	return "gt config set ssh_host " + e.Endpoint + " --host " + cmp.Or(e.Instance, "URL")
 }
 

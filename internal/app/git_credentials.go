@@ -55,11 +55,13 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 			return nil
 		}
 		host := snapshot.Hosts.Hosts[instance]
+		token := a.deps.Getenv("GITEA_TOKEN")
+		environmentMatches := token != "" && environmentHost != "" && environmentHost == instance
 		user, _ := a.selectedUser()
 		if user == "" {
 			user = request.Username
 		}
-		if user == "" {
+		if user == "" && !environmentMatches { // GITEA_TOKEN replaces the active account
 			user = host.User
 		}
 		if request.Username != "" && user != "" && !strings.EqualFold(request.Username, user) {
@@ -70,9 +72,7 @@ func (a *application) gitCredentialCommand() *cobra.Command {
 			user = configured
 		}
 		credential := auth.Credential{}
-		token := a.deps.Getenv("GITEA_TOKEN")
-		environmentMatches := environmentHost != "" && environmentHost == instance
-		if token != "" && environmentMatches {
+		if environmentMatches {
 			actual, err := services.CurrentAccount(cmd.Context(), a.instanceClient(instance, token, host))
 			if err != nil {
 				return err
@@ -115,7 +115,8 @@ func (a *application) setupGitCommand() *cobra.Command {
 		Annotations: textOutput("setup-git configures Git"),
 		Long: `Configure git to ask gt for the credentials of an instance, so that git push and fetch
 over HTTPS use the active account, or the account of --user. gt's own clone and checkout
-commands do not need this.
+commands do not need this. The instance's TLS client certificate and --insecure setting are
+configured for git too.
 
 Other credential helpers, such as a system keychain, are turned off for the instance:
 otherwise they answer first and keep a copy of gt's token. --keep-helpers keeps them.`,
@@ -131,7 +132,7 @@ $ gt auth setup-git --local --user alice`,
 			if err := a.requireGitAccount(t); err != nil {
 				return err
 			}
-			return a.setupGit(cmd, t.Host, local, keepHelpers)
+			return a.setupGit(cmd, t.Host, t.host, local, keepHelpers)
 		},
 	}
 	command.Flags().BoolVar(&local, "local", false, "Configure only the current Git repository instead of global Git configuration")
@@ -157,14 +158,18 @@ func (a *application) requireGitAccount(t target) error {
 	return clierr.Wrap(clierr.Authentication, t.accountError(pinned))
 }
 
-// setupGit configures Git to ask gt for the credentials of instance, globally or in the repository.
-func (a *application) setupGit(cmd *cobra.Command, instance string, local, keepHelpers bool) error {
+// setupGit configures Git to ask gt for the credentials of instance, globally or in the repository,
+// and to use the TLS client certificate and verification setting of host.
+func (a *application) setupGit(cmd *cobra.Command, instance string, host settings.Host, local, keepHelpers bool) error {
 	executable, configDir, err := a.credentialHelper()
 	if err != nil {
 		return err
 	}
 	pinned, _ := a.selectedUser()
 	if err := git.SetupCredentials(cmd.Context(), a.deps.Git, git.CredentialSetup{Directory: a.options.cwd, Local: local, KeepHelpers: keepHelpers, Instance: instance, Executable: executable, User: pinned, ConfigDirectory: configDir}); err != nil {
+		return err
+	}
+	if err := git.SetupTLS(cmd.Context(), a.deps.Git, a.options.cwd, local, instance, host.ClientCert, host.ClientKey, host.Insecure); err != nil {
 		return err
 	}
 	scope := "global git configuration"

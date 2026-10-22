@@ -43,7 +43,8 @@ func (a *application) loginCommand() *cobra.Command {
 how to log in, where to keep the token and whether git should use gt for the instance.
 
 Create a token on the instance under Settings > Applications. Logging in to an account
-that gt already has replaces its stored credential after a confirmation (or with --yes).`,
+that gt already has replaces its stored credential after a confirmation (or with --yes).
+The first instance logged in to becomes default_host, unless one is set.`,
 		Example: `$ gt auth login
 $ gt auth login --host gitea.com --with-token < token.txt
 $ gt auth login --host gitea.com --oauth --scopes read:repository,read:user
@@ -166,6 +167,7 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 				if err := manager.RegisterHTTPSign(instance, user, account, hostOptions); err != nil {
 					return err
 				}
+				a.defaultToFirstInstance(cmd, instance)
 				a.done(cmd, "Logged in to %s as %s (%s)", instance, user, credentialLabel(account))
 				return nil
 			}
@@ -238,9 +240,10 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 			if err := manager.Register(instance, user, answers.Store, method, hostOptions, credential); err != nil {
 				return err
 			}
+			a.defaultToFirstInstance(cmd, instance)
 			a.done(cmd, "Logged in to %s as %s (%s)", instance, user, credentialLabel(account))
 			if interactive && answers.SetupGit {
-				if err := a.setupGit(cmd, instance, false, false); err != nil {
+				if err := a.setupGit(cmd, instance, loginHost, false, false); err != nil {
 					a.warn(cmd, "Could not configure git: %v; run gt auth setup-git", err)
 				}
 			}
@@ -359,4 +362,32 @@ func defaultSSHKey() string {
 		}
 	}
 	return ""
+}
+
+// defaultToFirstInstance makes instance default_host when it is the only instance with accounts and
+// none is set, so that logging in to a second instance later does not make commands ask for --host.
+func (a *application) defaultToFirstInstance(cmd *cobra.Command, instance string) {
+	first := func(s settings.Snapshot) bool {
+		if s.Preferences.DefaultHost != "" {
+			return false
+		}
+		for name, host := range s.Hosts.Hosts {
+			if name != instance && len(host.Users) > 0 {
+				return false
+			}
+		}
+		return true
+	}
+	if s, err := a.deps.Settings.Load(); err != nil || !first(s) {
+		return
+	}
+	err := a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
+		if first(*s) {
+			s.Preferences.DefaultHost = instance
+		}
+		return nil
+	})
+	if err != nil {
+		a.warn(cmd, "Could not set default_host to %s: %v", instance, err)
+	}
 }

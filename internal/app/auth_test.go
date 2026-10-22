@@ -83,8 +83,10 @@ func TestLoginValidatesUserEnvironmentWithFlagPrecedence(t *testing.T) {
 			require.NoError(t, err)
 			if test.accepted {
 				require.Equal(t, "alice", snapshot.Hosts.Hosts[server.URL].User)
+				require.Equal(t, server.URL, snapshot.Preferences.DefaultHost, "the first instance becomes the default")
 			} else {
 				require.Empty(t, snapshot.Hosts.Hosts)
+				require.Empty(t, snapshot.Preferences.DefaultHost)
 			}
 		})
 	}
@@ -865,6 +867,11 @@ func TestLogoutFindsNamedAccountOnAnotherInstanceThanTheClone(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, snapshot.Hosts.Hosts["https://b.example.org"].Users, "bob")
 	require.Contains(t, snapshot.Hosts.Hosts["https://a.example.org"].Users, "alice")
+	require.Equal(t, "https://a.example.org", snapshot.Preferences.DefaultHost, "default_host moves off the removed instance")
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "logout", "alice", "--yes", "--no-input"}))
+	snapshot, err = deps.Settings.Load()
+	require.NoError(t, err)
+	require.Empty(t, snapshot.Preferences.DefaultHost)
 }
 
 func TestAuthStatusVerifyHonorsInstanceInsecureForEnvironmentToken(t *testing.T) {

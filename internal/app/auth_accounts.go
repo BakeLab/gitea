@@ -116,7 +116,9 @@ func (a *application) logoutCommand() *cobra.Command {
 		Annotations: map[string]string{"gt.text": "logout does not return a resource", "gt.confirm": "true"},
 		Long: `Log out of an account: gt forgets the account and deletes its stored credential. Git's
 other credential helpers are asked to forget what they stored for the account on the
-instance, such as a copy of its token that a keychain kept after a push.`,
+instance, such as a copy of its token that a keychain kept after a push. When the instance
+of default_host has no account and no settings left, default_host moves to the only other
+instance with accounts, or is unset.`,
 		Example: "$ gt auth logout\n$ gt auth logout bob --host gitea.com\n# Without confirmation\n$ gt auth logout alice --yes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.positionalAccount(args); err != nil {
@@ -147,6 +149,7 @@ instance, such as a copy of its token that a keychain kept after a push.`,
 				return err
 			}
 			a.done(cmd, "Logged out of %s (%s)", t.Host, t.User)
+			a.replaceRemovedDefault(cmd, t.Host)
 			// Helpers erase only the copies that hold the removed token, not the user's own credentials.
 			if err := git.RejectCredentials(cmd.Context(), a.gitProbe(), a.options.cwd, t.Host, t.User, removed.AccessToken); err != nil {
 				a.warn(cmd, "Could not ask git's credential helpers to forget %s on %s", t.User, t.Host)
@@ -249,5 +252,48 @@ $ gt auth token --host gitea.com --user alice`,
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), token)
 			return err
 		},
+	}
+}
+
+// replaceRemovedDefault moves default_host off instance after logout removed it from hosts.yml: to
+// the only other instance with accounts, or nowhere.
+func (a *application) replaceRemovedDefault(cmd *cobra.Command, instance string) {
+	replacement := func(s settings.Snapshot) (string, bool) {
+		if _, kept := s.Hosts.Hosts[instance]; kept || s.Preferences.DefaultHost != instance {
+			return "", false
+		}
+		var candidates []string
+		for name, host := range s.Hosts.Hosts {
+			if len(host.Users) > 0 {
+				candidates = append(candidates, name)
+			}
+		}
+		if len(candidates) == 1 {
+			return candidates[0], true
+		}
+		return "", true
+	}
+	if s, err := a.deps.Settings.Load(); err != nil {
+		return
+	} else if _, changed := replacement(s); !changed {
+		return
+	}
+	var next string
+	var changed bool
+	err := a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
+		next, changed = replacement(*s)
+		if changed {
+			s.Preferences.DefaultHost = next
+		}
+		return nil
+	})
+	switch {
+	case err != nil:
+		a.warn(cmd, "Could not update default_host, which names the removed instance %s: %v", instance, err)
+	case !changed:
+	case next != "":
+		a.done(cmd, "Set default_host to %s", next)
+	default:
+		a.done(cmd, "Unset default_host")
 	}
 }

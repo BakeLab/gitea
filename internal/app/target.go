@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -459,7 +460,7 @@ func (a *application) selectRepository(ctx context.Context, t *target, s setting
 	}
 	ref, err := settings.ParseRepository(raw, configured)
 	if err != nil {
-		return clierr.Wrap(clierr.Usage, err)
+		return clierr.Wrap(clierr.Usage, a.environmentSSHRemote(err, raw, configured))
 	}
 	if ref.Owner == "" && ref.Host == "" && a.isGitRemote(ctx, ref.Name) {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid repository %q: use OWNER/REPO, HOST/OWNER/REPO or a URL; did you mean --remote %s?", raw, ref.Name))
@@ -469,6 +470,25 @@ func (a *application) selectRepository(ctx context.Context, t *target, s setting
 		t.Host, t.HostSource = ref.Host, t.RepoSource
 	}
 	return nil
+}
+
+// environmentSSHRemote completes the SSH remote error of a remote on the GITEA_TOKEN instance when
+// no stored settings name it: only GITEA_INSTANCE_SSH_HOST can then set its SSH host.
+func (a *application) environmentSSHRemote(err error, raw string, configured map[string]settings.Host) error {
+	remote, ok := errors.AsType[*settings.SSHRemoteError](err)
+	if !ok || remote.Instance != "" || remote.Endpoint == "" || a.deps.Getenv("GITEA_TOKEN") == "" {
+		return err
+	}
+	instance, resolveErr := settings.ResolveHost(a.tokenInstance(), configured)
+	if _, stored := configured[instance]; resolveErr != nil || stored {
+		return err
+	}
+	remote.Environment = true
+	web, webErr := url.Parse(instance)
+	if u, parseErr := settings.ParseRemote(raw); webErr == nil && parseErr == nil && strings.EqualFold(u.Hostname(), web.Hostname()) {
+		remote.Instance = instance
+	}
+	return err
 }
 
 // cloneInstance selects the instance of the clone in the working directory for a target that
