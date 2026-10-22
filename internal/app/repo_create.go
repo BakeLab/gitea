@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -164,7 +165,7 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 		}
 		match, ok := teams[strings.ToLower(f.team)]
 		if !ok {
-			return clierr.Wrap(clierr.Usage, fmt.Errorf("team %q not found in organization %s", f.team, f.org))
+			return services.NotFound("team", strconv.Quote(f.team), "organization "+f.org)
 		}
 		// Checked before creating, so that the repository is not left without the team.
 		allowed, err := (services.Organizations{Client: target.client}).CanGrantTeamAccess(cmd.Context(), f.org, match.ID)

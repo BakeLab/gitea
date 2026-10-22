@@ -184,6 +184,10 @@ func TestReleaseCreateRefusesATagOnlyTheCloneHas(t *testing.T) {
 	err = Execute(context.Background(), deps, []string{"release", "create", "v1"})
 	require.EqualError(t, err, "tag v1 not found in alice/project; push it first: git push origin v1, or pass --target to create it on the server")
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/tags/v1"}, requests)
+	// Selecting the clone's own repository with -R keeps the guard.
+	deps.Git = &fakeGit{results: map[string]string{`config --get-regexp ^remote\..*\.url$`: "remote.upstream.url " + server.URL + "/alice/project.git", "rev-parse --verify --quiet refs/tags/v1": "abc"}}
+	err = Execute(context.Background(), deps, []string{"release", "create", "v1", "-R", "alice/project"})
+	require.EqualError(t, err, "tag v1 not found in alice/project; push it first: git push upstream v1, or pass --target to create it on the server")
 }
 
 func TestReleaseUploadsRefuseFilesWithTheSameName(t *testing.T) {

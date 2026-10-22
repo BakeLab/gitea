@@ -657,7 +657,7 @@ func TestAuthLoginAsksHowToLogIn(t *testing.T) {
 	credential, err := deps.Credentials.Load(server.URL, "alice", settings.StoreFile)
 	require.NoError(t, err)
 	require.Equal(t, "pasted-token", credential.AccessToken)
-	require.Equal(t, "✓ Logged in to "+server.URL+" as alice (token, file store)\n", withoutANSI(diagnostics.String()))
+	require.Equal(t, "✓ Logged in to "+server.URL+" as alice (token, file store)\n✓ Set default_host to "+server.URL+"\n", withoutANSI(diagnostics.String()))
 	// Without --host, the sole instance is the suggestion; logging in again replaces the token.
 	diagnostics.Reset()
 	prompt.answers.Token, prompt.accept = "rotated-token", true
@@ -918,7 +918,7 @@ func TestAuthSwitchTreatsThePositionalAccountLikeUser(t *testing.T) {
 	configureAccounts(t, deps, instance, "alice", "alice", "bob")
 	err := Execute(context.Background(), deps, []string{"auth", "switch", "bob", "--user", "alice"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
-	require.EqualError(t, err, "--user alice and the account bob differ")
+	require.EqualError(t, err, "an account argument cannot be combined with --user alice")
 	s, err := deps.Settings.Load()
 	require.NoError(t, err)
 	require.Equal(t, "alice", s.Hosts.Hosts[instance].User)

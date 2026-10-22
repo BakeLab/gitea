@@ -88,6 +88,24 @@ func SetupTLS(ctx context.Context, runner Runner, dir string, local bool, instan
 	return nil
 }
 
+// UnsetInsecureTLS removes the sslVerify=false that SetupTLS wrote for the instance, once the
+// instance verifies certificates again. A setting with another value is kept.
+func UnsetInsecureTLS(ctx context.Context, runner Runner, dir string, local bool, instance string) error {
+	normalized, err := settings.NormalizeHost(instance)
+	if err != nil {
+		return err
+	}
+	scope := "--global"
+	if local {
+		scope = "--local"
+	}
+	_, err = runner.Output(ctx, dir, false, "config", scope, "--unset-all", "http."+normalized+".sslVerify", "^false$")
+	if failure, ok := errors.AsType[*CommandError](err); ok && failure.ExitCode == 5 { // nothing to unset
+		return nil
+	}
+	return err
+}
+
 func tlsSettings(instance, certFile, keyFile string, insecure bool) ([][2]string, error) {
 	normalized, err := settings.NormalizeHost(instance)
 	if err != nil {

@@ -115,8 +115,8 @@ func (a *application) setupGitCommand() *cobra.Command {
 		Annotations: textOutput("setup-git configures Git"),
 		Long: `Configure git to ask gt for the credentials of an instance, so that git push and fetch
 over HTTPS use the active account, or the account of --user. gt's own clone and checkout
-commands do not need this. The instance's TLS client certificate and --insecure setting are
-configured for git too.
+commands do not need this. The instance's stored TLS client certificate and --insecure setting
+are configured for git too; GITEA_INSTANCE_INSECURE is never saved.
 
 Other credential helpers, such as a system keychain, are turned off for the instance:
 otherwise they answer first and keep a copy of gt's token. --keep-helpers keeps them.`,
@@ -132,7 +132,7 @@ $ gt auth setup-git --local --user alice`,
 			if err := a.requireGitAccount(t); err != nil {
 				return err
 			}
-			return a.setupGit(cmd, t.Host, t.host, local, keepHelpers)
+			return a.setupGit(cmd, t.Host, local, keepHelpers)
 		},
 	}
 	command.Flags().BoolVar(&local, "local", false, "Configure only the current Git repository instead of global Git configuration")
@@ -159,9 +159,13 @@ func (a *application) requireGitAccount(t target) error {
 }
 
 // setupGit configures Git to ask gt for the credentials of instance, globally or in the repository,
-// and to use the TLS client certificate and verification setting of host.
-func (a *application) setupGit(cmd *cobra.Command, instance string, host settings.Host, local, keepHelpers bool) error {
+// and to use the stored TLS client certificate and verification setting of instance.
+func (a *application) setupGit(cmd *cobra.Command, instance string, local, keepHelpers bool) error {
 	executable, configDir, err := a.credentialHelper()
+	if err != nil {
+		return err
+	}
+	host, err := a.storedHost(instance)
 	if err != nil {
 		return err
 	}
@@ -172,12 +176,24 @@ func (a *application) setupGit(cmd *cobra.Command, instance string, host setting
 	if err := git.SetupTLS(cmd.Context(), a.deps.Git, a.options.cwd, local, instance, host.ClientCert, host.ClientKey, host.Insecure); err != nil {
 		return err
 	}
+	if !host.Insecure {
+		if err := git.UnsetInsecureTLS(cmd.Context(), a.deps.Git, a.options.cwd, local, instance); err != nil {
+			return err
+		}
+	}
 	scope := "global git configuration"
 	if local {
 		scope = "this repository"
 	}
 	a.done(cmd, "Configured git to use gt for %s (%s)", instance, scope)
 	return nil
+}
+
+// storedHost returns the hosts.yml entry of instance without the environment's settings, which
+// must not end up in Git's configuration.
+func (a *application) storedHost(instance string) (settings.Host, error) {
+	snapshot, err := a.settings()
+	return snapshot.Hosts.Hosts[instance], err
 }
 
 // credentialHelper locates gt's executable and absolute configuration directory for Git's credential helper.

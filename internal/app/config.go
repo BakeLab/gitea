@@ -53,8 +53,8 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 	} else if value, key := a.envHost(); value != "" {
 		host, source = value, key
 	}
-	if host == "" && len(snapshot.Hosts.Hosts) == 1 {
-		for name := range snapshot.Hosts.Hosts {
+	if candidates := selectableInstances(snapshot.Hosts.Hosts); host == "" && len(candidates) == 1 {
+		for name := range candidates {
 			host, source = name, "sole configured instance"
 		}
 	}

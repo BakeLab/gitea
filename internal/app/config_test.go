@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"gitea.dev/cli/internal/auth"
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
 	"github.com/spf13/cobra"
@@ -35,6 +36,14 @@ func TestConfigReportsEffectivePreferenceSourcesWithoutAuthentication(t *testing
 	require.NoError(t, err)
 	require.Equal(t, "https://stored.example.org", snapshot.Preferences.DefaultHost)
 	require.Equal(t, "https", snapshot.Preferences.GitProtocol)
+}
+
+func TestConfigReportsTheInstanceThatCommandsPick(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	require.NoError(t, testManager(t, deps).Register("https://accounts.example.org", "alice", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "token"}))
+	configureHost(t, deps, "https://logged-out.example.org", settings.Host{GitProtocol: "ssh"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "default_host", "--show-source", "--json"}))
+	require.JSONEq(t, `{"default_host":{"value":"https://accounts.example.org","source":"sole configured instance"}}`, out.String())
 }
 
 func TestInstanceConfigUpdatesPreserveAccountsAndGlobalPreferences(t *testing.T) {

@@ -150,7 +150,11 @@ func (a *application) diagnose(ctx context.Context) doctorReport {
 		add(a.repositoryCheck(ctx, authenticated))
 	}
 	add(a.gitCheck(ctx, t.Host))
-	if check, ok := sshCheck(t, repoErr); ok {
+	sshSource := "ssh_host"
+	if stored, _ := a.storedHost(t.Host); stored.SSHHost != t.host.SSHHost {
+		sshSource = "GITEA_INSTANCE_SSH_HOST"
+	}
+	if check, ok := sshCheck(t, repoErr, sshSource); ok {
 		add(check)
 	}
 	return report
@@ -240,7 +244,8 @@ func (a *application) gitCheck(ctx context.Context, instance string) doctorCheck
 }
 
 // sshCheck reports where SSH remotes connect when the instance uses SSH, or the clone's remote does.
-func sshCheck(t target, repoErr error) (doctorCheck, bool) {
+// sshSource names the setting of the instance's SSH host.
+func sshCheck(t target, repoErr error, sshSource string) (doctorCheck, bool) {
 	var remote *settings.SSHRemoteError
 	switch {
 	case t.Repo == "" && errors.As(repoErr, &remote) && remote.Endpoint != "":
@@ -250,7 +255,7 @@ func sshCheck(t target, repoErr error) (doctorCheck, bool) {
 		}
 		return doctorCheck{"SSH", checkWarning, "the Git remote connects to " + remote.Endpoint + ", which is no instance's SSH host", fix}, true
 	case t.host.SSHHost != "":
-		return doctorCheck{"SSH", checkPassed, "remotes connect to " + t.host.SSHHost + " (ssh_host)", ""}, true
+		return doctorCheck{"SSH", checkPassed, "remotes connect to " + t.host.SSHHost + " (" + sshSource + ")", ""}, true
 	case t.gitProtocol == "ssh":
 		return doctorCheck{"SSH", checkWarning, "remotes connect to the web host on port 22", "gt config set --host " + t.Host + " ssh_host HOST:PORT, if SSH listens elsewhere"}, true
 	}

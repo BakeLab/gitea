@@ -462,6 +462,15 @@ func userExists(ctx context.Context, client *transport.Client, username string) 
 	return err
 }
 
+// OwnerExists fails with a *NotFoundError when no user or organization is called name.
+func OwnerExists(ctx context.Context, client *transport.Client, name string) error {
+	err := userExists(ctx, client, name)
+	if missing, ok := errors.AsType[*NotFoundError](err); ok {
+		missing.Kind = "user or organization"
+	}
+	return err
+}
+
 // RemoveMember removes an organization member and their organization access.
 func (s Organizations) RemoveMember(ctx context.Context, name, username string) error {
 	return do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {

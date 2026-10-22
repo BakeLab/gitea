@@ -77,7 +77,7 @@ func (a *application) rememberSSHHost(cmd *cobra.Command, t target, sshHost stri
 	})
 	switch {
 	case err != nil:
-		a.warn(cmd, "could not save the SSH host of %s: %v; run gt config set ssh_host %s --host %s", t.Host, err, sshHost, t.Host)
+		a.warn(cmd, "Could not save the SSH host of %s: %v; run gt config set ssh_host %s --host %s", t.Host, err, sshHost, t.Host)
 	case saved:
 		a.done(cmd, "Set ssh_host of %s to %s", t.Host, sshHost)
 	}
@@ -116,8 +116,8 @@ func (a *application) repoCloneCommand() *cobra.Command {
 		Long: `Clone a repository with gt's credentials, over the protocol of a URL argument, else the
 configured Git protocol. Git flags can follow --. A fork's parent is added as the "upstream" remote, and gt commands in the clone then
 target the parent. A pull mirror's source is added as the "source" remote; gt commands keep
-targeting the mirror. An HTTPS clone keeps the instance's TLS client certificate and --insecure
-setting in its Git configuration.`,
+targeting the mirror. An HTTPS clone keeps the instance's stored TLS client certificate and
+--insecure setting in its Git configuration; GITEA_INSTANCE_INSECURE applies to the clone only.`,
 		Example: `# Clone a repository into ./project
 $ gt repo clone alice/project
 
@@ -290,7 +290,9 @@ func (a *application) checkForkRemote(cmd *cobra.Command, t target, name, owner 
 	if t.ownsRemote(existing) {
 		return true, "", nil
 	}
-	if host, repo, err := settings.RemoteRepository(existing, t.hosts()); err == nil && host == t.Host && strings.EqualFold(strings.Split(repo, "/")[0], owner) {
+	host, repo, err := settings.RemoteRepository(existing, t.hosts())
+	onInstance := err == nil && host == t.Host
+	if onInstance && strings.EqualFold(strings.Split(repo, "/")[0], owner) {
 		fork, err := (services.Repositories{Client: t.client}).View(ctx, repo)
 		if err != nil && !services.IsNotFound(err) {
 			return false, "", err
@@ -299,7 +301,11 @@ func (a *application) checkForkRemote(cmd *cobra.Command, t target, name, owner 
 			return false, repo, nil
 		}
 	}
-	return false, "", clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %s points elsewhere; pass --remote-name", name))
+	pointsTo := settings.WithoutCredentials(existing)
+	if onInstance {
+		pointsTo = repo
+	}
+	return false, "", clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %s points to %s; pass --remote-name", name, pointsTo))
 }
 
 // addForkRemote adds fork as the remote name of the clone in the working directory, after renaming
@@ -402,7 +408,11 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 	}
 	a.done(cmd, "Cloned %s into %s", item.FullName, directory)
 	if !remoteIsSSH {
-		if err := git.SetupTLS(cmd.Context(), a.deps.Git, clone, true, t.Host, host.ClientCert, host.ClientKey, host.Insecure); err != nil {
+		stored, err := a.storedHost(t.Host)
+		if err == nil {
+			err = git.SetupTLS(cmd.Context(), a.deps.Git, clone, true, t.Host, stored.ClientCert, stored.ClientKey, stored.Insecure)
+		}
+		if err != nil {
 			return clone, fmt.Errorf("cloned the repository, but could not configure its TLS settings: %w", err)
 		}
 	}

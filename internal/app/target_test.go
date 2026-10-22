@@ -327,6 +327,14 @@ func TestRepositoryDiscoveryFindsGiteaRemoteBesideAnotherForge(t *testing.T) {
 			require.JSONEq(t, `{"full_name":"`+tc.want+`"}`, out.String())
 		})
 	}
+	deps, _, _ := testDeps(t)
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	configureAccounts(t, deps, "https://gitea.com", "carol", "carol")
+	deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": "https://gitea.com/carol/project.git"}}
+	err := Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "--remote", "origin", "--host", server.URL})
+	require.EqualError(t, err, "--host "+server.URL+" does not match the instance https://gitea.com of remote origin")
+	err = Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "-R", "https://gitea.com/carol/project", "--host", server.URL})
+	require.EqualError(t, err, "--host "+server.URL+" cannot be combined with https://gitea.com from --repo")
 }
 
 func TestRepositoryArgumentsAcceptShorthands(t *testing.T) {

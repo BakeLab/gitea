@@ -521,6 +521,9 @@ func (a *application) selectHost(t *target, s settings.Snapshot) error {
 		if err != nil {
 			return clierr.Wrap(clierr.Usage, err)
 		}
+		if t.Host != "" && t.Host != explicit && t.repoFromClone() {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--host %s does not match the instance %s of %s", explicit, t.Host, t.HostSource))
+		}
 		if t.Host != "" && t.Host != explicit {
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("--host %s cannot be combined with %s from %s", explicit, t.Host, t.HostSource))
 		}
@@ -541,12 +544,7 @@ func (a *application) defaultHost(t *target, s settings.Snapshot) error {
 	if t.Host == "" && s.Preferences.DefaultHost != "" {
 		t.Host, t.HostSource = s.Preferences.DefaultHost, "config.yml default_host"
 	}
-	// Instances whose accounts all logged out do not make the choice ambiguous.
-	candidates := maps.Clone(s.Hosts.Hosts)
-	maps.DeleteFunc(candidates, func(_ string, host settings.Host) bool { return len(host.Users) == 0 })
-	if len(candidates) == 0 {
-		candidates = s.Hosts.Hosts
-	}
+	candidates := selectableInstances(s.Hosts.Hosts)
 	if t.Host == "" && len(candidates) == 1 {
 		for host := range candidates {
 			t.Host, t.HostSource = host, "sole configured instance"
@@ -559,6 +557,17 @@ func (a *application) defaultHost(t *target, s settings.Snapshot) error {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("instance required: select --host or set default_host (instances: %s)", strings.Join(slices.Sorted(maps.Keys(candidates)), ", ")))
 	}
 	return nil
+}
+
+// selectableInstances are the instances that gt picks from when nothing names one: those with
+// accounts, as instances whose accounts all logged out do not make the choice ambiguous, else all.
+func selectableInstances(hosts map[string]settings.Host) map[string]settings.Host {
+	candidates := maps.Clone(hosts)
+	maps.DeleteFunc(candidates, func(_ string, host settings.Host) bool { return len(host.Users) == 0 })
+	if len(candidates) == 0 {
+		return hosts
+	}
+	return candidates
 }
 
 // selectAccount picks the account: --user or GITEA_CLI_USER, the instance's active account, its only

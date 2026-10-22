@@ -179,6 +179,17 @@ func TestCloneUsesTheInstanceTLSSettings(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "alice/project"}))
 	require.Equal(t, append([]string{clone}, persisted...), runner.calls, "plain git fetch and push in the clone use the same TLS settings")
 	require.Equal(t, "project", filepath.Base(runner.dirs[1]))
+
+	require.NoError(t, deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
+		host := s.Hosts.Hosts[server.URL]
+		host.Insecure = false
+		s.Hosts.Hosts[server.URL] = host
+		return nil
+	}))
+	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_INSTANCE_INSECURE": "true"})
+	runner.calls = nil
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "alice/project"}))
+	require.Equal(t, append([]string{clone}, persisted[:2]...), runner.calls, "GITEA_INSTANCE_INSECURE applies to the clone only")
 }
 
 func TestSSHURLCloneWithOnlyAnEnvironmentToken(t *testing.T) {

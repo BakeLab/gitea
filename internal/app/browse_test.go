@@ -28,6 +28,8 @@ func TestBrowseURLs(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"full_name":"alice/project","default_branch":"release/1.0"}`)
 		case "/api/v1/repos/alice/project/issues/7":
 			_, _ = fmt.Fprint(w, `{"number":7,"pull_request":{"merged":false}}`)
+		case "/api/v1/repos/alice/project/issues/9":
+			w.WriteHeader(http.StatusInternalServerError)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -43,6 +45,7 @@ func TestBrowseURLs(t *testing.T) {
 		// Gitea sends /issues/N of a pull request to an external tracker when the repository uses one.
 		{[]string{"#12"}, repo + "/issues/12", []string{"/api/v1/repos/alice/project/issues/12"}},
 		{[]string{"7"}, repo + "/pulls/7", []string{"/api/v1/repos/alice/project/issues/7"}},
+		{[]string{"9"}, repo + "/issues/9", []string{"/api/v1/repos/alice/project/issues/9"}},
 		{[]string{"77507cd"}, repo + "/commit/77507cd", nil},
 		{[]string{"--wiki"}, repo + "/wiki", nil},
 		{[]string{"--branch", "feature/x"}, repo + "/src/branch/feature/x", nil},
@@ -86,9 +89,11 @@ func TestBrowsePathsAndCommitsOfTheClone(t *testing.T) {
 	deps.Git = git.System{}
 	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": "https://gitea.example.test"})
 	for args, want := range map[string]string{
-		"--commit guide.md:2": "/src/commit/" + head + "/docs/guide.md?display=source#L2",
-		"--commit=HEAD /":     "/src/commit/" + head,
-		"-b main ../go.mod":   "/src/branch/main/go.mod",
+		"--commit guide.md:2":       "/src/commit/" + head + "/docs/guide.md?display=source#L2",
+		"--commit=HEAD /":           "/src/commit/" + head,
+		"-b main ../go.mod":         "/src/branch/main/go.mod",
+		"-R alice/project --commit": "/src/commit/" + head,
+		"5":                         "/issues/5", // without an account
 	} {
 		out.Reset()
 		require.NoError(t, Execute(context.Background(), deps, append([]string{"browse", "-n", "--cwd", filepath.Join(dir, "docs")}, strings.Fields(args)...)), args)

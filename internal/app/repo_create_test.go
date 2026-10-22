@@ -69,7 +69,7 @@ func TestRepositoryCreateGrantsTeamAccess(t *testing.T) {
 	requests = nil
 	out.Reset()
 	err = Execute(context.Background(), deps, []string{"repo", "create", "project", "--org", "acme", "--team", "missing", "--no-input"})
-	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 	require.ErrorContains(t, err, `team "missing" not found in organization acme`)
 	require.Equal(t, teamPages, requests)
 	require.Empty(t, out.String())

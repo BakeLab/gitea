@@ -325,7 +325,8 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 // --target names where to create it, and --verify-tag refuses any tag the server lacks.
 func (a *application) checkReleaseTag(cmd *cobra.Command, t target, service services.Releases, tag string, hasTarget, verify bool) error {
 	// Only the clone of the selected repository says anything about its tags.
-	local := t.repoFromClone() && a.localRefExists(cmd.Context(), "refs/tags/"+tag)
+	remote := a.cloneRemote(cmd.Context(), t)
+	local := remote != "" && a.localRefExists(cmd.Context(), "refs/tags/"+tag)
 	if !verify && (!local || hasTarget) {
 		return nil
 	}
@@ -335,7 +336,7 @@ func (a *application) checkReleaseTag(cmd *cobra.Command, t target, service serv
 	}
 	hint := "create it first or drop --verify-tag"
 	if local {
-		hint = "push it first: git push " + a.releaseRemote(t) + " " + tag
+		hint = "push it first: git push " + remote + " " + tag
 		if !verify {
 			hint += ", or pass --target to create it on the server"
 		}
@@ -346,10 +347,10 @@ func (a *application) checkReleaseTag(cmd *cobra.Command, t target, service serv
 
 // pushHint tells how to publish a ref that only the local clone has, or returns "".
 func (a *application) pushHint(ctx context.Context, t target, ref string) string {
-	if !t.repoFromClone() {
+	remote := a.cloneRemote(ctx, t)
+	if remote == "" {
 		return ""
 	}
-	remote := a.releaseRemote(t)
 	for _, prefix := range []string{"refs/tags/", "refs/heads/"} {
 		if a.localRefExists(ctx, prefix+ref) {
 			return "push it first: git push " + remote + " " + ref
@@ -367,12 +368,21 @@ func (a *application) localRefExists(ctx context.Context, ref string) bool {
 	return err == nil
 }
 
-// releaseRemote is the remote of the target repository, else origin.
-func (a *application) releaseRemote(t target) string {
+// cloneRemote returns the Git remote of the working directory that points at the target
+// repository, also when --repo selected it, or "" when the working directory is no clone of it.
+func (a *application) cloneRemote(ctx context.Context, t target) string {
 	if remote, ok := strings.CutPrefix(t.RepoSource, "remote "); ok {
 		return remote
 	}
-	return cmp.Or(a.options.remote, "origin")
+	if t.repoFromClone() {
+		return cmp.Or(a.options.remote, "origin")
+	}
+	for _, remote := range a.gitRemotes(ctx) {
+		if t.ownsRemote(remote[1]) {
+			return remote[0]
+		}
+	}
+	return ""
 }
 
 // rejectSwitchValue refuses the old gt syntax "--draft false": a switch reads no value, so the

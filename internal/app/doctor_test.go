@@ -166,6 +166,10 @@ func TestDoctorExplainsSSHRemoteOnAnotherPort(t *testing.T) {
 	deps.Git = &fakeGit{results: map[string]string{"--version": "git version 2.50.1", "remote": "origin", "remote get-url origin": "ssh://git@127.0.0.1:2222/alice/project.git"}}
 	require.NoError(t, Execute(context.Background(), deps, []string{"doctor", "--json=checks"}))
 	require.Contains(t, out.String(), `{"detail":"the Git remote connects to 127.0.0.1:2222, which is no instance's SSH host","fix":"gt config set ssh_host 127.0.0.1:2222 --host `+server.URL+`","name":"SSH","status":"warning"}`)
+	out.Reset()
+	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_INSTANCE_SSH_HOST": "127.0.0.1:2222"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"doctor", "--json=checks"}))
+	require.Contains(t, out.String(), `{"detail":"remotes connect to 127.0.0.1:2222 (GITEA_INSTANCE_SSH_HOST)","name":"SSH","status":"ok"}`)
 }
 
 func TestDoctorReportsBrokenSettingsFile(t *testing.T) {

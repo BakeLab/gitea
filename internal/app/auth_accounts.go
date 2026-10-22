@@ -20,7 +20,7 @@ import (
 
 func (a *application) authSwitchCommand() *cobra.Command {
 	return &cobra.Command{
-		Use: "switch [<user>]", Short: "Switch the active account of an instance", Args: usageArgs(cobra.MaximumNArgs(1)),
+		Use: "switch [<user>]", Short: "Switch the active account of an instance", Args: nonBlankArgs(cobra.MaximumNArgs(1), "account"),
 		Annotations: textOutput("switching accounts does not return a resource"), ValidArgsFunction: a.completeAccounts,
 		Long: `Switch the active account of an instance, which commands use unless --user or GITEA_CLI_USER
 selects another. With two accounts, gt auth switch toggles between them; with more, it
@@ -88,7 +88,7 @@ func (a *application) positionalAccount(args []string) error {
 		return nil
 	}
 	if a.options.user != "" && !strings.EqualFold(a.options.user, args[0]) {
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("--user %s and the account %s differ", a.options.user, args[0]))
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("an account argument cannot be combined with --user %s", a.options.user))
 	}
 	a.options.user = args[0]
 	return nil
@@ -112,7 +112,7 @@ func (a *application) chooseAccount(cmd *cobra.Command, instance string, names [
 
 func (a *application) logoutCommand() *cobra.Command {
 	return &cobra.Command{
-		Use: "logout [<user>]", Short: "Log out of an account", Args: usageArgs(cobra.MaximumNArgs(1)), ValidArgsFunction: a.completeAccounts,
+		Use: "logout [<user>]", Short: "Log out of an account", Args: nonBlankArgs(cobra.MaximumNArgs(1), "account"), ValidArgsFunction: a.completeAccounts,
 		Annotations: map[string]string{"gt.text": "logout does not return a resource", "gt.confirm": "true"},
 		Long: `Log out of an account: gt forgets the account and deletes its stored credential. Git's
 other credential helpers are asked to forget what they stored for the account on the

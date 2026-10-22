@@ -227,7 +227,7 @@ func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
 	runner.results["remote get-url origin"], requests = server.URL+"/alice/other.git", nil
 	err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
-	require.EqualError(t, err, "Git remote origin points elsewhere; pass --remote-name")
+	require.EqualError(t, err, "Git remote origin points to alice/other; pass --remote-name")
 	require.Equal(t, []string{"GET /api/v1/repos/alice/other"}, requests)
 }
 
@@ -245,6 +245,10 @@ func TestRepoForkRemoteChecksTheCloneBeforeForking(t *testing.T) {
 		err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--remote"})
 		require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%s: %v", name, err)
 	}
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote get-url origin": "https://alice:secret@github.com/alice/project.git"}}
+	err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--remote"})
+	require.EqualError(t, err, "Git remote origin points to https://github.com/alice/project.git; pass --remote-name")
 }
 
 func TestRepoRenameUpdatesTheSavedDefaultRepository(t *testing.T) {
@@ -272,6 +276,8 @@ func TestRepoTransfer(t *testing.T) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/orgs/acme/teams":
 			writeFirstPage(w, r, `[{"id":3,"name":"Developers"}]`)
+		case "GET /api/v1/users/bob":
+			_, _ = w.Write([]byte(`{"login":"bob"}`))
 		case "POST /api/v1/repos/alice/project/transfer":
 			var body struct {
 				NewOwner string   `json:"new_owner"`
@@ -314,6 +320,15 @@ func TestRepoTransfer(t *testing.T) {
 	require.JSONEq(t, `{"full_name":"alice/project","transfer_pending":true}`, out.String())
 	err := Execute(context.Background(), deps, []string{"repo", "transfer", "nobody", "-R", "alice/project", "--yes"})
 	require.EqualError(t, err, `user or organization "nobody" not found`)
+	for args, want := range map[string]string{
+		"nobody --team developers": `user or organization "nobody" not found`,
+		"bob --team developers":    `--team requires an organization as the new owner: organization "bob" not found`,
+		"acme --team missing":      `team "missing" not found in organization acme`,
+	} {
+		err = Execute(context.Background(), deps, append(strings.Fields("repo transfer "+args), "-R", "alice/project", "--yes"))
+		require.EqualError(t, err, want)
+		require.Equal(t, clierr.Failure, clierr.ExitCode(err), args)
+	}
 	// Without --yes, nothing is transferred without a terminal to confirm on.
 	deps, _, _ = serverDeps(t, server.URL)
 	requests = nil

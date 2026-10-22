@@ -167,8 +167,8 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 				if err := manager.RegisterHTTPSign(instance, user, account, hostOptions); err != nil {
 					return err
 				}
-				a.defaultToFirstInstance(cmd, instance)
 				a.done(cmd, "Logged in to %s as %s (%s)", instance, user, credentialLabel(account))
+				a.defaultToFirstInstance(cmd, instance)
 				return nil
 			}
 			credential := auth.Credential{AccessToken: answers.Token}
@@ -240,10 +240,10 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 			if err := manager.Register(instance, user, answers.Store, method, hostOptions, credential); err != nil {
 				return err
 			}
-			a.defaultToFirstInstance(cmd, instance)
 			a.done(cmd, "Logged in to %s as %s (%s)", instance, user, credentialLabel(account))
+			a.defaultToFirstInstance(cmd, instance)
 			if interactive && answers.SetupGit {
-				if err := a.setupGit(cmd, instance, loginHost, false, false); err != nil {
+				if err := a.setupGit(cmd, instance, false, false); err != nil {
 					a.warn(cmd, "Could not configure git: %v; run gt auth setup-git", err)
 				}
 			}
@@ -381,13 +381,17 @@ func (a *application) defaultToFirstInstance(cmd *cobra.Command, instance string
 	if s, err := a.deps.Settings.Load(); err != nil || !first(s) {
 		return
 	}
+	set := false
 	err := a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
-		if first(*s) {
+		if set = first(*s); set {
 			s.Preferences.DefaultHost = instance
 		}
 		return nil
 	})
-	if err != nil {
+	switch {
+	case err != nil:
 		a.warn(cmd, "Could not set default_host to %s: %v", instance, err)
+	case set:
+		a.done(cmd, "Set default_host to %s", instance)
 	}
 }

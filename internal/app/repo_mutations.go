@@ -6,6 +6,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -272,6 +273,9 @@ $ gt repo transfer bob -R alice/project`,
 			if len(teams) > 0 {
 				byName, err := (services.Teams{Client: t.client}).ByName(cmd.Context(), newOwner)
 				if services.IsNotFound(err) {
+					if missing := services.OwnerExists(cmd.Context(), t.client, newOwner); missing != nil {
+						return missing
+					}
 					return fmt.Errorf("--team requires an organization as the new owner: %w", err)
 				}
 				if err != nil {
@@ -280,7 +284,7 @@ $ gt repo transfer bob -R alice/project`,
 				for _, team := range teams {
 					match, ok := byName[strings.ToLower(team)]
 					if !ok {
-						return fmt.Errorf("team %q not found in organization %s", team, newOwner)
+						return services.NotFound("team", strconv.Quote(team), "organization "+newOwner)
 					}
 					teamIDs = append(teamIDs, match.ID)
 				}

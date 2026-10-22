@@ -41,6 +41,8 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"alias", "delete", "co", "--json"}, "alias deletion does not return a resource"},
 		{[]string{"alias", "list", "--json", "foo"}, "--json with field names requires aliases; none are defined"},
 		{[]string{"auth", "status", "--json=token"}, "unknown JSON field \"token\""},
+		{[]string{"auth", "logout", "", "--yes"}, "account cannot be empty"},
+		{[]string{"auth", "switch", " "}, "account cannot be empty"},
 		{[]string{"branch", "unprotect", "", "-y"}, "branch name cannot be empty"},
 		{[]string{"branch", "protect", "main", "--allow-push", " "}, "pusher names cannot be empty"},
 		{[]string{"branch", "protect", "main", "--status-check", " "}, "status check names cannot be empty"},

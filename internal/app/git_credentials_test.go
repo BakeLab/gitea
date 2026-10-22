@@ -14,6 +14,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/git/gittest"
+	"gitea.dev/cli/internal/settings"
 	"github.com/stretchr/testify/require"
 )
 
@@ -50,6 +51,18 @@ func TestSetupGitConfiguresTheInstanceTLSSettings(t *testing.T) {
 	require.NoError(t, err)
 	prefix := "http." + instance + "."
 	require.Equal(t, prefix+"sslcert /certs/client.pem\n"+prefix+"sslkey /certs/client.key\n"+prefix+"sslverify false", values)
+
+	require.NoError(t, deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
+		host := s.Hosts.Hosts[instance]
+		host.Insecure = false
+		s.Hosts.Hosts[instance] = host
+		return nil
+	}))
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": instance, "GITEA_TOKEN": "environment-token", "GITEA_INSTANCE_INSECURE": "true"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", instance, "--no-input"}))
+	values, err = deps.Git.Output(context.Background(), "", false, "config", "--global", "--get-regexp", `^http\.`)
+	require.NoError(t, err)
+	require.Equal(t, prefix+"sslcert /certs/client.pem\n"+prefix+"sslkey /certs/client.key", values, "the stale sslVerify goes and the environment's is not saved")
 }
 
 func TestGitCredentialHelperSelectsAccountsAndDoesNotMutateFromGit(t *testing.T) {
