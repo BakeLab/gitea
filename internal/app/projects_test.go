@@ -88,8 +88,36 @@ func TestIssueEditAddsToAndRemovesFromProjects(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--remove-project", "Board", "--remove-project", "board"}))
 	require.Equal(t, 1, reads["/api/v1/orgs/acme/projects/3/columns"])
 	require.Equal(t, 1, reads["/api/v1/orgs/acme/projects/3/columns/11/issues"])
+	mutations = nil
+	err = Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "Board", "--remove-project", "board"})
+	require.EqualError(t, err, `--add-project "Board" cannot be combined with --remove-project "board", which name the same project`)
+	require.Empty(t, mutations)
 	requireUsageBeforeRequests(t, "project names cannot be empty", "issue", "create", "--title", "x", "--project", " ")
 	requireUsageBeforeRequests(t, "--project cannot be combined with --web", "issue", "create", "--title", "x", "--project", "Board", "--web")
+}
+
+func TestIssueEditTellsProjectsApartThatDifferOnlyInCase(t *testing.T) {
+	var mutations []string
+	projects := projectServer(t, &mutations)
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/orgs/acme/projects":
+			writeFirstPage(w, r, `[{"id":3,"title":"Board"},{"id":6,"title":"board"}]`)
+		case "GET /api/v1/orgs/acme/projects/6/columns":
+			writeFirstPage(w, r, `[{"id":12,"title":"Todo","default":true}]`)
+		case "GET /api/v1/orgs/acme/projects/6/columns/12/issues":
+			writeFirstPage(w, r, `[{"id":70,"number":12}]`)
+		case "DELETE /api/v1/orgs/acme/projects/6/columns/12/issues/70":
+			mutations = append(mutations, r.Method+" "+r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			projects.ServeHTTP(w, r)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "Board", "--remove-project", "board"}))
+	require.Equal(t, []string{"POST /api/v1/orgs/acme/projects/3/columns/11/issues/70", "DELETE /api/v1/orgs/acme/projects/6/columns/12/issues/70"}, mutations)
 }
 
 func TestPullEditChangesProjectsOnlyOnceTheEditSucceeded(t *testing.T) {

@@ -182,7 +182,7 @@ func (a *application) setupGit(cmd *cobra.Command, instance string, local, keepH
 	if err := git.SetupTLS(cmd.Context(), a.deps.Git, a.options.cwd, local, instance, host.ClientCert, host.ClientKey, host.Insecure); err != nil {
 		return err
 	}
-	if !effective[instance].Insecure {
+	if !host.Insecure && !effective[instance].Insecure {
 		if err := git.UnsetInsecureTLS(cmd.Context(), a.deps.Git, a.options.cwd, local, instance); err != nil {
 			return err
 		}

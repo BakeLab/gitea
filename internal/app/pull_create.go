@@ -170,15 +170,20 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 			f.options.Head = owner + ":" + branch
 		}
 	}
+	base := &pullBase{}
 	if f.options.Base == "" {
-		repo, err := (services.Repositories{Client: t.client}).View(cmd.Context(), t.Repo)
+		repo, err := base.repository(cmd.Context(), t)
 		if err != nil {
+			return err
+		}
+		if err := repo.CheckEnabled(); err != nil {
 			return err
 		}
 		if f.options.Base = repo.DefaultBranch; f.options.Base == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("supply --base; repository has no default branch"))
 		}
 	}
+	base.branch = f.options.Base
 	if !f.agit {
 		if err := refuseSameBranch(f.options.Head, f.options.Base); err != nil {
 			return err
@@ -189,7 +194,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	}
 	if f.web {
 		// The comparison page needs the head on Gitea, as OWNER:BRANCH when it went to a fork.
-		if f.options.Head, err = a.ensureHeadPublished(cmd, t, s, f.options.Head, f.options.Base); err != nil {
+		if f.options.Head, err = a.ensureHeadPublished(cmd, t, s, f.options.Head, base); err != nil {
 			return err
 		}
 		return a.openBrowser(cmd, repositoryURL(t)+"/compare/"+compareRef(f.options.Base)+"..."+compareRef(f.options.Head))
@@ -225,7 +230,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		f.options.Title = services.AddDraftPrefix(f.options.Title)
 	}
 	if f.agit {
-		return a.pushAgit(cmd, t, s, git.AgitOptions{Remote: a.options.remote, Head: f.options.Head, Base: f.options.Base, Topic: f.topic, Title: f.options.Title, Body: f.options.Body})
+		return a.pushAgit(cmd, t, s, base, git.AgitOptions{Remote: a.options.remote, Head: f.options.Head, Base: f.options.Base, Topic: f.topic, Title: f.options.Title, Body: f.options.Body})
 	}
 	f.options.AllowMaintainerEdit = &f.allowMaintainerEdits
 	reviewService := services.Reviews{Client: t.client, Repository: t.Repo}
@@ -243,7 +248,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	if err != nil {
 		return err
 	}
-	if f.options.Head, err = a.ensureHeadPublished(cmd, t, s, f.options.Head, f.options.Base); err != nil {
+	if f.options.Head, err = a.ensureHeadPublished(cmd, t, s, f.options.Head, base); err != nil {
 		return err
 	}
 	item, err := service.Create(cmd.Context(), f.options)
@@ -267,7 +272,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 
 // pushAgit creates a pull request by pushing the head branch to refs/for/<base>/<topic>.
 // Without --remote it pushes to the one remote that matches the resolved repository.
-func (a *application) pushAgit(cmd *cobra.Command, t target, s settings.Snapshot, opts git.AgitOptions) error {
+func (a *application) pushAgit(cmd *cobra.Command, t target, s settings.Snapshot, base *pullBase, opts git.AgitOptions) error {
 	if _, branch, ok := strings.Cut(opts.Head, ":"); ok {
 		opts.Head = branch
 	}
@@ -287,6 +292,9 @@ func (a *application) pushAgit(cmd *cobra.Command, t target, s settings.Snapshot
 		return err
 	}
 	opts.Directory, opts.Prompt = a.options.cwd, a.policy(s).CanPrompt(a.deps.Streams)
+	if err := base.checkEnabled(cmd.Context(), t); err != nil {
+		return err
+	}
 	if err := git.PushAgitPR(cmd.Context(), a.deps.Git, opts); err != nil {
 		return err
 	}
@@ -461,11 +469,12 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 	if values.Agit && a.options.json != "" {
 		return clierr.Wrap(clierr.Usage, errors.New("--json/--jq cannot be combined with AGit create; AGit creates the pull request through git push"))
 	}
+	base := &pullBase{branch: values.Base, repo: &loaded.Base}
 	if values.AsDraft {
 		values.Title = services.AddDraftPrefix(values.Title)
 	}
 	if values.Agit {
-		return a.pushAgit(cmd, target, snapshot, git.AgitOptions{Remote: a.options.remote, Head: values.Head, Base: values.Base, Topic: values.Topic, Title: values.Title, Body: values.Body})
+		return a.pushAgit(cmd, target, snapshot, base, git.AgitOptions{Remote: a.options.remote, Head: values.Head, Base: values.Base, Topic: values.Topic, Title: values.Title, Body: values.Body})
 	}
 	if values.Deadline != nil {
 		due := endOfDay(*values.Deadline)
@@ -482,7 +491,7 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 	if err := a.refuseEmptyPull(cmd.Context(), target, options.Base, options.Head); err != nil {
 		return err
 	}
-	if options.Head, err = a.ensureHeadPublished(cmd, target, snapshot, options.Head, options.Base); err != nil {
+	if options.Head, err = a.ensureHeadPublished(cmd, target, snapshot, options.Head, base); err != nil {
 		return err
 	}
 	item, err := service.Create(cmd.Context(), options)
@@ -495,6 +504,12 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 // reportCreatedPull reports a new pull request and prints its URL, or the pull request as JSON.
 func (a *application) reportCreatedPull(cmd *cobra.Command, t target, item services.Pull) error {
 	a.done(cmd, "Created pull request %s", refLabel(t.Repo, item.Number, item.Title))
+	if a.options.json != "" {
+		var err error
+		if item, err = a.pullWithReviews(cmd, t, item); err != nil {
+			return err
+		}
+	}
 	return a.created(cmd, item, item.URL)
 }
 

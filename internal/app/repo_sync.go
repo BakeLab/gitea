@@ -53,9 +53,9 @@ $ gt repo sync bob/project`,
 			if err != nil {
 				return err
 			}
-			inside, _ := a.gitProbe().Output(cmd.Context(), a.options.cwd, false, "rev-parse", "--is-inside-work-tree")
+			inside := a.insideClone(cmd.Context())
 			remote, err := "", errNoMatchingRemote
-			if inside == "true" {
+			if inside {
 				remote, err = a.checkoutRemote(cmd.Context(), target, snapshot)
 				// A remote preference only picks among the remotes of this repository: a repository
 				// argument that no remote here names is synced on the server, as without one.
@@ -68,7 +68,7 @@ $ gt repo sync bob/project`,
 			switch {
 			case errors.Is(err, errNoMatchingRemote) && len(args) > 0:
 				return a.syncOnServer(cmd, target, branch)
-			case inside != "true":
+			case !inside:
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("repo sync needs a Git clone of %s; run it inside one, or pass a fork to update it on the server: gt repo sync OWNER/REPO", target.Repo))
 			case errors.Is(err, errNoMatchingRemote):
 				return clierr.Wrap(clierr.Usage, errors.New("no Git remote of this clone points to "+target.Repo+"; add one with git remote add, or pass --remote"))

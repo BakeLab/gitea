@@ -78,6 +78,8 @@ type application struct {
 	mu         sync.Mutex
 	snapshot   *settings.Snapshot
 	generation uint64
+	// resolved is the last target a command resolved, which error hints repeat.
+	resolved target
 }
 
 // settings returns the settings, loaded once per run and again after gt changed them.
@@ -98,6 +100,11 @@ func (a *application) settings() (settings.Snapshot, error) {
 
 // NewRoot builds fresh commands. Construction performs no disk, network, or Git IO.
 func NewRoot(deps Dependencies) *cobra.Command {
+	root, _ := newRoot(deps)
+	return root
+}
+
+func newRoot(deps Dependencies) (*cobra.Command, *application) {
 	if deps.Executable == nil {
 		deps.Executable = os.Executable
 	}
@@ -219,7 +226,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	rejectUnknownSubcommands(root)
 	addVerbAliases(root)
 	completeDefaults(root)
-	return root
+	return root, a
 }
 
 // rootGroups places the core and Actions commands in their root help groups; every other
@@ -352,7 +359,7 @@ func builtins(root *cobra.Command) map[string]bool {
 
 // Execute expands aliases and executes the fresh root without printing errors.
 func Execute(ctx context.Context, deps Dependencies, args []string) error {
-	root := NewRoot(deps)
+	root, a := newRoot(deps)
 	// Broken settings or aliases must not prevent help or recovery commands.
 	snapshot, loadErr := deps.Settings.Load()
 	names := builtins(root)
@@ -396,9 +403,18 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 		}
 	}
 	root.SetArgs(args)
-	err := root.ExecuteContext(ctx)
+	cmd, err := root.ExecuteContextC(ctx)
 	if services.IsUnauthorized(err) {
 		return clierr.Wrap(clierr.Authentication, err)
+	}
+	if notPull, ok := errors.AsType[*services.NotPullError](err); ok {
+		if issue, _, findErr := root.Find(strings.Fields(issueCommandPath(cmd))[1:]); findErr == nil && issue.Name() == cmd.Name() {
+			repo := ""
+			if resolved := a.lastTarget(); resolved.Repo == notPull.Repository {
+				repo = a.suggestedRepo(resolved)
+			}
+			return explain(err, "%s", strings.Replace(err.Error(), notPull.Error(), fmt.Sprintf("%s; use %s %d%s", notPull.Error(), issue.CommandPath(), notPull.Number, repo), 1))
+		}
 	}
 	return err
 }

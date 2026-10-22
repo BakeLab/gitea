@@ -131,6 +131,63 @@ func TestPullReopenWarnsWhenAlreadyOpen(t *testing.T) {
 	require.Contains(t, diagnostics.String(), "is already open")
 }
 
+func TestPullMutationsReadReviewsOnlyForTheirJSONFields(t *testing.T) {
+	const merged = `{"number":3,"title":"Add login","state":"closed","merged":true,"base":{"ref":"main"},"head":{"ref":"feature","sha":"abc123"}}`
+	var reads []string
+	pull := ""
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(mergeRepository))
+		case "GET /api/v1/repos/alice/project/branches/main":
+			_, _ = w.Write([]byte(`{"name":"main"}`))
+		case "GET /api/v1/repos/alice/project/pulls/3/reviews":
+			reads = append(reads, r.URL.Path)
+			writeFirstPage(w, r, `[{"id":1,"state":"APPROVED","official":true,"user":{"login":"carol"}}]`)
+		case "GET /api/v1/repos/alice/project/pulls/3":
+			reads = append(reads, r.URL.Path)
+			_, _ = w.Write([]byte(pull))
+		case "PATCH /api/v1/repos/alice/project/pulls/3":
+			_, _ = w.Write([]byte(`{"number":3,"title":"Add login","state":"open"}`))
+		case "POST /api/v1/repos/alice/project/pulls/3/merge":
+			pull = merged
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		pull string
+		args []string
+	}{
+		{`{"number":3,"title":"Add login","state":"closed"}`, []string{"pr", "reopen", "3"}},
+		{openPull, []string{"pr", "edit", "3", "--title", "Add login"}},
+		{`{"number":3,"title":"WIP: Add login","state":"open","draft":true}`, []string{"pr", "ready", "3"}},
+		{openPull, []string{"pr", "merge", "3", "--yes", "--delete-branch=false"}},
+		{merged, []string{"pr", "merge", "3", "--yes"}},
+	} {
+		pull = tc.pull
+		deps, out, _ := serverDeps(t, server.URL)
+		require.NoError(t, Execute(context.Background(), deps, append(tc.args, "-R", "alice/project", "--json", "review_decision,reviews")), tc.args)
+		var item struct {
+			Decision string `json:"review_decision"`
+			Reviews  []struct {
+				Author string `json:"author"`
+			} `json:"reviews"`
+		}
+		require.NoError(t, json.Unmarshal(out.Bytes(), &item), tc.args)
+		require.Equal(t, "approved", item.Decision, tc.args)
+		require.Len(t, item.Reviews, 1, tc.args)
+		require.Equal(t, "carol", item.Reviews[0].Author, tc.args)
+	}
+
+	reads, pull = nil, `{"number":3,"title":"Add login","state":"closed"}`
+	deps, _, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "reopen", "3", "-R", "alice/project", "--json", "number"}))
+	require.Equal(t, []string{"/api/v1/repos/alice/project/pulls/3"}, reads)
+}
+
 func TestPullMergeSendsTitleAndMessage(t *testing.T) {
 	var payload map[string]any
 	server := newAuthenticatedServer(mergeServer(t, openPull, &payload))

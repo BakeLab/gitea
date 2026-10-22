@@ -9,8 +9,24 @@ import (
 	"fmt"
 	"slices"
 
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 )
+
+// validateProjectChanges trims the titles of --add-project and --remove-project and rejects blank
+// ones and a title named by both, which would flip the project's membership on every run. Titles
+// that differ in case may name different projects, which loadProjectChanges tells apart.
+func validateProjectChanges(add, remove []string) error {
+	if err := requireNames("project", "", add, remove); err != nil {
+		return err
+	}
+	for _, title := range add {
+		if slices.Contains(remove, title) {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--add-project %q cannot be combined with --remove-project %q", title, title))
+		}
+	}
+	return nil
+}
 
 // projectChanges are the project boards that issues or pull requests are put on or taken off,
 // resolved once for all of them; projects of the repository come before its organization's.
@@ -26,6 +42,11 @@ func loadProjectChanges(ctx context.Context, t target, add, remove []string, exi
 	boards, err := changes.service.Boards(ctx, slices.Concat(add, remove), existing)
 	if err != nil {
 		return changes, err
+	}
+	for i, board := range boards[:len(add)] {
+		if j := slices.IndexFunc(boards[len(add):], func(b services.Board) bool { return b.ID == board.ID }); j >= 0 {
+			return changes, fmt.Errorf("--add-project %q cannot be combined with --remove-project %q, which name the same project", add[i], remove[j])
+		}
 	}
 	changes.add, changes.remove = distinctBoards(boards[:len(add)]), distinctBoards(boards[len(add):])
 	return changes, nil

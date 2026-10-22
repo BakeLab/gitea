@@ -204,6 +204,20 @@ func TestWikiViewEditAndDeleteExplainADisabledWiki(t *testing.T) {
 	}
 }
 
+func TestWikiDeleteNamesAMissingPageOfAWikiNeverCreated(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"message":"failed to clone repository: alice/project (exit status 128 - fatal: Remote branch main not found in upstream origin)"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"no such file or directory"}`))
+	}))
+	err := (Wiki{Client: client, Repository: "alice/project"}).Delete(context.Background(), "Home")
+	require.EqualError(t, err, `wiki page "Home" not found in alice/project`)
+}
+
 func TestWikiAddressesTitlesWithReservedCharacters(t *testing.T) {
 	titles := []string{"C++", "a+b c", "Plain page", "A B-C", "dash-ed", "a/b", "ünïcode", "notes.md", "100%", "what?", "#1"}
 	var requests []string

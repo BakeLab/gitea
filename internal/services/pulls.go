@@ -63,8 +63,7 @@ type Pull struct {
 	// WithReviews.
 	Reviewers     []string `json:"reviewers"`
 	ReviewerTeams []string `json:"reviewer_teams"`
-	// Reviews are the submitted reviews, oldest first. Only commands that read the reviews fill it;
-	// others give an empty list.
+	// Reviews are the submitted reviews, oldest first, filled by WithReviews and otherwise empty.
 	Reviews  []Review `json:"reviews"`
 	Comments int64    `json:"comments"`
 }
@@ -374,7 +373,7 @@ func (s Pulls) get(ctx context.Context, n int64) (*gitea.PullRequest, error) {
 	item, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
 		return c.PullRequests.GetPullRequest(ctx, owner, name, n)
 	})
-	return item, pullError(ctx, s.Client, s.Repository, err, n)
+	return item, pullReadError(ctx, s.Client, s.Repository, err, n)
 }
 
 // pullError names pull request n of repository in the failure of a request about it, or the
@@ -387,6 +386,18 @@ func pullError(ctx context.Context, client *transport.Client, repository string,
 		}
 	}
 	return Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), repository)
+}
+
+// pullReadError is pullError that tells the number of an issue apart from one that does not
+// exist, for requests that Gitea refuses before changing anything when pull request n is missing.
+func pullReadError(ctx context.Context, client *transport.Client, repository string, err error, n int64) error {
+	err = pullError(ctx, client, repository, err, n)
+	if notFound, ok := errors.AsType[*NotFoundError](err); ok && notFound.Kind == "pull request" {
+		if kind, _ := (Issues{Client: client, Repository: repository}).Kind(ctx, n); kind == KindIssue {
+			return &NotPullError{Number: n, Repository: repository, Err: err}
+		}
+	}
+	return err
 }
 
 // issues serves the pull requests through the issue endpoints.
@@ -447,14 +458,36 @@ func (s Pulls) existingPullError(ctx context.Context, err error, opts PullOption
 	return err
 }
 
-// CanPush reports whether the account may push branches to the pull requests' repository. A
-// response without permissions, as for an anonymous request, leaves it to the push.
-func (s Pulls) CanPush(ctx context.Context) (bool, error) {
+// PullRepository is what creating a pull request needs to know about the repository it goes into.
+type PullRepository struct {
+	Repository    string
+	DefaultBranch string
+	PullsEnabled  bool
+	// CanPush is whether the account may push branches to it. A response without permissions, as
+	// for an anonymous request, leaves it to the push.
+	CanPush bool
+}
+
+// Base reads the repository of the pull requests, for a new one.
+func (s Pulls) Base(ctx context.Context) (PullRepository, error) {
 	item, err := (Repositories{Client: s.Client}).get(ctx, s.Repository)
 	if err != nil {
-		return false, err
+		return PullRepository{}, err
 	}
-	return item.Permissions == nil || item.Permissions.Push, nil
+	return pullRepositoryFrom(s.Repository, item), nil
+}
+
+func pullRepositoryFrom(repository string, item *gitea.Repository) PullRepository {
+	return PullRepository{Repository: repository, DefaultBranch: item.DefaultBranch, PullsEnabled: item.HasPullRequests, CanPush: item.Permissions == nil || item.Permissions.Push}
+}
+
+// CheckEnabled returns the UnitError of a repository with its pull requests turned off, so that a
+// command can refuse before it prompts or pushes a branch.
+func (r PullRepository) CheckEnabled() error {
+	if !r.PullsEnabled {
+		return &UnitError{Repository: r.Repository, Unit: UnitPulls}
+	}
+	return nil
 }
 
 // PushableFork reports whether repo is a fork of the pull requests' repository that the account
@@ -1069,7 +1102,7 @@ func (s Pulls) Diff(ctx context.Context, n int64) (io.ReadCloser, error) {
 		return c.PullRequests.GetPullRequestDiff(ctx, owner, name, n, gitea.PullRequestDiffOptions{})
 	})
 	if err != nil {
-		return nil, pullError(ctx, s.Client, s.Repository, err, n)
+		return nil, pullReadError(ctx, s.Client, s.Repository, err, n)
 	}
 	return io.NopCloser(bytes.NewReader(diff)), nil
 }
@@ -1096,7 +1129,7 @@ func (s Pulls) Files(ctx context.Context, n int64) ([]string, error) {
 		return c.PullRequests.ListPullRequestFiles(ctx, owner, name, n, gitea.ListPullRequestFilesOptions{ListOptions: list})
 	})
 	if err != nil {
-		return nil, pullError(ctx, s.Client, s.Repository, err, n)
+		return nil, pullReadError(ctx, s.Client, s.Repository, err, n)
 	}
 	paths := make([]string, 0, len(files))
 	for _, file := range files {

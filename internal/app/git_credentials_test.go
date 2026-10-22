@@ -52,6 +52,12 @@ func TestSetupGitConfiguresTheInstanceTLSSettings(t *testing.T) {
 	prefix := "http." + instance + "."
 	require.Equal(t, prefix+"sslcert /certs/client.pem\n"+prefix+"sslkey /certs/client.key\n"+prefix+"sslverify false", values)
 
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": instance, "GITEA_TOKEN": "environment-token", "GITEA_INSTANCE_INSECURE": "false"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", instance, "--no-input"}))
+	values, err = deps.Git.Output(context.Background(), "", false, "config", "--global", "--get-regexp", `^http\.`)
+	require.NoError(t, err)
+	require.Equal(t, prefix+"sslcert /certs/client.pem\n"+prefix+"sslkey /certs/client.key\n"+prefix+"sslverify false", values, "GITEA_INSTANCE_INSECURE=false keeps the stored --insecure")
+
 	require.NoError(t, deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
 		host := s.Hosts.Hosts[instance]
 		host.Insecure = false

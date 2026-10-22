@@ -253,6 +253,10 @@ func TestRepoForkRemoteChecksTheCloneBeforeForking(t *testing.T) {
 	err = Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--remote"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
 	require.EqualError(t, err, "Git remote origin points to bob/project and cannot be renamed to upstream, which exists; pass --remote-name")
+	deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote get-url upstream": server.URL + "/bob/project.git"}}
+	err = Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--remote", "--remote-name", "upstream"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.EqualError(t, err, "Git remote upstream points to bob/project; pass another --remote-name")
 }
 
 func TestRepoRenameUpdatesTheSavedDefaultRepository(t *testing.T) {

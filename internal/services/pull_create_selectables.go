@@ -23,18 +23,23 @@ type CreateSelectables struct {
 // on the default branch, and the metadata selectables.
 type PullCreateChoices struct {
 	Repository Repository
+	Base       PullRepository
 	Template   string
 	CreateSelectables
 }
 
-// CreateChoices fetches the repository once for its default branch and permissions, then loads
-// the pull request template and the selectables concurrently.
+// CreateChoices fetches the repository once for its default branch and permissions, refusing one
+// with its pull requests turned off, then loads the pull request template and the selectables
+// concurrently.
 func (s Pulls) CreateChoices(ctx context.Context) (PullCreateChoices, error) {
 	item, err := (Repositories{Client: s.Client}).get(ctx, s.Repository)
 	if err != nil {
 		return PullCreateChoices{}, err
 	}
-	result := PullCreateChoices{Repository: repositoryFrom(item)}
+	result := PullCreateChoices{Repository: repositoryFrom(item), Base: pullRepositoryFrom(s.Repository, item)}
+	if err := result.Base.CheckEnabled(); err != nil {
+		return PullCreateChoices{}, err
+	}
 	err = loadTogether(
 		func() (err error) {
 			result.Template, err = s.Template(ctx, result.Repository.DefaultBranch)

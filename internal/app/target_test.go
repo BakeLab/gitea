@@ -69,6 +69,8 @@ func TestResolveIgnoresInstancesWithoutAccounts(t *testing.T) {
 	configureAccounts(t, deps, server.URL, "alice", "alice")
 	configureHost(t, deps, "https://logged-out.example", settings.Host{Insecure: true})
 	require.NoError(t, Execute(context.Background(), deps, []string{"package", "list", "--owner", "team"}))
+	deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": "https://logged-out.example/alice/project.git"}}
+	require.NoError(t, Execute(context.Background(), deps, []string{"package", "list", "--owner", "team"}), "a clone of an instance without accounts does not win over the only instance with one")
 }
 
 func TestResolvePromptsForAccountWhenNoneActive(t *testing.T) {

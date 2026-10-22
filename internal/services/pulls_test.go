@@ -625,6 +625,9 @@ func (f *partialEditServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "GET /api/v1/repos/alice/project":
 		_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
 		return
+	case "GET /api/v1/repos/alice/project/issues/7":
+		_, _ = w.Write([]byte(`{"number":7,"pull_request":{}}`))
+		return
 	case "GET /api/v1/users/carol":
 		_, _ = w.Write([]byte(`{"login":"carol"}`))
 		return

@@ -144,7 +144,17 @@ func (a *application) resolveRequest(ctx context.Context, req targetRequest) (ta
 			return t, err
 		}
 	}
+	a.mu.Lock()
+	a.resolved = t
+	a.mu.Unlock()
 	return t, nil
+}
+
+// lastTarget returns the target the command resolved last.
+func (a *application) lastTarget() target {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.resolved
 }
 
 // accountRepo returns the repository name of the account gt acts as on t's instance as OWNER/NAME.
@@ -512,7 +522,7 @@ func (a *application) environmentSSHRemote(err error, raw string, configured map
 // instance, when nothing else would select one: no GITEA_CLI_HOST or GITEA_INSTANCE_URL, no
 // default_host and several instances, or none. Outside such a clone it does nothing.
 func (a *application) cloneInstance(ctx context.Context, t *target, s settings.Snapshot) {
-	if value, _ := a.envHost(); value != "" || s.Preferences.DefaultHost != "" || len(s.Hosts.Hosts) == 1 {
+	if value, _ := a.envHost(); value != "" || s.Preferences.DefaultHost != "" || len(selectableInstances(s.Hosts.Hosts)) == 1 {
 		return
 	}
 	var clone target
@@ -673,7 +683,7 @@ func (a *application) selectedUser() (string, string) {
 	if a.options.user != "" {
 		return a.options.user, "--user"
 	}
-	return a.deps.Getenv("GITEA_CLI_USER"), "GITEA_CLI_USER"
+	return strings.TrimSpace(a.deps.Getenv("GITEA_CLI_USER")), "GITEA_CLI_USER"
 }
 
 // findAccountKey returns the configured account name that matches selected, ignoring case.

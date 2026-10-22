@@ -79,7 +79,7 @@ func TestPullCommentsAndAttachmentsRequirePullRequests(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"pr", "comment", "create", "1", "--body", "x"}, "#1 in alice/project is an issue, not a pull request; use gt issue comment create 1"},
+		{[]string{"pr", "comment", "create", "1", "--body", "x"}, "#1 in alice/project is an issue, not a pull request; use gt issue comment create 1 -R alice/project"},
 		{[]string{"pr", "comment", "list", "1"}, "#1 in alice/project is an issue"},
 		{[]string{"pr", "comment", "edit", "5", "--body", "x"}, "comment 5 in alice/project is on an issue, not a pull request; use gt issue comment edit 5"},
 		{[]string{"pr", "comment", "delete", "5", "--yes"}, "comment 5 in alice/project is on an issue"},

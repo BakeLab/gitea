@@ -89,7 +89,7 @@ fewer than required give review_required.`, Args: argsExact(0), RunE: func(cmd *
 			return err
 		}
 		items := window.Items
-		view, reviews := a.jsonSelects("merged_by"), a.jsonSelects("reviewers", "reviewer_teams", "reviews", "review_decision")
+		view, reviews := a.jsonSelects("merged_by"), a.jsonSelects(pullReviewFields...)
 		if view || reviews {
 			if items, err = service.Detail(cmd.Context(), items, view, reviews); err != nil {
 				return err
@@ -155,6 +155,33 @@ func (a *application) jsonSelects(fields ...string) bool {
 		}
 	}
 	return false
+}
+
+// pullReviewFields are the JSON fields of a pull request that come from its reviews.
+var pullReviewFields = []string{"reviewers", "reviewer_teams", "reviews", "review_decision"}
+
+// pullResult writes item as JSON with --json, after reading its reviews when the output includes
+// fields that come from them.
+func (a *application) pullResult(cmd *cobra.Command, t target, item services.Pull) error {
+	if a.options.json == "" {
+		return nil
+	}
+	item, err := a.pullWithReviews(cmd, t, item)
+	if err != nil {
+		return err
+	}
+	return a.writeJSON(cmd, item)
+}
+
+func (a *application) pullWithReviews(cmd *cobra.Command, t target, item services.Pull) (services.Pull, error) {
+	if !a.jsonSelects(pullReviewFields...) {
+		return item, nil
+	}
+	reviews, err := (services.Reviews{Client: t.client, Repository: t.Repo}).All(cmd.Context(), item.Number)
+	if err != nil {
+		return item, err
+	}
+	return (services.Pulls{Client: t.client, Repository: t.Repo}).WithReviews(cmd.Context(), item, reviews), nil
 }
 
 func (a *application) pullViewCommand() *cobra.Command {

@@ -36,3 +36,9 @@ func (a *application) gitProbe() git.Runner {
 	}
 	return a.deps.Git
 }
+
+// insideClone reports whether the working directory is inside a Git work tree.
+func (a *application) insideClone(ctx context.Context) bool {
+	inside, _ := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--is-inside-work-tree")
+	return inside == "true"
+}

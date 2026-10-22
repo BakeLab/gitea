@@ -84,7 +84,7 @@ Without an argument, a terminal asks for one of the repositories of the clone's 
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with a repository argument", setFlags([]string{"--view", "--unset"}, view, unset)[0]))
 			}
 			ctx := cmd.Context()
-			if inside, _ := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--is-inside-work-tree"); inside != "true" {
+			if !a.insideClone(ctx) {
 				return clierr.Wrap(clierr.Usage, errors.New("set-default must run inside a Git clone"))
 			}
 			saved, _ := a.gitProbe().Output(ctx, a.options.cwd, false, "config", "--local", "--get", "gt.repository")

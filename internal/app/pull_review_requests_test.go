@@ -22,7 +22,10 @@ func TestReviewRequestOutputUsesPullFields(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		case "/api/v1/repos/owner/repo/pulls/1":
 			require.Equal(t, http.MethodGet, r.Method)
-			_, _ = w.Write([]byte(`{"number":1,"requested_reviewers":[{"login":"alice","email":"omitted@example.test"}],"requested_reviewers_teams":[]}`))
+			_, _ = w.Write([]byte(`{"number":1,"requested_reviewers":[{"login":"alice","email":"omitted@example.test"},{"login":"bob"}],"requested_reviewers_teams":[]}`))
+		case "/api/v1/repos/owner/repo/pulls/1/reviews":
+			// Gitea still lists bob, who reviewed after his request was withdrawn.
+			writeFirstPage(w, r, `[{"id":1,"state":"REQUEST_REVIEW","user":{"login":"alice"}},{"id":2,"state":"COMMENT","user":{"login":"bob"}}]`)
 		default:
 			t.Errorf("unexpected request: %s", r.URL.Path)
 		}

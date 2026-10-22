@@ -113,7 +113,7 @@ func TestPullCommandsFindClosedPullsByBranch(t *testing.T) {
 			serverURL := closedLookupServer(t, &requests)
 			deps, _, _ := serverDeps(t, serverURL)
 			deps.Getenv = serverEnv(serverURL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
-			deps.Git = &fakeGit{results: map[string]string{}}
+			deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true"}}
 			err := Execute(context.Background(), deps, tc.args)
 			if tc.err != "" {
 				require.ErrorContains(t, err, tc.err)

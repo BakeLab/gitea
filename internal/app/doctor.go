@@ -246,9 +246,9 @@ func (a *application) gitCheck(ctx context.Context, instance string) doctorCheck
 // sshCheck reports where SSH remotes connect when the instance uses SSH, or the clone's remote does.
 // sshSource names the setting of the instance's SSH host.
 func sshCheck(t target, repoErr error, sshSource string) (doctorCheck, bool) {
-	var remote *settings.SSHRemoteError
+	remote, isRemote := errors.AsType[*settings.SSHRemoteError](repoErr)
 	switch {
-	case t.Repo == "" && errors.As(repoErr, &remote) && remote.Endpoint != "":
+	case t.Repo == "" && isRemote && remote.Endpoint != "":
 		fix := remote.Fix()
 		if remote.Instance == "" && !remote.Environment {
 			fix = "gt config set ssh_host " + remote.Endpoint + " --host " + t.Host + ", if it is the SSH host of " + t.Host

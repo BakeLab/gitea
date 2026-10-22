@@ -4,9 +4,11 @@
 package app
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,7 +28,7 @@ func publishCreateEnv(t *testing.T, creates *int) (Dependencies, *fakeGit, strin
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/repos/alice/project":
-			_, _ = w.Write([]byte(`{"full_name":"alice/project","permissions":{"push":true}}`))
+			_, _ = w.Write([]byte(`{"has_pull_requests":true,"full_name":"alice/project","permissions":{"push":true}}`))
 			return
 		case "/api/v1/repos/alice/project/branches/main":
 			_, _ = w.Write([]byte(`{"name":"main"}`))
@@ -34,6 +36,9 @@ func publishCreateEnv(t *testing.T, creates *int) (Dependencies, *fakeGit, strin
 		case "/api/v1/repos/alice/project/branches/nope":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"branch does not exist [name: nope]"}`))
+			return
+		case "/api/v1/repos/alice/project/pulls/7/reviews":
+			writeFirstPage(w, r, `[{"id":1,"state":"APPROVED","official":true,"user":{"login":"carol"}}]`)
 			return
 		}
 		require.Equal(t, http.MethodPost, r.Method)
@@ -63,7 +68,7 @@ func TestPullCreateAgitPushesToMatchingRemoteWithoutRemoteFlag(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/repos/alice/project":
-			_, _ = w.Write([]byte(`{"full_name":"alice/project","default_branch":"main","permissions":{"push":true}}`))
+			_, _ = w.Write([]byte(`{"has_pull_requests":true,"full_name":"alice/project","default_branch":"main","permissions":{"push":true}}`))
 		case r.URL.Path == "/api/v1/orgs/alice", strings.HasPrefix(r.URL.Path, "/api/v1/repos/alice/project/raw/"):
 			w.WriteHeader(http.StatusNotFound)
 		case r.Method == http.MethodGet:
@@ -114,6 +119,10 @@ func TestPullCreateAgitRecordsThePullRequestOfTheBranch(t *testing.T) {
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls" {
 			_, _ = w.Write([]byte(`[{"number":6,"head":{"ref":"refs/pull/6/head","label":"","sha":"othersha"},"base":{"ref":"main"}},
 				{"number":5,"title":"Title","html_url":"https://example.test/alice/project/pulls/5","head":{"ref":"refs/pull/5/head","label":"","sha":"localsha"},"base":{"ref":"main"}}]`))
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_pull_requests":true}`))
 			return
 		}
 		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
@@ -170,9 +179,66 @@ func TestPullCreateHelpListsYesForThePush(t *testing.T) {
 func TestPullCreatePushesWithYesWhenHeadUnpublished(t *testing.T) {
 	creates := 0
 	deps, runner, pushKey := publishCreateEnv(t, &creates)
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--head", "feature", "--base", "main", "--json=number", "--no-input", "--yes"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--head", "feature", "--base", "main", "--json=number,reviews", "--no-input", "--yes"}))
 	require.Equal(t, 1, creates)
 	require.Contains(t, runner.calls, pushKey)
+	require.Contains(t, deps.Streams.Out.(*bytes.Buffer).String(), `"reviews":[{"author":"carol"`)
+}
+
+func TestPullCreateRefusesARepositoryWithoutPullRequestsBeforePushing(t *testing.T) {
+	enabled, reads, creates := false, 0, 0
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project":
+			reads++
+			_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","default_branch":"main","has_pull_requests":%t,"permissions":{"push":true}}`, enabled)
+		case "GET /api/v1/repos/alice/project/branches/main":
+			_, _ = w.Write([]byte(`{"name":"main"}`))
+		case "POST /api/v1/repos/alice/project/pulls":
+			creates++
+			_, _ = w.Write([]byte(`{"number":7,"title":"PR","html_url":"https://example.test/pulls/7"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	pushKey := credentialCall(t, deps, server.URL, "alice", "push", "--set-upstream", "--quiet", "--", "origin", "refs/heads/feature")
+	newRunner := func() *fakeGit {
+		return &fakeGit{results: map[string]string{
+			"rev-parse --is-inside-work-tree":                "true",
+			"rev-parse --verify refs/heads/feature^{commit}": "localsha",
+			"symbolic-ref --quiet HEAD":                      "feature",
+			"remote":                                         "origin",
+			"remote get-url origin":                          server.URL + "/alice/project.git",
+			"config --get branch.feature.remote":             "origin",
+			pushKey:                                          "",
+		}}
+	}
+	for _, args := range [][]string{
+		{"--title", "PR", "--head", "feature", "--base", "main", "--no-input", "--yes"},
+		{"--title", "PR", "--head", "feature", "--no-input", "--yes"},
+		{"--agit", "--title", "PR", "--head", "feature", "--base", "main", "--no-input"},
+		{"--interactive"},
+	} {
+		reads = 0
+		runner, form := newRunner(), &recordingPullForm{}
+		deps.Git, deps.PullForm = runner, form
+		deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+		err := Execute(context.Background(), deps, append([]string{"pr", "create", "-R", "alice/project"}, args...))
+		require.EqualError(t, err, "pull requests are disabled in alice/project; turn them on with: gt repo edit --enable-pull-requests -R alice/project", args)
+		require.NotContains(t, strings.Join(runner.calls, "\n"), "push", args)
+		require.Zero(t, form.calls, "the form does not ask for a pull request the repository refuses")
+		require.Equal(t, 1, reads, args)
+	}
+	enabled, reads = true, 0
+	runner := newRunner()
+	deps.Git = runner
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--head", "feature", "--no-input", "--yes"}))
+	require.Contains(t, runner.calls, pushKey)
+	require.Equal(t, 1, creates)
+	require.Equal(t, 1, reads, "the repository is read once for its default branch, pull requests and permissions")
 }
 
 func TestPullCreatePushesANewBranchToTheForkInAForkClone(t *testing.T) {
@@ -193,8 +259,10 @@ func TestPullCreatePushesANewBranchToTheForkInAForkClone(t *testing.T) {
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/acme/project/branches/main":
 					_, _ = w.Write([]byte(`{"name":"main"}`))
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/acme/project":
+					_, _ = w.Write([]byte(`{"full_name":"acme/project","has_pull_requests":true}`))
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/"+test.fork+"/project":
-					_, _ = w.Write([]byte(`{"full_name":"` + test.fork + `/project","fork":true,"parent":{"full_name":"acme/project"},"permissions":{"push":` + strconv.FormatBool(!test.readOnly) + `}}`))
+					_, _ = w.Write([]byte(`{"has_pull_requests":true,"full_name":"` + test.fork + `/project","fork":true,"parent":{"full_name":"acme/project"},"permissions":{"push":` + strconv.FormatBool(!test.readOnly) + `}}`))
 				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/acme/project/pulls":
 					var payload map[string]any
 					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
@@ -251,14 +319,14 @@ func TestPullCreateGoesThroughAForkWithoutPushAccessToTheBase(t *testing.T) {
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/acme/project":
-					_, _ = w.Write([]byte(`{"full_name":"acme/project","permissions":{"push":false}}`))
+					_, _ = w.Write([]byte(`{"has_pull_requests":true,"full_name":"acme/project","permissions":{"push":false}}`))
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project":
-					_, _ = w.Write([]byte(`{"full_name":"alice/project","fork":true,"parent":{"full_name":"acme/project"},"permissions":{"push":true}}`))
+					_, _ = w.Write([]byte(`{"has_pull_requests":true,"full_name":"alice/project","fork":true,"parent":{"full_name":"acme/project"},"permissions":{"push":true}}`))
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/acme/project/branches/main" && test.name != "missing base":
 					_, _ = w.Write([]byte(`{"name":"main"}`))
 				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/acme/project/forks":
 					forked = true
-					_, _ = w.Write([]byte(`{"full_name":"alice/project","clone_url":"https://example.test/alice/project.git"}`))
+					_, _ = w.Write([]byte(`{"has_pull_requests":true,"full_name":"alice/project","clone_url":"https://example.test/alice/project.git"}`))
 				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/acme/project/pulls":
 					var payload map[string]any
 					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
@@ -328,9 +396,9 @@ func TestPullCreatePushesANewBranchToAForkRemoteOnlyOutsideACloneOfTheBase(t *te
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project":
-					_, _ = w.Write([]byte(`{"full_name":"alice/project","fork":true,"parent":{"full_name":"acme/project"},"permissions":{"push":true}}`))
+					_, _ = w.Write([]byte(`{"has_pull_requests":true,"full_name":"alice/project","fork":true,"parent":{"full_name":"acme/project"},"permissions":{"push":true}}`))
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/acme/project":
-					_, _ = w.Write([]byte(`{"full_name":"acme/project","permissions":{"push":true}}`))
+					_, _ = w.Write([]byte(`{"has_pull_requests":true,"full_name":"acme/project","permissions":{"push":true}}`))
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/acme/project/branches/main":
 					_, _ = w.Write([]byte(`{"name":"main"}`))
 				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/acme/project/pulls":
@@ -369,11 +437,15 @@ func TestPullCreatePushesANewBranchToAForkRemoteOnlyOutsideACloneOfTheBase(t *te
 func TestPullCreateWebPublishesTheHeadBeforeOpeningTheComparison(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project" {
-			_, _ = w.Write([]byte(`{"full_name":"alice/project","fork":true,"parent":{"full_name":"acme/project"},"permissions":{"push":true}}`))
+			_, _ = w.Write([]byte(`{"has_pull_requests":true,"full_name":"alice/project","fork":true,"parent":{"full_name":"acme/project"},"permissions":{"push":true}}`))
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/acme/project/branches/main" {
 			_, _ = w.Write([]byte(`{"name":"main"}`))
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/acme/project" {
+			_, _ = w.Write([]byte(`{"full_name":"acme/project","has_pull_requests":true}`))
 			return
 		}
 		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
@@ -480,6 +552,8 @@ func TestPullCreateRequestsReviewsAndUploadsAttachments(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/7":
 			_, _ = w.Write([]byte(`{"number":7,"title":"PR","requested_reviewers":[{"login":"bob"},{"login":"carol"}],"requested_reviewers_teams":[{"name":"core"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/7/reviews":
+			writeFirstPage(w, r, `[{"id":1,"state":"REQUEST_REVIEW","user":{"login":"bob"}},{"id":2,"state":"REQUEST_REVIEW","user":{"login":"carol"}},{"id":3,"state":"REQUEST_REVIEW","team":{"name":"core"}}]`)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/issues/7/assets":
 			file, header, err := r.FormFile("attachment")
 			require.NoError(t, err)
@@ -778,7 +852,7 @@ func testPullCreateDefaultsFromForkBranch(t *testing.T, remote string) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project":
-			_, _ = w.Write([]byte(`{"full_name":"alice/project","default_branch":"main"}`))
+			_, _ = w.Write([]byte(`{"has_pull_requests":true,"full_name":"alice/project","default_branch":"main"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls":
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
 			_, _ = w.Write([]byte(`{"number":1,"html_url":"https://example.org/pulls/1"}`))
@@ -824,6 +898,10 @@ func TestPullCreatePushesAForkBranchThatTracksItsNamesake(t *testing.T) {
 				}
 				if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/branches/main" {
 					_, _ = w.Write([]byte(`{"name":"main"}`))
+					return
+				}
+				if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project" {
+					_, _ = w.Write([]byte(`{"full_name":"alice/project","has_pull_requests":true}`))
 					return
 				}
 				t.Errorf("unexpected %s %s", r.Method, r.URL.Path)

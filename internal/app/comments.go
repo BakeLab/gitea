@@ -49,7 +49,7 @@ func requirePull(cmd *cobra.Command, t target, n int64) error {
 func discussion(cmd *cobra.Command, t target, n int64, kind refKind) (services.Issue, error) {
 	item, err := (services.Issues{Client: t.client, Repository: t.Repo, Pulls: kind == pullRef}).View(cmd.Context(), n)
 	if err == nil && kind == pullRef && item.Kind != services.KindPull {
-		err = fmt.Errorf("#%d in %s is an issue, not a pull request; use %s %d", n, t.Repo, issueCommandPath(cmd), n)
+		err = &services.NotPullError{Number: n, Repository: t.Repo}
 	}
 	return item, err
 }

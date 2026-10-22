@@ -29,7 +29,7 @@ import (
 // OWNER:BRANCH. A cross-repo head (OWNER:BRANCH) is pushed only when the local branch tracks its
 // namesake on a remote of OWNER. Non-work-trees and repositories without a matching remote are
 // skipped. A base branch missing from the repository fails before anything is pushed.
-func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot settings.Snapshot, head, base string) (string, error) {
+func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot settings.Snapshot, head string, base *pullBase) (string, error) {
 	owner, branch, cross := strings.Cut(head, ":")
 	if !cross {
 		branch = head
@@ -38,11 +38,10 @@ func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot
 		return head, nil
 	}
 	ctx := cmd.Context()
-	probe := a.gitProbe()
-	inside, err := probe.Output(ctx, a.options.cwd, false, "rev-parse", "--is-inside-work-tree")
-	if err != nil || inside != "true" {
+	if !a.insideClone(ctx) {
 		return head, nil
 	}
+	probe := a.gitProbe()
 	local, err := probe.Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
 	if err != nil {
 		return head, nil
@@ -63,9 +62,9 @@ func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot
 		remote, published = config.Remote, trackedOwner+":"+branch
 	default:
 		// A branch started from the base branch, or without an upstream.
-		fork, forkOwner, forkNeeded := a.forkRemote(ctx, t)
+		fork, forkOwner, forkNeeded := a.forkRemote(ctx, t, base)
 		if forkNeeded {
-			if err := a.requireBase(ctx, t, base); err != nil {
+			if err := base.require(ctx, t); err != nil {
 				return head, err
 			}
 			if fork, forkOwner, err = a.forkForPush(cmd, t, branch); err != nil {
@@ -90,7 +89,7 @@ func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot
 		return published, nil
 	}
 	if !forked {
-		if err := a.requireBase(ctx, t, base); err != nil {
+		if err := base.require(ctx, t); err != nil {
 			return head, err
 		}
 		confirmation := terminal.Confirmation{
@@ -121,13 +120,53 @@ func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot
 	return published, nil
 }
 
-// requireBase fails when the base branch, unless empty, is missing from t's repository, so that a
-// mistyped --base does not publish the head branch first.
-func (a *application) requireBase(ctx context.Context, t target, base string) error {
-	if base == "" {
+// pullBase is the base branch of a new pull request and its repository, which is read once.
+type pullBase struct {
+	branch string
+	repo   *services.PullRepository
+}
+
+// repository returns the repository of t that the pull request goes into.
+func (b *pullBase) repository(ctx context.Context, t target) (services.PullRepository, error) {
+	if b.repo == nil {
+		repo, err := (services.Pulls{Client: t.client, Repository: t.Repo}).Base(ctx)
+		if err != nil {
+			return repo, err
+		}
+		b.repo = &repo
+	}
+	return *b.repo, nil
+}
+
+// checkEnabled fails when the repository is missing or has its pull requests turned off. Other
+// failures to read it are left to the requests that follow.
+func (b *pullBase) checkEnabled(ctx context.Context, t target) error {
+	repo, err := b.repository(ctx, t)
+	if err != nil {
+		if services.IsNotFound(err) {
+			return err
+		}
 		return nil
 	}
-	_, err := (services.Branches{Client: t.client}).View(ctx, t.Repo, base)
+	return repo.CheckEnabled()
+}
+
+// canPush reports whether the account may push to the repository, or cannot tell.
+func (b *pullBase) canPush(ctx context.Context, t target) bool {
+	repo, err := b.repository(ctx, t)
+	return err != nil || repo.CanPush
+}
+
+// require fails when the repository has its pull requests turned off, or the base branch, unless
+// empty, is missing from it, so that the head branch is not published for nothing.
+func (b *pullBase) require(ctx context.Context, t target) error {
+	if err := b.checkEnabled(ctx, t); err != nil {
+		return err
+	}
+	if b.branch == "" {
+		return nil
+	}
+	_, err := (services.Branches{Client: t.client}).View(ctx, t.Repo, b.branch)
 	return err
 }
 
@@ -154,7 +193,7 @@ func (a *application) remoteRepository(ctx context.Context, t target, remote str
 // account can push to it. Both are empty when there is no such remote, or the account cannot push
 // to that fork, so that the branch goes to the base repository. forkNeeded reports that a remote
 // of t's repository exists but the account can push neither to it nor to a fork remote.
-func (a *application) forkRemote(ctx context.Context, t target) (remote, owner string, forkNeeded bool) {
+func (a *application) forkRemote(ctx context.Context, t target, base *pullBase) (remote, owner string, forkNeeded bool) {
 	names, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote")
 	if err != nil {
 		return "", "", false
@@ -177,10 +216,7 @@ func (a *application) forkRemote(ctx context.Context, t target) (remote, owner s
 		}
 	}
 	service := services.Pulls{Client: t.client, Repository: t.Repo}
-	pushable := func() bool {
-		ok, err := service.CanPush(ctx)
-		return err != nil || ok
-	}
+	pushable := func() bool { return base.canPush(ctx, t) }
 	if baseOrigin && pushable() {
 		return "", "", false // a clone of the base repository
 	}
@@ -302,7 +338,7 @@ func (a *application) pullStateCommand(closing bool) *cobra.Command {
 		if deleteBranch {
 			item = a.deleteHead(cmd, service, item, false, true)
 		}
-		return a.jsonResult(cmd, item)
+		return a.pullResult(cmd, t, item)
 	}}
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "Leave a comment before changing the state")
 	cmd.ValidArgsFunction = firstArg(a.completePulls(map[bool]string{true: "open", false: "closed"}[closing]))
@@ -503,7 +539,7 @@ to that fork: your own, or any as a site administrator. A fork you cannot push t
 		switch {
 		case item.Merged:
 			a.warn(cmd, "Pull request %s is already merged", ref)
-			return a.jsonResult(cmd, item)
+			return a.pullResult(cmd, t, item)
 		case item.State == "closed":
 			return fmt.Errorf("pull request %s is closed; reopen it with: gt pr reopen %d", ref, n)
 		case item.Draft:
@@ -570,7 +606,7 @@ to that fork: your own, or any as a site administrator. A fork you cannot push t
 				merged = a.deleteHead(cmd, service, merged, !item.HeadRemoteDeleted, deleteLocal)
 			}
 		}
-		return a.jsonResult(cmd, merged)
+		return a.pullResult(cmd, t, merged)
 	}}
 	enumFlag(cmd, &method, "method", "s", "", "Merge method (default: the repository's default merge style)", mergeMethods...)
 	cmd.Flags().BoolVar(&style.merge, "merge", false, "Create a merge commit")

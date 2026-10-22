@@ -78,7 +78,7 @@ outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnot
 		if cmd.Flags().Changed("allow-maintainer-edit") {
 			opts.AllowMaintainerEdit = &maintainer
 		}
-		if err := requireNames("project", "", addProjects, removeProjects); err != nil {
+		if err := validateProjectChanges(addProjects, removeProjects); err != nil {
 			return err
 		}
 		if opts == (services.PullEdit{}) && !useEditor && !draft && !ready && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone") && !removeMilestone && len(addProjects)+len(removeProjects) == 0 {
@@ -173,7 +173,7 @@ outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnot
 		}
 		a.done(cmd, "Edited pull request %s", refLabel(t.Repo, n, item.Title))
 		// The edit stands and is reported; what Gitea left out fails the command after.
-		return errors.Join(followUpError(fmt.Sprintf("pull request #%d", n), "edited", failures), pullEditLeftOut(cmd, n, opts, item, t.Repo), a.jsonResult(cmd, item))
+		return errors.Join(followUpError(fmt.Sprintf("pull request #%d", n), "edited", failures), pullEditLeftOut(cmd, n, opts, item, t.Repo), a.pullResult(cmd, t, item))
 	}}
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Pull request title")
 	cmd.Flags().StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339 or Unix timestamp; only the date counts, as the end of that day in UTC; empty clears it")
@@ -264,7 +264,7 @@ removes or adds that marker.`, Annotations: pullArgumentsAnnotation(nil), Args: 
 				a.done(cmd, "Marked pull request %s as ready for review", refLabel(t.Repo, n, item.Title))
 			}
 		}
-		return a.jsonResult(cmd, item)
+		return a.pullResult(cmd, t, item)
 	}}
 	cmd.Flags().BoolVar(&undo, "undo", false, "Turn the pull request back into a draft")
 	cmd.ValidArgsFunction = firstArg(a.completePulls("open"))

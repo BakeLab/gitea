@@ -61,6 +61,7 @@ func TestLoginValidatesUserEnvironmentWithFlagPrecedence(t *testing.T) {
 	}{
 		{"environment matches", "ALICE", "", true},
 		{"environment mismatches", "bob", "", false},
+		{"blank environment is unset", " ", "", true},
 		{"flag overrides environment", "bob", "alice", true},
 		{"flag mismatches", "alice", "bob", false},
 	} {

@@ -83,6 +83,9 @@ that git push updates it and pr commands without an argument select the pull req
 		if cmd.Flags().Changed("branch") && strings.TrimSpace(branch) == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--branch cannot be empty"))
 		}
+		if !a.insideClone(cmd.Context()) {
+			return clierr.Wrap(clierr.Usage, errors.New("pr checkout must run inside a Git clone"))
+		}
 		target, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
 			return err

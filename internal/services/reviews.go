@@ -132,7 +132,7 @@ func (s Reviews) List(ctx context.Context, n int64, limit, page int) ([]Review, 
 		return c.PullRequests.ListPullReviews(ctx, owner, name, n, gitea.ListPullReviewsOptions{ListOptions: listOptions(limit, page)})
 	})
 	if err != nil {
-		return nil, pullError(ctx, s.Client, s.Repository, err, n)
+		return nil, pullReadError(ctx, s.Client, s.Repository, err, n)
 	}
 	return convertAll(reviews, reviewFrom), nil
 }
@@ -150,7 +150,7 @@ func (s Reviews) ListPage(ctx context.Context, n int64, limit, page int) (Page[R
 		return reviews, headers, err
 	})
 	if err != nil {
-		return Page[Review]{}, pullError(ctx, s.Client, s.Repository, err, n)
+		return Page[Review]{}, pullReadError(ctx, s.Client, s.Repository, err, n)
 	}
 	return convertPage(window, reviewFrom), nil
 }
@@ -187,7 +187,7 @@ func (s Reviews) reviewError(ctx context.Context, err error, n, id int64) error 
 		return err
 	}
 	if strings.HasPrefix(apiErr.Message, "pull request does not exist") {
-		return &NotFoundError{Kind: "pull request", Key: "#" + strconv.FormatInt(n, 10), Scope: s.Repository, Err: err}
+		return pullReadError(ctx, s.Client, s.Repository, err, n)
 	}
 	missing := &NotFoundError{Kind: "review", Key: strconv.FormatInt(id, 10), Scope: "pull request #" + strconv.FormatInt(n, 10), Err: err}
 	if strings.HasPrefix(apiErr.Message, "review does not exist") {
@@ -216,7 +216,7 @@ func (s Reviews) Create(ctx context.Context, n int64, opts ReviewOptions) (Revie
 	item, err := repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
 		return c.PullRequests.CreatePullReview(ctx, owner, name, n, option)
 	})
-	return item, s.closedPullError(ctx, n, pullError(ctx, s.Client, s.Repository, err, n), "only comment reviews can be submitted")
+	return item, s.closedPullError(ctx, n, pullReadError(ctx, s.Client, s.Repository, err, n), "only comment reviews can be submitted")
 }
 
 // closedPullError tells whether pull request n is merged or closed when Gitea refuses a review
@@ -409,7 +409,7 @@ func (s Reviews) reviewComments(ctx context.Context, n int64, reviews []Review, 
 			return c.PullRequests.ListPullReviewComments(ctx, owner, name, n, review.ID)
 		})
 		if err != nil {
-			return nil, err
+			return nil, s.reviewError(ctx, err, n, review.ID)
 		}
 		results = append(results, convertAll(comments, reviewCommentFrom)...)
 	}

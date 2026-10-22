@@ -87,7 +87,7 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 		if err != nil {
 			return err
 		}
-		if err := requireNames("project", "", addProjects, removeProjects); err != nil {
+		if err := validateProjectChanges(addProjects, removeProjects); err != nil {
 			return err
 		}
 		editing := opts != (services.IssueEdit{}) || useEditor || metadata.changed(cmd) || milestone != ""

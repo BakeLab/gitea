@@ -293,3 +293,46 @@ func TestPullViewResolvesCurrentBranch(t *testing.T) {
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.EqualError(t, err, "pass a pull request number, URL or branch with --repo")
 }
+
+func TestPullCommandsNameTheIssueAPullRequestNumberBelongsTo(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_pull_requests":true}`))
+		case "/api/v1/repos/alice/project/issues/5":
+			_, _ = w.Write([]byte(`{"number":5,"title":"An issue"}`))
+		case "/api/v1/users/bob":
+			_, _ = w.Write([]byte(`{"login":"bob"}`))
+		case "/api/v1/repos/alice/project/pulls/5/reviews", "/api/v1/repos/alice/project/pulls/5/reviews/7", "/api/v1/repos/alice/project/pulls/5/reviews/7/comments", "/api/v1/repos/alice/project/pulls/5/requested_reviewers":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"pull request does not exist [id: 0, issue_id: 0, head_repo_id: 0, base_repo_id: 1, head_branch: , base_branch: ]"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		}
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"pr", "view", "5", "-R", "alice/project"}, "#5 in alice/project is an issue, not a pull request; use gt issue view 5 -R alice/project"},
+		{[]string{"pr", "view", server.URL + "/alice/project/pulls/5"}, "#5 in alice/project is an issue, not a pull request; use gt issue view 5 -R alice/project"},
+		{[]string{"pr", "view", "5"}, "#5 in alice/project is an issue, not a pull request; use gt issue view 5"},
+		{[]string{"pr", "close", "5", "-R", "alice/project"}, "#5 in alice/project is an issue, not a pull request; use gt issue close 5 -R alice/project"},
+		{[]string{"pr", "diff", "5", "-R", "alice/project"}, "#5 in alice/project is an issue, not a pull request"},
+		{[]string{"pr", "diff", "5", "--name-only", "-R", "alice/project"}, "#5 in alice/project is an issue, not a pull request"},
+		{[]string{"pr", "review", "list", "5", "-R", "alice/project"}, "#5 in alice/project is an issue, not a pull request"},
+		{[]string{"pr", "review", "comments", "5", "-R", "alice/project"}, "#5 in alice/project is an issue, not a pull request"},
+		{[]string{"pr", "review", "comments", "5", "--review", "7", "-R", "alice/project"}, "#5 in alice/project is an issue, not a pull request"},
+		{[]string{"pr", "review", "request", "5", "--reviewer", "bob", "-R", "alice/project"}, "#5 in alice/project is an issue, not a pull request"},
+		{[]string{"pr", "review", "dismiss", "5", "7", "--body", "x", "--yes", "-R", "alice/project"}, "#5 in alice/project is an issue, not a pull request"},
+		{[]string{"pr", "review", "5", "--comment", "--body", "x", "-R", "alice/project"}, "#5 in alice/project is an issue, not a pull request"},
+		{[]string{"pr", "view", "6", "-R", "alice/project"}, "pull request #6 not found in alice/project"},
+	} {
+		deps, _, _ := serverDeps(t, server.URL)
+		deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": server.URL + "/alice/project.git"}}
+		err := Execute(context.Background(), deps, tc.args)
+		require.EqualError(t, err, tc.want, tc.args)
+	}
+}

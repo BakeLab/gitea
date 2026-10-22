@@ -43,6 +43,20 @@ func (e *NotFoundError) Error() string {
 
 func (e *NotFoundError) Unwrap() error { return e.Err }
 
+// NotPullError reports that the number a pull request was asked for is an issue's.
+type NotPullError struct {
+	Number     int64
+	Repository string
+	// Err is the *NotFoundError of the pull request.
+	Err error
+}
+
+func (e *NotPullError) Error() string {
+	return "#" + strconv.FormatInt(e.Number, 10) + " in " + e.Repository + " is an issue, not a pull request"
+}
+
+func (e *NotPullError) Unwrap() error { return e.Err }
+
 // NotFound reports that no kind named key exists in scope.
 func NotFound(kind, key, scope string) *NotFoundError {
 	return &NotFoundError{Kind: kind, Key: key, Scope: scope}

@@ -28,11 +28,11 @@ func TestPullCleanRejectsOpenPullBeforeGitMutation(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
-	runner := &fakeGit{}
+	runner := &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true"}}
 	deps.Git = runner
 	err := Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input"})
 	require.ErrorContains(t, err, "still open")
-	require.Empty(t, runner.calls)
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree"}, runner.calls)
 	require.Empty(t, out.String())
 }
 

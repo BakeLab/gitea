@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -286,6 +287,12 @@ func (s Wiki) Delete(ctx context.Context, name string) error {
 	})
 	if err := s.disabled(ctx, err); err != nil {
 		return err
+	}
+	// Gitea fails with a server error to delete from a wiki that was never created.
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status >= http.StatusInternalServerError {
+		if _, lookupErr := s.lookup(ctx, name); IsNotFound(lookupErr) {
+			return lookupErr
+		}
 	}
 	return Classify(err, "wiki page", strconv.Quote(name), s.Repository)
 }

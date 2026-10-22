@@ -20,6 +20,9 @@ import (
 func (a *application) pullCleanCommand() *cobra.Command {
 	var ignoreSHA bool
 	cmd := &cobra.Command{Use: "clean [<number> | <url> | <branch>]", Short: "Delete the branches of a merged or closed pull request", Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+		if !a.insideClone(cmd.Context()) {
+			return clierr.Wrap(clierr.Usage, errors.New("pr clean must run inside a Git clone"))
+		}
 		target, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
 			return err

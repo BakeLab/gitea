@@ -157,7 +157,7 @@ func newPullEditServer(t *testing.T, writer bool) *pullEditServer {
 func (f *pullEditServer) state() string {
 	pull := map[string]any{
 		"id": 70, "number": 12, "title": f.title, "base": map[string]any{"ref": f.base},
-		"allow_maintainer_edit": f.maintainers, "labels": []any{}, "assignees": []any{},
+		"allow_maintainer_edit": f.maintainers, "labels": []any{}, "assignees": []any{}, "pull_request": map[string]any{},
 	}
 	if f.milestone != 0 {
 		pull["milestone"] = map[string]any{"id": f.milestone, "title": "Release"}

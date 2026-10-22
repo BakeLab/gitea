@@ -42,7 +42,7 @@ func (a *application) pullReviewRequestCommand(add bool) *cobra.Command {
 			names = append(names, "team "+team)
 		}
 		a.done(cmd, "%s %s on %s", verb, strings.Join(names, ", "), refLabel(t.Repo, item.Number, item.Title))
-		return a.jsonResult(cmd, item)
+		return a.pullResult(cmd, t, item)
 	}}
 	cmd.Flags().StringSliceVarP(&input.Users, "reviewer", "r", nil, "Reviewer usernames or email addresses; @me for yourself")
 	cmd.Flags().StringSliceVar(&input.Teams, "team", nil, "Teams of the repository's organization")

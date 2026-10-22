@@ -29,7 +29,7 @@ func TestPullCreateChoicesFetchRepositoryOnce(t *testing.T) {
 				case r.URL.Path == "/api/v1/orgs/alice":
 					w.WriteHeader(http.StatusNotFound)
 				case r.URL.Path == "/api/v1/repos/alice/project":
-					_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","default_branch":"trunk","permissions":{"push":%t}}`, push)
+					_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","default_branch":"trunk","has_pull_requests":true,"permissions":{"push":%t}}`, push)
 				case strings.HasPrefix(r.URL.Path, "/api/v1/repos/alice/project/raw/"):
 					assert.Equal(t, "trunk", r.URL.Query().Get("ref"))
 					if r.URL.Path != "/api/v1/repos/alice/project/raw/.gitea/PULL_REQUEST_TEMPLATE.md" {
@@ -88,7 +88,7 @@ func TestPullCreateChoicesLoadConcurrently(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/api/v1/repos/alice/project" {
-			_, _ = w.Write([]byte(`{"full_name":"alice/project","default_branch":"main","permissions":{"push":true}}`))
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","default_branch":"main","has_pull_requests":true,"permissions":{"push":true}}`))
 			return
 		}
 		if ch, ok := arrived[path]; ok {
@@ -124,7 +124,7 @@ func TestPullCreateChoicesReportFailures(t *testing.T) {
 				case r.URL.Path == failing:
 					w.WriteHeader(http.StatusInternalServerError)
 				case r.URL.Path == "/api/v1/repos/alice/project":
-					_, _ = w.Write([]byte(`{"full_name":"alice/project","default_branch":"main","permissions":{"push":true}}`))
+					_, _ = w.Write([]byte(`{"full_name":"alice/project","default_branch":"main","has_pull_requests":true,"permissions":{"push":true}}`))
 				default:
 					_, _ = w.Write([]byte(`[]`))
 				}

@@ -61,15 +61,22 @@ func (a *application) rememberSSHHost(cmd *cobra.Command, t target, sshHost stri
 	if standard, _ := settings.SSHEndpoint(settings.DefaultSSHHost(t.Host)); err != nil || learned == standard {
 		return
 	}
-	saved, environment := false, false
+	snapshot, err := a.settings()
+	if err != nil {
+		return
+	}
+	if host, exists := snapshot.Hosts.Hosts[t.Host]; !exists {
+		if instance, err := settings.ResolveHost(a.tokenInstance(), snapshot.Hosts.Hosts); a.deps.Getenv("GITEA_TOKEN") != "" && err == nil && instance == t.Host {
+			a.warn(cmd, "gt commands in the clone need the SSH host of %s: set GITEA_INSTANCE_SSH_HOST=%s", t.Host, sshHost)
+		}
+		return
+	} else if host.SSHHost != "" {
+		return
+	}
+	saved := false
 	err = a.deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
 		host, exists := s.Hosts.Hosts[t.Host]
-		if !exists {
-			instance, err := settings.ResolveHost(a.tokenInstance(), s.Hosts.Hosts)
-			environment = a.deps.Getenv("GITEA_TOKEN") != "" && err == nil && instance == t.Host
-			return nil
-		}
-		if host.SSHHost != "" {
+		if !exists || host.SSHHost != "" {
 			return nil
 		}
 		host.SSHHost, saved = sshHost, true
@@ -81,8 +88,6 @@ func (a *application) rememberSSHHost(cmd *cobra.Command, t target, sshHost stri
 		a.warn(cmd, "Could not save the SSH host of %s: %v; run gt config set ssh_host %s --host %s", t.Host, err, sshHost, t.Host)
 	case saved:
 		a.done(cmd, "Set ssh_host of %s to %s", t.Host, sshHost)
-	case environment:
-		a.warn(cmd, "gt commands in the clone need the SSH host of %s: set GITEA_INSTANCE_SSH_HOST=%s", t.Host, sshHost)
 	}
 }
 
@@ -117,10 +122,11 @@ func (a *application) repoCloneCommand() *cobra.Command {
 		Use:   "clone <repository> [<directory>] [-- <gitflags>...]",
 		Short: "Clone a repository locally",
 		Long: `Clone a repository with gt's credentials, over the protocol of a URL argument, else the
-configured Git protocol. Git flags can follow --. A fork's parent is added as the "upstream" remote, and gt commands in the clone then
-target the parent. A pull mirror's source is added as the "source" remote; gt commands keep
-targeting the mirror. An HTTPS clone keeps the instance's stored TLS client certificate and
---insecure setting in its Git configuration; GITEA_INSTANCE_INSECURE applies to the clone only.`,
+configured Git protocol. Git flags can follow --. A fork's parent is added as the "upstream"
+remote, and gt commands in the clone then target the parent. A pull mirror's source is added as
+the "source" remote; gt commands keep targeting the mirror. An HTTPS clone keeps the instance's
+stored TLS client certificate and --insecure setting in its Git configuration;
+GITEA_INSTANCE_INSECURE applies to the clone only.`,
 		Example: `# Clone a repository into ./project
 $ gt repo clone alice/project
 
@@ -153,8 +159,8 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 			t, err := a.resolve(cmd.Context(), true)
 			// An SSH URL on the web host of an instance without ssh_host is cloned when the API
 			// confirms its SSH endpoint.
-			var unknownSSH *settings.SSHRemoteError
-			if errors.As(err, &unknownSSH) && unknownSSH.Instance != "" {
+			unknownSSH, isSSH := errors.AsType[*settings.SSHRemoteError](err)
+			if isSSH && unknownSSH.Instance != "" {
 				if u, parseErr := settings.ParseRemote(args[0]); parseErr == nil {
 					a.options.repo = unknownSSH.Instance + "/" + strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
 					t, err = a.resolve(cmd.Context(), true)
@@ -283,7 +289,7 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 // of it by owner, such as the fork of an earlier run.
 func (a *application) checkForkRemote(cmd *cobra.Command, t target, name, owner string) (rename bool, current string, err error) {
 	ctx := cmd.Context()
-	if inside, _ := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--is-inside-work-tree"); inside != "true" {
+	if !a.insideClone(ctx) {
 		return false, "", clierr.Wrap(clierr.Usage, fmt.Errorf("--remote must run inside a Git clone of %s", t.Repo))
 	}
 	existing, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", name)
@@ -291,7 +297,10 @@ func (a *application) checkForkRemote(cmd *cobra.Command, t target, name, owner 
 		return false, "", nil
 	}
 	if t.ownsRemote(existing) {
-		if _, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", "upstream"); err == nil || name == "upstream" {
+		if name == "upstream" {
+			return false, "", clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote upstream points to %s; pass another --remote-name", t.Repo))
+		}
+		if _, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", "upstream"); err == nil {
 			return false, "", clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %s points to %s and cannot be renamed to upstream, which exists; pass --remote-name", name, t.Repo))
 		}
 		return true, "", nil

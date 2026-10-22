@@ -210,6 +210,7 @@ func TestSSHURLCloneWithOnlyAnEnvironmentToken(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "ssh://git@127.0.0.1:2222/alice/project.git", "destination", "--no-input"}))
 	require.Equal(t, []string{call}, runner.calls)
 	require.Equal(t, "! gt commands in the clone need the SSH host of "+server.URL+": set GITEA_INSTANCE_SSH_HOST=127.0.0.1:2222\n", diagnostics.String())
+	require.NoFileExists(t, filepath.Join(deps.Settings.Dir, "hosts.yml"), "an instance only in the environment leaves the configuration alone")
 	runner.calls = nil
 	err = Execute(context.Background(), deps, []string{"repo", "clone", "ssh://git@127.0.0.1:2223/alice/project.git", "--no-input"})
 	require.EqualError(t, err, "SSH remote does not match a configured instance; if 127.0.0.1:2223 is the SSH host of "+server.URL+", set GITEA_INSTANCE_SSH_HOST=127.0.0.1:2223")
