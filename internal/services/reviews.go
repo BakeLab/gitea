@@ -30,6 +30,8 @@ type Review struct {
 	SubmittedAt   string `json:"submitted_at"`
 	CommentsCount int    `json:"comments_count"`
 	Dismissed     bool   `json:"dismissed"`
+	// Official tells whether the review counts towards the approvals the base branch requires.
+	Official bool `json:"official"`
 }
 
 // Reviewer names who the review is by, or for a request to a team, "team NAME".
@@ -48,6 +50,7 @@ func reviewFrom(review *gitea.PullReview) Review {
 	return Review{
 		ID: review.ID, Body: review.Body, State: string(review.State), Author: login(review.Reviewer), Team: team, URL: review.HTMLURL,
 		Commit: review.CommitID, SubmittedAt: timestamp(review.Submitted), CommentsCount: review.CodeCommentsCount, Dismissed: review.Dismissed,
+		Official: review.Official,
 	}
 }
 
@@ -211,7 +214,25 @@ func (s Reviews) Create(ctx context.Context, n int64, opts ReviewOptions) (Revie
 	item, err := repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
 		return c.PullRequests.CreatePullReview(ctx, owner, name, n, option)
 	})
-	return item, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository)
+	return item, s.closedPullError(ctx, n, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository), "only comment reviews can be submitted")
+}
+
+// closedPullError tells whether pull request n is merged or closed when Gitea refuses a review
+// change with its bare "closed or merged PR" 422, and returns err otherwise.
+func (s Reviews) closedPullError(ctx context.Context, n int64, err error, hint string) error {
+	apiErr, ok := errors.AsType[*transport.APIError](err)
+	if !ok || apiErr.Status != http.StatusUnprocessableEntity || !strings.Contains(apiErr.Message, "closed or merged PR") {
+		return err
+	}
+	pull, pullErr := (Pulls{Client: s.Client, Repository: s.Repository}).get(ctx, n)
+	if pullErr != nil {
+		return err
+	}
+	conflict := &ConflictError{Reason: ReasonClosed, Kind: "pull request", Key: "#" + strconv.FormatInt(n, 10), Hint: hint, Err: err}
+	if pull.HasMerged {
+		conflict.Reason = ReasonMerged
+	}
+	return conflict
 }
 
 // Submit publishes an existing pending review with explicitly collected input.
@@ -233,14 +254,14 @@ func (s Reviews) Submit(ctx context.Context, n, id int64, opts ReviewSubmitOptio
 		var review gitea.PullReview
 		endpoint := fmt.Sprintf("repos/%s/pulls/%d/reviews/%d", s.Repository, n, id)
 		if err := sendJSON(ctx, s.Client, http.MethodPost, endpoint, option, &review); err != nil {
-			return Review{}, err
+			return Review{}, s.closedPullError(ctx, n, err, "only comment reviews can be submitted")
 		}
 		return reviewFrom(&review), nil
 	}
 	item, err := repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
 		return c.PullRequests.SubmitPullReview(ctx, owner, name, n, id, option)
 	})
-	return item, s.reviewError(ctx, err, n, id)
+	return item, s.closedPullError(ctx, n, s.reviewError(ctx, err, n, id), "only comment reviews can be submitted")
 }
 
 // Delete removes one review.
@@ -259,7 +280,7 @@ func (s Reviews) Dismiss(ctx context.Context, n, id int64, dismiss bool, message
 		return c.PullRequests.UnDismissPullReview(ctx, owner, name, n, id)
 	})
 	if err != nil {
-		return Review{}, s.reviewError(ctx, err, n, id)
+		return Review{}, s.closedPullError(ctx, n, s.reviewError(ctx, err, n, id), "")
 	}
 	review, err := s.View(ctx, n, id)
 	if err != nil {
@@ -361,6 +382,18 @@ func ReviewDecision(reviews []Review, requested bool) string {
 		return "review_required"
 	}
 	return decision
+}
+
+// OfficialApprovals counts the reviewers whose latest decisive review is an official approval
+// that was not dismissed.
+func OfficialApprovals(reviews []Review) int64 {
+	var approvals int64
+	for _, review := range LatestReviews(slices.DeleteFunc(slices.Clone(reviews), func(review Review) bool { return review.State == string(gitea.ReviewStateComment) })) {
+		if review.State == string(gitea.ReviewStateApproved) && review.Official && !review.Dismissed {
+			approvals++
+		}
+	}
+	return approvals
 }
 
 func (s Reviews) reviewComments(ctx context.Context, n int64, reviews []Review, skipEmpty bool) ([]ReviewComment, error) {

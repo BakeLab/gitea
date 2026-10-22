@@ -39,8 +39,10 @@ name.
 A branch that is not on the remote yet is pushed first, with its upstream set, after a
 confirmation; without a terminal, pass --yes to push it. A branch that
 does not track a branch of the same name yet goes to the fork when origin is a fork of the
-repository, or, when origin is not the repository itself, to the only remote of your own
-fork; otherwise it goes to the repository's remote.`, Annotations: map[string]string{"gt.confirm": "true"}, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+repository, or, when origin is not the repository itself or you cannot push to it, to the only
+remote of your own fork; otherwise it goes to the repository's remote. Without push access and
+a fork remote, gt offers on a terminal to fork the repository and adds the fork as the remote
+"fork"; elsewhere, run gt repo fork --remote first. A missing base branch fails before the push.`, Annotations: map[string]string{"gt.confirm": "true"}, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		return a.runPullCreate(cmd, &f)
 	}}
 	create.Flags().StringSliceVarP(&f.options.Assignees, "assignee", "a", nil, "Assign users by username; @me for yourself")
@@ -97,6 +99,9 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		}
 		if err := onlyFlagsWith(cmd, "agit", "AGit pushes carry only a title and body", "title", "body", "body-file", "editor", "head", "base", "draft", "fill", "allow-maintainer-edits", "topic"); err != nil {
 			return err
+		}
+		if f.topic != "" && f.topic == f.options.Base {
+			return agitTopicError(f.topic)
 		}
 	} else if f.topic != "" {
 		return clierr.Wrap(clierr.Usage, errors.New("--topic requires --agit"))
@@ -182,7 +187,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	}
 	if f.web {
 		// The comparison page needs the head on Gitea, as OWNER:BRANCH when it went to a fork.
-		if f.options.Head, err = a.ensureHeadPublished(cmd, t, s, f.options.Head); err != nil {
+		if f.options.Head, err = a.ensureHeadPublished(cmd, t, s, f.options.Head, f.options.Base); err != nil {
 			return err
 		}
 		return a.openBrowser(cmd, repositoryURL(t)+"/compare/"+compareRef(f.options.Base)+"..."+compareRef(f.options.Head))
@@ -236,7 +241,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	if err != nil {
 		return err
 	}
-	if f.options.Head, err = a.ensureHeadPublished(cmd, t, s, f.options.Head); err != nil {
+	if f.options.Head, err = a.ensureHeadPublished(cmd, t, s, f.options.Head, f.options.Base); err != nil {
 		return err
 	}
 	item, err := service.Create(cmd.Context(), f.options)
@@ -267,6 +272,9 @@ func (a *application) pushAgit(cmd *cobra.Command, t target, s settings.Snapshot
 	if opts.Topic == "" {
 		opts.Topic = opts.Head
 	}
+	if opts.Topic == opts.Base {
+		return agitTopicError(opts.Topic)
+	}
 	var err error
 	if opts.Remote == "" {
 		if opts.Remote, err = a.checkoutRemote(cmd.Context(), t, s); err != nil {
@@ -284,6 +292,10 @@ func (a *application) pushAgit(cmd *cobra.Command, t target, s settings.Snapshot
 		return a.reportCreatedPull(cmd, t, pull)
 	}
 	return nil
+}
+
+func agitTopicError(topic string) error {
+	return clierr.Wrap(clierr.Usage, fmt.Errorf("the AGit topic %s must differ from the base branch; pass another --topic", topic))
 }
 
 // recordAgitPull records the AGit pull request just pushed from the head branch in that branch's
@@ -468,7 +480,7 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 	if err := a.refuseEmptyPull(cmd.Context(), target, options.Base, options.Head); err != nil {
 		return err
 	}
-	if options.Head, err = a.ensureHeadPublished(cmd, target, snapshot, options.Head); err != nil {
+	if options.Head, err = a.ensureHeadPublished(cmd, target, snapshot, options.Head, options.Base); err != nil {
 		return err
 	}
 	item, err := service.Create(cmd.Context(), options)

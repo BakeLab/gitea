@@ -117,7 +117,7 @@ func (a *application) currentPullStatus(cmd *cobra.Command) (*services.Pull, pul
 		return nil, details, branch
 	}
 	if details.reviews, err = (services.Reviews{Client: t.client, Repository: t.Repo}).All(cmd.Context(), n); err == nil {
-		pull = pull.WithReviews(details.reviews)
+		pull = service.WithReviews(cmd.Context(), pull, details.reviews)
 	}
 	if pull.HeadSHA != "" {
 		details.checks, _ = service.CommitChecks(cmd.Context(), pull.HeadSHA)

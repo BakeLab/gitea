@@ -24,10 +24,12 @@ import (
 // ensureHeadPublished pushes the head branch, setting its upstream, when the selected remote tip is
 // missing or differs, and returns the head to create the pull request from. A branch that tracks
 // its namesake on a remote other than the base repository's is pushed there; any other branch, in
-// a clone of a fork, goes to the fork. In both cases the head becomes OWNER:BRANCH. A cross-repo
-// head (OWNER:BRANCH) is pushed only when the local branch tracks its namesake on a remote of
-// OWNER. Non-work-trees and repositories without a matching remote are skipped.
-func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot settings.Snapshot, head string) (string, error) {
+// a clone of a fork, goes to the fork, and so it does in a clone of the base repository that the
+// account cannot push to, after forking it on a terminal. In those cases the head becomes
+// OWNER:BRANCH. A cross-repo head (OWNER:BRANCH) is pushed only when the local branch tracks its
+// namesake on a remote of OWNER. Non-work-trees and repositories without a matching remote are
+// skipped. A base branch missing from the repository fails before anything is pushed.
+func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot settings.Snapshot, head, base string) (string, error) {
 	owner, branch, cross := strings.Cut(head, ":")
 	if !cross {
 		branch = head
@@ -45,7 +47,7 @@ func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot
 	if err != nil {
 		return head, nil
 	}
-	published, remote := head, ""
+	published, remote, forked := head, "", false
 	config := git.ReadBranchConfig(ctx, probe, a.options.cwd, branch)
 	tracked := a.remoteRepository(ctx, t, config.Remote)
 	trackedOwner, _, _ := strings.Cut(tracked, "/")
@@ -61,7 +63,17 @@ func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot
 		remote, published = config.Remote, trackedOwner+":"+branch
 	default:
 		// A branch started from the base branch, or without an upstream.
-		if fork, forkOwner := a.forkRemote(ctx, t); fork != "" {
+		fork, forkOwner, forkNeeded := a.forkRemote(ctx, t)
+		if forkNeeded {
+			if err := a.requireBase(ctx, t, base); err != nil {
+				return head, err
+			}
+			if fork, forkOwner, err = a.forkForPush(cmd, t, branch); err != nil {
+				return head, err
+			}
+			forked = true
+		}
+		if fork != "" {
 			remote, published = fork, forkOwner+":"+branch
 		}
 	}
@@ -77,12 +89,17 @@ func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot
 	if tipErr == nil && remoteTip == local {
 		return published, nil
 	}
-	confirmation := terminal.Confirmation{
-		Prompt: fmt.Sprintf("Push branch %s to %s first?", branch, remote), DefaultYes: true,
-		NonTTY: fmt.Sprintf("push branch %q to remote %q before creating the pull request (or push it first)", branch, remote),
-	}
-	if err := a.confirmAction(cmd, confirmation); err != nil {
-		return head, err
+	if !forked {
+		if err := a.requireBase(ctx, t, base); err != nil {
+			return head, err
+		}
+		confirmation := terminal.Confirmation{
+			Prompt: fmt.Sprintf("Push branch %s to %s first?", branch, remote), DefaultYes: true,
+			NonTTY: fmt.Sprintf("push branch %q to remote %q before creating the pull request (or push it first)", branch, remote),
+		}
+		if err := a.confirmAction(cmd, confirmation); err != nil {
+			return head, err
+		}
 	}
 	credentials, err := a.remoteCredentials(ctx, t, remote)
 	if err != nil {
@@ -94,6 +111,16 @@ func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot
 	}
 	a.done(cmd, "Pushed %s to %s", branch, remote)
 	return published, nil
+}
+
+// requireBase fails when the base branch, unless empty, is missing from t's repository, so that a
+// mistyped --base does not publish the head branch first.
+func (a *application) requireBase(ctx context.Context, t target, base string) error {
+	if base == "" {
+		return nil
+	}
+	_, err := (services.Branches{Client: t.client}).View(ctx, t.Repo, base)
+	return err
 }
 
 // remoteRepository returns the OWNER/NAME of the repository the named Git remote points to on t's
@@ -113,23 +140,26 @@ func (a *application) remoteRepository(ctx context.Context, t target, remote str
 	return repo
 }
 
-// forkRemote returns the Git remote of a fork of t's repository and the owner of that fork, which
-// may be an organization: origin when it is such a fork, else, unless origin is t's repository
-// itself, the only remote of a repository of the account gt acts as. Both are empty when there is
-// no such remote, or the account cannot push to that fork, so that a clone of the base repository
-// keeps pushing new branches to origin.
-func (a *application) forkRemote(ctx context.Context, t target) (remote, owner string) {
+// forkRemote returns the Git remote of a fork of t's repository to push a new branch to, and the
+// owner of that fork, which may be an organization: origin when it is such a fork, else the only
+// remote of a fork of the account gt acts as, unless origin is t's repository itself and the
+// account can push to it. Both are empty when there is no such remote, or the account cannot push
+// to that fork, so that the branch goes to the base repository. forkNeeded reports that a remote
+// of t's repository exists but the account can push neither to it nor to a fork remote.
+func (a *application) forkRemote(ctx context.Context, t target) (remote, owner string, forkNeeded bool) {
 	names, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote")
 	if err != nil {
-		return "", ""
+		return "", "", false
 	}
 	login := t.login()
 	forks := map[string]string{}
+	baseOrigin, baseRemote := false, false
 	for name := range strings.FieldsSeq(names) {
 		repo := a.remoteRepository(ctx, t, name)
 		repoOwner, _, _ := strings.Cut(repo, "/")
-		if name == "origin" && strings.EqualFold(repo, t.Repo) {
-			return "", "" // a clone of the base repository
+		if strings.EqualFold(repo, t.Repo) {
+			baseOrigin, baseRemote = baseOrigin || name == "origin", true
+			continue
 		}
 		if repo == "" || strings.EqualFold(repoOwner, t.owner()) {
 			continue // Gitea forks a repository only into another owner.
@@ -138,10 +168,18 @@ func (a *application) forkRemote(ctx context.Context, t target) (remote, owner s
 			forks[name] = repo
 		}
 	}
+	service := services.Pulls{Client: t.client, Repository: t.Repo}
+	pushable := func() bool {
+		ok, err := service.CanPush(ctx)
+		return err != nil || ok
+	}
+	if baseOrigin && pushable() {
+		return "", "", false // a clone of the base repository
+	}
 	remote = "origin"
 	if _, ok := forks[remote]; !ok {
 		if len(forks) != 1 {
-			return "", ""
+			return "", "", len(forks) == 0 && baseRemote && (baseOrigin || !pushable())
 		}
 		for name := range forks {
 			remote = name
@@ -149,12 +187,37 @@ func (a *application) forkRemote(ctx context.Context, t target) (remote, owner s
 	}
 	// A repository that is not a fork of t's cannot be the head of its pull request, and a fork the
 	// account cannot push to, such as a colleague's, cannot take the branch.
-	pushable, err := (services.Pulls{Client: t.client, Repository: t.Repo}).PushableFork(ctx, forks[remote])
-	if err != nil || !pushable {
-		return "", ""
+	if ok, err := service.PushableFork(ctx, forks[remote]); err != nil || !ok {
+		return "", "", false
 	}
 	owner, _, _ = strings.Cut(forks[remote], "/")
-	return remote, owner
+	return remote, owner, false
+}
+
+// forkForPush forks t's repository, which the account cannot push to, once confirmed on a
+// terminal, and adds the fork as the Git remote "fork" to push the head branch to.
+func (a *application) forkForPush(cmd *cobra.Command, t target, branch string) (remote, owner string, err error) {
+	if !a.canPrompt() {
+		return "", "", fmt.Errorf("you cannot push to %s; fork it with gt repo fork --remote, then rerun gt pr create", t.Repo)
+	}
+	question := fmt.Sprintf("You cannot push to %s. Fork it and push branch %s to the fork?", t.Repo, branch)
+	if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: question, DefaultYes: true}); err != nil {
+		return "", "", err
+	}
+	fork, existed, err := (services.Repositories{Client: t.client}).Fork(cmd.Context(), t.Repo, services.ForkOptions{})
+	if err != nil {
+		return "", "", err
+	}
+	if existed {
+		a.warn(cmd, "%s already exists", fork.FullName)
+	} else {
+		a.done(cmd, "Forked %s to %s", t.Repo, fork.FullName)
+	}
+	if err := a.addForkRemote(cmd, t, fork, "fork", false, ""); err != nil {
+		return "", "", err
+	}
+	owner, _, _ = strings.Cut(fork.FullName, "/")
+	return "fork", owner, nil
 }
 
 func (a *application) addPullMutations(group *cobra.Command) {

@@ -40,9 +40,11 @@ type Pull struct {
 	Merged    bool            `json:"merged"`
 	MergedAt  *string         `json:"merged_at"`
 	// MergedBy is only in responses for one pull request; lists leave it out.
-	MergedBy  string `json:"merged_by"`
-	Mergeable bool   `json:"mergeable"`
-	Draft     bool   `json:"draft"`
+	MergedBy string `json:"merged_by"`
+	// MergeCommitSHA is the commit the merge created on the base branch, or null.
+	MergeCommitSHA *string `json:"merge_commit_sha"`
+	Mergeable      bool    `json:"mergeable"`
+	Draft          bool    `json:"draft"`
 	// ReviewDecision summarizes the reviews like gh: approved, changes_requested, review_required
 	// or "". Only commands that read the reviews fill it.
 	ReviewDecision    string `json:"review_decision"`
@@ -61,7 +63,9 @@ type Pull struct {
 	// WithReviews.
 	Reviewers     []string `json:"reviewers"`
 	ReviewerTeams []string `json:"reviewer_teams"`
-	Comments      int64    `json:"comments"`
+	// Reviews are the submitted reviews, oldest first. Only commands that read the reviews fill it.
+	Reviews  []Review `json:"reviews"`
+	Comments int64    `json:"comments"`
 }
 
 // pullHeadBranch returns the head branch of a pull request and whether Gitea deleted it, in which
@@ -95,7 +99,7 @@ func pullFrom(pull *gitea.PullRequest) Pull {
 		Assignees: convertAll(pull.Assignees, login), Milestone: issueMilestoneFrom(pull.Milestone), Labels: convertAll(pull.Labels, labelFrom),
 		Deadline: optionalTimestamp(pull.Deadline), ID: pull.ID, Number: pull.Index, Title: pull.Title, Body: pull.Body,
 		URL: pull.HTMLURL, State: string(pull.State), Merged: pull.HasMerged, MergedAt: optionalTimestamp(pull.Merged), MergedBy: login(pull.MergedBy),
-		Mergeable: pull.Mergeable, Draft: pull.Draft, AllowMaintainerEdit: pull.AllowMaintainerEdit,
+		MergeCommitSHA: pull.MergedCommitID, Mergeable: pull.Mergeable, Draft: pull.Draft, AllowMaintainerEdit: pull.AllowMaintainerEdit,
 		Base: base.Ref, Head: headBranch, HeadSHA: head.Sha, HeadRemoteDeleted: remoteDeleted,
 		Reviewers: convertAll(pull.RequestedReviewers, login), Comments: int64(pull.Comments),
 		ReviewerTeams: convertAll(pull.RequestedReviewersTeams, func(team *gitea.Team) string { return team.Name }),
@@ -248,11 +252,21 @@ func (s Pulls) View(ctx context.Context, n int64) (Pull, error) {
 	return pullFrom(pull), nil
 }
 
-// WithReviews returns the pull request with its reviewers, reviewer teams and review decision
-// taken from reviews, all of its reviews.
-func (p Pull) WithReviews(reviews []Review) Pull {
+// WithReviews returns p with its reviewers, reviewer teams, reviews and review decision taken
+// from reviews, all of its reviews. Approvals decide only once there are as many official ones
+// as the protection of the base branch requires, as Gitea counts them for merging; a protection
+// that cannot be read requires one.
+func (s Pulls) WithReviews(ctx context.Context, p Pull, reviews []Review) Pull {
 	p.Reviewers, p.ReviewerTeams = RequestedReviewers(reviews)
+	p.Reviews = slices.DeleteFunc(slices.Clone(reviews), func(review Review) bool {
+		return review.Author == "" || review.State == string(gitea.ReviewStatePending) || review.State == string(gitea.ReviewStateRequestReview)
+	})
 	p.ReviewDecision = ReviewDecision(reviews, len(p.ReviewerTeams) > 0)
+	if p.ReviewDecision == "approved" && p.Base != "" {
+		if base, err := (Branches{Client: s.Client}).View(ctx, s.Repository, p.Base); err == nil && OfficialApprovals(reviews) < base.RequiredApprovals {
+			p.ReviewDecision = "review_required"
+		}
+	}
 	return p
 }
 
@@ -272,7 +286,7 @@ func (s Pulls) Detail(ctx context.Context, items []Pull, view, reviews bool) ([]
 			if err != nil {
 				return err
 			}
-			detailed[i] = detailed[i].WithReviews(all)
+			detailed[i] = s.WithReviews(ctx, detailed[i], all)
 		}
 		return nil
 	})
@@ -318,9 +332,35 @@ func (s Pulls) Create(ctx context.Context, opts PullOptions) (Pull, error) {
 	// TODO(sdk): CreatePullRequestOption lacks allow_maintainer_edit.
 	var pull gitea.PullRequest
 	if err := sendJSON(ctx, s.Client, http.MethodPost, "repos/"+s.Repository+"/pulls", opts, &pull); err != nil {
-		return Pull{}, s.createError(ctx, err, opts.Head)
+		return Pull{}, s.existingPullError(ctx, s.createError(ctx, err, opts.Head), opts)
 	}
 	return pullFrom(&pull), nil
+}
+
+// existingPullError links the open pull request that already exists for the branches of opts,
+// which Gitea refuses to duplicate without saying which it is.
+func (s Pulls) existingPullError(ctx context.Context, err error, opts PullOptions) error {
+	conflict, ok := errors.AsType[*ConflictError](err)
+	if !ok || conflict.Reason != ReasonExists || conflict.Kind != "pull request" {
+		return err
+	}
+	existing, lookupErr := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
+		return c.PullRequests.GetPullRequestByBaseHead(ctx, owner, name, opts.Base, opts.Head)
+	})
+	if lookupErr == nil && existing.HTMLURL != "" {
+		conflict.Hint = "see " + existing.HTMLURL
+	}
+	return err
+}
+
+// CanPush reports whether the account may push branches to the pull requests' repository. A
+// response without permissions, as for an anonymous request, leaves it to the push.
+func (s Pulls) CanPush(ctx context.Context) (bool, error) {
+	item, err := (Repositories{Client: s.Client}).get(ctx, s.Repository)
+	if err != nil {
+		return false, err
+	}
+	return item.Permissions == nil || item.Permissions.Push, nil
 }
 
 // PushableFork reports whether repo is a fork of the pull requests' repository that the account
@@ -1062,7 +1102,8 @@ func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 		err = merge()
 	}
 	key := "#" + strconv.FormatInt(n, 10)
-	if refused, ok := errors.AsType[*transport.APIError](err); !ok || refused.Status != http.StatusMethodNotAllowed {
+	refused, ok := errors.AsType[*transport.APIError](err)
+	if !ok || refused.Status != http.StatusMethodNotAllowed {
 		return Classify(err, "pull request", key, s.Repository)
 	}
 	var reason string
@@ -1077,8 +1118,10 @@ func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 		reason = "has conflicting files, or Gitea is still checking whether it can be merged; retry in a moment"
 	case later():
 		reason = "cannot be merged yet: Gitea is still checking whether it can be merged; retry in a moment"
-	case !pull.Mergeable:
+	case !pull.Mergeable && refused.Message == "":
 		reason = "has conflicting files or is otherwise not mergeable"
+	case !pull.Mergeable:
+		reason = "cannot be merged" // Gitea's message, such as "Does not have enough approvals", says why
 	default:
 		return Classify(err, "pull request", key, s.Repository)
 	}

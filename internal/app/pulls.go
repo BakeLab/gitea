@@ -40,10 +40,13 @@ func (a *application) pullListCommand() *cobra.Command {
 	var web bool
 	cmd := &cobra.Command{Use: "list", Short: "List pull requests", Long: `List the pull requests of a repository, newest first.
 
-The reviewers, reviewer_teams and review_decision JSON fields come from the reviews of each pull
-request, and merged_by from reading each pull request again. gt only makes these requests when --json
-names the fields, or selects every field and a --jq expression names them (see gt help formatting).
---limit bounds how many requests it makes.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+The reviewers, reviewer_teams, reviews and review_decision JSON fields come from the reviews of each
+pull request, and merged_by from reading each pull request again. gt only makes these requests when
+--json names the fields, or selects every field and a --jq expression names them (see gt help
+formatting). --limit bounds how many requests it makes.
+
+review_decision is changes_requested, approved, review_required or empty. When the base branch's
+protection requires approvals, approved needs that many official approvals, as for merging.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 1 {
 			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
 		}
@@ -85,7 +88,7 @@ names the fields, or selects every field and a --jq expression names them (see g
 			return err
 		}
 		items := window.Items
-		view, reviews := a.jsonSelects("merged_by"), a.jsonSelects("reviewers", "reviewer_teams", "review_decision")
+		view, reviews := a.jsonSelects("merged_by"), a.jsonSelects("reviewers", "reviewer_teams", "reviews", "review_decision")
 		if view || reviews {
 			if items, err = service.Detail(cmd.Context(), items, view, reviews); err != nil {
 				return err
@@ -175,7 +178,7 @@ func (a *application) pullViewCommand() *cobra.Command {
 		if details.reviews, err = (services.Reviews{Client: t.client, Repository: t.Repo}).All(cmd.Context(), n); err != nil {
 			return err
 		}
-		item = item.WithReviews(details.reviews)
+		item = service.WithReviews(cmd.Context(), item, details.reviews)
 		if a.options.json != "" {
 			return a.writeJSON(cmd, item)
 		}

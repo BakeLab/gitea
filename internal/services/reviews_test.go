@@ -198,6 +198,24 @@ func TestReviewCreateSendsInlineComments(t *testing.T) {
 	require.Equal(t, []InlineComment{{Path: "a.go", Body: "here", NewLine: 3}, {Path: "b.go", Body: "there", OldLine: 2}}, created.Comments)
 }
 
+func TestReviewCreateNamesMergedOrClosedPull(t *testing.T) {
+	for pull, want := range map[string]string{
+		`{"number":1,"state":"closed","merged":true}`: "pull request #1 is already merged; only comment reviews can be submitted",
+		`{"number":1,"state":"closed"}`:               "pull request #1 is closed; only comment reviews can be submitted",
+	} {
+		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/1" {
+				_, _ = w.Write([]byte(pull))
+				return
+			}
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"can't submit review for a closed or merged PR"}`))
+		}))
+		_, err := (Reviews{Client: client, Repository: "owner/repo"}).Create(context.Background(), 1, ReviewOptions{Event: "APPROVED"})
+		require.EqualError(t, err, want)
+	}
+}
+
 func TestReviewResolveAndReplyUseCommentEndpoints(t *testing.T) {
 	paths := []string{}
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

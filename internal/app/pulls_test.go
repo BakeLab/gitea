@@ -137,6 +137,41 @@ func TestPullViewIgnoresReviewersWithoutAnOutstandingRequest(t *testing.T) {
 	require.JSONEq(t, `{"reviewers":[],"reviewer_teams":[],"review_decision":""}`, out.String())
 }
 
+func TestPullViewReviewDecisionNeedsTheRequiredOfficialApprovals(t *testing.T) {
+	carolOfficial := "false"
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/pulls/8":
+			_, _ = w.Write([]byte(`{"number":8,"state":"closed","merged":true,"merge_commit_sha":"abc123","base":{"ref":"main"}}`))
+		case "/api/v1/repos/alice/project/branches/main":
+			_, _ = w.Write([]byte(`{"name":"main","protected":true,"required_approvals":2}`))
+		case "/api/v1/repos/alice/project/pulls/8/reviews":
+			if r.URL.Query().Get("page") > "1" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"id":1,"state":"APPROVED","official":true,"body":"LGTM","user":{"login":"bob"},"submitted_at":"2026-01-02T00:00:00Z"},
+				{"id":2,"state":"APPROVED","official":` + carolOfficial + `,"user":{"login":"carol"}},
+				{"id":3,"state":"PENDING","user":{"login":"dave"}},{"id":4,"state":"REQUEST_REVIEW","user":{"login":"erin"}}]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	args := []string{"pr", "view", "8", "-R", "alice/project", "--json", "review_decision,merge_commit_sha", "--jq", ".review_decision + \" \" + .merge_commit_sha"}
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.Equal(t, "review_required abc123\n", out.String())
+	carolOfficial = "true"
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.Equal(t, "approved abc123\n", out.String())
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "view", "8", "-R", "alice/project", "--jq", "[.reviews[] | {author, state, body, submitted_at}]"}))
+	require.JSONEq(t, `[{"author":"bob","state":"APPROVED","body":"LGTM","submitted_at":"2026-01-02T00:00:00Z"},{"author":"carol","state":"APPROVED","body":"","submitted_at":""}]`, out.String())
+}
+
 func TestPullListFillsReviewDecisionWhenSelected(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

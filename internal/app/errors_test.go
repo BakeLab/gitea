@@ -42,13 +42,14 @@ func fakeGitea(t *testing.T, responses map[string][2]string) *httptest.Server {
 
 func TestExplainKeepsClassifiedErrorsAndAddsHints(t *testing.T) {
 	server := fakeGitea(t, map[string][2]string{
-		"GET /api/v1/user":                               {"200", `{"login":"alice"}`},
-		"GET /api/v1/repos/alice/project":                {"200", `{"full_name":"alice/project","has_issues":true,"has_pull_requests":true}`},
-		"GET /api/v1/repos/alice/old":                    {"200", `{"full_name":"alice/old","archived":true,"has_issues":true}`},
-		"POST /api/v1/repos/alice/old/issues":            {"423", `{"message":"repo is archived"}`},
-		"POST /api/v1/repos/alice/project/pulls":         {"409", `{"message":"pull request already exists for these targets [id: 16, issue_id: 3, head_repo_id: 1, base_repo_id: 1, head_branch: feat, base_branch: main]"}`},
-		"GET /api/v1/repos/alice/project/pulls/3":        {"200", `{"number":3,"state":"open","mergeable":false,"head":{"sha":"abc"}}`},
-		"POST /api/v1/repos/alice/project/pulls/3/merge": {"405", `{"message":"PR is not ready to be merged"}`},
+		"GET /api/v1/user":                                {"200", `{"login":"alice"}`},
+		"GET /api/v1/repos/alice/project":                 {"200", `{"full_name":"alice/project","has_issues":true,"has_pull_requests":true}`},
+		"GET /api/v1/repos/alice/old":                     {"200", `{"full_name":"alice/old","archived":true,"has_issues":true}`},
+		"POST /api/v1/repos/alice/old/issues":             {"423", `{"message":"repo is archived"}`},
+		"POST /api/v1/repos/alice/project/pulls":          {"409", `{"message":"pull request already exists for these targets [id: 16, issue_id: 3, head_repo_id: 1, base_repo_id: 1, head_branch: feat, base_branch: main]"}`},
+		"GET /api/v1/repos/alice/project/pulls/main/feat": {"200", `{"number":2,"html_url":"https://gitea.test/alice/project/pulls/2"}`},
+		"GET /api/v1/repos/alice/project/pulls/3":         {"200", `{"number":3,"state":"open","mergeable":false,"head":{"sha":"abc"}}`},
+		"POST /api/v1/repos/alice/project/pulls/3/merge":  {"405", `{"message":"Does not have enough approvals"}`},
 	})
 	for _, tc := range []struct {
 		name string
@@ -58,8 +59,8 @@ func TestExplainKeepsClassifiedErrorsAndAddsHints(t *testing.T) {
 		{"missing issue", []string{"issue", "view", "999", "-R", "alice/project"}, "issue #999 not found in alice/project"},
 		{"missing pull request", []string{"pr", "view", "999", "-R", "alice/project"}, "pull request #999 not found in alice/project"},
 		{"archived repository", []string{"issue", "create", "-R", "alice/old", "--title", "x", "--body", "y"}, "alice/old is archived (read-only); unarchive it with: gt repo unarchive alice/old"},
-		{"existing pull request", []string{"pr", "create", "-R", "alice/project", "--head", "feat", "--base", "main", "--title", "x", "--body", "y"}, "pull request for feat into main already exists in alice/project"},
-		{"context added by the command", []string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, "pull request #3 has conflicting files or is otherwise not mergeable: Gitea API returned HTTP 405 for POST /api/v1/repos/alice/project/pulls/3/merge: PR is not ready to be merged"},
+		{"existing pull request", []string{"pr", "create", "-R", "alice/project", "--head", "feat", "--base", "main", "--title", "x", "--body", "y"}, "pull request for feat into main already exists in alice/project; see https://gitea.test/alice/project/pulls/2"},
+		{"context added by the command", []string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, "pull request #3 cannot be merged: Gitea API returned HTTP 405 for POST /api/v1/repos/alice/project/pulls/3/merge: Does not have enough approvals"},
 		{"raw api response", []string{"api", "users/nobody"}, "not found (HTTP 404 GET /api/v1/users/nobody)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

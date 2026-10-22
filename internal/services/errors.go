@@ -65,6 +65,7 @@ const (
 	ReasonArchived  = "archived"          // the repository is archived and read-only
 	ReasonExists    = "exists"            // a resource with the same identity already exists
 	ReasonMerged    = "merged"            // the pull request is already merged
+	ReasonClosed    = "closed"            // the pull request is closed
 	ReasonDraft     = "draft"             // a draft pull request cannot be merged
 	ReasonOwnReview = "own review"        // authors cannot approve or reject their own pull request
 	ReasonNoChanges = "no changes"        // the head branch has no commits the base lacks
@@ -102,6 +103,8 @@ func (e *ConflictError) Error() string {
 		}
 	case ReasonMerged:
 		text = cmp.Or(subject, "the pull request") + " is already merged"
+	case ReasonClosed:
+		text = cmp.Or(subject, "the pull request") + " is closed"
 	case ReasonDraft:
 		text = cmp.Or(subject, "the pull request") + " is a draft"
 	case ReasonOwnReview:
