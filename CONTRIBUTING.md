@@ -74,8 +74,8 @@ GITEA_CLI_TEST_REVIEWER_TOKEN_FILE=/private/path/reviewer-token \
 Token files contain scoped PATs for their accounts and should be `0600`;
 `scripts/integration-tokens.py` creates them for the CI accounts. Optional
 coverage is enabled by `GITEA_CLI_TEST_REPOSITORY_ROOT` (the server's repository
-root, with `[repository] IMPORT_LOCAL_PATHS = true`, for migration) and
-`GITEA_CLI_TEST_SSH_ENDPOINT` (an SSH clone endpoint).
+root, with `[security] IMPORT_LOCAL_PATHS = true`, for migration) and
+`GITEA_CLI_TEST_SSH_ENDPOINT` (the server's SSH endpoint as `host:port`).
 
 ## Code review
 
