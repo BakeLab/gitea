@@ -130,6 +130,8 @@ func TestJSONFieldCompletion(t *testing.T) {
 func TestCompletionOffersPathsOnlyWherePathsAreExpected(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	for args, want := range map[string]cobra.ShellCompDirective{
+		"browse ":                        cobra.ShellCompDirectiveDefault,
+		"browse docs ":                   cobra.ShellCompDirectiveNoFileComp,
 		"issue view ":                    cobra.ShellCompDirectiveNoFileComp,
 		"issue view 5 ":                  cobra.ShellCompDirectiveNoFileComp,
 		"issue list --state ":            cobra.ShellCompDirectiveNoFileComp,
@@ -161,7 +163,7 @@ func TestCompletionOffersPathsOnlyWherePathsAreExpected(t *testing.T) {
 		}
 		path := strings.Fields(cmd.CommandPath())[1:]
 		_, directive := complete(t, deps, out, append(path, "")...)
-		takesFile := slices.Contains([]string{"gt label import", "gt ssh-key create", "gt repo deploy-key add"}, cmd.CommandPath())
+		takesFile := slices.Contains([]string{"gt browse", "gt label import", "gt ssh-key create", "gt repo deploy-key add"}, cmd.CommandPath())
 		require.Equal(t, takesFile, directive == cobra.ShellCompDirectiveDefault, "%s <TAB>: %d", cmd.CommandPath(), directive)
 		for _, flags := range []*pflag.FlagSet{cmd.LocalNonPersistentFlags(), cmd.PersistentFlags()} {
 			flags.VisitAll(func(flag *pflag.Flag) {
