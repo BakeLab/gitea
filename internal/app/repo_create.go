@@ -167,12 +167,12 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("team %q not found in organization %s", f.team, f.org))
 		}
 		// Checked before creating, so that the repository is not left without the team.
-		allowed, err := (services.Organizations{Client: target.client}).CanGrantTeamAccess(cmd.Context(), f.org)
+		allowed, err := (services.Organizations{Client: target.client}).CanGrantTeamAccess(cmd.Context(), f.org, match.ID)
 		if err != nil {
 			return err
 		}
 		if !allowed {
-			return fmt.Errorf("--team requires an owner of %s or a site administrator", f.org)
+			return fmt.Errorf("--team requires an owner of %s, a site administrator, or a member of team %s when %s lets repository administrators change team access", f.org, match.Name, f.org)
 		}
 		teamID = match.ID
 	}
@@ -286,7 +286,7 @@ func (a *application) completeTemplates(list func(services.Repositories, context
 }
 
 // checkPublishSource fails unless dir is a Git working tree without a remote named remote and,
-// for push, with a commit to push.
+// for push, with a commit on a checked-out branch to push.
 func (a *application) checkPublishSource(ctx context.Context, dir, remote string, push bool) error {
 	if inside, _ := a.gitProbe().Output(ctx, dir, false, "rev-parse", "--is-inside-work-tree"); inside != "true" {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("--source %s is not a Git repository; run git init first", dir))
@@ -299,6 +299,9 @@ func (a *application) checkPublishSource(ctx context.Context, dir, remote string
 	}
 	if _, err := a.gitProbe().Output(ctx, dir, false, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err != nil {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("--push requires a commit in --source %s; commit first", dir))
+	}
+	if _, err := a.gitProbe().Output(ctx, dir, false, "symbolic-ref", "--quiet", "HEAD"); err != nil {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("--push requires a checked-out branch in --source %s", dir))
 	}
 	return nil
 }

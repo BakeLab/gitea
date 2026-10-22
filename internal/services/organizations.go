@@ -244,9 +244,10 @@ func (s Organizations) memberPage(ctx context.Context, name string, limit, page 
 	return convertPage(users, memberFrom), Classify(err, "organization", strconv.Quote(name), "")
 }
 
-// CanGrantTeamAccess reports whether the account may grant the teams of org access to a
-// repository, which Gitea allows owners of org and site administrators.
-func (s Organizations) CanGrantTeamAccess(ctx context.Context, org string) (bool, error) {
+// CanGrantTeamAccess reports whether the account may grant team of org access to a repository it
+// creates. Gitea allows site administrators and owners of org, and members of the team when org
+// lets repository administrators change team access.
+func (s Organizations) CanGrantTeamAccess(ctx context.Context, org string, team int64) (bool, error) {
 	user, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
 		return c.Users.GetMyUserInfo(ctx)
 	})
@@ -256,10 +257,20 @@ func (s Organizations) CanGrantTeamAccess(ctx context.Context, org string) (bool
 	permissions, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.OrgPermissions, *gitea.Response, error) {
 		return c.Organizations.GetOrgPermissions(ctx, org, login(user))
 	})
-	if err != nil {
-		return false, Classify(err, "organization", strconv.Quote(org), "")
+	if err != nil || permissions.IsOwner {
+		return err == nil, Classify(err, "organization", strconv.Quote(org), "")
 	}
-	return permissions.IsOwner, nil
+	organization, err := s.View(ctx, org)
+	if err != nil || !organization.RepoAdminChangeTeamAccess {
+		return false, err
+	}
+	_, _, err = call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
+		return c.Organizations.GetTeamMember(ctx, team, login(user))
+	})
+	if IsNotFound(err) || IsForbidden(err) { // Gitea refuses non-members with a 403
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // publicListExact reports whether Gitea lists exactly the public memberships to the caller; it

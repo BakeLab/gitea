@@ -158,6 +158,18 @@ func (s Issues) View(ctx context.Context, number int64) (Issue, error) {
 	return item, s.issueError(ctx, err, number)
 }
 
+// IsPull reports whether number is a pull request, in one request. A number Gitea does not show,
+// such as an issue of a repository that uses an external tracker, is none.
+func (s Issues) IsPull(ctx context.Context, number int64) (bool, error) {
+	item, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Issue, *gitea.Response, error) {
+		return c.Issues.GetIssue(ctx, owner, repo, number)
+	})
+	if IsNotFound(err) {
+		return false, nil
+	}
+	return err == nil && item.PullRequest != nil, err
+}
+
 // issueError names issue number in the failure of a request about it, or its repository when
 // that is what is missing. Some endpoints, such as the timeline, answer a missing issue with
 // HTTP 500 "issue does not exist".

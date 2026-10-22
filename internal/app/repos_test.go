@@ -132,6 +132,11 @@ func TestRepoSetDefaultValidatesTheRepository(t *testing.T) {
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.EqualError(t, err, "repo set-default requires a repository argument")
 	require.NotContains(t, runner.calls, saved)
+	// A blank argument is no request to save what the remotes select.
+	err = Execute(context.Background(), deps, []string{"repo", "set-default", " "})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, "repository cannot be empty")
+	require.NotContains(t, runner.calls, saved)
 	runner.results[`config --get-regexp ^remote\..*\.url$`] = "remote.github.url https://github.com/example/project.git\nremote.origin.url " + server.URL + "/alice/project.git"
 	prompter := &choosingPrompter{}
 	deps.Prompter = prompter

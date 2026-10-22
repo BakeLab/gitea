@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/git/gittest"
 	"github.com/stretchr/testify/require"
@@ -22,37 +23,44 @@ func TestBrowseURLs(t *testing.T) {
 	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.URL.Path)
-		if r.URL.Path != "/api/v1/repos/alice/project" {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project":
+			_, _ = fmt.Fprint(w, `{"full_name":"alice/project","default_branch":"release/1.0"}`)
+		case "/api/v1/repos/alice/project/issues/7":
+			_, _ = fmt.Fprint(w, `{"number":7,"pull_request":{"merged":false}}`)
+		default:
 			w.WriteHeader(http.StatusNotFound)
-			return
 		}
-		_, _ = fmt.Fprint(w, `{"full_name":"alice/project","default_branch":"release/1.0"}`)
 	}))
 	defer server.Close()
 	repo := server.URL + "/alice/project"
 	for _, tc := range []struct {
-		args []string
-		want string
+		args     []string
+		want     string
+		requests []string
 	}{
-		{nil, repo},
-		{[]string{"#12"}, repo + "/issues/12"},
-		{[]string{"77507cd"}, repo + "/commit/77507cd"},
-		{[]string{"--wiki"}, repo + "/wiki"},
-		{[]string{"--branch", "feature/x"}, repo + "/src/branch/feature/x"},
-		{[]string{"docs/a b.md:3-5", "-b", "feature/x"}, repo + "/src/branch/feature/x/docs/a%20b.md?display=source#L3-L5"},
-		{[]string{"--commit=77507cd", "../docs/"}, repo + "/src/commit/77507cd/docs"},
-		{[]string{"cmd/main.go:7"}, repo + "/src/branch/release/1.0/cmd/main.go?display=source#L7"},
+		{nil, repo, nil},
+		// Gitea sends /issues/N of a pull request to an external tracker when the repository uses one.
+		{[]string{"#12"}, repo + "/issues/12", []string{"/api/v1/repos/alice/project/issues/12"}},
+		{[]string{"7"}, repo + "/pulls/7", []string{"/api/v1/repos/alice/project/issues/7"}},
+		{[]string{"77507cd"}, repo + "/commit/77507cd", nil},
+		{[]string{"--wiki"}, repo + "/wiki", nil},
+		{[]string{"--branch", "feature/x"}, repo + "/src/branch/feature/x", nil},
+		{[]string{"docs/a b.md:3-5", "-b", "feature/x"}, repo + "/src/branch/feature/x/docs/a%20b.md?display=source#L3-L5", nil},
+		{[]string{"--commit=77507cd", "../docs/"}, repo + "/src/commit/77507cd/docs", nil},
+		{[]string{"cmd/main.go:7"}, repo + "/src/branch/release/1.0/cmd/main.go?display=source#L7", []string{"/api/v1/repos/alice/project"}},
 	} {
 		requests = nil
 		deps, out, _ := serverDeps(t, server.URL)
 		require.NoError(t, Execute(context.Background(), deps, append([]string{"browse", "-R", "alice/project", "-n"}, tc.args...)), "%v", tc.args)
 		require.Equal(t, tc.want+"\n", out.String(), "%v", tc.args)
-		if len(tc.args) == 1 && strings.HasPrefix(tc.args[0], "cmd/") {
-			require.Equal(t, []string{"/api/v1/repos/alice/project"}, requests)
-		} else {
-			require.Empty(t, requests, "%v", tc.args)
-		}
+		require.Equal(t, tc.requests, requests, "%v", tc.args)
 	}
+	// The clone in the working directory is not the repository of --repo.
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"browse", "-R", "alice/project", "--commit"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.EqualError(t, err, "--commit without a SHA requires a clone of alice/project")
 	deps, out, _ := serverDeps(t, server.URL)
 	browser := &recordingBrowser{}
 	deps.Browser = browser

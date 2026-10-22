@@ -189,10 +189,19 @@ func TestRepoForkRefusesTheOwnersRepository(t *testing.T) {
 }
 
 func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
+	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "POST /api/v1/repos/bob/project/forks", r.Method+" "+r.URL.Path)
-		requirePayload(t, `{"name":"mine"}`, r.Body)
-		_, _ = fmt.Fprintf(w, `{"full_name":"alice/mine","html_url":"https://gitea.test/alice/mine","clone_url":"http://%s/alice/mine.git"}`, r.Host)
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/mine":
+			_, _ = w.Write([]byte(`{"full_name":"alice/mine","fork":true,"parent":{"full_name":"bob/project"}}`))
+		case "GET /api/v1/repos/alice/other":
+			_, _ = w.Write([]byte(`{"full_name":"alice/other"}`))
+		default:
+			require.Equal(t, "POST /api/v1/repos/bob/project/forks", r.Method+" "+r.URL.Path)
+			requirePayload(t, `{"name":"mine"}`, r.Body)
+			_, _ = fmt.Fprintf(w, `{"full_name":"alice/mine","html_url":"https://gitea.test/alice/mine","clone_url":"http://%s/alice/mine.git"}`, r.Host)
+		}
 	}))
 	defer server.Close()
 	deps, out, diagnostics := repoTTYDeps(t, server.URL)
@@ -214,8 +223,12 @@ func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"}))
 	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin"}, runner.calls)
 	require.Equal(t, "✓ Forked bob/project to alice/mine\n! Git remote origin already points to alice/mine\n", diagnostics.String())
-	runner.results["remote get-url origin"] = server.URL + "/alice/other.git"
-	require.ErrorContains(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"}), "Git remote origin points to alice/other, not the fork alice/mine; pass --remote-name")
+	// Another repository of the fork owner is refused before forking.
+	runner.results["remote get-url origin"], requests = server.URL+"/alice/other.git", nil
+	err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.EqualError(t, err, "Git remote origin points elsewhere; pass --remote-name")
+	require.Equal(t, []string{"GET /api/v1/repos/alice/other"}, requests)
 }
 
 func TestRepoForkRemoteChecksTheCloneBeforeForking(t *testing.T) {

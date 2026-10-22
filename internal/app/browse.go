@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -97,8 +98,15 @@ $ gt browse --no-browser docs/README.md`,
 					lines += "-L" + arg[match[4]:match[5]]
 				}
 			}
+			var number int64
+			if issueNumber.MatchString(arg) {
+				var err error
+				if number, err = strconv.ParseInt(strings.TrimPrefix(arg, "#"), 10, 64); err != nil {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid issue or pull request number %q", arg))
+				}
+			}
 			needsDefaultBranch := filePath != "" && branch == "" && commit == "" && !issueNumber.MatchString(arg) && !commitSHA.MatchString(arg)
-			t, err := a.resolveTarget(cmd.Context(), true, needsDefaultBranch)
+			t, err := a.resolveTarget(cmd.Context(), true, needsDefaultBranch || issueNumber.MatchString(arg))
 			if err != nil {
 				return err
 			}
@@ -108,7 +116,16 @@ $ gt browse --no-browser docs/README.md`,
 			case page != "":
 				link += "/" + page
 			case issueNumber.MatchString(arg):
-				link += "/issues/" + strings.TrimPrefix(arg, "#") // Gitea redirects to the pull request.
+				// Gitea sends /issues/N of a pull request to an external issue tracker.
+				pull, err := (services.Issues{Client: t.client, Repository: t.Repo}).IsPull(cmd.Context(), number)
+				if err != nil {
+					return err
+				}
+				kind := "/issues/"
+				if pull {
+					kind = "/pulls/"
+				}
+				link += kind + strconv.FormatInt(number, 10)
 			case commitSHA.MatchString(arg):
 				link += "/commit/" + arg
 			default:
@@ -116,6 +133,9 @@ $ gt browse --no-browser docs/README.md`,
 				case commit != "":
 					sha := commit
 					if !commitSHA.MatchString(sha) {
+						if !t.repoFromClone() {
+							return clierr.Wrap(clierr.Usage, fmt.Errorf("--commit without a SHA requires a clone of %s", t.Repo))
+						}
 						if sha, err = a.gitProbe().Output(cmd.Context(), a.options.cwd, false, "rev-parse", "--verify", "--quiet", commit+"^{commit}"); err != nil || sha == "" {
 							return clierr.Wrap(clierr.Usage, fmt.Errorf("--commit %q requires a Git clone with that commit", commit))
 						}

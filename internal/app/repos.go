@@ -75,7 +75,7 @@ $ gt repo set-default --view
 $ gt repo set-default --unset`,
 		Annotations: map[string]string{"gt.arguments": `A repository can be supplied as NAME (one of yours), OWNER/NAME, HOST/OWNER/NAME or a URL.
 Without an argument, a terminal asks for one of the repositories of the clone's Git remotes.`, "gt.text": "set-default configures Git"},
-		Args: usageArgs(cobra.MaximumNArgs(1)),
+		Args: nonBlankArgs(cobra.MaximumNArgs(1), "repository"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
 			case view && unset:

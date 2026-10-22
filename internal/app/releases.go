@@ -235,7 +235,8 @@ func (a *application) releaseCreateCommand() *cobra.Command {
 the tag at --target (the default branch) when it does not exist yet. The title defaults to the tag.
 
 gt never pushes: commits and tags that only exist in your clone are not on the server, so push them
-first (git push <remote> <tag>), or pass --verify-tag to fail when the tag is not on the server yet.`,
+first (git push <remote> <tag>). A tag that only exists in your clone is refused unless --target
+says where Gitea creates it; --verify-tag refuses any tag that is not on the server yet.`,
 		Example: `# Create a release with notes from a file and two assets
 $ gt release create v1.0.0 dist/gt-linux dist/gt-darwin --notes-file CHANGELOG.md
 
@@ -320,8 +321,8 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 }
 
 // checkReleaseTag guards against a release whose tag Gitea would create from the default branch
-// instead of from the local commit the tag names: --verify-tag refuses a tag the server lacks, and
-// without it a tag that only exists locally is warned about.
+// instead of from the local commit the tag names: a tag that only exists locally is refused unless
+// --target names where to create it, and --verify-tag refuses any tag the server lacks.
 func (a *application) checkReleaseTag(cmd *cobra.Command, t target, service services.Releases, tag string, hasTarget, verify bool) error {
 	// Only the clone of the selected repository says anything about its tags.
 	local := t.repoFromClone() && a.localRefExists(cmd.Context(), "refs/tags/"+tag)
@@ -332,16 +333,15 @@ func (a *application) checkReleaseTag(cmd *cobra.Command, t target, service serv
 	if err != nil || exists {
 		return err
 	}
-	hint := ""
+	hint := "create it first or drop --verify-tag"
 	if local {
 		hint = "push it first: git push " + a.releaseRemote(t) + " " + tag
+		if !verify {
+			hint += ", or pass --target to create it on the server"
+		}
 	}
-	if verify {
-		missing := services.NotFound("tag", tag, t.Repo)
-		return explain(missing, "%s; %s", missing, cmp.Or(hint, "create it first or drop --verify-tag"))
-	}
-	a.warn(cmd, "Tag %s exists in your clone but not in %s; the release creates it at the default branch, not at your local commit; %s", tag, t.Repo, hint)
-	return nil
+	missing := services.NotFound("tag", tag, t.Repo)
+	return explain(missing, "%s; %s", missing, hint)
 }
 
 // pushHint tells how to publish a ref that only the local clone has, or returns "".

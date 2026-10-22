@@ -166,7 +166,7 @@ func TestReleaseCreateWithUnknownTargetNamesTheTargetAndHintsAtPushing(t *testin
 	require.EqualError(t, Explain(context.Background(), deps, err), `target "nowhere" not found in alice/project`)
 }
 
-func TestReleaseCreateVerifyTagRefusesATagTheServerLacks(t *testing.T) {
+func TestReleaseCreateRefusesATagOnlyTheCloneHas(t *testing.T) {
 	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
@@ -178,6 +178,11 @@ func TestReleaseCreateVerifyTagRefusesATagTheServerLacks(t *testing.T) {
 	deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": server.URL + "/alice/project.git", "rev-parse --verify --quiet refs/tags/v1": "abc"}}
 	err := Execute(context.Background(), deps, []string{"release", "create", "v1", "--verify-tag"})
 	require.EqualError(t, err, "tag v1 not found in alice/project; push it first: git push origin v1")
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/tags/v1"}, requests)
+	// Without --verify-tag, Gitea would create the tag at the default branch rather than at the local commit.
+	requests = nil
+	err = Execute(context.Background(), deps, []string{"release", "create", "v1"})
+	require.EqualError(t, err, "tag v1 not found in alice/project; push it first: git push origin v1, or pass --target to create it on the server")
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/tags/v1"}, requests)
 }
 

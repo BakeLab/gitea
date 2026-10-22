@@ -276,8 +276,8 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 
 // checkForkRemote reports, before anything is forked, whether the clone in the working directory
 // can take the fork as the remote name: rename when a remote of that name points to the forked
-// repository and must be renamed to upstream first, and current when it already points to a
-// repository of owner on the instance, such as the fork of an earlier run.
+// repository and must be renamed to upstream first, and current when it already points to a fork
+// of it by owner, such as the fork of an earlier run.
 func (a *application) checkForkRemote(cmd *cobra.Command, t target, name, owner string) (rename bool, current string, err error) {
 	ctx := cmd.Context()
 	if inside, _ := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--is-inside-work-tree"); inside != "true" {
@@ -291,7 +291,13 @@ func (a *application) checkForkRemote(cmd *cobra.Command, t target, name, owner 
 		return true, "", nil
 	}
 	if host, repo, err := settings.RemoteRepository(existing, t.hosts()); err == nil && host == t.Host && strings.EqualFold(strings.Split(repo, "/")[0], owner) {
-		return false, repo, nil
+		fork, err := (services.Repositories{Client: t.client}).View(ctx, repo)
+		if err != nil && !services.IsNotFound(err) {
+			return false, "", err
+		}
+		if err == nil && fork.Parent != nil && strings.EqualFold(fork.Parent.FullName, t.Repo) {
+			return false, repo, nil
+		}
 	}
 	return false, "", clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %s points elsewhere; pass --remote-name", name))
 }
