@@ -86,9 +86,6 @@ func TestRepositoryAssigneesTagsAndMissingPermissions(t *testing.T) {
 	tags, err := service.Tags(context.Background(), "alice/project", 5, 2)
 	require.NoError(t, err)
 	require.Equal(t, []string{"v1.0", "v0.9"}, tags)
-	permissions, err := service.viewPermissions(context.Background(), "alice/project")
-	require.NoError(t, err)
-	require.Equal(t, RepositoryPermissions{}, permissions)
 }
 
 func TestRepositoryRenameNamesTheTakenName(t *testing.T) {

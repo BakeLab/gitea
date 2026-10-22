@@ -51,20 +51,6 @@ func TestReleaseUploadStreamsAndMapsMetadata(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
-func TestReleaseAssetPaginationUsesOneUnpaginatedRequest(t *testing.T) {
-	requests := 0
-	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		assert.Equal(t, "/api/v1/repos/owner/repo/releases/1/assets", r.URL.Path)
-		_, _ = w.Write([]byte(`[{"id":1},{"id":2},{"id":3}]`))
-	}))
-	service := Releases{Client: client, Repository: "owner/repo"}
-	items, err := service.AllAssets(context.Background(), 1)
-	require.NoError(t, err)
-	require.Len(t, items, 3)
-	require.Equal(t, 1, requests)
-}
-
 func TestReleaseAssetDownloadFollowsObjectStorageRedirect(t *testing.T) {
 	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Empty(t, r.Header.Get("Authorization"))

@@ -8,6 +8,7 @@ GOFILES := $(shell find . -name "*.go" -type f)
 # Tool packages with pinned versions
 GOFUMPT_PACKAGE ?= mvdan.cc/gofumpt@v0.12.0
 GOLANGCI_LINT_PACKAGE ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+DEADCODE_PACKAGE ?= golang.org/x/tools/cmd/deadcode@v0.52.0
 
 BUILD_VERSION ?= $(shell git describe --tags --match 'v*' --always | sed 's/-/+/' | sed 's/^v//')
 BUILD_VERSION_TAG ?= $(subst +,_,$(BUILD_VERSION))
@@ -54,6 +55,15 @@ vet:
 .PHONY: lint
 lint:
 	$(GO) run $(GOLANGCI_LINT_PACKAGE) run
+
+.PHONY: deadcode
+deadcode:
+	@out=$$($(GO) run $(DEADCODE_PACKAGE) ./cmd/gt ./tools/cli-docs); \
+	if [ -n "$$out" ]; then \
+		echo "These functions are never called; remove them:"; \
+		echo "$${out}"; \
+		exit 1; \
+	fi
 
 .PHONY: lint-fix
 lint-fix:
@@ -124,6 +134,10 @@ test: unit-test
 .PHONY: unit-test-coverage
 unit-test-coverage:
 	$(GO) test -race -cover -coverprofile coverage.out $(UNIT_PACKAGES) && echo "\n==>\033[32m Ok\033[m\n" || exit 1
+
+.PHONY: tidy-check
+tidy-check:
+	@$(GO) mod tidy -diff || { echo "Please run 'make tidy' and commit the result"; exit 1; }
 
 .PHONY: tidy
 tidy:

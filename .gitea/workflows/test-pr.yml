@@ -13,16 +13,29 @@ jobs:
         with:
           go-version-file: 'go.mod'
           check-latest: true
-      - name: lint and build
-        run: |
-          make clean
-          make vet
-          make lint
-          make fmt-check
-          make build
-      - name: unit test and coverage
-        run: |
-          make unit-test-coverage
+      - name: Clean
+        run: make clean
+
+      - name: Vet
+        run: make vet
+
+      - name: Lint
+        run: make lint
+
+      - name: Check deadcode
+        run: make deadcode
+
+      - name: Check tidy
+        run: make tidy-check
+
+      - name: Check formatting
+        run: make fmt-check
+
+      - name: Build
+        run: make build
+
+      - name: Unit test and coverage
+        run: make unit-test-coverage
 
   integration-test:
     name: Integration Test
@@ -54,8 +67,7 @@ jobs:
       - name: create private token fixtures
         run: python3 scripts/integration-tokens.py
       - name: integration test
-        run: |
-          make integration-test
+        run: make integration-test
     services:
       gitea:
         image: docker.gitea.com/gitea:28.2.0

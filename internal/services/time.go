@@ -56,13 +56,7 @@ type Times struct {
 	Repository string
 }
 
-// List returns a non-nil page of tracked time records.
-func (s Times) List(ctx context.Context, opts TimeOptions) ([]TrackedTime, error) {
-	page, err := s.ListPage(ctx, opts)
-	return page.Items, err
-}
-
-// ListPage is List with the number of records, as the server counts them.
+// ListPage returns a non-nil page of tracked time records with their number, as the server counts them.
 func (s Times) ListPage(ctx context.Context, opts TimeOptions) (Page[TrackedTime], error) {
 	query := gitea.ListTrackedTimesOptions{User: opts.Username}
 	if opts.Since != nil {

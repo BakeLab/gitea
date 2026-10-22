@@ -55,8 +55,9 @@ func TestTimeListSelectsScopeAndFilters(t *testing.T) {
 					{"id":2,"time":30,"issue":{"number":3,"repository":{"full_name":"carol/other"}}}
 				]`))
 			}))
-			items, err := (Times{Client: client, Repository: "alice/project"}).List(context.Background(), test.opts)
+			page, err := (Times{Client: client, Repository: "alice/project"}).ListPage(context.Background(), test.opts)
 			require.NoError(t, err)
+			items := page.Items
 			require.Equal(t, []TrackedTime{
 				{ID: 1, Seconds: 60, User: "bob", Repository: "alice/project", IssueNumber: 7, IssueURL: "https://example.test/7"},
 				{ID: 2, Seconds: 30, Repository: "carol/other", IssueNumber: 3},

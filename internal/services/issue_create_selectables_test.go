@@ -112,18 +112,6 @@ func TestIssueSelectablesLoadMetadataWithoutPush(t *testing.T) {
 	}
 }
 
-func TestViewPermissionsKeepsRepositorySchemaSeparate(t *testing.T) {
-	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"id":1,"name":"project","full_name":"alice/project","permissions":{"admin":true,"push":true,"pull":true}}`))
-	}))
-	repo, err := (Repositories{Client: client}).View(context.Background(), "alice/project")
-	require.NoError(t, err)
-	require.Equal(t, "alice/project", repo.FullName)
-	permissions, err := (Repositories{Client: client}).viewPermissions(context.Background(), "alice/project")
-	require.NoError(t, err)
-	require.Equal(t, RepositoryPermissions{Admin: true, Push: true, Pull: true}, permissions)
-}
-
 func TestEditSelectablesIncludeOrganizationLabels(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

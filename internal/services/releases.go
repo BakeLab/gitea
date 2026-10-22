@@ -209,17 +209,6 @@ func (s Releases) Delete(ctx context.Context, item Release, deleteTag bool) erro
 	return nil
 }
 
-// AllAssets retrieves the full collection; this endpoint has no server pagination.
-func (s Releases) AllAssets(ctx context.Context, id int64) ([]ReleaseAsset, error) {
-	attachments, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.Attachment, *gitea.Response, error) {
-		return c.Releases.ListReleaseAttachments(ctx, owner, repo, id, gitea.ListReleaseAttachmentsOptions{Page: -1})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return convertAll(attachments, assetFrom), nil
-}
-
 // DeleteAsset removes one asset from the selected release.
 func (s Releases) DeleteAsset(ctx context.Context, id, asset int64) error {
 	return repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {

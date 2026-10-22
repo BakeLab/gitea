@@ -180,15 +180,6 @@ type RepositoryPermissions struct {
 	Pull  bool `json:"pull"`
 }
 
-// viewPermissions reads repository access flags without exposing them on Repository results.
-func (s Repositories) viewPermissions(ctx context.Context, repo string) (RepositoryPermissions, error) {
-	item, err := s.get(ctx, repo)
-	if err != nil {
-		return RepositoryPermissions{}, err
-	}
-	return permissionsFrom(item), nil
-}
-
 func permissionsFrom(item *gitea.Repository) RepositoryPermissions {
 	if item.Permissions == nil {
 		return RepositoryPermissions{}
