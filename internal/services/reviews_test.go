@@ -126,6 +126,24 @@ func TestReviewDismissalReturnsTheUpdatedReview(t *testing.T) {
 	}
 }
 
+func TestReviewViewNamesAnIssueNumberOfAnEmptyRepository(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo":
+			_ = json.NewEncoder(w).Encode(map[string]any{"full_name": "owner/repo", "empty": true})
+		case "/api/v1/repos/owner/repo/issues/1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 1})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		}
+	}))
+	_, err := (Reviews{Client: client, Repository: "owner/repo"}).View(context.Background(), 1, 7)
+	require.EqualError(t, err, "#1 in owner/repo is an issue, not a pull request")
+	_, err = (Reviews{Client: client, Repository: "owner/repo"}).View(context.Background(), 50, 7)
+	require.EqualError(t, err, "pull request #50 not found in owner/repo")
+}
+
 func TestReviewSubmitPreservesBodyUnlessReplaced(t *testing.T) {
 	empty := ""
 	for name, test := range map[string]struct {

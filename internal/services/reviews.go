@@ -196,6 +196,12 @@ func (s Reviews) reviewError(ctx context.Context, err error, n, id int64) error 
 	if repoErr := repositoryItemError(ctx, s.Client, s.Repository, err, "review", missing.Key); isMissingRepository(repoErr) {
 		return repoErr
 	}
+	switch kind, kindErr := (Issues{Client: s.Client, Repository: s.Repository}).Kind(ctx, n); {
+	case kindErr == nil && kind == KindIssue:
+		return &NotPullError{Number: n, Repository: s.Repository, Err: &NotFoundError{Kind: "pull request", Key: "#" + strconv.FormatInt(n, 10), Scope: s.Repository, Err: err}}
+	case kindErr == nil && kind == "":
+		return &NotFoundError{Kind: "pull request", Key: "#" + strconv.FormatInt(n, 10), Scope: s.Repository, Err: err}
+	}
 	return missing
 }
 

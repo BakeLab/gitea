@@ -74,6 +74,11 @@ func TestNameOrIDPrefersIDsThenExactThenFoldedNames(t *testing.T) {
 		require.NoError(t, err, tc.raw)
 		require.Equal(t, tc.want, got.id, tc.raw)
 	}
+	lookup.ByName, lookup.NoIDs = true, true
+	_, err := lookup.Find(labels, "BUG")
+	require.EqualError(t, err, `label "BUG" is ambiguous in alice/project (IDs 11, 12); use the exact name`)
+	_, err = lookup.Find(labels, "dup")
+	require.EqualError(t, err, `label "dup" is ambiguous in alice/project (IDs 21, 22); rename one of them`)
 }
 
 func TestNameOrIDExactMatchesNamesOnlyInTheirOwnCase(t *testing.T) {

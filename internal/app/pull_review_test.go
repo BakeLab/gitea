@@ -436,6 +436,10 @@ func TestReviewViewNamesTheMissingReviewOrPullRequest(t *testing.T) {
 				_, _ = w.Write([]byte(`{"full_name":"alice/x"}`))
 				return
 			}
+			if r.URL.Path == "/api/v1/repos/alice/x/issues/20" && tc.repoExists {
+				_, _ = w.Write([]byte(`{"number":20,"pull_request":{"merged":false}}`))
+				return
+			}
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"` + tc.message + `"}`))
 		}))

@@ -43,7 +43,7 @@ func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) 
 	if err != nil {
 		return nil, err
 	}
-	find := NameOrID[*gitea.Project]{Kind: "project", Scope: s.Repository, ByName: true, ID: func(p *gitea.Project) int64 { return p.ID }, Name: func(p *gitea.Project) string { return p.Title }}
+	find := NameOrID[*gitea.Project]{Kind: "project", Scope: s.Repository, ByName: true, NoIDs: true, ID: func(p *gitea.Project) int64 { return p.ID }, Name: func(p *gitea.Project) string { return p.Title }}
 	boards := make([]Board, len(titles))
 	for _, scope := range []gitea.ProjectScope{gitea.RepoProjectScope(owner, repo), gitea.OrgProjectScope(owner)} {
 		if !slices.ContainsFunc(boards, func(b Board) bool { return b.Project == nil }) {
