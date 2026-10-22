@@ -61,7 +61,7 @@ func (a *application) assetListCommand() *cobra.Command {
 		Use:     "list <tag>",
 		Short:   "List release assets",
 		Example: "$ gt release asset list v1.0.0",
-		Args:    argsExact(1),
+		Args:    nonBlankArgs(cobra.ExactArgs(1), "tag"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {
@@ -106,7 +106,7 @@ func (a *application) releaseUploadCommand() *cobra.Command {
 An asset with the same name is replaced only with --clobber.`,
 		Example: `$ gt release upload v1.0.0 dist/gt-linux dist/gt-darwin
 $ gt release upload v1.0.0 dist/gt-linux --clobber`,
-		Args: usageArgs(cobra.MinimumNArgs(2)),
+		Args: nonBlankArgs(cobra.MinimumNArgs(2), "tag", "file"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("name") && (len(args) != 2 || strings.TrimSpace(name) == "") {
 				return clierr.Wrap(clierr.Usage, errors.New("--name requires exactly one file and a nonempty name"))
@@ -190,7 +190,7 @@ $ gt release download v1.0.0 --pattern '*linux*' --dir dist
 # Download the source code as a zip file
 $ gt release download v1.0.0 --archive zip`,
 		Annotations: textOutput("asset downloads are files"),
-		Args:        usageArgs(cobra.ArbitraryArgs),
+		Args:        nonBlankArgs(cobra.ArbitraryArgs, "tag", "asset name"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := flags.validate(); err != nil {
 				return err
@@ -371,7 +371,7 @@ func (a *application) assetEditCommand() *cobra.Command {
 		Use:     "edit <tag> <asset>",
 		Short:   "Rename a release asset",
 		Example: "$ gt release asset edit v1.0.0 gt-linux --name gt-linux-amd64",
-		Args:    argsExact(2),
+		Args:    nonBlankArgs(cobra.ExactArgs(2), "tag", "asset name"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(name) == "" {
 				return clierr.Wrap(clierr.Usage, errors.New("supply --name for asset rename"))
@@ -416,7 +416,7 @@ func (a *application) assetDeleteCommand() *cobra.Command {
 		Example: `$ gt release asset delete v1.0.0 gt-linux
 $ gt release asset delete v1.0.0 12 13 --yes`,
 		Annotations: map[string]string{"gt.confirm": "true", "gt.text": "asset deletion does not return a resource"},
-		Args:        usageArgs(cobra.MinimumNArgs(2)),
+		Args:        nonBlankArgs(cobra.MinimumNArgs(2), "tag", "asset name"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {

@@ -487,7 +487,7 @@ func TestReviewReplyNamesTheMissingPullRequestOrComment(t *testing.T) {
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.URL.Path == "/api/v1/repos/alice/x" && tc.repoExists:
-					_, _ = w.Write([]byte(`{"full_name":"alice/x"}`))
+					_, _ = w.Write([]byte(`{"full_name":"alice/x","has_pull_requests":true}`))
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/20" && tc.pullExists:
 					_, _ = w.Write([]byte(pullJSON("bob")))
 				default:

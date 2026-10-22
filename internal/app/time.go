@@ -70,8 +70,8 @@ func (a *application) timeListCommand() *cobra.Command {
 repositories with --mine. On a terminal, the total of the listed time follows the table.`, Example: `$ gt time list
 $ gt time list --issue 12
 $ gt time list --mine --since 168h`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		if scopes := setFlags([]string{"mine", "issue", "username"}, opts.Mine, issue != "", opts.Username != ""); len(scopes) > 1 {
-			return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --%s", scopes[0], scopes[1]))
+		if scopes := setFlags([]string{"--mine", "--issue", "--username"}, opts.Mine, issue != "", opts.Username != ""); len(scopes) > 1 {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with %s", scopes[0], scopes[1]))
 		}
 		if total && a.options.json != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--total is a human-output summary; use --jq 'map(.seconds) | add // 0' for JSON"))

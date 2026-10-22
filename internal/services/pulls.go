@@ -237,8 +237,7 @@ func (s Pulls) listPage(ctx context.Context, options PullListOptions) (Page[Pull
 	// TODO(sdk): ListPullRequestsOptions lacks the poster, base_branch, and labels filters.
 	page, err := rawPage[*gitea.PullRequest](ctx, s.Client, "repos/"+s.Repository+"/pulls", query, options.Limit, options.Page)
 	if err != nil {
-		// A 404 here can only mean the repository is missing or invisible.
-		return Page[Pull]{}, Classify(err, "repository", s.Repository, "")
+		return Page[Pull]{}, (Issues{Client: s.Client, Repository: s.Repository}).listError(ctx, err, "pulls")
 	}
 	return convertPage(page, pullFrom), nil
 }
@@ -374,7 +373,10 @@ func (s Pulls) get(ctx context.Context, n int64) (*gitea.PullRequest, error) {
 	item, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
 		return c.PullRequests.GetPullRequest(ctx, owner, name, n)
 	})
-	return item, repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
+	if unitErr := unitError(ctx, s.Client, s.Repository, err, UnitPulls); unitErr != nil {
+		return nil, unitErr
+	}
+	return item, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository)
 }
 
 // ListOpen returns every open pull request in the repository.
@@ -480,10 +482,8 @@ func (s Pulls) CheckUsers(ctx context.Context, assignees, reviewers []string) er
 // a missing branch without saying it looked in the fork. It answers a missing repository with a
 // bare "not found" too.
 func (s Pulls) createError(ctx context.Context, err error, head string) error {
-	if IsNotFound(err) {
-		if repoErr := missingRepository(ctx, s.Client, s.Repository); repoErr != nil {
-			return repoErr
-		}
+	if unitErr := unitError(ctx, s.Client, s.Repository, err, UnitPulls); unitErr != nil {
+		return unitErr
 	}
 	owner, branch, qualified := strings.Cut(head, ":")
 	baseOwner, _, _ := strings.Cut(s.Repository, "/")

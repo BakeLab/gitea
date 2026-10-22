@@ -329,7 +329,7 @@ func (s Teams) Members(ctx context.Context, id int64, limit, page int) (Page[Tea
 
 // IsMember reports whether username belongs to the team.
 func (s Teams) IsMember(ctx context.Context, id int64, username string) (bool, error) {
-	return Organizations{Client: s.Client}.check(ctx, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	return Organizations{Client: s.Client}.check(ctx, username, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		_, resp, err := c.Organizations.GetTeamMember(ctx, id, username)
 		return resp, err
 	})

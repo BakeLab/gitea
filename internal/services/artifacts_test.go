@@ -19,6 +19,10 @@ import (
 func TestArtifactListingProjectsMetadataAndEmptyArrays(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method)
+		if r.URL.Path == "/api/v1/repos/owner/repo/actions/runs/7" {
+			_, _ = w.Write([]byte(`{"id":7}`))
+			return
+		}
 		require.Equal(t, "/api/v1/repos/owner/repo/actions/runs/7/artifacts", r.URL.Path)
 		require.Equal(t, "20", r.URL.Query().Get("limit"))
 		if r.URL.Query().Get("page") == "2" {
@@ -45,6 +49,8 @@ func TestMissingRunIsNotFound(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/repos/owner/repo/actions/runs/8/artifacts":
 			_, _ = w.Write([]byte(`{"artifacts":[],"total_count":0}`))
+		case "/api/v1/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"run with id 8: resource does not exist"}`))
@@ -53,8 +59,16 @@ func TestMissingRunIsNotFound(t *testing.T) {
 	service := Actions{Client: client, Repository: "owner/repo"}
 	_, err := service.Artifacts(context.Background(), 8, 20, 1)
 	require.EqualError(t, err, "run 8 not found in owner/repo")
+	_, err = service.Artifacts(context.Background(), 8, 20, 2)
+	require.EqualError(t, err, "run 8 not found in owner/repo")
 	_, err = service.JobsPage(context.Background(), 8, 20, 1)
 	require.EqualError(t, err, "run 8 not found in owner/repo")
+	// Gitea answers a missing repository with the same 404 as a missing run.
+	service.Repository = "owner/gone"
+	_, err = service.JobsPage(context.Background(), 8, 20, 1)
+	require.EqualError(t, err, "repository owner/gone not found")
+	_, err = service.Artifacts(context.Background(), 8, 20, 1)
+	require.EqualError(t, err, "repository owner/gone not found")
 }
 
 func TestArtifactFromMapsServerFields(t *testing.T) {

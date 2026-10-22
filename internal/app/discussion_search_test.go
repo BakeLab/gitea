@@ -47,7 +47,7 @@ func TestSearchOwnerMatchesRepositoryCaseInsensitively(t *testing.T) {
 	deps, _, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"search", "issue", "-R", "Alice/project", "--owner", "alice", "--json"}))
 	err := Execute(context.Background(), deps, []string{"search", "issue", "-R", "Alice/project", "--owner", "bob", "--json"})
-	require.ErrorContains(t, err, "--owner conflicts with selected repository")
+	require.ErrorContains(t, err, "--owner bob cannot be combined with repository Alice/project")
 }
 
 func TestSearchIssueAcceptsFlexibleTimeBounds(t *testing.T) {

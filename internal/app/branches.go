@@ -409,7 +409,7 @@ func (a *application) branchUnprotectCommand() *cobra.Command {
 		Long:        "Remove the protection rules of branches, or of glob patterns such as release/*.",
 		Example:     "$ gt branch unprotect main\n$ gt branch unprotect 'release/*' --yes",
 		Annotations: map[string]string{"gt.confirm": "true", "gt.text": "branch unprotect does not return a resource"},
-		Args:        usageArgs(cobra.MinimumNArgs(1)),
+		Args:        nonBlankArgs(cobra.MinimumNArgs(1), "branch name"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {

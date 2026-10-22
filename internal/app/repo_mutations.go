@@ -52,7 +52,7 @@ $ gt repo archive alice/old-project --yes
 # Archive several repositories after one confirmation
 $ gt repo archive acme/legacy-api acme/legacy-web`,
 		Annotations: map[string]string{"gt.arguments": repositoryArguments, "gt.confirm": "true"},
-		Args:        usageArgs(cobra.ArbitraryArgs),
+		Args:        nonBlankArgs(cobra.ArbitraryArgs, "repository"),
 	}
 	if !archive {
 		command.Use, command.Short = "unarchive [<repository>...]", "Unarchive a repository"
@@ -107,7 +107,7 @@ $ gt repo archive acme/legacy-api acme/legacy-web`,
 // archiveRepositories archives or unarchives each named repository, after one confirmation.
 func (a *application) archiveRepositories(cmd *cobra.Command, repositories []string, archive bool) error {
 	if a.options.repo != "" {
-		return clierr.Wrap(clierr.Usage, errors.New("supply the repositories as arguments or --repo, not both"))
+		return clierr.Wrap(clierr.Usage, errors.New("repository arguments cannot be combined with --repo"))
 	}
 	verb := "Unarchived"
 	if archive {
@@ -317,7 +317,7 @@ $ gt repo delete alice/old-project
 # Delete without a prompt
 $ gt repo delete alice/old-project --yes`,
 		Annotations: map[string]string{"gt.arguments": repositoryArguments, "gt.confirm": "true", "gt.text": "repository deletion does not return a resource"},
-		Args:        usageArgs(cobra.MaximumNArgs(1)),
+		Args:        nonBlankArgs(cobra.MaximumNArgs(1), "repository"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.repositoryArgument(args); err != nil {
 				return err

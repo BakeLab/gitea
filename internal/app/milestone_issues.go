@@ -19,7 +19,7 @@ it. Milestones are addressed by title or ID; issues and pull requests by number 
 	opts := services.ListOptions{Page: 1}
 	var byName bool
 	list := &cobra.Command{Use: "list <milestone>", Short: "List issues and pull requests in a milestone", Example: `$ gt milestone issue list v1.0
-$ gt milestone issue list v1.0 --state all --kind issues`, Annotations: map[string]string{"gt.arguments": milestoneArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt milestone issue list v1.0 --state all --kind issues`, Annotations: map[string]string{"gt.arguments": milestoneArguments}, Args: nonBlankArgs(cobra.ExactArgs(1), "milestone title or ID"), RunE: func(cmd *cobra.Command, args []string) error {
 		target, err := a.resolve(cmd.Context(), true)
 		if err != nil {
 			return err
@@ -52,7 +52,7 @@ $ gt milestone issue list v1.0 --state all --kind issues`, Annotations: map[stri
 			short, preposition, past = "Remove issues or pull requests from a milestone", "from", "Removed"
 		}
 		command := &cobra.Command{Use: verb + " <milestone> {<number> | <url>}...", Short: short, Example: fmt.Sprintf(`$ gt milestone issue %[1]s v1.0 12
-$ gt milestone issue %[1]s v1.0 12 13 '#14'`, verb), Annotations: map[string]string{"gt.arguments": milestoneArguments + "\n\n" + issueArguments}, Args: usageArgs(cobra.MinimumNArgs(2)), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt milestone issue %[1]s v1.0 12 13 '#14'`, verb), Annotations: map[string]string{"gt.arguments": milestoneArguments + "\n\n" + issueArguments}, Args: nonBlankArgs(cobra.MinimumNArgs(2), "milestone title or ID", "issue"), RunE: func(cmd *cobra.Command, args []string) error {
 			target, numbers, err := a.resolveRefs(cmd, args[1:], issueRef)
 			if err != nil {
 				return err

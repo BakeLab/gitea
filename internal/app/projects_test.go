@@ -70,9 +70,9 @@ func TestIssueEditAddsToAndRemovesFromProjects(t *testing.T) {
 	require.ErrorContains(t, err, `project "Roadmap" not found`)
 	err = Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "old"})
 	require.ErrorContains(t, err, `project "old" is closed`)
-	// A board without columns gets the default column Gitea creates on the web.
+	// A board without columns gets the default column Gitea creates on the web, once.
 	mutations = nil
-	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "Empty"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "Empty", "--add-project", "empty"}))
 	require.Equal(t, []string{"POST /api/v1/orgs/acme/projects/4/columns", "POST /api/v1/orgs/acme/projects/4/columns/20/default", "POST /api/v1/orgs/acme/projects/4/columns/20/issues/70"}, mutations)
 	requireUsageBeforeRequests(t, "project names cannot be empty", "issue", "create", "--title", "x", "--project", " ")
 	requireUsageBeforeRequests(t, "--project cannot be combined with --web", "issue", "create", "--title", "x", "--project", "Board", "--web")

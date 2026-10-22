@@ -224,7 +224,7 @@ func TestRunLogsSelectJobsAndFollowSeveral(t *testing.T) {
 		{"a job by name", []string{"--job", "Build"}, "compiled\nlinked", "build (job 30)\n", ""},
 		{"follow several jobs", []string{"--follow", "--interval=1ms"}, "build\tcompiled\nbuild\tlinked\ntest\tboom\n", "build (job 30)\ntest (job 31)\n", ""},
 		{"unknown job", []string{"--job", "deploy"}, "", "", `job "deploy" not found in run 29`},
-		{"failed with a job", []string{"--job", "Build", "--failed"}, "", "", "--failed and --job cannot be combined"},
+		{"failed with a job", []string{"--job", "Build", "--failed"}, "", "", "--failed cannot be combined with --job"},
 		{"clobber without a download", []string{"--clobber"}, "", "", "--clobber requires --output or --dir"},
 		{"clobber to standard output", []string{"--clobber", "--output", "-"}, "", "", "--clobber cannot be combined with --output -"},
 		{"skip-existing without a download", []string{"--failed", "--skip-existing"}, "", "", "--skip-existing requires --output or --dir"},

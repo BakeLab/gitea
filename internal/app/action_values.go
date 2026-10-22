@@ -62,8 +62,8 @@ func (f *actionScopeFlags) scope() services.ActionScope {
 
 // resolve selects the scope and the account that manages it.
 func (f *actionScopeFlags) resolve(a *application, cmd *cobra.Command) (services.ActionScope, target, error) {
-	if (f.org != "" && f.account) || ((f.org != "" || f.account) && a.options.repo != "") {
-		return services.ActionScope{}, target{}, clierr.Wrap(clierr.Usage, errors.New("--org, --account and --repo select different scopes; pass one"))
+	if scopes := setFlags([]string{"--org", "--account", "--repo"}, f.org != "", f.account, a.options.repo != ""); len(scopes) > 1 {
+		return services.ActionScope{}, target{}, clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with %s", scopes[0], scopes[1]))
 	}
 	t, err := a.resolve(cmd.Context(), f.org == "" && !f.account)
 	if err != nil {

@@ -668,7 +668,7 @@ func milestoneFlag(cmd *cobra.Command, value string) (selected string, remove bo
 	case !cmd.Flags().Changed("milestone"):
 		return "", remove, nil
 	case remove:
-		return "", false, clierr.Wrap(clierr.Usage, errors.New("--milestone and --remove-milestone cannot be combined"))
+		return "", false, clierr.Wrap(clierr.Usage, errors.New("--milestone cannot be combined with --remove-milestone"))
 	case strings.TrimSpace(value) == "":
 		hint := "omit --milestone for none"
 		if cmd.Flags().Lookup("remove-milestone") != nil {

@@ -51,6 +51,10 @@ func discussion(cmd *cobra.Command, t target, n int64, kind refKind) (services.I
 	if missing, ok := errors.AsType[*services.NotFoundError](err); ok && kind == pullRef && missing.Kind == "issue" {
 		missing.Kind = "pull request"
 	}
+	// Gitea serves pull requests through the issue endpoints also when issues are turned off.
+	if unit, ok := errors.AsType[*services.UnitError](err); ok && kind == pullRef && unit.Unit == services.UnitIssues {
+		err = services.NotFound("pull request", "#"+strconv.FormatInt(n, 10), t.Repo)
+	}
 	if err == nil && kind == pullRef && item.Kind != services.KindPull {
 		err = fmt.Errorf("#%d in %s is an issue, not a pull request; use %s %d", n, t.Repo, issueCommandPath(cmd), n)
 	}
@@ -311,7 +315,7 @@ $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[st
 			return err
 		}
 		if editLast && deleteLast {
-			return clierr.Wrap(clierr.Usage, errors.New("--edit-last and --delete-last cannot be combined"))
+			return clierr.Wrap(clierr.Usage, errors.New("--edit-last cannot be combined with --delete-last"))
 		}
 		if deleteLast && (cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") || flags.useEditor) {
 			return clierr.Wrap(clierr.Usage, errors.New("--delete-last takes no comment text"))

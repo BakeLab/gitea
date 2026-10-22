@@ -37,7 +37,7 @@ $ gt repo sync --branch release/1.0
 # Update a fork on the server from its parent
 $ gt repo sync bob/project`,
 		Annotations: map[string]string{"gt.arguments": repositoryArguments},
-		Args:        usageArgs(cobra.MaximumNArgs(1)),
+		Args:        nonBlankArgs(cobra.MaximumNArgs(1), "repository"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("branch") && strings.TrimSpace(branch) == "" {
 				return clierr.Wrap(clierr.Usage, errors.New("--branch cannot be empty"))

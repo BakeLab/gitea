@@ -161,7 +161,7 @@ $ gt admin user edit bob --admin=false`,
 	}
 	if verb == "create" {
 		command.Use, command.Short, command.ValidArgsFunction = "create [<username>]", "Create an account", nil
-		command.Args = usageArgs(cobra.MaximumNArgs(1))
+		command.Args = nonBlankArgs(cobra.MaximumNArgs(1), "username")
 		command.Long = `Create an account. On a terminal, gt asks for a missing username, email address and
 password; the new account must change its password on its first sign-in unless
 --must-change-password=false is passed.`
@@ -205,7 +205,7 @@ $ gt admin user create ci-bot --email ci@example.com --password-file pw.txt --mu
 		if verb == "create" {
 			if len(args) > 0 {
 				if cmd.Flags().Changed("username") {
-					return clierr.Wrap(clierr.Usage, errors.New("supply username as an argument or --username, not both"))
+					return clierr.Wrap(clierr.Usage, errors.New("a username argument cannot be combined with --username"))
 				}
 				username = args[0]
 			}

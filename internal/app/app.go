@@ -175,7 +175,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 			}
 			for c := cmd; c.HasParent(); c = c.Parent() {
 				if c.Name() == "auth" && !c.Parent().HasParent() {
-					return clierr.Wrap(clierr.Usage, errors.New("--sudo cannot be used with auth commands"))
+					return clierr.Wrap(clierr.Usage, errors.New("--sudo cannot be combined with auth commands"))
 				}
 			}
 		}

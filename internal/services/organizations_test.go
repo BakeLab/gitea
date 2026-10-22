@@ -120,6 +120,8 @@ func TestOrganizationMembershipChecksReportWhatGiteaRefuses(t *testing.T) {
 			_, _ = w.Write([]byte(`{"message":"user does not exist [uid: 0, name: bbo]"}`))
 		case "/api/v1/orgs/acme":
 			_, _ = w.Write([]byte(`{"name":"acme"}`))
+		case "/api/v1/users/carol":
+			_, _ = w.Write([]byte(`{"login":"carol"}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -132,6 +134,8 @@ func TestOrganizationMembershipChecksReportWhatGiteaRefuses(t *testing.T) {
 	require.True(t, IsForbidden(err), "%v", err)
 	_, err = service.IsMember(context.Background(), "acme", "bbo")
 	require.EqualError(t, err, `user "bbo" not found`)
+	_, err = service.IsMember(context.Background(), "acme", "ghost")
+	require.EqualError(t, err, `user "ghost" not found`)
 	member, err := service.IsMember(context.Background(), "acme", "carol")
 	require.NoError(t, err)
 	require.False(t, member)

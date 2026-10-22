@@ -522,7 +522,7 @@ func (a *application) selectHost(t *target, s settings.Snapshot) error {
 			return clierr.Wrap(clierr.Usage, err)
 		}
 		if t.Host != "" && t.Host != explicit {
-			return clierr.Wrap(clierr.Usage, fmt.Errorf("--host %s conflicts with %s from %s", explicit, t.Host, t.HostSource))
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--host %s cannot be combined with %s from %s", explicit, t.Host, t.HostSource))
 		}
 		t.Host, t.HostSource = explicit, "--host"
 	}

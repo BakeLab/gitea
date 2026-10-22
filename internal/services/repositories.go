@@ -275,10 +275,7 @@ func (s Repositories) createForUser(ctx context.Context, owner string, options g
 	case err == nil:
 		return item, nil
 	case IsForbidden(err):
-		_, _, userErr := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
-			return c.Users.GetUserInfo(ctx, owner)
-		})
-		if userErr == nil {
+		if userExists(ctx, s.Client, owner) == nil {
 			return nil, fmt.Errorf("%s is a user, not an organization; only site administrators can create repositories for other users", owner)
 		}
 	case !IsNotFound(err):

@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -56,24 +57,21 @@ $ gt browse --commit
 $ gt browse --releases -R alice/project
 $ gt browse --no-browser docs/README.md`,
 		Annotations: textOutput("browse opens a web page"),
-		Args:        usageArgs(cobra.MaximumNArgs(1)),
+		Args:        nonBlankArgs(cobra.MaximumNArgs(1), "number, path or commit SHA"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arg := ""
 			if len(args) > 0 {
 				arg = args[0]
 			}
-			var exclusive []string
+			var names []string
 			page := ""
-			for i, selected := range pages {
-				if selected {
-					exclusive, page = append(exclusive, "--"+browsePages[i].flag), browsePages[i].page
+			for i, p := range browsePages {
+				names = append(names, "--"+p.flag)
+				if pages[i] {
+					page = p.page
 				}
 			}
-			for _, name := range []string{"branch", "commit"} {
-				if cmd.Flags().Changed(name) {
-					exclusive = append(exclusive, "--"+name)
-				}
-			}
+			exclusive := setFlags(append(names, "--branch", "--commit"), slices.Concat(pages, []bool{cmd.Flags().Changed("branch"), cmd.Flags().Changed("commit")})...)
 			switch {
 			case len(exclusive) > 1:
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with %s", exclusive[0], exclusive[1]))

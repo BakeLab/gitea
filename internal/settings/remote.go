@@ -107,18 +107,27 @@ func RemoteRepository(raw string, hosts map[string]Host) (string, string, error)
 	return RepositoryURL(WithoutCredentials(raw), hosts)
 }
 
-// WithoutCredentials removes the user information of an HTTP(S) URL and the password of an
-// ssh:// URL.
+// WithoutCredentials returns a URL without the secrets it can embed, for showing or matching it.
+// An HTTP(S) URL loses its user information, an ssh:// URL its password, and both their query and
+// fragment. An scp-like address such as git@host:owner/name keeps its user, which Git reads as a
+// login name only. A URL that does not parse but holds an @ becomes "".
 func WithoutCredentials(raw string) string {
-	u, err := url.Parse(raw)
-	if !strings.Contains(raw, "://") || err != nil || u.User == nil {
+	if !strings.Contains(raw, "://") {
 		return raw
 	}
-	if u.Scheme == "ssh" {
+	u, err := url.Parse(raw)
+	if err != nil {
+		if strings.Contains(raw, "@") {
+			return ""
+		}
+		return raw
+	}
+	if u.User != nil && u.Scheme == "ssh" {
 		u.User = url.User(u.User.Username())
 	} else {
 		u.User = nil
 	}
+	u.RawQuery, u.Fragment = "", ""
 	return u.String()
 }
 

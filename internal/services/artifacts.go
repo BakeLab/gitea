@@ -54,10 +54,10 @@ func (s Actions) Artifacts(ctx context.Context, run int64, limit, page int) (Pag
 		return convertAll(response.Artifacts, artifactFrom), headers, nil
 	})
 	if err != nil {
-		return Page[Artifact]{}, Classify(err, "run", strconv.FormatInt(run, 10), s.Repository)
+		return Page[Artifact]{}, repositoryItemError(ctx, s.Client, s.Repository, err, "run", strconv.FormatInt(run, 10))
 	}
 	// Gitea lists no artifacts for a missing run rather than failing.
-	if len(result.Items) == 0 && page <= 1 {
+	if len(result.Items) == 0 {
 		if _, err := s.Run(ctx, run); err != nil {
 			return Page[Artifact]{}, err
 		}
@@ -85,7 +85,7 @@ func (s Actions) AllArtifacts(ctx context.Context, run int64) ([]Artifact, error
 func (s Actions) DownloadArtifact(ctx context.Context, id int64) (io.ReadCloser, error) {
 	body, err := downloadAPI(ctx, s.Client, fmt.Sprintf("%sartifacts/%d/zip", s.endpoint(), id))
 	if err != nil {
-		return nil, Classify(err, "artifact", strconv.FormatInt(id, 10), s.Repository)
+		return nil, repositoryItemError(ctx, s.Client, s.Repository, err, "artifact", strconv.FormatInt(id, 10))
 	}
 	return body, nil
 }

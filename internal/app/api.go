@@ -153,7 +153,7 @@ type apiFlags struct {
 
 func (a *application) apiCommand() *cobra.Command {
 	var f apiFlags
-	cmd := &cobra.Command{Use: "api <endpoint>", Short: "Make an authenticated Gitea API request", Long: apiLong, Example: apiExamples, Annotations: map[string]string{"gt.text": "api returns raw responses", "gt.rawjson": "true"}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "api <endpoint>", Short: "Make an authenticated Gitea API request", Long: apiLong, Example: apiExamples, Annotations: map[string]string{"gt.text": "api returns raw responses", "gt.rawjson": "true"}, Args: nonBlankArgs(cobra.ExactArgs(1), "endpoint"), RunE: func(cmd *cobra.Command, args []string) error {
 		return a.runAPI(cmd, args, &f)
 	}}
 	cmd.Flags().StringVarP(&f.method, "method", "X", "GET", "HTTP `method`")
@@ -187,7 +187,7 @@ func (a *application) runAPI(cmd *cobra.Command, args []string, f *apiFlags) err
 		return usage(errors.New("--input requires a file path or -"))
 	}
 	if f.input != "" && len(fields) > 0 {
-		return usage(errors.New("--input conflicts with API fields"))
+		return usage(errors.New("--input cannot be combined with API fields"))
 	}
 	if !cmd.Flags().Changed("method") && (f.input != "" || len(fields) > 0) {
 		f.method = http.MethodPost

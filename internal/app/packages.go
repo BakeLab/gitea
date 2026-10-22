@@ -220,7 +220,7 @@ func (a *application) packageLinkCommand(service packageService, link bool) *cob
 		},
 	}
 	if !link {
-		cmd.Use, cmd.Short, cmd.Args, cmd.Example = "unlink <type> <name>", "Unlink a package from its repository", argsExact(2), "$ gt package unlink generic tool"
+		cmd.Use, cmd.Short, cmd.Args, cmd.Example = "unlink <type> <name>", "Unlink a package from its repository", nonBlankArgs(cobra.ExactArgs(2), "package type", "package name"), "$ gt package unlink generic tool"
 		cmd.Annotations = textOutput("unlinking a package does not return a resource")
 	}
 	return cmd

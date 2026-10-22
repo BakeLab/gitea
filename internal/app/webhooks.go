@@ -56,8 +56,8 @@ type webhookScope struct {
 }
 
 func (s *webhookScope) service(a *application, cmd *cobra.Command) (target, services.Webhooks, error) {
-	if scopes := setFlags([]string{"org", "account", "global", "repo"}, s.org != "", s.account, s.global, a.options.repo != ""); len(scopes) > 1 {
-		return target{}, services.Webhooks{}, clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --%s", scopes[0], scopes[1]))
+	if scopes := setFlags([]string{"--org", "--account", "--global", "--repo"}, s.org != "", s.account, s.global, a.options.repo != ""); len(scopes) > 1 {
+		return target{}, services.Webhooks{}, clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with %s", scopes[0], scopes[1]))
 	}
 	t, err := a.resolve(cmd.Context(), s.org == "" && !s.account && !s.global)
 	return t, services.Webhooks{Client: t.client, Scope: services.WebhookScope{Repository: t.Repo, Organization: s.org, Account: s.account, Global: s.global}}, err
@@ -251,7 +251,7 @@ $ gt webhook edit 3 --events push,release --authorization-header-file header.txt
 	eventsUsage := "Events that trigger the webhook, comma-separated"
 	if create {
 		command.Use, command.Short, command.ValidArgsFunction = "create [<url>]", "Create a webhook", nil
-		command.Args = usageArgs(cobra.MaximumNArgs(1))
+		command.Args = nonBlankArgs(cobra.MaximumNArgs(1), "URL")
 		command.Long = `Create a webhook that delivers events to a URL, by default as JSON for push events.
 
 ` + wrap("Events: "+strings.Join(services.WebhookEvents, ", ")+"; issues and pull_request include every issue or pull request event.", 95) + `
@@ -315,7 +315,7 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 		}
 		if len(args) > 0 && create {
 			if cmd.Flags().Changed("url") {
-				return clierr.Wrap(clierr.Usage, errors.New("supply the URL as an argument or --url, not both"))
+				return clierr.Wrap(clierr.Usage, errors.New("a URL argument cannot be combined with --url"))
 			}
 			endpoint = args[0]
 		}

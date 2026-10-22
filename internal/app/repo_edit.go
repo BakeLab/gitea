@@ -76,7 +76,7 @@ $ gt repo edit alice/project --visibility private --enable-wiki=false
 # Squash pull requests by default and tag the repository
 $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 		Annotations: map[string]string{"gt.arguments": repositoryArguments},
-		Args:        usageArgs(cobra.MaximumNArgs(1)),
+		Args:        nonBlankArgs(cobra.MaximumNArgs(1), "repository"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.repositoryArgument(args); err != nil {
 				return err
@@ -108,7 +108,7 @@ $ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
 			}
 			if changed("visibility") {
 				if changed("private") {
-					return clierr.Wrap(clierr.Usage, errors.New("--visibility and --private cannot be combined"))
+					return clierr.Wrap(clierr.Usage, errors.New("--visibility cannot be combined with --private"))
 				}
 				private := visibility == "private"
 				options.Private = &private

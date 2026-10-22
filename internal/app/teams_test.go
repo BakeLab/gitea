@@ -272,7 +272,7 @@ func TestTeamMemberRemoveConfirmsOnce(t *testing.T) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/teams/5":
 			_, _ = w.Write([]byte(`{"id":5,"name":"devs","organization":{"username":"acme"}}`))
-		case "GET /api/v1/teams/5/members/carol", "GET /api/v1/teams/5/members/dave":
+		case "GET /api/v1/teams/5/members/carol", "GET /api/v1/teams/5/members/dave", "GET /api/v1/users/erin":
 			_, _ = w.Write([]byte(`{"login":"` + path.Base(r.URL.Path) + `"}`))
 		case "GET /api/v1/teams/5/members/erin":
 			w.WriteHeader(http.StatusNotFound)
@@ -303,6 +303,8 @@ func TestTeamMembershipAndAccessChangesContinuePastFailures(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":5,"name":"devs","organization":{"username":"acme"}}`))
 		case path.Base(r.URL.Path) == "ghost":
 			http.NotFound(w, r)
+		case r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"login":"bob"}`))
 		default:
 			changed = append(changed, r.Method+" "+r.URL.Path)
 			w.WriteHeader(http.StatusNoContent)
@@ -315,6 +317,7 @@ func TestTeamMembershipAndAccessChangesContinuePastFailures(t *testing.T) {
 		done, fail string
 	}{
 		{[]string{"member", "add"}, "PUT /api/v1/teams/5/members/bob", "Added bob to team acme/devs", "user ghost: not found"},
+		{[]string{"member", "remove"}, "DELETE /api/v1/teams/5/members/bob", "Removed bob from team acme/devs", "user ghost: not found"},
 		{[]string{"repo", "add"}, "PUT /api/v1/teams/5/repos/acme/bob", "Granted team acme/devs access to acme/bob", "repository acme/ghost: not found"},
 		{[]string{"repo", "remove"}, "DELETE /api/v1/teams/5/repos/acme/bob", "Revoked team acme/devs access to acme/bob", "repository acme/ghost: not found"},
 	} {

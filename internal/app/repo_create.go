@@ -102,7 +102,7 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 	}
 	if owner, name, ok := strings.Cut(f.opts.Name, "/"); ok {
 		if cmd.Flags().Changed("org") {
-			return clierr.Wrap(clierr.Usage, errors.New("supply the owner as OWNER/NAME or --org, not both"))
+			return clierr.Wrap(clierr.Usage, errors.New("an OWNER/NAME argument cannot be combined with --org"))
 		}
 		f.org, f.opts.Name = owner, name
 	}
@@ -111,7 +111,7 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 	}
 	if f.public {
 		if cmd.Flags().Changed("private") {
-			return clierr.Wrap(clierr.Usage, errors.New("--public and --private cannot be combined"))
+			return clierr.Wrap(clierr.Usage, errors.New("--public cannot be combined with --private"))
 		}
 		f.opts.Private = false
 	}

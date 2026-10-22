@@ -232,7 +232,7 @@ func (a *application) labelEditCommand(scope labelScope, complete cobra.Completi
 	var byName bool
 	cmd := &cobra.Command{Use: "edit <label>", Short: "Edit a label", Example: `$ gt label edit bug --name defect --color b60205
 $ gt label edit "kind/question" --description "Further information is requested"
-$ gt label edit old-stuff --archived`, Annotations: map[string]string{"gt.arguments": labelArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt label edit old-stuff --archived`, Annotations: map[string]string{"gt.arguments": labelArguments}, Args: nonBlankArgs(cobra.ExactArgs(1), "label name"), RunE: func(cmd *cobra.Command, args []string) error {
 		opts, err := fields.options(cmd)
 		if err != nil {
 			return err
@@ -269,7 +269,7 @@ $ gt label edit old-stuff --archived`, Annotations: map[string]string{"gt.argume
 func (a *application) labelDeleteCommand(scope labelScope, complete cobra.CompletionFunc) *cobra.Command {
 	var byName bool
 	cmd := &cobra.Command{Use: "delete <label>...", Short: "Delete labels", Example: `$ gt label delete bug
-$ gt label delete wontfix duplicate --yes`, Annotations: map[string]string{"gt.text": "label deletion does not return a resource", "gt.confirm": "true", "gt.arguments": labelArguments}, Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt label delete wontfix duplicate --yes`, Annotations: map[string]string{"gt.text": "label deletion does not return a resource", "gt.confirm": "true", "gt.arguments": labelArguments}, Args: nonBlankArgs(cobra.MinimumNArgs(1), "label name"), RunE: func(cmd *cobra.Command, args []string) error {
 		s, err := scope(cmd)
 		if err != nil {
 			return err

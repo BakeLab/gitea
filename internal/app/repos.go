@@ -27,7 +27,7 @@ func (a *application) repositoryArgument(args []string) error {
 		return nil
 	}
 	if a.options.repo != "" {
-		return clierr.Wrap(clierr.Usage, errors.New("supply the repository as an argument or --repo, not both"))
+		return clierr.Wrap(clierr.Usage, errors.New("a repository argument cannot be combined with --repo"))
 	}
 	a.options.repo = args[0]
 	return nil
@@ -79,9 +79,9 @@ Without an argument, a terminal asks for one of the repositories of the clone's 
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
 			case view && unset:
-				return clierr.Wrap(clierr.Usage, errors.New("--view and --unset cannot be combined"))
+				return clierr.Wrap(clierr.Usage, errors.New("--view cannot be combined with --unset"))
 			case (view || unset) && len(args) > 0:
-				return clierr.Wrap(clierr.Usage, errors.New("--view and --unset take no repository"))
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with a repository argument", setFlags([]string{"--view", "--unset"}, view, unset)[0]))
 			}
 			ctx := cmd.Context()
 			if inside, _ := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--is-inside-work-tree"); inside != "true" {
@@ -178,7 +178,7 @@ $ gt repo list acme --type fork
 
 # List your starred repositories as JSON
 $ gt repo list --starred --json full_name,url`,
-		Args: usageArgs(cobra.MaximumNArgs(1)),
+		Args: nonBlankArgs(cobra.MaximumNArgs(1), "owner"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.rejectRepoFlag(cmd, func(owner string) string { return "gt repo list " + owner }); err != nil {
 				return err
@@ -186,14 +186,8 @@ $ gt repo list --starred --json full_name,url`,
 			if len(args) > 0 {
 				opts.Owner = args[0]
 			}
-			scopes := 0
-			for _, selected := range []bool{opts.Owner != "", opts.Starred, opts.Watched} {
-				if selected {
-					scopes++
-				}
-			}
-			if scopes > 1 {
-				return clierr.Wrap(clierr.Usage, errors.New("an owner, --starred and --watched select different collections; pass one"))
+			if scopes := setFlags([]string{"an owner argument", "--starred", "--watched"}, opts.Owner != "", opts.Starred, opts.Watched); len(scopes) > 1 {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with %s", scopes[0], scopes[1]))
 			}
 			target, err := a.resolve(cmd.Context(), false)
 			if err != nil {
@@ -276,7 +270,7 @@ $ gt repo view alice/project --branch develop
 # Open the repository in the browser
 $ gt repo view alice/project --web`,
 		Annotations: map[string]string{"gt.arguments": repositoryArguments},
-		Args:        usageArgs(cobra.MaximumNArgs(1)),
+		Args:        nonBlankArgs(cobra.MaximumNArgs(1), "repository"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.repositoryArgument(args); err != nil {
 				return err

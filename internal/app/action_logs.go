@@ -77,10 +77,10 @@ $ gt run logs 34 --output logs.zip`,
 				return err
 			}
 			if follow && failed {
-				return clierr.Wrap(clierr.Usage, errors.New("--follow and --failed cannot be combined"))
+				return clierr.Wrap(clierr.Usage, errors.New("--follow cannot be combined with --failed"))
 			}
 			if failed && job != "" {
-				return clierr.Wrap(clierr.Usage, errors.New("--failed and --job cannot be combined"))
+				return clierr.Wrap(clierr.Usage, errors.New("--failed cannot be combined with --job"))
 			}
 			t, run, err := a.runArg(cmd, args, false)
 			if err != nil {

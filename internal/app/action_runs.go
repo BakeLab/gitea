@@ -736,7 +736,7 @@ $ gt run rerun 34 --job build`,
 		Annotations: map[string]string{"gt.arguments": runArguments},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if failed && job != "" {
-				return clierr.Wrap(clierr.Usage, errors.New("--failed and --job cannot be combined"))
+				return clierr.Wrap(clierr.Usage, errors.New("--failed cannot be combined with --job"))
 			}
 			conflicting := ""
 			if failed {

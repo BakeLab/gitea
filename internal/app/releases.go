@@ -109,7 +109,7 @@ $ gt release view
 
 # View a release in the browser
 $ gt release view v1.0.0 --web`,
-		Args: usageArgs(cobra.MaximumNArgs(1)),
+		Args: nonBlankArgs(cobra.MaximumNArgs(1), "tag"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {
@@ -242,7 +242,7 @@ $ gt release create v1.0.0 dist/gt-linux dist/gt-darwin --notes-file CHANGELOG.m
 
 # Create a draft prerelease of a new tag on a branch
 $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title "1.1 RC 1"`,
-		Args: usageArgs(cobra.ArbitraryArgs),
+		Args: nonBlankArgs(cobra.ArbitraryArgs, "tag", "file"),
 		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			var editorDraft terminal.Draft
 			defer finishDraft(&editorDraft, &runErr)
@@ -398,7 +398,7 @@ func (a *application) releaseEditCommand() *cobra.Command {
 		Short: "Edit releases",
 		Example: `$ gt release edit v1.0.0 --title "1.0.0" --notes-file CHANGELOG.md
 $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
-		Args: usageArgs(cobra.MinimumNArgs(1)),
+		Args: nonBlankArgs(cobra.MinimumNArgs(1), "tag"),
 		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			var editorDraft terminal.Draft
 			defer finishDraft(&editorDraft, &runErr)
@@ -474,7 +474,7 @@ func (a *application) releasePublishCommand() *cobra.Command {
 		Use:     "publish <tag>...",
 		Short:   "Publish draft releases",
 		Example: "$ gt release publish v1.1.0",
-		Args:    usageArgs(cobra.MinimumNArgs(1)),
+		Args:    nonBlankArgs(cobra.MinimumNArgs(1), "tag"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {
@@ -512,7 +512,7 @@ func (a *application) releaseDeleteCommand() *cobra.Command {
 		Example: `$ gt release delete v1.0.0-rc1
 $ gt release delete v1.0.0-rc1 v1.0.0-rc2 --delete-tag --yes`,
 		Annotations: map[string]string{"gt.confirm": "true", "gt.text": "release deletion does not return a resource"},
-		Args:        usageArgs(cobra.MinimumNArgs(1)),
+		Args:        nonBlankArgs(cobra.MinimumNArgs(1), "tag"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {

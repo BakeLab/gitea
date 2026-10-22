@@ -148,7 +148,7 @@ func milestoneView(t target, now time.Time) func(services.Milestone) terminal.Vi
 func (a *application) milestoneViewCommand(service milestoneService) *cobra.Command {
 	var byName, web bool
 	cmd := &cobra.Command{Use: "view <milestone>", Short: "View a milestone", Example: `$ gt milestone view v1.0
-$ gt milestone view 3 --web`, Annotations: map[string]string{"gt.arguments": milestoneArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt milestone view 3 --web`, Annotations: map[string]string{"gt.arguments": milestoneArguments}, Args: nonBlankArgs(cobra.ExactArgs(1), "milestone title or ID"), RunE: func(cmd *cobra.Command, args []string) error {
 		s, t, err := service(cmd)
 		if err != nil {
 			return err
@@ -241,13 +241,13 @@ and due date. A milestone with the same title, ignoring case, is refused unless 
 it, since titles address milestones.`, Example: `$ gt milestone create v1.0 --deadline 2026-12-31 --description "First release"
 $ gt milestone create --title v2.0 --editor
 # Update the milestone if it exists
-$ gt milestone create v1.0 --deadline 2027-01-31 --force`, Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+$ gt milestone create v1.0 --deadline 2027-01-31 --force`, Args: nonBlankArgs(cobra.MaximumNArgs(1), "milestone title"), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		if err := validateTextSources(cmd, "description", "description-file"); err != nil {
 			return err
 		}
 		if len(args) == 1 {
 			if cmd.Flags().Changed("title") {
-				return clierr.Wrap(clierr.Usage, errors.New("pass the title as an argument or --title, not both"))
+				return clierr.Wrap(clierr.Usage, errors.New("a title argument cannot be combined with --title"))
 			}
 			if err := cmd.Flags().Set("title", args[0]); err != nil {
 				return err
@@ -309,7 +309,7 @@ func (a *application) milestoneEditCommand(service milestoneService) *cobra.Comm
 	cmd := &cobra.Command{Use: "edit <milestone>", Short: "Edit a milestone", Long: `Edit the title, description or due date of a milestone. Without flags on a terminal, a form
 starts from the current values.`, Example: `$ gt milestone edit v1.0 --title v1.0.0 --deadline 2027-01-31
 $ gt milestone edit v1.0 --deadline=
-$ gt milestone edit 3 --editor`, Annotations: map[string]string{"gt.arguments": milestoneArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+$ gt milestone edit 3 --editor`, Annotations: map[string]string{"gt.arguments": milestoneArguments}, Args: nonBlankArgs(cobra.ExactArgs(1), "milestone title or ID"), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		if err := validateTextSources(cmd, "description", "description-file"); err != nil {
 			return err
 		}
@@ -390,7 +390,7 @@ $ gt milestone edit 3 --editor`, Annotations: map[string]string{"gt.arguments": 
 func (a *application) milestoneDeleteCommand(service milestoneService) *cobra.Command {
 	var byName bool
 	cmd := &cobra.Command{Use: "delete <milestone>", Short: "Delete a milestone", Long: "Delete a milestone. Its issues and pull requests stay, without a milestone.", Example: `$ gt milestone delete v0.9
-$ gt milestone delete 7 --yes`, Annotations: map[string]string{"gt.confirm": "true", "gt.arguments": milestoneArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt milestone delete 7 --yes`, Annotations: map[string]string{"gt.confirm": "true", "gt.arguments": milestoneArguments}, Args: nonBlankArgs(cobra.ExactArgs(1), "milestone title or ID"), RunE: func(cmd *cobra.Command, args []string) error {
 		s, t, err := service(cmd)
 		if err != nil {
 			return err

@@ -122,7 +122,7 @@ func TestIssueRequestsNameTheMissingRepositoryOrItem(t *testing.T) {
 	for _, repository := range []string{"owner/repo", "owner/missing"} {
 		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/v1/repos/owner/repo" {
-				_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
+				_, _ = w.Write([]byte(`{"full_name":"owner/repo","has_issues":true,"has_pull_requests":true}`))
 				return
 			}
 			w.WriteHeader(http.StatusNotFound)
@@ -212,4 +212,39 @@ func TestIssueDependenciesReportAFailureBesideAMissingList(t *testing.T) {
 	}))
 	_, err := (Issues{Client: client, Repository: "owner/repo"}).Dependencies(context.Background(), 7)
 	require.ErrorContains(t, err, "500")
+}
+
+func TestIssueAndPullRequestsNameATurnedOffUnit(t *testing.T) {
+	const (
+		noIssues = "issues are disabled in owner/repo; turn them on with: gt repo edit --enable-issues -R owner/repo"
+		noPulls  = "pull requests are disabled in owner/repo; turn them on with: gt repo edit --enable-pull-requests -R owner/repo"
+		tracker  = "owner/repo uses an external issue tracker: https://tracker.example"
+	)
+	for _, test := range []struct {
+		repository, view, list, pull, pulls string
+	}{
+		{`{"has_issues":false,"has_pull_requests":true}`, noIssues, noIssues, "pull request #9 not found in owner/repo", "repository owner/repo not found"},
+		{`{"has_issues":true,"has_pull_requests":false}`, "issue #9 not found in owner/repo", "repository owner/repo not found", noPulls, noPulls},
+		{`{"has_issues":true,"has_pull_requests":true,"external_tracker":{"external_tracker_url":"https://tracker.example"}}`, tracker, tracker, "pull request #9 not found in owner/repo", "repository owner/repo not found"},
+	} {
+		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/repos/owner/repo" {
+				_, _ = w.Write([]byte(test.repository))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		}))
+		ctx := context.Background()
+		issues := Issues{Client: client, Repository: "owner/repo"}
+		_, err := issues.View(ctx, 9)
+		require.EqualError(t, err, test.view)
+		_, _, err = issues.List(ctx, ListOptions{State: "open", Limit: 10, Page: 1})
+		require.EqualError(t, err, test.list)
+		pulls := Pulls{Client: client, Repository: "owner/repo"}
+		_, err = pulls.View(ctx, 9)
+		require.EqualError(t, err, test.pull)
+		_, _, err = pulls.List(ctx, PullListOptions{State: "open", Limit: 10, Page: 1})
+		require.EqualError(t, err, test.pulls)
+	}
 }

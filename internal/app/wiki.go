@@ -76,7 +76,7 @@ func (a *application) wikiViewCommand() *cobra.Command {
 		Short:   "View a wiki page",
 		Long:    "View a wiki page, rendered on a terminal.",
 		Example: "$ gt wiki view Home\n$ gt wiki view \"Getting Started\" --web",
-		Args:    argsExact(1),
+		Args:    nonBlankArgs(cobra.ExactArgs(1), "page name"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {
@@ -120,7 +120,7 @@ func (a *application) wikiRevisionsCommand() *cobra.Command {
 		Use:     "revisions <page>",
 		Short:   "List revisions of a wiki page",
 		Example: "$ gt wiki revisions Home",
-		Args:    argsExact(1),
+		Args:    nonBlankArgs(cobra.ExactArgs(1), "page name"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {
@@ -173,13 +173,13 @@ func (a *application) wikiCreateCommand() *cobra.Command {
 		Long:  "Create a wiki page. Without --body or --body-file, the content is written in an editor or typed on the terminal.",
 		Example: `$ gt wiki create "Getting Started" --body-file docs/start.md
 $ gt wiki create Home --editor`,
-		Args: usageArgs(cobra.MaximumNArgs(1)),
+		Args: nonBlankArgs(cobra.MaximumNArgs(1), "page title"),
 		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			var draft terminal.Draft
 			defer finishDraft(&draft, &runErr)
 			if len(args) > 0 {
 				if cmd.Flags().Changed("title") {
-					return clierr.Wrap(clierr.Usage, errors.New("supply the title as an argument or --title, not both"))
+					return clierr.Wrap(clierr.Usage, errors.New("a title argument cannot be combined with --title"))
 				}
 				content.title = args[0]
 			}
@@ -318,7 +318,7 @@ func (a *application) wikiEditCommand() *cobra.Command {
 		Example: `$ gt wiki edit Home --body-file docs/home.md --message "Rewrite the home page"
 $ gt wiki edit "Old Title" --title "New Title"
 $ gt wiki edit Home --editor`,
-		Args: argsExact(1),
+		Args: nonBlankArgs(cobra.ExactArgs(1), "page name"),
 		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			var draft terminal.Draft
 			defer finishDraft(&draft, &runErr)
@@ -382,7 +382,7 @@ func (a *application) wikiDeleteCommand() *cobra.Command {
 		Short:       "Delete a wiki page",
 		Example:     "$ gt wiki delete \"Old Notes\" --yes",
 		Annotations: map[string]string{"gt.confirm": "true", "gt.text": "wiki page deletion does not return a resource"},
-		Args:        argsExact(1),
+		Args:        nonBlankArgs(cobra.ExactArgs(1), "page name"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {

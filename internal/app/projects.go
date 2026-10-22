@@ -27,8 +27,20 @@ func loadProjectChanges(ctx context.Context, t target, add, remove []string, exi
 	if err != nil {
 		return changes, err
 	}
-	changes.add, changes.remove = boards[:len(add)], boards[len(add):]
+	changes.add, changes.remove = distinctBoards(boards[:len(add)]), distinctBoards(boards[len(add):])
 	return changes, nil
+}
+
+// distinctBoards drops repeats of a project, which two spellings of its title select, so that
+// each board is changed once.
+func distinctBoards(boards []services.Board) []services.Board {
+	var distinct []services.Board
+	for _, board := range boards {
+		if !slices.ContainsFunc(distinct, func(b services.Board) bool { return b.ID == board.ID }) {
+			distinct = append(distinct, board)
+		}
+	}
+	return distinct
 }
 
 // apply puts the issue with the global ID issueID, as project boards address issues, on the boards

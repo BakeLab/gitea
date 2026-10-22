@@ -4,8 +4,10 @@
 package services
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -131,8 +133,7 @@ func (s Issues) ListPage(ctx context.Context, opts ListOptions) (Page[Issue], er
 			return c.Issues.ListRepoIssues(ctx, owner, repo, query)
 		})
 		if err != nil {
-			// A 404 here can only mean the repository is missing or invisible.
-			return Page[Issue]{}, Classify(err, "repository", s.Repository, "")
+			return Page[Issue]{}, s.listError(ctx, err, kind)
 		}
 		return convertPage(issues, discussionFrom), nil
 	}
@@ -178,7 +179,66 @@ func (s Issues) issueError(ctx context.Context, err error, number int64) error {
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && strings.Contains(strings.ToLower(apiErr.Message), "issue does not exist") {
 		return &NotFoundError{Kind: "issue", Key: key, Scope: s.Repository, Err: err}
 	}
-	return repositoryItemError(ctx, s.Client, s.Repository, err, "issue", key)
+	if unitErr := unitError(ctx, s.Client, s.Repository, err, UnitIssues); unitErr != nil {
+		return unitErr
+	}
+	return Classify(err, "issue", key, s.Repository)
+}
+
+// listError explains the failure to list discussions of kind "issues", "pulls" or "all".
+func (s Issues) listError(ctx context.Context, err error, kind string) error {
+	unit := map[string]string{"pulls": UnitPulls, "all": unitDiscussions}[kind]
+	if unitErr := unitError(ctx, s.Client, s.Repository, err, cmp.Or(unit, UnitIssues)); unitErr != nil {
+		return unitErr
+	}
+	return Classify(err, "repository", s.Repository, "")
+}
+
+// Repository units that Gitea answers with a bare 404 when they are turned off.
+const (
+	UnitIssues      = "issues"
+	UnitPulls       = "pull requests"
+	unitDiscussions = "issues and pull requests"
+)
+
+// UnitError reports a request to issues or pull requests of a repository that has them turned
+// off, or that keeps its issues in an external tracker.
+type UnitError struct {
+	Repository string
+	// Unit is UnitIssues, UnitPulls, or both.
+	Unit string
+	// Tracker is the URL of the external issue tracker, if the repository uses one.
+	Tracker string
+}
+
+func (e *UnitError) Error() string {
+	if e.Tracker != "" {
+		return e.Repository + " uses an external issue tracker: " + e.Tracker
+	}
+	flags := map[string]string{UnitIssues: "--enable-issues", UnitPulls: "--enable-pull-requests", unitDiscussions: "--enable-issues --enable-pull-requests"}
+	return fmt.Sprintf("%s are disabled in %s; turn them on with: gt repo edit %s -R %s", e.Unit, e.Repository, flags[e.Unit], e.Repository)
+}
+
+// unitError explains a 404 from the issues or pull requests of repository: Gitea answers the
+// same bare 404 for a missing repository, a unit that is turned off, and issues kept in an
+// external tracker. It returns nil for any other error, also when the repository lookup fails.
+func unitError(ctx context.Context, client *transport.Client, repository string, err error, unit string) error {
+	if !IsNotFound(err) {
+		return nil
+	}
+	item, lookupErr := (Repositories{Client: client}).get(ctx, repository)
+	switch {
+	case IsNotFound(lookupErr):
+		return lookupErr
+	case lookupErr != nil:
+		return nil
+	case unit == unitDiscussions && !item.HasIssues && !item.HasPullRequests,
+		unit == UnitIssues && !item.HasIssues, unit == UnitPulls && !item.HasPullRequests:
+		return &UnitError{Repository: repository, Unit: unit}
+	case unit == UnitIssues && item.ExternalTracker != nil:
+		return &UnitError{Repository: repository, Unit: unit, Tracker: item.ExternalTracker.ExternalTrackerURL}
+	}
+	return nil
 }
 
 // repositoryItemError names kind key in the failure of a request about it, or repository when
@@ -209,8 +269,7 @@ func (s Issues) Create(ctx context.Context, options IssueOptions) (Issue, error)
 			Deadline: options.Deadline, Milestone: options.Milestone, Labels: options.Labels,
 		})
 	})
-	// A 404 here can only mean the repository is missing or invisible.
-	return item, Classify(err, "repository", s.Repository, "")
+	return item, s.listError(ctx, err, "issues")
 }
 
 // SetState updates only the selected issue state.

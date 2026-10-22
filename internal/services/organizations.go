@@ -401,9 +401,9 @@ func concurrently(n int, request func(i int) error) error {
 }
 
 // IsMember reports whether username belongs to the organization. It fails with a *NotFoundError
-// when the organization does not exist.
+// when the organization or the user does not exist.
 func (s Organizations) IsMember(ctx context.Context, name, username string) (bool, error) {
-	member, err := s.check(ctx, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	member, err := s.check(ctx, "", func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		_, resp, err := c.Organizations.CheckOrgMembership(ctx, name, username)
 		return resp, err
 	})
@@ -412,20 +412,22 @@ func (s Organizations) IsMember(ctx context.Context, name, username string) (boo
 		if _, err := s.View(ctx, name); err != nil {
 			return false, err
 		}
+		return false, userExists(ctx, s.Client, username)
 	}
 	return member, err
 }
 
 // IsPublicMember reports whether username's membership of the organization is public.
 func (s Organizations) IsPublicMember(ctx context.Context, name, username string) (bool, error) {
-	return s.check(ctx, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	return s.check(ctx, "", func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		_, resp, err := c.Organizations.CheckPublicOrgMembership(ctx, name, username)
 		return resp, err
 	})
 }
 
-// check runs a membership check that answers no with a 404.
-func (s Organizations) check(ctx context.Context, op func(context.Context, *gitea.Client) (*gitea.Response, error)) (bool, error) {
+// check runs a membership check that answers no with a 404. Given a username, it fails with a
+// *NotFoundError when that user does not exist.
+func (s Organizations) check(ctx context.Context, username string, op func(context.Context, *gitea.Client) (*gitea.Response, error)) (bool, error) {
 	err := do(ctx, s.Client, op)
 	// Gitea redirects callers who are not members, and gt does not follow the redirect.
 	if failure, ok := errors.AsType[*transport.APIError](err); ok && failure.Status == http.StatusSeeOther {
@@ -436,9 +438,28 @@ func (s Organizations) check(ctx context.Context, op func(context.Context, *gite
 		if missing, ok := errors.AsType[*NotFoundError](Classify(err, "", "", "")); ok && missing.Kind == "user" {
 			return false, missing
 		}
-		return false, nil
+		// Gitea 28 answers a missing user with the same bare 404 as a missing membership.
+		if username == "" {
+			return false, nil
+		}
+		return false, userExists(ctx, s.Client, username)
 	}
 	return err == nil, err
+}
+
+// userExists fails with a *NotFoundError when no user is called username. A user the account
+// may not see counts as existing.
+func userExists(ctx context.Context, client *transport.Client, username string) error {
+	_, _, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
+		return c.Users.GetUserInfo(ctx, username)
+	})
+	if IsNotFound(err) {
+		return &NotFoundError{Kind: "user", Key: strconv.Quote(username), Err: err}
+	}
+	if IsForbidden(err) {
+		return nil
+	}
+	return err
 }
 
 // RemoveMember removes an organization member and their organization access.

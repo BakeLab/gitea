@@ -595,8 +595,13 @@ $ gt team member add 2 bob carol`,
 				return err
 			}
 			var members []string
+			var missing []error
 			for _, username := range args[1:] {
 				member, err := service.IsMember(cmd.Context(), team.ID, username)
+				if _, ok := errors.AsType[*services.NotFoundError](err); ok {
+					missing = append(missing, fmt.Errorf("user %s: %w", username, teamItemError(err)))
+					continue
+				}
 				if err != nil {
 					return err
 				}
@@ -607,14 +612,14 @@ $ gt team member add 2 bob carol`,
 				members = append(members, username)
 			}
 			if len(members) == 0 {
-				return nil
+				return errors.Join(missing...)
 			}
 			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Remove %s from team %s?", joinNames(members), team.Slug())}); err != nil {
 				return err
 			}
-			return batchDone(a, cmd, members, func(username string) string { return "user " + username }, func(username string) (string, error) {
+			return errors.Join(append(missing, batchDone(a, cmd, members, func(username string) string { return "user " + username }, func(username string) (string, error) {
 				return username, teamItemError(service.SetMember(cmd.Context(), team.ID, username, false))
-			}, func(username string) string { return fmt.Sprintf("Removed %s from team %s", username, team.Slug()) })
+			}, func(username string) string { return fmt.Sprintf("Removed %s from team %s", username, team.Slug()) }))...)
 		},
 	}
 	group.AddCommand(list, add, remove)

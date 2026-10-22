@@ -110,8 +110,10 @@ func (s Issues) searchRepository(ctx context.Context, opts DiscussionSearchOptio
 		query.ListOptions = list
 		return c.Issues.ListRepoIssues(ctx, owner, repo, query)
 	})
-	// A 404 here can only mean the repository is missing or invisible.
-	return issues, Classify(err, "repository", s.Repository, "")
+	if err != nil {
+		return issues, s.listError(ctx, err, string(kind))
+	}
+	return issues, nil
 }
 
 func (s Issues) searchInstance(ctx context.Context, opts DiscussionSearchOptions, kind gitea.IssueType) (Page[*gitea.Issue], error) {

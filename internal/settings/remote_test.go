@@ -64,6 +64,20 @@ func TestRemoteIsSSH(t *testing.T) {
 	}
 }
 
+func TestWithoutCredentials(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://alice:token@example.org/alice/project.git?token=x#f": "https://example.org/alice/project.git",
+		"https://token@example.org/alice/project.git":                 "https://example.org/alice/project.git",
+		"ssh://git:secret@example.org:2222/alice/project.git":         "ssh://git@example.org:2222/alice/project.git",
+		"git@example.org:alice/project.git":                           "git@example.org:alice/project.git",
+		"/srv/project.git":                                            "/srv/project.git",
+		"https://alice:to ken@exa mple.org/x":                         "",
+		"https://exa mple.org/x":                                      "https://exa mple.org/x",
+	} {
+		require.Equal(t, want, WithoutCredentials(raw), raw)
+	}
+}
+
 func TestParseRemoteReadsSCPStyleRemotes(t *testing.T) {
 	u, err := ParseRemote("git@git.example.org:alice/project.git")
 	require.NoError(t, err)

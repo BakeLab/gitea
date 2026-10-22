@@ -182,6 +182,7 @@ func TestPullMergeExplainsRefusal(t *testing.T) {
 	}{
 		{"conflicting files or checking", `{"state":"open","mergeable":false}`, "Please try again later", "pull request #3 has conflicting files, or Gitea is still checking whether it can be merged; retry in a moment", 2},
 		{"not mergeable", `{"state":"open","mergeable":false}`, "", "pull request #3 has conflicting files or is otherwise not mergeable", 1},
+		{"not mergeable with a reason", `{"state":"open","mergeable":false}`, "Does not have enough approvals", "pull request #3 cannot be merged: Gitea API returned HTTP 405 for POST /api/v1/repos/owner/repo/pulls/3/merge: Does not have enough approvals", 1},
 		{"refused with a reason", `{"state":"open","mergeable":true}`, "Does not have enough approvals", "pull request #3 cannot be merged: Gitea API returned HTTP 405 for POST /api/v1/repos/owner/repo/pulls/3/merge: Does not have enough approvals", 1},
 		{"already merged", `{"state":"closed","merged":true}`, "", "pull request #3 has already been merged", 1},
 		{"closed", `{"state":"closed"}`, "Please try again later", "pull request #3 is closed", 1},
@@ -364,7 +365,7 @@ func TestPullCreateNamesTheForkOfAMissingHead(t *testing.T) {
 		t.Run(test.head, func(t *testing.T) {
 			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo" && !strings.HasPrefix(test.want, "repository") {
-					_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
+					_, _ = w.Write([]byte(`{"full_name":"owner/repo","has_pull_requests":true}`))
 					return
 				}
 				w.WriteHeader(test.status)
@@ -510,7 +511,7 @@ func TestPullErrorsNameTheMissingRepositoryOrPullRequest(t *testing.T) {
 	for _, repository := range []string{"owner/repo", "owner/missing"} {
 		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/v1/repos/owner/repo" {
-				_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
+				_, _ = w.Write([]byte(`{"full_name":"owner/repo","has_pull_requests":true}`))
 				return
 			}
 			w.WriteHeader(http.StatusNotFound)

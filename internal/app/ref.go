@@ -232,7 +232,10 @@ func (a *application) pullSelectorAny(cmd *cobra.Command, args []string) (target
 }
 
 func (a *application) selectPull(cmd *cobra.Command, args []string, closed bool) (target, int64, error) {
-	if len(args) == 0 || args[0] == "" {
+	if len(args) > 0 && strings.TrimSpace(args[0]) == "" {
+		return target{}, 0, clierr.Wrap(clierr.Usage, errors.New("pull request cannot be empty"))
+	}
+	if len(args) == 0 {
 		// The checked-out branch says nothing about a repository chosen with --repo.
 		if a.options.repo != "" {
 			return target{}, 0, clierr.Wrap(clierr.Usage, errors.New("pass a pull request number, URL or branch with --repo"))

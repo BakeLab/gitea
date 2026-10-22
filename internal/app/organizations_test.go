@@ -17,8 +17,10 @@ func TestOrganizationMemberChangesCheckMembershipFirst(t *testing.T) {
 	var changes []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
-		case "GET /api/v1/orgs/acme/members/bob":
+		case "GET /api/v1/orgs/acme/members/bob", "GET /api/v1/orgs/acme/members/ghost", "GET /api/v1/users/ghost":
 			w.WriteHeader(http.StatusNotFound)
+		case "GET /api/v1/users/bob":
+			_, _ = w.Write([]byte(`{"login":"bob"}`))
 		case "GET /api/v1/orgs/acme/members/carol", "GET /api/v1/orgs/acme/public_members/carol":
 			w.WriteHeader(http.StatusNoContent)
 		case "GET /api/v1/orgs/acme":
@@ -37,6 +39,8 @@ func TestOrganizationMemberChangesCheckMembershipFirst(t *testing.T) {
 	require.Equal(t, "! bob is not a member of acme\n", withoutANSI(diagnostics.String()))
 	err := Execute(context.Background(), deps, []string{"org", "member", "publicize", "acme", "bob"})
 	require.EqualError(t, err, "bob is not a member of acme")
+	err = Execute(context.Background(), deps, []string{"org", "member", "remove", "acme", "ghost", "--yes"})
+	require.EqualError(t, err, `user "ghost" not found`)
 	for _, verb := range []string{"publicize", "conceal", "remove"} {
 		err = Execute(context.Background(), deps, []string{"org", "member", verb, "nobody", "bob", "--yes"})
 		require.EqualError(t, err, `organization "nobody" not found`)

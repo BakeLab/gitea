@@ -6,7 +6,6 @@ package app
 import (
 	"context"
 	"maps"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -227,21 +226,7 @@ func (a *application) gitRemotes(ctx context.Context) [][2]string {
 func (a *application) completeRemotes(cmd *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 	ctx, cancel := completionContext(cmd)
 	defer cancel()
-	return matching(describe(a.gitRemotes(ctx), func(remote [2]string) (string, string) { return remote[0], withoutCredentials(remote[1]) }), toComplete), cobra.ShellCompDirectiveNoFileComp
-}
-
-// withoutCredentials drops the user info and query of a remote URL, which can embed a password or
-// token that the shell would print in its menu. An unparsable URL shows nothing.
-func withoutCredentials(raw string) string {
-	if !strings.Contains(raw, "://") {
-		return raw // scp-like addresses carry no password.
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return ""
-	}
-	u.User, u.RawQuery, u.Fragment = nil, "", ""
-	return u.String()
+	return matching(describe(a.gitRemotes(ctx), func(remote [2]string) (string, string) { return remote[0], settings.WithoutCredentials(remote[1]) }), toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
 // completeLocalBranches completes the branches of the local checkout.

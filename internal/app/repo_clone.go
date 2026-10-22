@@ -138,11 +138,11 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 				return clierr.Wrap(clierr.Usage, errors.New("--depth must be nonnegative; zero fetches full history"))
 			}
 			if a.options.repo != "" {
-				return clierr.Wrap(clierr.Usage, errors.New("clone repository argument cannot be combined with --repo"))
+				return clierr.Wrap(clierr.Usage, errors.New("a repository argument cannot be combined with --repo"))
 			}
 			if noUpstream {
 				if cmd.Flags().Changed("upstream-remote-name") {
-					return clierr.Wrap(clierr.Usage, errors.New("--no-upstream and --upstream-remote-name cannot be combined"))
+					return clierr.Wrap(clierr.Usage, errors.New("--no-upstream cannot be combined with --upstream-remote-name"))
 				}
 				opts.upstream = ""
 			}
@@ -215,7 +215,7 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 			args, gitFlags := args[:at], args[at:]
 			switch {
 			case clone && addRemote:
-				return clierr.Wrap(clierr.Usage, errors.New("--clone and --remote cannot be combined"))
+				return clierr.Wrap(clierr.Usage, errors.New("--clone cannot be combined with --remote"))
 			case len(gitFlags) > 0 && !clone:
 				return clierr.Wrap(clierr.Usage, errors.New("Git flags after -- require --clone"))
 			case cmd.Flags().Changed("remote-name") && !addRemote:
@@ -337,7 +337,7 @@ func argsBeforeGitFlags(minimum, maximum int) cobra.PositionalArgs {
 		if args = args[:argsBeforeDash(cmd, args)]; len(args) > maximum {
 			return clierr.Wrap(clierr.Usage, &argumentError{problem: "too many arguments", cmd: cmd})
 		}
-		return usageArgs(cobra.MinimumNArgs(minimum))(cmd, args)
+		return nonBlankArgs(cobra.MinimumNArgs(minimum), "repository", "directory")(cmd, args)
 	}
 }
 

@@ -47,6 +47,8 @@ func outageServer(t *testing.T, statuses ...int) *Actions {
 			}
 		case "/api/v1/repos/owner/repo/actions/runs/1/jobs":
 			_, _ = w.Write([]byte(`{"jobs":[]}`))
+		case "/api/v1/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
 		default:
 			t.Errorf("unexpected request %s", r.URL.Path)
 		}

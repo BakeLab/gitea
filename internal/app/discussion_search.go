@@ -50,7 +50,7 @@ repository with --repo. Words of the query match titles and bodies.`, nouns), Ex
 			return err
 		}
 		if target.Repo != "" && opts.Owner != "" && !strings.EqualFold(target.owner(), opts.Owner) {
-			return clierr.Wrap(clierr.Usage, errors.New("--owner conflicts with selected repository"))
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--owner %s cannot be combined with repository %s", opts.Owner, target.Repo))
 		}
 		if opts.Team != "" && opts.Owner == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--team requires --owner"))

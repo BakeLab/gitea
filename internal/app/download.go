@@ -43,9 +43,9 @@ func (f *downloadFlags) register(cmd *cobra.Command) {
 func (f downloadFlags) validate() error {
 	switch {
 	case f.output != "" && f.dir != "":
-		return clierr.Wrap(clierr.Usage, errors.New("--output and --dir cannot be combined"))
+		return clierr.Wrap(clierr.Usage, errors.New("--output cannot be combined with --dir"))
 	case f.clobber && f.skipExisting:
-		return clierr.Wrap(clierr.Usage, errors.New("--clobber and --skip-existing cannot be combined"))
+		return clierr.Wrap(clierr.Usage, errors.New("--clobber cannot be combined with --skip-existing"))
 	case f.output == "-" && f.clobber:
 		return clierr.Wrap(clierr.Usage, errors.New("--clobber cannot be combined with --output -"))
 	case f.output == "-" && f.skipExisting:

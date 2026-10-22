@@ -241,7 +241,7 @@ func (s Actions) Run(ctx context.Context, id int64) (Run, error) {
 	var response runResponse
 	// TODO(sdk): ActionsWorkflowRun lacks created_at/updated_at.
 	err := getJSON(ctx, s.Client, fmt.Sprintf("%sruns/%d", s.endpoint(), id), &response)
-	return response.result(), Classify(err, "run", strconv.FormatInt(id, 10), s.Repository)
+	return response.result(), repositoryItemError(ctx, s.Client, s.Repository, err, "run", strconv.FormatInt(id, 10))
 }
 
 // NameRun names a run that a mutation returned after its workflow; it stays as is when the
@@ -289,7 +289,7 @@ func (s Actions) Rerun(ctx context.Context, id, job int64, failedOnly bool) erro
 		_, resp, err := c.Actions.RerunRepoRun(ctx, owner, repo, id)
 		return resp, err
 	})
-	return Classify(err, "run", strconv.FormatInt(id, 10), s.Repository)
+	return repositoryItemError(ctx, s.Client, s.Repository, err, "run", strconv.FormatInt(id, 10))
 }
 
 // DeleteRun removes the selected run.
@@ -297,7 +297,7 @@ func (s Actions) DeleteRun(ctx context.Context, id int64) error {
 	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
 		return c.Actions.DeleteRepoRun(ctx, owner, repo, id)
 	})
-	return Classify(err, "run", strconv.FormatInt(id, 10), s.Repository)
+	return repositoryItemError(ctx, s.Client, s.Repository, err, "run", strconv.FormatInt(id, 10))
 }
 
 func completedActionStatus(status string) bool {
@@ -364,7 +364,7 @@ func (s Actions) CancelRun(ctx context.Context, id int64, force bool) (Run, erro
 	// TODO(sdk): ActionsWorkflowRun lacks created_at/updated_at.
 	err := sendJSON(ctx, s.Client, http.MethodPost, fmt.Sprintf("%sruns/%d/%s", s.endpoint(), id, action), nil, &response)
 	if err != nil {
-		return Run{}, Classify(err, "run", strconv.FormatInt(id, 10), s.Repository)
+		return Run{}, repositoryItemError(ctx, s.Client, s.Repository, err, "run", strconv.FormatInt(id, 10))
 	}
 	return response.result(), nil
 }

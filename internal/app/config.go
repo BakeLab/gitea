@@ -651,6 +651,13 @@ $ gt alias set il "issue list --assignee @me" --clobber`,
 				return err
 			}
 			if a.options.json != "" {
+				names := slices.Sorted(maps.Keys(s.Preferences.Aliases))
+				if len(names) == 0 && a.options.json != "*" {
+					return clierr.Wrap(clierr.Usage, errors.New("--json with field names requires aliases; none are defined"))
+				}
+				if err := terminal.ValidateOutput(a.options.json, "", names); err != nil {
+					return clierr.Wrap(clierr.Usage, err)
+				}
 				return a.writeJSON(cmd, s.Preferences.Aliases)
 			}
 			return writeTable(a, cmd, slices.Sorted(maps.Keys(s.Preferences.Aliases)), listSpec[string]{

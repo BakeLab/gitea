@@ -174,7 +174,7 @@ func TestSudoSendsHeaderAfterIdentityCheck(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"--sudo", "bob", "repo", "view", "--repo", "alice/project", "--json=full_name"}))
 	require.Equal(t, []string{"/api/v1/user ", "/api/v1/repos/alice/project bob"}, seen)
 	require.JSONEq(t, `{"full_name":"alice/project"}`, out.String())
-	requireUsageBeforeRequests(t, "--sudo cannot be used with auth commands", "auth", "status", "--sudo", "bob")
+	requireUsageBeforeRequests(t, "--sudo cannot be combined with auth commands", "auth", "status", "--sudo", "bob")
 	requireUsageBeforeRequests(t, "--sudo requires a username", "repo", "view", "--sudo", "")
 }
 
