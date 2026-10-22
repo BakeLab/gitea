@@ -310,6 +310,15 @@ func (a *application) unsentHeader(host settings.Host, name string) string {
 	return name + " is not sent: " + host.Headers[name] + " is not set"
 }
 
+// warnUnsentHeaders warns about the headers being configured whose value names an environment
+// variable that is unset or empty, so that they would not be sent.
+func (a *application) warnUnsentHeaders(cmd *cobra.Command, headers map[string]string) {
+	host := settings.Host{Headers: headers}
+	for _, name := range a.unsentHeaders(host) {
+		a.warn(cmd, "%s", a.unsentHeader(host, name))
+	}
+}
+
 // clientCertificateCheck checks that the instance's TLS client certificate and key can be loaded.
 func clientCertificateCheck(host settings.Host) doctorCheck {
 	if _, err := transport.LoadClientCertificate(host.ClientCert, host.ClientKey); err != nil {

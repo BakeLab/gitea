@@ -441,6 +441,11 @@ func ParseTimeout(value string) (time.Duration, error) {
 	return timeout, nil
 }
 
+// HasSettings reports whether h stores instance settings besides its accounts.
+func (h Host) HasSettings() bool {
+	return h.SSHHost != "" || h.Insecure || h.GitProtocol != "" || h.OAuthClientID != "" || len(h.Headers) > 0 || h.ClientCert != "" || h.ClientKey != ""
+}
+
 // WithHeaders returns h with headers added, replacing those of the same name; an empty value
 // removes the header. Names are in canonical form, as ParseHeader and Load leave them.
 func (h Host) WithHeaders(headers map[string]string) Host {

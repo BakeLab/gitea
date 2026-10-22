@@ -150,6 +150,11 @@ func (m Manager) Logout(instance, user string) (Credential, error) {
 				}
 			}
 		}
+		if len(host.Users) == 0 && !host.HasSettings() {
+			// An instance left without accounts or settings would still count when selecting one.
+			delete(s.Hosts.Hosts, instance)
+			return restore, nil
+		}
 		s.Hosts.Hosts[instance] = host
 		return restore, nil
 	})

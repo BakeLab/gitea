@@ -4,6 +4,7 @@
 package git
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -54,6 +55,28 @@ func CredentialArguments(instance, executable, user, configDir string) ([]string
 	}
 	prefix := "credential." + normalized + "."
 	return []string{"-c", prefix + "helper=", "-c", prefix + "helper=" + helper, "-c", prefix + "useHttpPath=true"}, nil
+}
+
+// TLSArguments make one Git operation present the instance's TLS client certificate, with its key in
+// keyFile or else in certFile, and skip certificate verification when insecure, as gt's API requests
+// do. They apply only to the instance's URLs.
+func TLSArguments(instance, certFile, keyFile string, insecure bool) ([]string, error) {
+	normalized, err := settings.NormalizeHost(instance)
+	if err != nil {
+		return nil, err
+	}
+	if strings.ContainsAny(certFile+keyFile, "\x00\r\n") {
+		return nil, errors.New("client certificate paths cannot contain NUL or line breaks")
+	}
+	prefix := "http." + normalized + "."
+	var args []string
+	if certFile != "" {
+		args = append(args, "-c", prefix+"sslCert="+certFile, "-c", prefix+"sslKey="+cmp.Or(keyFile, certFile))
+	}
+	if insecure {
+		args = append(args, "-c", prefix+"sslVerify=false")
+	}
+	return args, nil
 }
 
 // CredentialSetup specifies an explicit persistent helper installation.

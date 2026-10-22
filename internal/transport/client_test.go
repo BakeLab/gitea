@@ -334,6 +334,21 @@ func TestClientCertificatesAreLoadedForInstancesThatRequireThem(t *testing.T) {
 	require.False(t, presented)
 }
 
+func TestExpiredClientCertificatesAreRejected(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	expired := time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC)
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), NotBefore: expired.AddDate(-1, 0, 0), NotAfter: expired}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+	file := filepath.Join(t.TempDir(), "both.pem")
+	data := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	data = append(data, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: must(x509.MarshalECPrivateKey(key))})...)
+	require.NoError(t, os.WriteFile(file, data, 0o600))
+	_, err = LoadClientCertificate(file, "")
+	require.EqualError(t, err, "the client certificate "+file+" expired on 2020-01-02")
+}
+
 func TestInsecureSkipsVerificationOnlyForTheInstance(t *testing.T) {
 	storage := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("file"))

@@ -60,6 +60,17 @@ func TestResolveTakesTheCloneInstanceWhenNothingElseSelectsOne(t *testing.T) {
 	require.Equal(t, []string{"/api/v1/packages/team"}, otherPaths)
 }
 
+func TestResolveIgnoresInstancesWithoutAccounts(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeFirstPage(w, r, `[]`)
+	}))
+	defer server.Close()
+	deps, _, _ := testDeps(t)
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	configureHost(t, deps, "https://logged-out.example", settings.Host{Insecure: true})
+	require.NoError(t, Execute(context.Background(), deps, []string{"package", "list", "--owner", "team"}))
+}
+
 func TestResolvePromptsForAccountWhenNoneActive(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/user/repos", r.URL.Path)

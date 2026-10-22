@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/transport"
 )
 
@@ -101,7 +102,14 @@ func explainAPIError(deps Dependencies, err error, apiErr *transport.APIError) e
 		if deps.Getenv != nil && deps.Getenv("GITEA_TOKEN") != "" {
 			return explain(err, "%s; set GITEA_TOKEN to a token with that scope", apiErr.Message)
 		}
-		return explain(err, "%s; create a token with that scope and log in with it: gt auth login --with-token", apiErr.Message)
+		token := "create a token with that scope and log in with it: gt auth login --with-token"
+		switch oauth, other := instanceAuthMethods(deps, apiErr.Instance); {
+		case oauth && other:
+			return explain(err, "%s; %s, or for an OAuth account: %s", apiErr.Message, token, oauthScopeLogin(apiErr))
+		case oauth:
+			return explain(err, "%s; log in again with that scope: %s", apiErr.Message, oauthScopeLogin(apiErr))
+		}
+		return explain(err, "%s; %s", apiErr.Message, token)
 	}
 	if conflict, ok := errors.AsType[*services.ConflictError](err); ok && conflict.Hint == "" {
 		if hint := conflictHint(apiErr, conflict); hint != "" {
@@ -109,6 +117,38 @@ func explainAPIError(deps Dependencies, err error, apiErr *transport.APIError) e
 		}
 	}
 	return err
+}
+
+// instanceAuthMethods reports whether the accounts of instance include OAuth accounts and others.
+// Explain does not know which account a command used, so a hint must suit all of them.
+func instanceAuthMethods(deps Dependencies, instance string) (oauth, other bool) {
+	if deps.Settings == nil {
+		return false, false
+	}
+	s, err := deps.Settings.Load()
+	if err != nil {
+		return false, false
+	}
+	for _, account := range s.Hosts.Hosts[instance].Users {
+		if account.AuthMethod == settings.AuthOAuth {
+			oauth = true
+		} else {
+			other = true
+		}
+	}
+	return oauth, other
+}
+
+// oauthScopeLogin is the login that grants an OAuth account the scopes a 403 names, such as
+// "token does not have at least one of required scope(s), required=[write:user], token scope=...".
+func oauthScopeLogin(apiErr *transport.APIError) string {
+	scopes := "SCOPES"
+	if _, rest, ok := strings.Cut(apiErr.Message, "required=["); ok {
+		if required, _, ok := strings.Cut(rest, "]"); ok && required != "" {
+			scopes = strings.Join(strings.Fields(required), ",")
+		}
+	}
+	return "gt auth login --host " + apiErr.Instance + " --oauth --scopes " + scopes
 }
 
 // explainable reports whether err says no more than the failed request: its text is the API

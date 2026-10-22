@@ -182,7 +182,7 @@ func TestAuthStatusFiltersBeforeReadingCredentials(t *testing.T) {
 	}
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--host", "https://EXAMPLE.org/base/", "--user", "BOB", "--json"}))
 	require.Equal(t, []string{auth.Identity("https://example.org/base", "bob")}, keyring.reads)
-	require.JSONEq(t, `[{"host":"https://example.org/base","user":"bob","active":false,"method":"token","credential_store":"keyring","credential_available":true,"expires_at":null,"verified":null,"scopes":null,"error":""}]`, out.String())
+	require.JSONEq(t, `[{"host":"https://example.org/base","user":"bob","active":false,"method":"token","credential_store":"keyring","credential_available":true,"expires_at":null,"verified":null,"scopes":null,"error":"","git_credential_helper":""}]`, out.String())
 	out.Reset()
 	keyring.reads = nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--host", "https://unconfigured.example.org", "--json"}))
@@ -716,7 +716,7 @@ func TestAuthStatusShowsAccountsByInstance(t *testing.T) {
 		},
 		{
 			name: "environment token", users: []string{"alice"}, env: map[string]string{"GITEA_TOKEN": "env", "GITEA_CLI_HOST": "example.org"},
-			want: instance + "\n  ✓ Using GITEA_TOKEN from the environment\n  ✓ Logged in as alice (token, file store) · active\n  - Git credential helper: not configured; run gt auth setup-git\n",
+			want: instance + "\n  ✓ Using GITEA_TOKEN from the environment\n  ✓ Logged in as alice (token, file store)\n  - Git credential helper: not configured; run gt auth setup-git\n",
 		},
 		{
 			name: "environment token only", env: map[string]string{"GITEA_TOKEN": "env", "GITEA_INSTANCE_URL": instance},
@@ -741,6 +741,11 @@ func TestAuthStatusShowsAccountsByInstance(t *testing.T) {
 				require.NoError(t, err)
 			}
 			require.Equal(t, tc.want, withoutANSI(out.String()))
+			if tc.helper {
+				out.Reset()
+				require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--json", "user,git_credential_helper"}))
+				require.JSONEq(t, `[{"user":"alice","git_credential_helper":"global"},{"user":"bob","git_credential_helper":"global"}]`, withoutANSI(out.String()))
+			}
 		})
 	}
 	deps, out, _ := testDeps(t)
@@ -749,6 +754,19 @@ func TestAuthStatusShowsAccountsByInstance(t *testing.T) {
 	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
 	require.EqualError(t, err, "1 of 1 credentials cannot authenticate; log in again with gt auth login")
 	require.Equal(t, instance+"\talice\ttrue\ttoken\tfile\tfalse\t\t\tcredential unavailable; run gt auth login for this instance and account\n", out.String())
+}
+
+func TestAuthStatusWarnsWhenTheEnvironmentTokenIsAnotherAccount(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"login":"bob"}`))
+	}))
+	defer server.Close()
+	deps, out, diagnostics := testDeps(t)
+	configureAccounts(t, deps, server.URL, "alice", "alice")
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "env", "GITEA_CLI_HOST": server.URL})
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--verify", "--json", "user,active"}))
+	require.JSONEq(t, `[{"user":"bob","active":true},{"user":"alice","active":false}]`, out.String())
+	require.Equal(t, "! GITEA_TOKEN authenticates as bob, not the active account alice; commands on "+server.URL+" act as bob\n", withoutANSI(diagnostics.String()))
 }
 
 func TestAuthSwitchSelectsInstanceAndAccount(t *testing.T) {
@@ -935,10 +953,12 @@ func TestHeaderValuesNameVariablesAsDollarNameOrBraced(t *testing.T) {
 		_, _ = w.Write([]byte(`{"login":"alice"}`))
 	}))
 	defer server.Close()
-	deps, _, _ := testDeps(t)
+	deps, _, diagnostics := testDeps(t)
 	deps.Getenv = envFunc(map[string]string{"BRACED_SECRET": "from-env"})
 	deps.Streams.In = strings.NewReader("token\n")
-	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "login", "--host", server.URL, "--with-token", "--credential-store", "file", "--no-input", "--header", "X-Braced: ${BRACED_SECRET}"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "login", "--host", server.URL, "--with-token", "--credential-store", "file", "--no-input", "--header", "X-Braced: ${BRACED_SECRET}", "--header", "X-Unset: $UNSET_SECRET"}))
+	require.Contains(t, diagnostics.String(), "X-Unset is not sent: $UNSET_SECRET is not set\n")
+	require.NotContains(t, diagnostics.String(), "X-Braced")
 	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user", "--host", server.URL}))
 	require.Equal(t, []string{"from-env", "from-env"}, seen)
 
@@ -948,7 +968,9 @@ func TestHeaderValuesNameVariablesAsDollarNameOrBraced(t *testing.T) {
 		require.EqualError(t, err, fmt.Sprintf("header X-Bad must name an environment variable as $NAME or ${NAME}, not %q", value))
 		requireUsageBeforeRequests(t, "header X-Bad must name an environment variable", "auth", "login", "--host", server.URL, "--with-token", "--header", "X-Bad: "+value)
 	}
+	diagnostics.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "headers", "X-Good: ${_GOOD_1}", "--host", server.URL}))
+	require.Contains(t, diagnostics.String(), "X-Good is not sent: ${_GOOD_1} is not set\n")
 }
 
 func TestLoginWithATokenThatCannotReadTheAccountNamesTheScope(t *testing.T) {

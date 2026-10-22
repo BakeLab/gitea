@@ -71,6 +71,7 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 				}
 				headers[name] = value
 			}
+			a.warnUnsentHeaders(cmd, headers)
 			selected, methodFlag := 0, ""
 			for _, choice := range []struct {
 				flag   string

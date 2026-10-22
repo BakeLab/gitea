@@ -34,6 +34,9 @@ type authStatusRow struct {
 	Verified  *bool      `json:"verified"`
 	Scopes    []string   `json:"scopes"`
 	Error     string     `json:"error"`
+	// GitHelper is where Git is configured to ask gt for the instance's credentials: local,
+	// global, or empty when it is not.
+	GitHelper string `json:"git_credential_helper"`
 	account   settings.Account
 }
 
@@ -52,8 +55,8 @@ func (a *application) authStatusCommand() *cobra.Command {
 	status := &cobra.Command{
 		Use: "status", Short: "Show the accounts gt can use", Args: argsExact(0),
 		Long: `Show the accounts gt can use on each instance, the active one, and how they
-authenticate. Fails with exit code 4 when there is no account, or when a credential is
-missing or rejected. With --json it exits 0 either way; read credential_available, verified and error.`,
+authenticate. A GITEA_TOKEN replaces the active account of its instance. Fails with
+exit code 4 when there is no account, or when a credential is missing or rejected. With --json it exits 0 either way; read credential_available, verified and error.`,
 		Example: `$ gt auth status
 # Check the credentials against their instances
 $ gt auth status --verify
@@ -84,13 +87,37 @@ $ gt auth status --host gitea.com --json`,
 					rows = append(rows, a.accountStatus(cmd.Context(), s, instance, user, verify))
 				}
 			}
-			if row, ok := a.environmentStatus(cmd.Context(), s, verify); ok && (selectedHost == "" || row.Host == selectedHost) && services.MatchAccount(a.options.user, cmp.Or(row.User, a.options.user)) {
-				rows = append(rows, row)
+			if row, ok := a.environmentStatus(cmd.Context(), s, verify); ok && (selectedHost == "" || row.Host == selectedHost) {
+				// Commands use the token instead of the instance's active account.
+				for i := range rows {
+					if rows[i].Host != row.Host || !rows[i].Active {
+						continue
+					}
+					rows[i].Active = false
+					if row.User != "" && !services.MatchAccount(rows[i].User, row.User) {
+						a.warn(cmd, "GITEA_TOKEN authenticates as %s, not the active account %s; commands on %s act as %s", terminal.SafeLine(row.User), terminal.SafeLine(rows[i].User), row.Host, terminal.SafeLine(row.User))
+					}
+				}
+				if services.MatchAccount(a.options.user, cmp.Or(row.User, a.options.user)) {
+					rows = append(rows, row)
+				}
 			}
 			slices.SortFunc(rows, func(x, y authStatusRow) int {
 				return cmp.Or(strings.Compare(x.Host, y.Host), cmp.Compare(boolOrder(y.environment()), boolOrder(x.environment())), strings.Compare(x.User, y.User))
 			})
 			if a.options.json != "" {
+				helpers := map[string]string{}
+				for i, row := range rows {
+					if row.Host == "" {
+						continue
+					}
+					scope, known := helpers[row.Host]
+					if !known {
+						scope = git.HelperScope(cmd.Context(), a.gitProbe(), a.options.cwd, row.Host)
+						helpers[row.Host] = scope
+					}
+					rows[i].GitHelper = scope
+				}
 				return a.writeJSON(cmd, rows)
 			}
 			if len(rows) == 0 {

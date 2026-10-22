@@ -172,6 +172,20 @@ func TestLogoutRemovesAccountWithMissingCredential(t *testing.T) {
 	require.Contains(t, s.Hosts.Hosts["https://example.org"].Users, "alice")
 }
 
+func TestLogoutOfTheLastAccountRemovesAnInstanceWithoutSettings(t *testing.T) {
+	config := settings.New(t.TempDir())
+	manager := newTestManager(t, config, &Store{Dir: config.Dir})
+	for _, instance := range []string{"https://plain.example", "https://insecure.example"} {
+		require.NoError(t, manager.Register(instance, "alice", settings.StoreFile, settings.AuthToken, HostOptions{Insecure: instance == "https://insecure.example"}, Credential{AccessToken: "secret"}))
+		_, err := manager.Logout(instance, "alice")
+		require.NoError(t, err)
+	}
+	s, err := config.Load()
+	require.NoError(t, err)
+	require.NotContains(t, s.Hosts.Hosts, "https://plain.example")
+	require.True(t, s.Hosts.Hosts["https://insecure.example"].Insecure)
+}
+
 func TestRegisterHTTPSignRejectsTokenAccounts(t *testing.T) {
 	config := settings.New(t.TempDir())
 	manager := newTestManager(t, config, &Store{Dir: config.Dir, Keyring: &memoryKeyring{values: map[string]string{}}})

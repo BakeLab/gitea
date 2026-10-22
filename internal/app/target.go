@@ -492,7 +492,7 @@ func (a *application) isGitRemote(ctx context.Context, name string) bool {
 }
 
 // selectHost picks the instance: the repository's, --host, GITEA_CLI_HOST or GITEA_INSTANCE_URL,
-// default_host, the only configured instance, or the clone's (see cloneInstance).
+// default_host, the only instance with an account, or the clone's (see cloneInstance).
 func (a *application) selectHost(t *target, s settings.Snapshot) error {
 	if a.options.host != "" {
 		explicit, err := settings.ResolveHost(a.options.host, s.Hosts.Hosts)
@@ -519,16 +519,22 @@ func (a *application) defaultHost(t *target, s settings.Snapshot) error {
 	if t.Host == "" && s.Preferences.DefaultHost != "" {
 		t.Host, t.HostSource = s.Preferences.DefaultHost, "config.yml default_host"
 	}
-	if t.Host == "" && len(s.Hosts.Hosts) == 1 {
-		for host := range s.Hosts.Hosts {
+	// Instances whose accounts all logged out do not make the choice ambiguous.
+	candidates := maps.Clone(s.Hosts.Hosts)
+	maps.DeleteFunc(candidates, func(_ string, host settings.Host) bool { return len(host.Users) == 0 })
+	if len(candidates) == 0 {
+		candidates = s.Hosts.Hosts
+	}
+	if t.Host == "" && len(candidates) == 1 {
+		for host := range candidates {
 			t.Host, t.HostSource = host, "sole configured instance"
 		}
 	}
 	if t.Host == "" {
-		if len(s.Hosts.Hosts) == 0 {
+		if len(candidates) == 0 {
 			return clierr.Wrap(clierr.Usage, errors.New("no instance selected: log in with gt auth login, or pass --host"))
 		}
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("instance required: select --host or set default_host (instances: %s)", strings.Join(slices.Sorted(maps.Keys(s.Hosts.Hosts)), ", ")))
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("instance required: select --host or set default_host (instances: %s)", strings.Join(slices.Sorted(maps.Keys(candidates)), ", ")))
 	}
 	return nil
 }

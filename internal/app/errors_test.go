@@ -16,6 +16,7 @@ import (
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
@@ -114,6 +115,27 @@ func TestExplainWordsCredentialAndConnectionFailures(t *testing.T) {
 	_, err = (&http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}}).Get("http://example.test/api/v1/user")
 	err = transport.RequestError(context.Background(), "API request failed", err)
 	require.EqualError(t, Explain(context.Background(), deps, err), "cannot reach the proxy "+proxy.Host+" (connection refused); check HTTPS_PROXY and HTTP_PROXY")
+}
+
+func TestExplainSuggestsTheLoginThatGrantsAMissingScope(t *testing.T) {
+	message := "token does not have at least one of required scope(s), required=[write:user], token scope=read:user"
+	server := fakeGitea(t, map[string][2]string{"GET /api/v1/user/repos": {"403", `{"message":"` + message + `"}`}})
+	deps, _, _ := testDeps(t)
+	configureAccounts(t, deps, server.URL, "alice", "alice", "bob")
+	explained := func() string {
+		err := Execute(context.Background(), deps, []string{"repo", "list"})
+		return Explain(context.Background(), deps, err).Error()
+	}
+	token := "create a token with that scope and log in with it: gt auth login --with-token"
+	oauth := "gt auth login --host " + server.URL + " --oauth --scopes write:user"
+	require.Equal(t, message+"; "+token, explained())
+	configureHost(t, deps, server.URL, settings.Host{User: "alice", Users: map[string]settings.Account{
+		"alice": {AuthMethod: settings.AuthOAuth, CredentialStore: settings.StoreFile},
+		"bob":   {AuthMethod: settings.AuthToken, CredentialStore: settings.StoreFile},
+	}})
+	require.Equal(t, message+"; "+token+", or for an OAuth account: "+oauth, explained())
+	configureHost(t, deps, server.URL, settings.Host{User: "alice", Users: map[string]settings.Account{"alice": {AuthMethod: settings.AuthOAuth, CredentialStore: settings.StoreFile}}})
+	require.Equal(t, message+"; log in again with that scope: "+oauth, explained())
 }
 
 func TestTimeoutErrorsNameTheWaitAndKeepTheExitCode(t *testing.T) {

@@ -240,6 +240,10 @@ $ gt config get ssh_key --host https://gitea.com --user alice`,
 				return err
 			}
 			value, ok := values[args[0]]
+			if !ok && a.options.host != "" && slices.Contains(instanceKeys, args[0]) {
+				instance := values["default_host"]
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("instance %s is not configured; run gt auth login --host %s", instance, instance))
+			}
 			if !ok {
 				return unknownSetting(args[0])
 			}
@@ -343,6 +347,9 @@ $ gt config set ssh_key ~/.ssh/id_ed25519 --host https://example.com --user alic
 				scope = " for " + a.options.user + " on " + instance
 			}
 			a.reportSet(cmd, key, value, scope)
+			if name, header, err := settings.ParseHeader(value); key == "headers" && err == nil {
+				a.warnUnsentHeaders(cmd, map[string]string{name: header})
+			}
 			return nil
 		},
 	})

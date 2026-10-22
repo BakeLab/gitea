@@ -198,7 +198,12 @@ func (a *application) gitCredentialArguments(instance, user string) ([]string, e
 
 func (a *application) gitTransportArguments(target target, ssh bool) ([]string, error) {
 	if !ssh {
-		return a.gitCredentialArguments(target.Host, target.User)
+		credentials, err := a.gitCredentialArguments(target.Host, target.User)
+		if err != nil {
+			return nil, err
+		}
+		tls, err := git.TLSArguments(target.Host, target.host.ClientCert, target.host.ClientKey, target.host.Insecure)
+		return append(tls, credentials...), err
 	}
 	account := target.host.Users[target.User]
 	return git.SSHArguments(account.SSHKey, account.SSHAgent)

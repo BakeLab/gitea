@@ -309,6 +309,10 @@ func LoadClientCertificate(certFile, keyFile string) (*tls.Certificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot load the client certificate %s with key %s: %w", certFile, keyFile, err)
 	}
+	// Servers answer an expired certificate with a generic error, if they say anything at all.
+	if leaf := certificate.Leaf; leaf != nil && time.Now().After(leaf.NotAfter) {
+		return nil, fmt.Errorf("the client certificate %s expired on %s", certFile, leaf.NotAfter.Format(time.DateOnly))
+	}
 	return &certificate, nil
 }
 

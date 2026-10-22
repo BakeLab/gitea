@@ -154,6 +154,26 @@ func TestSSHCloneTrustsAPIEndpointUnlessSSHHostIsConfigured(t *testing.T) {
 	require.Empty(t, runner.calls)
 }
 
+func TestCloneUsesTheInstanceTLSSettings(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"id":9,"name":"project","full_name":"alice/project","clone_url":"http://%s/alice/project.git"}`, r.Host)
+	}))
+	defer server.Close()
+	deps, _, _ := repoTTYDeps(t, server.URL)
+	require.NoError(t, deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
+		host := s.Hosts.Hosts[server.URL]
+		host.Insecure, host.ClientCert = true, "/certs/client.pem"
+		s.Hosts.Hosts[server.URL] = host
+		return nil
+	}))
+	prefix := "-c http." + server.URL + ".sslCert=/certs/client.pem -c http." + server.URL + ".sslKey=/certs/client.pem -c http." + server.URL + ".sslVerify=false "
+	clone := prefix + credentialCall(t, deps, server.URL, "alice", "clone", "--", server.URL+"/alice/project.git")
+	runner := &fakeGit{results: map[string]string{clone: ""}}
+	deps.Git = runner
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "alice/project"}))
+	require.Equal(t, []string{clone}, runner.calls)
+}
+
 func TestCloneAddsSourceRemoteForMirrors(t *testing.T) {
 	original := ""
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

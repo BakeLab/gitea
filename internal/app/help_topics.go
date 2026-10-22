@@ -298,8 +298,8 @@ current branch's remote, upstream or origin, skipping remotes on instances witho
 account, or not on --host or the GITEA_TOKEN instance). Like gh, a clone with upstream
 and origin targets upstream: a branch tracking origin does not select the fork,
 and the instance from the repository URL, --host, GITEA_CLI_HOST or GITEA_INSTANCE_URL,
-default_host, the only configured instance, or, among several, the instance of the clone's
-repository.
+default_host, the only instance with an account, or, among several, the instance of the
+clone's repository.
 
 Environment variables:
 
