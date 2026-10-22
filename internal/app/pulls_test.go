@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -191,6 +192,51 @@ func TestPullListFillsReviewDecisionWhenSelected(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--json", "number,review_decision"}))
 	require.JSONEq(t, `[{"number":13,"review_decision":"approved"}]`, out.String())
+}
+
+func TestPullListReviewDecisionCountsApprovalsLikeMerging(t *testing.T) {
+	var mu sync.Mutex
+	requests := map[string]int{}
+	reviews := map[string]string{
+		"1": `[{"id":1,"state":"APPROVED","official":true,"user":{"login":"bob"}}]`,
+		"2": `[{"id":2,"state":"APPROVED","official":true,"stale":true,"user":{"login":"bob"}}]`,
+		"3": `[]`,
+		"4": `[]`,
+		"5": `[{"id":5,"state":"APPROVED","official":false,"user":{"login":"carol"}}]`,
+	}
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests[r.URL.Path]++
+		mu.Unlock()
+		number := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/repos/alice/project/pulls/"), "/reviews")
+		switch {
+		case r.URL.Path == "/api/v1/repos/alice/project/pulls":
+			_, _ = w.Write([]byte(`[{"number":1,"base":{"ref":"main"}},{"number":2,"base":{"ref":"main"}},{"number":3,"base":{"ref":"main"}},{"number":4,"base":{"ref":"dev"}},{"number":5,"base":{"ref":"main"}}]`))
+		case reviews[number] != "":
+			if r.URL.Query().Get("page") > "1" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(reviews[number]))
+		case r.URL.Path == "/api/v1/repos/alice/project/branches/main":
+			_, _ = w.Write([]byte(`{"name":"main","protected":true,"required_approvals":1,"effective_branch_protection_name":"main"}`))
+		case r.URL.Path == "/api/v1/repos/alice/project/branches/dev":
+			_, _ = w.Write([]byte(`{"name":"dev"}`))
+		case r.URL.Path == "/api/v1/repos/alice/project/branch_protections/main":
+			_, _ = w.Write([]byte(`{"rule_name":"main","required_approvals":1,"ignore_stale_approvals":true}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--json", "number,review_decision"}))
+	require.JSONEq(t, `[{"number":1,"review_decision":"approved"},{"number":2,"review_decision":"review_required"},{"number":3,"review_decision":"review_required"},
+		{"number":4,"review_decision":""},{"number":5,"review_decision":"review_required"}]`, out.String())
+	require.Equal(t, 1, requests["/api/v1/repos/alice/project/branches/main"])
+	require.Equal(t, 1, requests["/api/v1/repos/alice/project/branches/dev"])
+	require.Equal(t, 1, requests["/api/v1/repos/alice/project/branch_protections/main"])
 }
 
 func TestPullListFillsReviewFieldsWhenSelectingEveryField(t *testing.T) {

@@ -188,6 +188,13 @@ func RecordPull(ctx context.Context, runner Runner, dir, branch string, number i
 	return nil
 }
 
+// RecordBaseRemote records remote as the remote of the base repository of branch, which
+// repository discovery prefers to the remote the branch tracks, such as a fork.
+func RecordBaseRemote(ctx context.Context, runner Runner, dir, branch, remote string) error {
+	_, err := runner.Output(ctx, dir, false, "config", "branch."+branch+"."+pullBaseRemoteKey, remote)
+	return err
+}
+
 // requireBranchFreeElsewhere fails when branch is checked out in a linked worktree other than
 // the current one, which git switch would refuse with a message that does not say where.
 func requireBranchFreeElsewhere(run func(...string) (string, error), branch string) error {

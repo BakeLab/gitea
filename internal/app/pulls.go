@@ -46,7 +46,8 @@ pull request, and merged_by from reading each pull request again. gt only makes 
 formatting). --limit bounds how many requests it makes.
 
 review_decision is changes_requested, approved, review_required or empty. When the base branch's
-protection requires approvals, approved needs that many official approvals, as for merging.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+protection requires approvals, the decision counts official approvals as Gitea does for merging:
+fewer than required give review_required.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 1 {
 			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
 		}

@@ -42,7 +42,9 @@ does not track a branch of the same name yet goes to the fork when origin is a f
 repository, or, when origin is not the repository itself or you cannot push to it, to the only
 remote of your own fork; otherwise it goes to the repository's remote. Without push access and
 a fork remote, gt offers on a terminal to fork the repository and adds the fork as the remote
-"fork"; elsewhere, run gt repo fork --remote first. A missing base branch fails before the push.`, Annotations: map[string]string{"gt.confirm": "true"}, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+"fork", or one named after your login when "fork" points elsewhere; elsewhere, run gt repo fork
+--remote first. A missing base branch fails before the push. After a push to a fork, gt pr
+commands on the branch keep selecting the repository rather than the fork.`, Annotations: map[string]string{"gt.confirm": "true"}, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		return a.runPullCreate(cmd, &f)
 	}}
 	create.Flags().StringSliceVarP(&f.options.Assignees, "assignee", "a", nil, "Assign users by username; @me for yourself")

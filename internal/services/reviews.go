@@ -30,6 +30,8 @@ type Review struct {
 	SubmittedAt   string `json:"submitted_at"`
 	CommentsCount int    `json:"comments_count"`
 	Dismissed     bool   `json:"dismissed"`
+	// Stale tells whether the pull request changed since the review.
+	Stale bool `json:"stale"`
 	// Official tells whether the review counts towards the approvals the base branch requires.
 	Official bool `json:"official"`
 }
@@ -50,7 +52,7 @@ func reviewFrom(review *gitea.PullReview) Review {
 	return Review{
 		ID: review.ID, Body: review.Body, State: string(review.State), Author: login(review.Reviewer), Team: team, URL: review.HTMLURL,
 		Commit: review.CommitID, SubmittedAt: timestamp(review.Submitted), CommentsCount: review.CodeCommentsCount, Dismissed: review.Dismissed,
-		Official: review.Official,
+		Stale: review.Stale, Official: review.Official,
 	}
 }
 
@@ -218,10 +220,10 @@ func (s Reviews) Create(ctx context.Context, n int64, opts ReviewOptions) (Revie
 }
 
 // closedPullError tells whether pull request n is merged or closed when Gitea refuses a review
-// change with its bare "closed or merged PR" 422, and returns err otherwise.
+// change with its bare "closed or merged PR" 422, or 403 for a dismissal, and returns err otherwise.
 func (s Reviews) closedPullError(ctx context.Context, n int64, err error, hint string) error {
 	apiErr, ok := errors.AsType[*transport.APIError](err)
-	if !ok || apiErr.Status != http.StatusUnprocessableEntity || !strings.Contains(apiErr.Message, "closed or merged PR") {
+	if !ok || (apiErr.Status != http.StatusUnprocessableEntity && apiErr.Status != http.StatusForbidden) || !strings.Contains(apiErr.Message, "closed or merged PR") {
 		return err
 	}
 	pull, pullErr := (Pulls{Client: s.Client, Repository: s.Repository}).get(ctx, n)
@@ -385,11 +387,11 @@ func ReviewDecision(reviews []Review, requested bool) string {
 }
 
 // OfficialApprovals counts the reviewers whose latest decisive review is an official approval
-// that was not dismissed.
-func OfficialApprovals(reviews []Review) int64 {
+// that was not dismissed, nor stale with skipStale.
+func OfficialApprovals(reviews []Review, skipStale bool) int64 {
 	var approvals int64
 	for _, review := range LatestReviews(slices.DeleteFunc(slices.Clone(reviews), func(review Review) bool { return review.State == string(gitea.ReviewStateComment) })) {
-		if review.State == string(gitea.ReviewStateApproved) && review.Official && !review.Dismissed {
+		if review.State == string(gitea.ReviewStateApproved) && review.Official && !review.Dismissed && !(skipStale && review.Stale) {
 			approvals++
 		}
 	}

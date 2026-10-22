@@ -253,21 +253,97 @@ func (s Pulls) View(ctx context.Context, n int64) (Pull, error) {
 }
 
 // WithReviews returns p with its reviewers, reviewer teams, reviews and review decision taken
-// from reviews, all of its reviews. Approvals decide only once there are as many official ones
-// as the protection of the base branch requires, as Gitea counts them for merging; a protection
-// that cannot be read requires one.
+// from reviews, all of its reviews. While the protection of the base branch requires approvals,
+// the decision is approved only with as many official ones as Gitea counts for merging, and
+// review_required with fewer.
 func (s Pulls) WithReviews(ctx context.Context, p Pull, reviews []Review) Pull {
+	return s.withReviews(ctx, p, reviews, &approvalRules{})
+}
+
+func (s Pulls) withReviews(ctx context.Context, p Pull, reviews []Review, rules *approvalRules) Pull {
 	p.Reviewers, p.ReviewerTeams = RequestedReviewers(reviews)
 	p.Reviews = slices.DeleteFunc(slices.Clone(reviews), func(review Review) bool {
 		return review.Author == "" || review.State == string(gitea.ReviewStatePending) || review.State == string(gitea.ReviewStateRequestReview)
 	})
 	p.ReviewDecision = ReviewDecision(reviews, len(p.ReviewerTeams) > 0)
-	if p.ReviewDecision == "approved" && p.Base != "" {
-		if base, err := (Branches{Client: s.Client}).View(ctx, s.Repository, p.Base); err == nil && OfficialApprovals(reviews) < base.RequiredApprovals {
-			p.ReviewDecision = "review_required"
-		}
+	if p.ReviewDecision == "changes_requested" || p.ReviewDecision == "review_required" || p.Base == "" {
+		return p
+	}
+	required, rule := rules.branch(ctx, s, p.Base)
+	approvals := OfficialApprovals(reviews, false)
+	if approvals >= required && OfficialApprovals(reviews, true) < required && rules.ignoresStale(ctx, s, rule) {
+		approvals = OfficialApprovals(reviews, true)
+	}
+	if approvals < required {
+		p.ReviewDecision = "review_required"
 	}
 	return p
+}
+
+// approvalRules remembers, for the pull requests of one command, what the protection of each base
+// branch asks of approvals, so that each base and rule is read once.
+type approvalRules struct {
+	branches onceByKey[branchApprovals]
+	rules    onceByKey[bool]
+}
+
+// onceByKey runs read once per key, also for concurrent callers, and remembers its value.
+type onceByKey[T any] struct {
+	mu    sync.Mutex
+	reads map[string]func() T
+}
+
+func (o *onceByKey[T]) get(key string, read func() T) T {
+	o.mu.Lock()
+	value, ok := o.reads[key]
+	if !ok {
+		if o.reads == nil {
+			o.reads = map[string]func() T{}
+		}
+		value = sync.OnceValue(read)
+		o.reads[key] = value
+	}
+	o.mu.Unlock()
+	return value()
+}
+
+type branchApprovals struct {
+	required int64
+	rule     string
+}
+
+// branch returns how many approvals the protection of base requires and the name of its rule. A
+// branch that cannot be read requires none.
+func (r *approvalRules) branch(ctx context.Context, s Pulls, base string) (int64, string) {
+	found := r.branches.get(base, func() branchApprovals {
+		var branch *gitea.Branch
+		_ = repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (resp *gitea.Response, err error) {
+			branch, resp, err = c.Repositories.GetRepoBranch(ctx, owner, name, base)
+			return resp, err
+		})
+		if branch == nil {
+			return branchApprovals{}
+		}
+		return branchApprovals{required: branch.RequiredApprovals, rule: branch.EffectiveBranchProtectionName}
+	})
+	return found.required, found.rule
+}
+
+// ignoresStale tells whether the protection rule leaves out approvals of an older head commit.
+// Gitea shows rules only to repository admins and leaves out the rule name for others; then the
+// approvals count as with Gitea's default, which keeps them.
+func (r *approvalRules) ignoresStale(ctx context.Context, s Pulls, rule string) bool {
+	if rule == "" {
+		return false
+	}
+	return r.rules.get(rule, func() bool {
+		// TODO(sdk): BranchProtection lacks ignore_stale_approvals.
+		var protection struct {
+			IgnoreStaleApprovals bool `json:"ignore_stale_approvals"`
+		}
+		err := getJSON(ctx, s.Client, "repos/"+s.Repository+"/branch_protections/"+url.PathEscape(rule), &protection)
+		return err == nil && protection.IgnoreStaleApprovals
+	})
 }
 
 // Detail reads, a few pull requests at a time, what a listing leaves out: with view, each pull
@@ -275,6 +351,7 @@ func (s Pulls) WithReviews(ctx context.Context, p Pull, reviews []Review) Pull {
 func (s Pulls) Detail(ctx context.Context, items []Pull, view, reviews bool) ([]Pull, error) {
 	detailed := slices.Clone(items)
 	service := Reviews{Client: s.Client, Repository: s.Repository}
+	rules := &approvalRules{}
 	err := concurrently(len(items), func(i int) (err error) {
 		if view {
 			if detailed[i], err = s.View(ctx, items[i].Number); err != nil {
@@ -286,7 +363,7 @@ func (s Pulls) Detail(ctx context.Context, items []Pull, view, reviews bool) ([]
 			if err != nil {
 				return err
 			}
-			detailed[i] = s.WithReviews(ctx, detailed[i], all)
+			detailed[i] = s.withReviews(ctx, detailed[i], all, rules)
 		}
 		return nil
 	})
@@ -1120,7 +1197,7 @@ func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 		reason = "cannot be merged yet: Gitea is still checking whether it can be merged; retry in a moment"
 	case !pull.Mergeable && refused.Message == "":
 		reason = "has conflicting files or is otherwise not mergeable"
-	case !pull.Mergeable:
+	case refused.Message != "":
 		reason = "cannot be merged" // Gitea's message, such as "Does not have enough approvals", says why
 	default:
 		return Classify(err, "pull request", key, s.Repository)

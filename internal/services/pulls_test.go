@@ -182,7 +182,7 @@ func TestPullMergeExplainsRefusal(t *testing.T) {
 	}{
 		{"conflicting files or checking", `{"state":"open","mergeable":false}`, "Please try again later", "pull request #3 has conflicting files, or Gitea is still checking whether it can be merged; retry in a moment", 2},
 		{"not mergeable", `{"state":"open","mergeable":false}`, "", "pull request #3 has conflicting files or is otherwise not mergeable", 1},
-		{"refused with a reason", `{"state":"open","mergeable":false}`, "Does not have enough approvals", "pull request #3 cannot be merged: Gitea API returned HTTP 405 for POST /api/v1/repos/owner/repo/pulls/3/merge: Does not have enough approvals", 1},
+		{"refused with a reason", `{"state":"open","mergeable":true}`, "Does not have enough approvals", "pull request #3 cannot be merged: Gitea API returned HTTP 405 for POST /api/v1/repos/owner/repo/pulls/3/merge: Does not have enough approvals", 1},
 		{"already merged", `{"state":"closed","merged":true}`, "", "pull request #3 has already been merged", 1},
 		{"closed", `{"state":"closed"}`, "Please try again later", "pull request #3 is closed", 1},
 		{"draft", `{"state":"open","draft":true}`, "Please try again later", "pull request #3 is a draft", 1},

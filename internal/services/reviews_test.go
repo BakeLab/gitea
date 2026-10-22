@@ -214,6 +214,16 @@ func TestReviewCreateNamesMergedOrClosedPull(t *testing.T) {
 		_, err := (Reviews{Client: client, Repository: "owner/repo"}).Create(context.Background(), 1, ReviewOptions{Event: "APPROVED"})
 		require.EqualError(t, err, want)
 	}
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/1" {
+			_, _ = w.Write([]byte(`{"number":1,"state":"closed","merged":true}`))
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"can't dismiss a review associated to a closed or merged PR"}`))
+	}))
+	_, err := (Reviews{Client: client, Repository: "owner/repo"}).Dismiss(context.Background(), 1, 2, true, "outdated")
+	require.EqualError(t, err, "pull request #1 is already merged")
 }
 
 func TestReviewResolveAndReplyUseCommentEndpoints(t *testing.T) {

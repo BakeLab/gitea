@@ -48,7 +48,7 @@ func TestExplainKeepsClassifiedErrorsAndAddsHints(t *testing.T) {
 		"POST /api/v1/repos/alice/old/issues":             {"423", `{"message":"repo is archived"}`},
 		"POST /api/v1/repos/alice/project/pulls":          {"409", `{"message":"pull request already exists for these targets [id: 16, issue_id: 3, head_repo_id: 1, base_repo_id: 1, head_branch: feat, base_branch: main]"}`},
 		"GET /api/v1/repos/alice/project/pulls/main/feat": {"200", `{"number":2,"html_url":"https://gitea.test/alice/project/pulls/2"}`},
-		"GET /api/v1/repos/alice/project/pulls/3":         {"200", `{"number":3,"state":"open","mergeable":false,"head":{"sha":"abc"}}`},
+		"GET /api/v1/repos/alice/project/pulls/3":         {"200", `{"number":3,"state":"open","mergeable":true,"head":{"sha":"abc"}}`},
 		"POST /api/v1/repos/alice/project/pulls/3/merge":  {"405", `{"message":"Does not have enough approvals"}`},
 	})
 	for _, tc := range []struct {

@@ -4,6 +4,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -233,12 +234,14 @@ func TestPullCreatePushesANewBranchToTheForkInAForkClone(t *testing.T) {
 
 func TestPullCreateGoesThroughAForkWithoutPushAccessToTheBase(t *testing.T) {
 	for _, test := range []struct {
-		name, remotes string
-		tty, forks    bool
-		want, err     string
+		name, remotes, forkRepo, pushRemote string
+		tty, forks                          bool
+		want, err                           string
 	}{
 		{name: "fork remote", remotes: "origin fork", want: "alice:feature"},
 		{name: "fork on a terminal", tty: true, forks: true, want: "alice:feature"},
+		{name: "fork remote elsewhere", remotes: "origin fork", forkRepo: "bob/other", pushRemote: "alice", tty: true, forks: true, want: "alice:feature"},
+		{name: "fork remotes elsewhere", remotes: "origin fork alice", forkRepo: "bob/other", tty: true, err: "you cannot push to acme/project, and Git remotes fork and alice point elsewhere; add a remote of your fork with gt repo fork --remote --remote-name NAME, then rerun gt pr create"},
 		{name: "no fork without a terminal", err: "you cannot push to acme/project; fork it with gt repo fork --remote, then rerun gt pr create"},
 		{name: "missing base", tty: true, err: `branch "main" not found in acme/project`},
 	} {
@@ -268,16 +271,24 @@ func TestPullCreateGoesThroughAForkWithoutPushAccessToTheBase(t *testing.T) {
 			}))
 			defer server.Close()
 			deps, _, _ := serverDeps(t, server.URL)
-			pushKey := credentialCall(t, deps, server.URL, "alice", "push", "--set-upstream", "--quiet", "--", "fork", "refs/heads/feature")
+			pushRemote, forkRepo := cmp.Or(test.pushRemote, "fork"), cmp.Or(test.forkRepo, "alice/project")
+			pushKey := credentialCall(t, deps, server.URL, "alice", "push", "--set-upstream", "--quiet", "--", pushRemote, "refs/heads/feature")
+			recordKey := "config branch.feature.gitea-cli-base-remote origin"
 			runner := &fakeGit{results: map[string]string{
 				"rev-parse --is-inside-work-tree":                "true",
 				"rev-parse --verify refs/heads/feature^{commit}": "localsha",
 				"remote":                "origin",
 				"remote get-url origin": server.URL + "/acme/project.git",
-				"remote get-url fork":   server.URL + "/alice/project.git",
-				"remote add -- fork https://example.test/alice/project.git": "",
-				pushKey: "",
+				"remote get-url fork":   server.URL + "/" + forkRepo + ".git",
+				"remote add -- " + pushRemote + " https://example.test/alice/project.git": "",
+				pushKey:   "",
+				recordKey: "",
 			}}
+			if test.pushRemote != "" {
+				runner.results["remote get-url "+pushRemote] = server.URL + "/alice/project.git"
+			} else {
+				runner.results["remote get-url alice"] = server.URL + "/bob/other.git"
+			}
 			if test.remotes != "" {
 				runner.results["remote"] = test.remotes
 			}
@@ -299,6 +310,7 @@ func TestPullCreateGoesThroughAForkWithoutPushAccessToTheBase(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Contains(t, runner.calls, pushKey)
+			require.Contains(t, runner.calls, recordKey) // so that discovery keeps the base rather than the fork the branch tracks
 			require.Equal(t, test.want, head)
 		})
 	}

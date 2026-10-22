@@ -110,6 +110,14 @@ func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot
 		return head, err
 	}
 	a.done(cmd, "Pushed %s to %s", branch, remote)
+	if !strings.EqualFold(a.remoteRepository(ctx, t, remote), t.Repo) {
+		// Discovery follows the branch's upstream, which is now the fork, unless the base remote is recorded.
+		if base, err := a.checkoutRemote(ctx, t, snapshot); err == nil {
+			if err := git.RecordBaseRemote(ctx, a.gitProbe(), a.options.cwd, branch, base); err != nil {
+				a.warn(cmd, "Could not record Git remote %s as the base of branch %s: %v", base, branch, err)
+			}
+		}
+	}
 	return published, nil
 }
 
@@ -195,16 +203,49 @@ func (a *application) forkRemote(ctx context.Context, t target) (remote, owner s
 }
 
 // forkForPush forks t's repository, which the account cannot push to, once confirmed on a
-// terminal, and adds the fork as the Git remote "fork" to push the head branch to.
+// terminal, and adds the fork as the Git remote "fork", or one named after the account when
+// "fork" points elsewhere, to push the head branch to. A remote of either name that points to a
+// fork the account can push to is used instead.
 func (a *application) forkForPush(cmd *cobra.Command, t target, branch string) (remote, owner string, err error) {
 	if !a.canPrompt() {
 		return "", "", fmt.Errorf("you cannot push to %s; fork it with gt repo fork --remote, then rerun gt pr create", t.Repo)
 	}
+	ctx := cmd.Context()
+	names, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote")
+	if err != nil {
+		return "", "", err
+	}
+	existing := ""
+	for _, name := range []string{"fork", t.login()} {
+		if name == "" {
+			continue
+		}
+		if !slices.Contains(strings.Fields(names), name) {
+			remote = name
+			break
+		}
+		if repo := a.remoteRepository(ctx, t, name); repo != "" {
+			if ok, err := (services.Pulls{Client: t.client, Repository: t.Repo}).PushableFork(ctx, repo); err == nil && ok {
+				remote, existing = name, repo
+				break
+			}
+		}
+	}
+	if remote == "" {
+		return "", "", fmt.Errorf("you cannot push to %s, and Git remotes fork and %s point elsewhere; add a remote of your fork with gt repo fork --remote --remote-name NAME, then rerun gt pr create", t.Repo, t.login())
+	}
 	question := fmt.Sprintf("You cannot push to %s. Fork it and push branch %s to the fork?", t.Repo, branch)
+	if existing != "" {
+		question = fmt.Sprintf("You cannot push to %s. Push branch %s to your fork %s?", t.Repo, branch, existing)
+	}
 	if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: question, DefaultYes: true}); err != nil {
 		return "", "", err
 	}
-	fork, existed, err := (services.Repositories{Client: t.client}).Fork(cmd.Context(), t.Repo, services.ForkOptions{})
+	if existing != "" {
+		owner, _, _ = strings.Cut(existing, "/")
+		return remote, owner, nil
+	}
+	fork, existed, err := (services.Repositories{Client: t.client}).Fork(ctx, t.Repo, services.ForkOptions{})
 	if err != nil {
 		return "", "", err
 	}
@@ -213,11 +254,11 @@ func (a *application) forkForPush(cmd *cobra.Command, t target, branch string) (
 	} else {
 		a.done(cmd, "Forked %s to %s", t.Repo, fork.FullName)
 	}
-	if err := a.addForkRemote(cmd, t, fork, "fork", false, ""); err != nil {
+	if err := a.addForkRemote(cmd, t, fork, remote, false, ""); err != nil {
 		return "", "", err
 	}
 	owner, _, _ = strings.Cut(fork.FullName, "/")
-	return "fork", owner, nil
+	return remote, owner, nil
 }
 
 func (a *application) addPullMutations(group *cobra.Command) {
