@@ -358,6 +358,9 @@ $ gt admin user delete spammer --purge`,
 			err = service.Delete(cmd.Context(), user.Username, purge)
 			if conflict, ok := errors.AsType[*services.ConflictError](err); ok && (conflict.Reason == services.ReasonOwnsRepos || conflict.Reason == services.ReasonOwnsOther) {
 				conflict.Hint = "transfer or delete them, or pass --purge to delete them with the user"
+				if conflict.Reason == services.ReasonOwnsRepos {
+					conflict.Hint = "transfer them with gt repo transfer or delete them, or pass --purge to delete them with the user"
+				}
 			}
 			if err != nil {
 				return err

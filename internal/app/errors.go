@@ -198,7 +198,7 @@ func conflictHint(apiErr *transport.APIError, conflict *services.ConflictError) 
 			return "cancel it first: gt run cancel " + conflict.Key
 		}
 	case services.ReasonOwnsRepos:
-		return "transfer or delete them first"
+		return "transfer them with gt repo transfer or delete them first"
 	}
 	return ""
 }

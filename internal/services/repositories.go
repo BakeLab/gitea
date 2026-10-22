@@ -338,6 +338,44 @@ func (s Repositories) Delete(ctx context.Context, repo string) error {
 	return Classify(err, "repository", repo, "")
 }
 
+// RepositoryTransfer is a repository whose transfer was requested. A pending transfer waits for
+// the new owner to accept it, and the repository keeps its owner until then.
+type RepositoryTransfer struct {
+	Repository
+	Pending bool `json:"transfer_pending"`
+}
+
+// Transfer moves repo to newOwner and grants the teams of an organization access to it. Gitea
+// makes the transfer wait for the new owner when the account may not create repositories there.
+func (s Repositories) Transfer(ctx context.Context, repo, newOwner string, teams []int64) (RepositoryTransfer, error) {
+	owner, name, err := splitRepository(repo)
+	if err != nil {
+		return RepositoryTransfer{}, err
+	}
+	opts := gitea.TransferRepoOption{NewOwner: newOwner}
+	if len(teams) > 0 {
+		opts.TeamIDs = &teams
+	}
+	item, resp, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Repository, *gitea.Response, error) {
+		return c.Repositories.TransferRepo(ctx, owner, name, opts)
+	})
+	apiErr, _ := errors.AsType[*transport.APIError](err)
+	switch {
+	case err == nil:
+		// Gitea answers 201 Created for a pending transfer and 202 Accepted for a completed one.
+		return RepositoryTransfer{Repository: repositoryFrom(item), Pending: resp.StatusCode == http.StatusCreated}, nil
+	case apiErr != nil && apiErr.Status == http.StatusNotFound && strings.Contains(apiErr.Message, "new owner"):
+		return RepositoryTransfer{}, &NotFoundError{Kind: "user or organization", Key: strconv.Quote(newOwner), Err: err}
+	case apiErr != nil && apiErr.Status == http.StatusConflict:
+		return RepositoryTransfer{}, &RefusedError{Text: "a transfer of " + repo + " is already pending; its new owner must accept or reject it first", Err: err}
+	}
+	err = Classify(err, "repository", repo, "")
+	if conflict, ok := errors.AsType[*ConflictError](err); ok && conflict.Reason == ReasonExists {
+		conflict.Key = newOwner + "/" + name
+	}
+	return RepositoryTransfer{}, err
+}
+
 // ForkOptions places a fork: under Organization instead of the account, and named Name instead
 // of the forked repository's name.
 type ForkOptions struct{ Organization, Name string }

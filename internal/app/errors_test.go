@@ -88,7 +88,7 @@ func TestExplainAddsTheNextStepToRefusals(t *testing.T) {
 		{"POST", "workflow", "nightly.yaml", "workflow is disabled", 403, "workflow nightly.yaml is disabled; enable it with: gt workflow enable nightly.yaml"},
 		{"DELETE", "run", "37", "this workflow run is not done", 400, "run 37 has not finished; cancel it first: gt run cancel 37"},
 		{"POST", "issue", "", "repo is archived", 423, "alice/x is archived (read-only); unarchive it with: gt repo unarchive alice/x"},
-		{"DELETE", "user", `"uxadm1"`, "user still has ownership of repositories [uid: 7]", 422, `user "uxadm1" still owns repositories; transfer or delete them first`},
+		{"DELETE", "user", `"uxadm1"`, "user still has ownership of repositories [uid: 7]", 422, `user "uxadm1" still owns repositories; transfer them with gt repo transfer or delete them first`},
 		{"POST", "SSH key", "", "Key content has been used as non-deploy key", 422, "this SSH key is already registered"},
 	} {
 		apiErr := &transport.APIError{Status: tc.status, Method: tc.method, Endpoint: "/api/v1/repos/alice/x/endpoint", Message: tc.message, Instance: "http://localhost:3001"}

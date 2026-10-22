@@ -17,7 +17,7 @@ import (
 
 func (a *application) addRepositoryMutations(group *cobra.Command) {
 	group.AddCommand(a.repoCreateCommand(), a.repoMigrateCommand(), a.repoForkCommand(), a.repoCloneCommand(), a.repoEditCommand())
-	group.AddCommand(a.repoArchiveCommand(true), a.repoArchiveCommand(false), a.repoRenameCommand(), a.repoDeleteCommand(), a.deployKeyCommand())
+	group.AddCommand(a.repoArchiveCommand(true), a.repoArchiveCommand(false), a.repoRenameCommand(), a.repoTransferCommand(), a.repoDeleteCommand(), a.deployKeyCommand())
 }
 
 // cloneArguments documents the <repository> argument of repo clone, which is required.
@@ -212,20 +212,98 @@ $ gt repo rename new-name -R alice/old-name`,
 				return err
 			}
 			a.done(cmd, "Renamed repository %s to %s", t.Repo, item.FullName)
-			if remote, ok := strings.CutPrefix(t.RepoSource, "remote "); ok {
-				a.warn(cmd, "Git remote %s still points to %s; update it with git remote set-url", remote, t.Repo)
-			}
-			if t.RepoSource == "git config gt.repository" {
-				// gt's own setting; the old name would fail with HTTP 301 from now on.
-				if _, err := a.git(cmd.Context(), "config", "--local", "gt.repository", t.Host+"/"+item.FullName); err != nil {
-					a.warn(cmd, "gt.repository still points to %s; update it with gt repo set-default %s", t.Repo, item.FullName)
-				} else {
-					a.done(cmd, "Updated the default repository of this clone to %s", item.FullName)
-				}
-			}
+			a.repositoryMoved(cmd, t, item.FullName)
 			return a.jsonResult(cmd, item)
 		},
 	}
+}
+
+// repositoryMoved points the default repository of the clone, when it selected t, to fullName,
+// the new name of t's repository, and warns about a Git remote that still uses the old one.
+func (a *application) repositoryMoved(cmd *cobra.Command, t target, fullName string) {
+	if remote, ok := strings.CutPrefix(t.RepoSource, "remote "); ok {
+		a.warn(cmd, "Git remote %s still points to %s; update it with git remote set-url", remote, t.Repo)
+	}
+	if t.RepoSource == "git config gt.repository" {
+		// gt's own setting; the old name would fail with HTTP 301 from now on.
+		if _, err := a.git(cmd.Context(), "config", "--local", "gt.repository", t.Host+"/"+fullName); err != nil {
+			a.warn(cmd, "gt.repository still points to %s; update it with gt repo set-default %s", t.Repo, fullName)
+		} else {
+			a.done(cmd, "Updated the default repository of this clone to %s", fullName)
+		}
+	}
+}
+
+func (a *application) repoTransferCommand() *cobra.Command {
+	var teams []string
+	command := &cobra.Command{
+		Use:   "transfer <new-owner>",
+		Short: "Transfer a repository to another owner",
+		Long: `Transfer a repository to another user or organization. --team grants teams of a new owning
+organization access to it.
+
+Gitea completes the transfer at once when you may create repositories for the new owner, such as
+in an organization you can create repositories in. Otherwise the transfer waits until the new owner
+accepts it on the repository's page, and the repository keeps its owner until then.`,
+		Example: `# Transfer the repository of the current clone to an organization
+$ gt repo transfer acme --team developers
+
+# Offer another repository to a user
+$ gt repo transfer bob -R alice/project`,
+		Annotations: map[string]string{"gt.confirm": "true"},
+		Args:        nonBlankArgs(cobra.ExactArgs(1), "new owner"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			newOwner := strings.TrimSpace(args[0])
+			if err := requireNames("team", "", teams); err != nil {
+				return err
+			}
+			t, err := a.resolve(cmd.Context(), true)
+			if err != nil {
+				return err
+			}
+			if owner, _ := t.ownerName(); strings.EqualFold(owner, newOwner) {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is already owned by %s", t.Repo, owner))
+			}
+			inferred, err := a.inferredRepository(t, "transfer", false)
+			if err != nil {
+				return err
+			}
+			var teamIDs []int64
+			if len(teams) > 0 {
+				byName, err := (services.Teams{Client: t.client}).ByName(cmd.Context(), newOwner)
+				if services.IsNotFound(err) {
+					return fmt.Errorf("--team requires an organization as the new owner: %w", err)
+				}
+				if err != nil {
+					return err
+				}
+				for _, team := range teams {
+					match, ok := byName[strings.ToLower(team)]
+					if !ok {
+						return fmt.Errorf("team %q not found in organization %s", team, newOwner)
+					}
+					teamIDs = append(teamIDs, match.ID)
+				}
+			}
+			if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Transfer " + t.Repo + inferred + " to " + newOwner + "?", NonTTY: "transfer " + t.Repo}); err != nil {
+				return err
+			}
+			result, err := (services.Repositories{Client: t.client}).Transfer(cmd.Context(), t.Repo, newOwner, teamIDs)
+			if err != nil {
+				return err
+			}
+			if result.Pending {
+				a.done(cmd, "Requested the transfer of %s to %s; it completes when %s accepts it", t.Repo, newOwner, newOwner)
+			} else {
+				a.done(cmd, "Transferred repository %s to %s", t.Repo, result.FullName)
+				a.repositoryMoved(cmd, t, result.FullName)
+			}
+			return a.jsonResult(cmd, result)
+		},
+	}
+	command.Flags().StringSliceVar(&teams, "team", nil, "Grant this team of the new owning organization access (repeatable)")
+	command.ValidArgsFunction = firstArg(a.completeOrgs())
+	return jsonOutput(command, jsonFields[services.RepositoryTransfer]())
 }
 
 func (a *application) repoDeleteCommand() *cobra.Command {

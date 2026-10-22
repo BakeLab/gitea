@@ -106,7 +106,7 @@ func TestOrganizationDeleteAsksToTypeTheName(t *testing.T) {
 
 	repos = "2"
 	err = Execute(context.Background(), deps, []string{"org", "delete", "acme", "--yes"})
-	require.EqualError(t, err, "organization acme still owns repositories; transfer or delete them first (see gt repo list acme)")
+	require.EqualError(t, err, "organization acme still owns repositories; transfer them with gt repo transfer or delete them first (see gt repo list acme)")
 	require.Len(t, deleted, 1)
 }
 

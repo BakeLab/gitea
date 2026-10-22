@@ -100,7 +100,7 @@ func TestAdminUserDeleteOffersPurgeForOwners(t *testing.T) {
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
 	err := Execute(context.Background(), deps, []string{"admin", "user", "delete", "bob", "--yes"})
-	require.EqualError(t, err, `user "bob" still owns repositories; transfer or delete them, or pass --purge to delete them with the user`)
+	require.EqualError(t, err, `user "bob" still owns repositories; transfer them with gt repo transfer or delete them, or pass --purge to delete them with the user`)
 
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	const typed = "Delete user bob with their repositories, packages and organization memberships, and the organizations they are the last owner of with those organizations' repositories? This cannot be undone. Type bob to confirm:"

@@ -264,6 +264,68 @@ func TestRepoRenameUpdatesTheSavedDefaultRepository(t *testing.T) {
 	require.Equal(t, "✓ Renamed repository alice/project to alice/renamed\n✓ Updated the default repository of this clone to alice/renamed\n", diagnostics.String())
 }
 
+func TestRepoTransfer(t *testing.T) {
+	var requests []string
+	status := http.StatusAccepted
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/orgs/acme/teams":
+			writeFirstPage(w, r, `[{"id":3,"name":"Developers"}]`)
+		case "POST /api/v1/repos/alice/project/transfer":
+			var body struct {
+				NewOwner string   `json:"new_owner"`
+				TeamIDs  *[]int64 `json:"team_ids"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			switch body.NewOwner {
+			case "nobody":
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"The new owner does not exist or cannot be found"}`))
+				return
+			case "acme":
+				require.Equal(t, &[]int64{3}, body.TeamIDs)
+			default:
+				require.Nil(t, body.TeamIDs)
+			}
+			w.WriteHeader(status)
+			fullName := body.NewOwner + "/project"
+			if status == http.StatusCreated {
+				fullName = "alice/project"
+			}
+			_, _ = fmt.Fprintf(w, `{"name":"project","full_name":%q}`, fullName)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, diagnostics := repoTTYDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "transfer", "acme", "--team", "developers", "-R", "alice/project", "--yes"}))
+	require.Empty(t, out.String())
+	require.Equal(t, "✓ Transferred repository alice/project to acme/project\n", diagnostics.String())
+	require.Equal(t, "POST /api/v1/repos/alice/project/transfer", requests[len(requests)-1])
+	// Gitea answers 201 Created for a transfer that waits for the new owner.
+	status, requests = http.StatusCreated, nil
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "transfer", "bob", "-R", "alice/project", "--yes"}))
+	require.Equal(t, "✓ Requested the transfer of alice/project to bob; it completes when bob accepts it\n", diagnostics.String())
+	require.Equal(t, []string{"POST /api/v1/repos/alice/project/transfer"}, requests)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "transfer", "bob", "-R", "alice/project", "--yes", "--json=full_name,transfer_pending"}))
+	require.JSONEq(t, `{"full_name":"alice/project","transfer_pending":true}`, out.String())
+	err := Execute(context.Background(), deps, []string{"repo", "transfer", "nobody", "-R", "alice/project", "--yes"})
+	require.EqualError(t, err, `user or organization "nobody" not found`)
+	// Without --yes, nothing is transferred without a terminal to confirm on.
+	deps, _, _ = serverDeps(t, server.URL)
+	requests = nil
+	require.Error(t, Execute(context.Background(), deps, []string{"repo", "transfer", "bob", "-R", "alice/project"}))
+	require.Empty(t, requests)
+	err = Execute(context.Background(), deps, []string{"repo", "transfer", "Alice", "-R", "alice/project", "--yes"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.EqualError(t, err, "alice/project is already owned by alice")
+	require.Empty(t, requests)
+	requireUsageBeforeRequests(t, "new owner cannot be empty", "repo", "transfer", " ", "--yes")
+}
+
 func TestRepoArchiveTakesSeveralRepositories(t *testing.T) {
 	var archived []string
 	users := 0

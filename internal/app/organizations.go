@@ -295,7 +295,7 @@ $ gt org delete acme-old --yes`,
 				return err
 			}
 			if repos != nil && *repos > 0 {
-				return &services.ConflictError{Reason: services.ReasonOwnsRepos, Kind: "organization", Key: org.Name, Hint: "transfer or delete them first (see gt repo list " + org.Name + ")"}
+				return &services.ConflictError{Reason: services.ReasonOwnsRepos, Kind: "organization", Key: org.Name, Hint: "transfer them with gt repo transfer or delete them first (see gt repo list " + org.Name + ")"}
 			}
 			if err := a.confirmAction(cmd, terminal.Confirmation{
 				Prompt: fmt.Sprintf("Delete organization %s and its teams? This cannot be undone.", org.Name),
