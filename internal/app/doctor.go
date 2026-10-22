@@ -151,7 +151,7 @@ func (a *application) diagnose(ctx context.Context) doctorReport {
 	}
 	add(a.gitCheck(ctx, t.Host))
 	sshSource := "ssh_host"
-	if stored, _ := a.storedHost(t.Host); stored.SSHHost != t.host.SSHHost {
+	if a.environmentSSHHost(t.Host, snapshot.Hosts.Hosts) {
 		sshSource = "GITEA_INSTANCE_SSH_HOST"
 	}
 	if check, ok := sshCheck(t, repoErr, sshSource); ok {

@@ -214,7 +214,7 @@ func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
 	}}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"}))
-	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", "remote rename origin upstream", "remote add -- origin " + fork}, runner.calls)
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", "remote get-url upstream", "remote rename origin upstream", "remote add -- origin " + fork}, runner.calls)
 	require.Equal(t, "✓ Forked bob/project to alice/mine\n✓ Renamed Git remote origin to upstream\n✓ Added Git remote origin for alice/mine\n", diagnostics.String())
 	require.Equal(t, "https://gitea.test/alice/mine\n", out.String())
 	// A second run finds origin pointing to the fork.
@@ -249,6 +249,10 @@ func TestRepoForkRemoteChecksTheCloneBeforeForking(t *testing.T) {
 	deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote get-url origin": "https://alice:secret@github.com/alice/project.git"}}
 	err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--remote"})
 	require.EqualError(t, err, "Git remote origin points to https://github.com/alice/project.git; pass --remote-name")
+	deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote get-url origin": server.URL + "/bob/project.git", "remote get-url upstream": server.URL + "/carol/project.git"}}
+	err = Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--remote"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.EqualError(t, err, "Git remote origin points to bob/project and cannot be renamed to upstream, which exists; pass --remote-name")
 }
 
 func TestRepoRenameUpdatesTheSavedDefaultRepository(t *testing.T) {

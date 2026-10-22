@@ -61,14 +61,15 @@ func (a *application) rememberSSHHost(cmd *cobra.Command, t target, sshHost stri
 	if standard, _ := settings.SSHEndpoint(settings.DefaultSSHHost(t.Host)); err != nil || learned == standard {
 		return
 	}
-	if a.deps.Getenv("GITEA_TOKEN") != "" {
-		a.warn(cmd, "gt commands in the clone need the SSH host of %s: set GITEA_INSTANCE_SSH_HOST=%s", t.Host, sshHost)
-		return
-	}
-	saved := false
+	saved, environment := false, false
 	err = a.deps.Settings.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
 		host, exists := s.Hosts.Hosts[t.Host]
-		if !exists || host.SSHHost != "" {
+		if !exists {
+			instance, err := settings.ResolveHost(a.tokenInstance(), s.Hosts.Hosts)
+			environment = a.deps.Getenv("GITEA_TOKEN") != "" && err == nil && instance == t.Host
+			return nil
+		}
+		if host.SSHHost != "" {
 			return nil
 		}
 		host.SSHHost, saved = sshHost, true
@@ -80,6 +81,8 @@ func (a *application) rememberSSHHost(cmd *cobra.Command, t target, sshHost stri
 		a.warn(cmd, "Could not save the SSH host of %s: %v; run gt config set ssh_host %s --host %s", t.Host, err, sshHost, t.Host)
 	case saved:
 		a.done(cmd, "Set ssh_host of %s to %s", t.Host, sshHost)
+	case environment:
+		a.warn(cmd, "gt commands in the clone need the SSH host of %s: set GITEA_INSTANCE_SSH_HOST=%s", t.Host, sshHost)
 	}
 }
 
@@ -288,6 +291,9 @@ func (a *application) checkForkRemote(cmd *cobra.Command, t target, name, owner 
 		return false, "", nil
 	}
 	if t.ownsRemote(existing) {
+		if _, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", "upstream"); err == nil || name == "upstream" {
+			return false, "", clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %s points to %s and cannot be renamed to upstream, which exists; pass --remote-name", name, t.Repo))
+		}
 		return true, "", nil
 	}
 	host, repo, err := settings.RemoteRepository(existing, t.hosts())

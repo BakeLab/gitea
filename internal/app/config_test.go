@@ -43,7 +43,11 @@ func TestConfigReportsTheInstanceThatCommandsPick(t *testing.T) {
 	require.NoError(t, testManager(t, deps).Register("https://accounts.example.org", "alice", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "token"}))
 	configureHost(t, deps, "https://logged-out.example.org", settings.Host{GitProtocol: "ssh"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "default_host", "--show-source", "--json"}))
-	require.JSONEq(t, `{"default_host":{"value":"https://accounts.example.org","source":"sole configured instance"}}`, out.String())
+	require.JSONEq(t, `{"default_host":{"value":"https://accounts.example.org","source":"only instance with an account"}}`, out.String())
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "logout", "alice", "--host", "https://accounts.example.org", "--yes"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "default_host", "--show-source", "--json"}))
+	require.JSONEq(t, `{"default_host":{"value":"https://logged-out.example.org","source":"only configured instance"}}`, out.String())
 }
 
 func TestInstanceConfigUpdatesPreserveAccountsAndGlobalPreferences(t *testing.T) {
@@ -139,7 +143,7 @@ func TestConfigHelpDocumentsSettingsAndEnvironment(t *testing.T) {
 	for _, name := range []string{"GITEA_CLI_CONFIG_DIR", "GITEA_CLI_HOST", "GITEA_INSTANCE_URL", "GITEA_TOKEN", "GITEA_CLI_USER", "GITEA_CLI_REPO", "GITEA_CLI_EDITOR", "VISUAL", "EDITOR", "GITEA_CLI_PAGER", "PAGER", "GITEA_CLI_COLOR", "NO_COLOR", "BROWSER"} {
 		require.Contains(t, out.String(), name)
 	}
-	require.Contains(t, out.String(), "default_host, the only instance with an account, or, among several, the instance of the\nclone's repository.")
+	require.Contains(t, out.String(), "does not select the fork.\n\ngt selects the instance from the repository URL, --host, GITEA_CLI_HOST or\nGITEA_INSTANCE_URL, default_host, the only instance with an account, or, among several or\nnone, the instance of the clone's repository.")
 	// CLICOLOR_FORCE colors stderr even when redirected, but never piped stdout.
 	require.Contains(t, out.String(), "colors stderr, even when redirected, and\n")
 	// gt pr diff --color always colors piped output, as git does.
@@ -366,4 +370,8 @@ func TestConfigGetShowsTheEnvironmentOverridesOfTheTokenInstance(t *testing.T) {
 	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "secret", "GITEA_CLI_HOST": "https://example.org", "GITEA_INSTANCE_SSH_HOST": "git.example.org:2222"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "ssh_host", "--show-source", "--json"}))
 	require.JSONEq(t, `{"ssh_host":{"value":"git.example.org:2222","source":"GITEA_INSTANCE_SSH_HOST"}}`, out.String())
+	out.Reset()
+	configureHost(t, deps, "https://example.org", settings.Host{SSHHost: "git.example.org:2222"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "ssh_host", "--show-source", "--json"}))
+	require.JSONEq(t, `{"ssh_host":{"value":"git.example.org:2222","source":"GITEA_INSTANCE_SSH_HOST"}}`, out.String(), "the variable is the source even when ssh_host agrees")
 }

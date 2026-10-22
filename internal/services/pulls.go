@@ -63,7 +63,8 @@ type Pull struct {
 	// WithReviews.
 	Reviewers     []string `json:"reviewers"`
 	ReviewerTeams []string `json:"reviewer_teams"`
-	// Reviews are the submitted reviews, oldest first. Only commands that read the reviews fill it.
+	// Reviews are the submitted reviews, oldest first. Only commands that read the reviews fill it;
+	// others give an empty list.
 	Reviews  []Review `json:"reviews"`
 	Comments int64    `json:"comments"`
 }
@@ -101,7 +102,7 @@ func pullFrom(pull *gitea.PullRequest) Pull {
 		URL: pull.HTMLURL, State: string(pull.State), Merged: pull.HasMerged, MergedAt: optionalTimestamp(pull.Merged), MergedBy: login(pull.MergedBy),
 		MergeCommitSHA: pull.MergedCommitID, Mergeable: pull.Mergeable, Draft: pull.Draft, AllowMaintainerEdit: pull.AllowMaintainerEdit,
 		Base: base.Ref, Head: headBranch, HeadSHA: head.Sha, HeadRemoteDeleted: remoteDeleted,
-		Reviewers: convertAll(pull.RequestedReviewers, login), Comments: int64(pull.Comments),
+		Reviewers: convertAll(pull.RequestedReviewers, login), Reviews: []Review{}, Comments: int64(pull.Comments),
 		ReviewerTeams: convertAll(pull.RequestedReviewersTeams, func(team *gitea.Team) string { return team.Name }),
 	}
 	// Without a head repository, an AGit pull request, which has no label, has its head in the base
@@ -373,10 +374,24 @@ func (s Pulls) get(ctx context.Context, n int64) (*gitea.PullRequest, error) {
 	item, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
 		return c.PullRequests.GetPullRequest(ctx, owner, name, n)
 	})
-	if unitErr := unitError(ctx, s.Client, s.Repository, err, UnitPulls); unitErr != nil {
-		return nil, unitErr
+	return item, pullError(ctx, s.Client, s.Repository, err, n)
+}
+
+// pullError names pull request n of repository in the failure of a request about it, or the
+// repository or its turned-off pull requests when that is what Gitea's bare 404 means. A 404 that
+// names what is missing, such as the pull request or a branch, is no such answer.
+func pullError(ctx context.Context, client *transport.Client, repository string, err error, n int64) error {
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && (apiErr.Message == "" || apiErr.Message == "not found") {
+		if unitErr := unitError(ctx, client, repository, err, UnitPulls); unitErr != nil {
+			return unitErr
+		}
 	}
-	return item, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository)
+	return Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), repository)
+}
+
+// issues serves the pull requests through the issue endpoints.
+func (s Pulls) issues() Issues {
+	return Issues{Client: s.Client, Repository: s.Repository, Pulls: true}
 }
 
 // ListOpen returns every open pull request in the repository.
@@ -578,7 +593,7 @@ func (s Pulls) edit(ctx context.Context, n int64, opts PullEdit, before *Pull, s
 		before = &item
 	}
 	if opts.Changes != nil {
-		issues, edit := Issues{Client: s.Client, Repository: s.Repository}, IssueEdit{Labels: opts.Labels, Assignees: opts.Assignees, Changes: opts.Changes}
+		issues, edit := s.issues(), IssueEdit{Labels: opts.Labels, Assignees: opts.Assignees, Changes: opts.Changes}
 		var err error
 		if before != nil {
 			edit, err = issues.applyChangesTo(ctx, before.Labels, before.Assignees, edit)
@@ -621,7 +636,7 @@ func (s Pulls) editPull(ctx context.Context, n int64, opts PullEdit) (Pull, erro
 	item, err := repoConvert(ctx, s.Client, s.Repository, pullFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
 		return c.PullRequests.EditPullRequest(ctx, owner, name, n, editPullOption(opts))
 	})
-	return item, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository)
+	return item, pullError(ctx, s.Client, s.Repository, err, n)
 }
 
 // editRun follows the requests that edit pull request n with opts.
@@ -668,7 +683,7 @@ type editFailure struct {
 // fields share the same mutation. The labels go last: Gitea refuses label changes from people
 // who cannot write to the pull requests, and still takes the other changes from the author.
 func (r *editRun) throughIssue(ctx context.Context) (Pull, error) {
-	issues := Issues{Client: r.Client, Repository: r.Repository}
+	issues := r.issues()
 	opts := r.opts
 	common := PullEdit{
 		Title: opts.Title, Body: opts.Body, Assignees: opts.Assignees, Milestone: opts.Milestone,
@@ -757,7 +772,7 @@ func (r *editRun) savedSome(ctx context.Context) bool {
 // refused. A change the pull request held before the edit is named in neither. Only an edit
 // that went to its end and saved something returns the pull request.
 func (r *editRun) failed(ctx context.Context) (Pull, error) {
-	issues := Issues{Client: r.Client, Repository: r.Repository}
+	issues := r.issues()
 	if r.before == nil {
 		// An edit of one field: with nothing to compare with, the error goes as Gitea gave it.
 		if r.labelsErr != nil {
@@ -851,7 +866,7 @@ func (r *editRun) failed(ctx context.Context) (Pull, error) {
 // labelsFailure words the failed label change of the edit; unknown is set when no read of the
 // pull request after the label request tells whether Gitea stored them before it failed.
 func (r *editRun) labelsFailure(ctx context.Context, unknown bool) error {
-	issues := Issues{Client: r.Client, Repository: r.Repository}
+	issues := r.issues()
 	if refusal := issues.labelsRefusal(ctx, r.n, KindPull, r.labelsErr); refusal != "" {
 		return &RefusedError{Text: "the labels were left unchanged: " + refusal, Err: r.labelsErr}
 	}
@@ -1054,7 +1069,7 @@ func (s Pulls) Diff(ctx context.Context, n int64) (io.ReadCloser, error) {
 		return c.PullRequests.GetPullRequestDiff(ctx, owner, name, n, gitea.PullRequestDiffOptions{})
 	})
 	if err != nil {
-		return nil, repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
+		return nil, pullError(ctx, s.Client, s.Repository, err, n)
 	}
 	return io.NopCloser(bytes.NewReader(diff)), nil
 }
@@ -1081,7 +1096,7 @@ func (s Pulls) Files(ctx context.Context, n int64) ([]string, error) {
 		return c.PullRequests.ListPullRequestFiles(ctx, owner, name, n, gitea.ListPullRequestFilesOptions{ListOptions: list})
 	})
 	if err != nil {
-		return nil, repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
+		return nil, pullError(ctx, s.Client, s.Repository, err, n)
 	}
 	paths := make([]string, 0, len(files))
 	for _, file := range files {

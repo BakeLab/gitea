@@ -66,12 +66,12 @@ func (c projectChanges) apply(ctx context.Context, issueID int64) (bool, error) 
 	return sent, errors.Join(failures...)
 }
 
-// applyToNumber is apply for the issue or pull request numbered n, whose global ID it looks up.
+// applyToNumber is apply for the pull request numbered n, whose global ID it looks up.
 func (c projectChanges) applyToNumber(ctx context.Context, n int64) (bool, error) {
 	if len(c.add)+len(c.remove) == 0 {
 		return false, nil
 	}
-	issue, err := (services.Issues{Client: c.service.Client, Repository: c.service.Repository}).View(ctx, n)
+	issue, err := (services.Issues{Client: c.service.Client, Repository: c.service.Repository, Pulls: true}).View(ctx, n)
 	if err != nil {
 		return false, err
 	}

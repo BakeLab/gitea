@@ -116,7 +116,8 @@ func (a *application) setupGitCommand() *cobra.Command {
 		Long: `Configure git to ask gt for the credentials of an instance, so that git push and fetch
 over HTTPS use the active account, or the account of --user. gt's own clone and checkout
 commands do not need this. The instance's stored TLS client certificate and --insecure setting
-are configured for git too; GITEA_INSTANCE_INSECURE is never saved.
+are configured for git too; GITEA_INSTANCE_INSECURE is never saved, and keeps an earlier
+--insecure setting in Git's configuration.
 
 Other credential helpers, such as a system keychain, are turned off for the instance:
 otherwise they answer first and keep a copy of gt's token. --keep-helpers keeps them.`,
@@ -165,7 +166,12 @@ func (a *application) setupGit(cmd *cobra.Command, instance string, local, keepH
 	if err != nil {
 		return err
 	}
-	host, err := a.storedHost(instance)
+	snapshot, err := a.settings()
+	if err != nil {
+		return err
+	}
+	host := snapshot.Hosts.Hosts[instance]
+	effective, err := a.environmentHosts(snapshot.Hosts.Hosts)
 	if err != nil {
 		return err
 	}
@@ -176,7 +182,7 @@ func (a *application) setupGit(cmd *cobra.Command, instance string, local, keepH
 	if err := git.SetupTLS(cmd.Context(), a.deps.Git, a.options.cwd, local, instance, host.ClientCert, host.ClientKey, host.Insecure); err != nil {
 		return err
 	}
-	if !host.Insecure {
+	if !effective[instance].Insecure {
 		if err := git.UnsetInsecureTLS(cmd.Context(), a.deps.Git, a.options.cwd, local, instance); err != nil {
 			return err
 		}

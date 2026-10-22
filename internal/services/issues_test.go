@@ -220,20 +220,26 @@ func TestIssueAndPullRequestsNameATurnedOffUnit(t *testing.T) {
 		noPulls  = "pull requests are disabled in owner/repo; turn them on with: gt repo edit --enable-pull-requests -R owner/repo"
 		tracker  = "owner/repo uses an external issue tracker: https://tracker.example"
 	)
+	const refused = "user should have specific read permission or be a repo admin or a site admin"
 	for _, test := range []struct {
-		repository, view, list, pull, pulls string
+		repository, view, list, create, pull, pulls string
 	}{
-		{`{"has_issues":false,"has_pull_requests":true}`, noIssues, noIssues, "pull request #9 not found in owner/repo", "repository owner/repo not found"},
-		{`{"has_issues":true,"has_pull_requests":false}`, "issue #9 not found in owner/repo", "repository owner/repo not found", noPulls, noPulls},
-		{`{"has_issues":true,"has_pull_requests":true,"external_tracker":{"external_tracker_url":"https://tracker.example"}}`, tracker, tracker, "pull request #9 not found in owner/repo", "repository owner/repo not found"},
+		{`{"has_issues":false,"has_pull_requests":true}`, noIssues, noIssues, noIssues, "pull request #9 not found in owner/repo", "repository owner/repo not found"},
+		{`{"has_issues":true,"has_pull_requests":false}`, "issue #9 not found in owner/repo", "repository owner/repo not found", "permission denied by the Gitea instance: " + refused, noPulls, noPulls},
+		{`{"has_issues":true,"has_pull_requests":true,"external_tracker":{"external_tracker_url":"https://tracker.example"}}`, tracker, tracker, tracker, "pull request #9 not found in owner/repo", "repository owner/repo not found"},
 	} {
 		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/api/v1/repos/owner/repo" {
+			switch {
+			case r.URL.Path == "/api/v1/repos/owner/repo":
 				_, _ = w.Write([]byte(test.repository))
-				return
+			case r.Method == http.MethodPost:
+				// Gitea refuses issues without the unit with a 403 for anyone but admins.
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"message":"` + refused + `"}`))
+			default:
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"not found"}`))
 			}
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"message":"not found"}`))
 		}))
 		ctx := context.Background()
 		issues := Issues{Client: client, Repository: "owner/repo"}
@@ -241,8 +247,26 @@ func TestIssueAndPullRequestsNameATurnedOffUnit(t *testing.T) {
 		require.EqualError(t, err, test.view)
 		_, _, err = issues.List(ctx, ListOptions{State: "open", Limit: 10, Page: 1})
 		require.EqualError(t, err, test.list)
+		_, err = issues.Search(ctx, DiscussionSearchOptions{State: "open", Limit: 10, Page: 1})
+		require.EqualError(t, err, test.list)
+		_, err = issues.Search(ctx, DiscussionSearchOptions{State: "open", Pulls: true, Limit: 10, Page: 1})
+		require.EqualError(t, err, test.pulls)
+		_, err = (Times{Client: client, Repository: "owner/repo"}).ListPage(ctx, TimeOptions{Limit: 10, Page: 1})
+		require.EqualError(t, err, test.list)
+		_, err = issues.Create(ctx, IssueOptions{Title: "x"})
+		require.EqualError(t, err, test.create)
 		pulls := Pulls{Client: client, Repository: "owner/repo"}
 		_, err = pulls.View(ctx, 9)
+		require.EqualError(t, err, test.pull)
+		_, err = pulls.Edit(ctx, 9, PullEdit{Changes: &MetadataChanges{AddLabels: []int64{1}}})
+		require.EqualError(t, err, test.pull)
+		_, err = pulls.Diff(ctx, 9)
+		require.EqualError(t, err, test.pull)
+		_, err = pulls.Files(ctx, 9)
+		require.EqualError(t, err, test.pull)
+		_, err = (Reviews{Client: client, Repository: "owner/repo"}).ListPage(ctx, 9, 10, 1)
+		require.EqualError(t, err, test.pull)
+		_, err = (Issues{Client: client, Repository: "owner/repo", Pulls: true}).View(ctx, 9)
 		require.EqualError(t, err, test.pull)
 		_, _, err = pulls.List(ctx, PullListOptions{State: "open", Limit: 10, Page: 1})
 		require.EqualError(t, err, test.pulls)

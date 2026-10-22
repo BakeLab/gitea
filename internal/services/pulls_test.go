@@ -406,7 +406,7 @@ func TestPullFromMapsServerFields(t *testing.T) {
 		ID: 10, Number: 3, Title: "Feature", Body: "Adds", URL: "https://gitea.test/alice/project/pulls/3", State: "open",
 		Mergeable: true, Draft: true, Base: "main", Head: "feature", HeadSHA: "abc", HeadRepo: "bob/project", HeadCanPush: true,
 		HeadCloneURL: "https://gitea.test/bob/project.git", HeadSSHURL: "git@gitea.test:bob/project.git",
-		Reviewers: []string{"dave"}, ReviewerTeams: []string{"core"}, Comments: 4,
+		Reviewers: []string{"dave"}, ReviewerTeams: []string{"core"}, Reviews: []Review{}, Comments: 4,
 	}, pullFrom(pull))
 }
 
@@ -422,6 +422,7 @@ func TestPullFromLeavesTheHeadRepositoryOfADeletedForkEmpty(t *testing.T) {
 	data, err := json.Marshal(result)
 	require.NoError(t, err)
 	require.Contains(t, string(data), `"head_repo":""`, "lists and views keep the same keys")
+	require.Contains(t, string(data), `"reviews":[]`, "commands that do not read the reviews give no null")
 }
 
 func TestPullFromPutsTheHeadOfAnAGitPullRequestInTheBase(t *testing.T) {
@@ -449,7 +450,7 @@ func TestPullFromKeepsAGitHeadsUndeleted(t *testing.T) {
 }
 
 func TestPullFromToleratesMissingBranches(t *testing.T) {
-	require.Equal(t, Pull{Number: 1, Assignees: []string{}, Labels: []Label{}, Reviewers: []string{}, ReviewerTeams: []string{}},
+	require.Equal(t, Pull{Number: 1, Assignees: []string{}, Labels: []Label{}, Reviewers: []string{}, ReviewerTeams: []string{}, Reviews: []Review{}},
 		pullFrom(decode[gitea.PullRequest](t, `{"number":1,"head":null,"base":null}`)))
 }
 

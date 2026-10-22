@@ -297,10 +297,11 @@ gt selects the repository from --repo, GITEA_CLI_REPO, git config gt.repository 
 set-default) or a Git remote (--remote, else the base remote pr checkout recorded, the
 current branch's remote, upstream or origin, skipping remotes on instances without an
 account, or not on --host or the GITEA_TOKEN instance). Like gh, a clone with upstream
-and origin targets upstream: a branch tracking origin does not select the fork,
-and the instance from the repository URL, --host, GITEA_CLI_HOST or GITEA_INSTANCE_URL,
-default_host, the only instance with an account, or, among several, the instance of the
-clone's repository.
+and origin targets upstream: a branch tracking origin does not select the fork.
+
+gt selects the instance from the repository URL, --host, GITEA_CLI_HOST or
+GITEA_INSTANCE_URL, default_host, the only instance with an account, or, among several or
+none, the instance of the clone's repository.
 
 Environment variables:
 
@@ -332,7 +333,8 @@ Preferences in config.yml are described in gt config --help.`},
   0    success, including an empty list
   1    the command failed
   2    usage error: an unknown command or flag, or a missing or invalid argument
-  3    canceled: a declined confirmation, a prompt left with Esc or Ctrl-D, or a timeout
+  3    canceled: a declined confirmation, a prompt left with Esc (or Ctrl-D with TERM=dumb),
+       or a timeout
   4    authentication is missing or was rejected
   8    gt pr checks: some checks are still pending
   130  interrupted with Ctrl-C, also at a prompt

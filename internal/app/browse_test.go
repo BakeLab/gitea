@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,8 @@ func TestBrowseURLs(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"full_name":"alice/project","default_branch":"release/1.0"}`)
 		case "/api/v1/repos/alice/project/issues/7":
 			_, _ = fmt.Fprint(w, `{"number":7,"pull_request":{"merged":false}}`)
+		case "/api/v1/repos/alice/project/issues/8":
+			_, _ = fmt.Fprint(w, `{"number":8}`)
 		case "/api/v1/repos/alice/project/issues/9":
 			w.WriteHeader(http.StatusInternalServerError)
 		default:
@@ -42,10 +45,12 @@ func TestBrowseURLs(t *testing.T) {
 		requests []string
 	}{
 		{nil, repo, nil},
-		// Gitea sends /issues/N of a pull request to an external tracker when the repository uses one.
-		{[]string{"#12"}, repo + "/issues/12", []string{"/api/v1/repos/alice/project/issues/12"}},
+		// Gitea sends /issues/N of a pull request to an external tracker when the repository uses
+		// one, and /pulls/N of an issue to /issues/N.
+		{[]string{"#12"}, repo + "/pulls/12", []string{"/api/v1/repos/alice/project/issues/12"}},
 		{[]string{"7"}, repo + "/pulls/7", []string{"/api/v1/repos/alice/project/issues/7"}},
-		{[]string{"9"}, repo + "/issues/9", []string{"/api/v1/repos/alice/project/issues/9"}},
+		{[]string{"8"}, repo + "/issues/8", []string{"/api/v1/repos/alice/project/issues/8"}},
+		{[]string{"9"}, repo + "/pulls/9", []string{"/api/v1/repos/alice/project/issues/9"}},
 		{[]string{"77507cd"}, repo + "/commit/77507cd", nil},
 		{[]string{"--wiki"}, repo + "/wiki", nil},
 		{[]string{"--branch", "feature/x"}, repo + "/src/branch/feature/x", nil},
@@ -72,6 +77,34 @@ func TestBrowseURLs(t *testing.T) {
 	require.Empty(t, out.String())
 }
 
+func TestBrowseWithoutAnInstanceTakesTheCloneInstanceForARepository(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": "https://gitea.example.test/alice/project.git"}}
+	for _, args := range [][]string{{"--wiki"}, {"-R", "alice/project", "--wiki"}} {
+		out.Reset()
+		require.NoError(t, Execute(context.Background(), deps, append([]string{"browse", "-n"}, args...)), "%v", args)
+		require.Equal(t, "https://gitea.example.test/alice/project/wiki\n", out.String(), "%v", args)
+	}
+}
+
+func TestBrowseNumberWithoutAnAccount(t *testing.T) {
+	var authorized []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorized = append(authorized, r.Header.Get("Authorization"))
+		if r.URL.Path == "/api/v1/repos/alice/project/issues/7" {
+			_, _ = fmt.Fprint(w, `{"number":7,"pull_request":{"merged":false}}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+	deps, out, _ := testDeps(t)
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": server.URL})
+	require.NoError(t, Execute(context.Background(), deps, []string{"browse", "-R", "alice/project", "-n", "7"}))
+	require.Equal(t, server.URL+"/alice/project/pulls/7\n", out.String())
+	require.Equal(t, []string{""}, authorized)
+}
+
 func TestBrowsePathsAndCommitsOfTheClone(t *testing.T) {
 	gittest.Isolate(t)
 	dir := t.TempDir()
@@ -93,7 +126,6 @@ func TestBrowsePathsAndCommitsOfTheClone(t *testing.T) {
 		"--commit=HEAD /":           "/src/commit/" + head,
 		"-b main ../go.mod":         "/src/branch/main/go.mod",
 		"-R alice/project --commit": "/src/commit/" + head,
-		"5":                         "/issues/5", // without an account
 	} {
 		out.Reset()
 		require.NoError(t, Execute(context.Background(), deps, append([]string{"browse", "-n", "--cwd", filepath.Join(dir, "docs")}, strings.Fields(args)...)), args)

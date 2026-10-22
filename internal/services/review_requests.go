@@ -126,7 +126,7 @@ func (s Reviews) requestError(ctx context.Context, n int64, err error) error {
 		return &NotFoundError{Kind: "team", Key: strconv.Quote(name), Scope: owner, Err: err}
 	}
 	if apiErr.Status == http.StatusNotFound && (apiErr.Message == "not found" || strings.HasPrefix(apiErr.Message, "pull request does not exist")) {
-		return repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
+		return pullError(ctx, s.Client, s.Repository, err, n)
 	}
 	return err
 }

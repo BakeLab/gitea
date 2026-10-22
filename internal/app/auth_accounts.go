@@ -88,7 +88,7 @@ func (a *application) positionalAccount(args []string) error {
 		return nil
 	}
 	if a.options.user != "" && !strings.EqualFold(a.options.user, args[0]) {
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("an account argument cannot be combined with --user %s", a.options.user))
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("the account argument %s does not match --user %s", args[0], a.options.user))
 	}
 	a.options.user = args[0]
 	return nil
@@ -117,8 +117,8 @@ func (a *application) logoutCommand() *cobra.Command {
 		Long: `Log out of an account: gt forgets the account and deletes its stored credential. Git's
 other credential helpers are asked to forget what they stored for the account on the
 instance, such as a copy of its token that a keychain kept after a push. When the instance
-of default_host has no account and no settings left, default_host moves to the only other
-instance with accounts, or is unset.`,
+of default_host has no account left, default_host moves to the only other instance with
+accounts, or is unset.`,
 		Example: "$ gt auth logout\n$ gt auth logout bob --host gitea.com\n# Without confirmation\n$ gt auth logout alice --yes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.positionalAccount(args); err != nil {
@@ -255,11 +255,11 @@ $ gt auth token --host gitea.com --user alice`,
 	}
 }
 
-// replaceRemovedDefault moves default_host off instance after logout removed it from hosts.yml: to
+// replaceRemovedDefault moves default_host off instance after logout left it without accounts: to
 // the only other instance with accounts, or nowhere.
 func (a *application) replaceRemovedDefault(cmd *cobra.Command, instance string) {
 	replacement := func(s settings.Snapshot) (string, bool) {
-		if _, kept := s.Hosts.Hosts[instance]; kept || s.Preferences.DefaultHost != instance {
+		if len(s.Hosts.Hosts[instance].Users) > 0 || s.Preferences.DefaultHost != instance {
 			return "", false
 		}
 		var candidates []string
@@ -289,7 +289,7 @@ func (a *application) replaceRemovedDefault(cmd *cobra.Command, instance string)
 	})
 	switch {
 	case err != nil:
-		a.warn(cmd, "Could not update default_host, which names the removed instance %s: %v", instance, err)
+		a.warn(cmd, "Could not update default_host, which names %s without accounts: %v", instance, err)
 	case !changed:
 	case next != "":
 		a.done(cmd, "Set default_host to %s", next)

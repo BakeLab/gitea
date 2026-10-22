@@ -87,7 +87,7 @@ func (s Times) ListPage(ctx context.Context, opts TimeOptions) (Page[TrackedTime
 	case opts.Issue != 0:
 		err = s.issues().issueError(ctx, err, opts.Issue)
 	default:
-		err = Classify(err, "repository", s.Repository, "")
+		err = s.issues().listError(ctx, err, "issues")
 	}
 	return Page[TrackedTime]{Items: items, More: records.More, Total: records.Total, Counted: records.Counted}, err
 }

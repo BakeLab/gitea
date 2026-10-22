@@ -140,7 +140,10 @@ func TestSSHCloneTrustsAPIEndpointUnlessSSHHostIsConfigured(t *testing.T) {
 	configure("")
 	require.NoError(t, Execute(context.Background(), deps, args))
 	require.Equal(t, []string{call}, runner.calls)
-	require.Equal(t, "! gt commands in the clone need the SSH host of "+server.URL+": set GITEA_INSTANCE_SSH_HOST=ssh.example.test:2222\n", diagnostics.String())
+	require.Empty(t, diagnostics.String())
+	snapshot, err := deps.Settings.Load()
+	require.NoError(t, err)
+	require.Equal(t, "ssh.example.test:2222", snapshot.Hosts.Hosts[server.URL].SSHHost, "GITEA_TOKEN does not keep a stored instance from saving it")
 	runner.calls = nil
 	configure("git.example.test")
 	require.ErrorContains(t, Execute(context.Background(), deps, args), "clone URL does not match")

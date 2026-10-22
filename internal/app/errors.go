@@ -40,6 +40,13 @@ func Explain(ctx context.Context, deps Dependencies, err error) error {
 	if err == nil || errors.As(err, new(*explainedError)) {
 		return err
 	}
+	// The hint of a turned-off unit names the instance where -R OWNER/REPO would not find it.
+	if unit, ok := errors.AsType[*services.UnitError](err); ok && unit.Tracker == "" && unit.Instance != "" && deps.Settings != nil && deps.Getenv != nil &&
+		!(&application{deps: deps}).isDefaultHost(strings.TrimSuffix(unit.Instance, "/")) {
+		qualified := *unit
+		qualified.NamesInstance = true
+		return explain(err, "%s", strings.Replace(err.Error(), unit.Error(), qualified.Error(), 1))
+	}
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok {
 		return explainAPIError(deps, err, apiErr)
 	}

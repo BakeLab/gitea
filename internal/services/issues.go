@@ -95,6 +95,9 @@ type ListOptions struct {
 type Issues struct {
 	Client     *transport.Client
 	Repository string
+	// Pulls is set when the numbers name pull requests, which Gitea serves through the issue
+	// endpoints also when issues are turned off: failures then name the pull request.
+	Pulls bool
 }
 
 func (s Issues) endpoint() string { return "repos/" + s.Repository + "/issues" }
@@ -159,30 +162,40 @@ func (s Issues) View(ctx context.Context, number int64) (Issue, error) {
 	return item, s.issueError(ctx, err, number)
 }
 
-// IsPull reports whether number is a pull request, in one request. A number Gitea does not show,
-// such as an issue of a repository that uses an external tracker, is none.
-func (s Issues) IsPull(ctx context.Context, number int64) (bool, error) {
+// Kind returns whether number is an issue or a pull request, KindIssue or KindPull, in one
+// request. It is "" for a number Gitea does not show, such as an issue of a repository that uses
+// an external tracker.
+func (s Issues) Kind(ctx context.Context, number int64) (string, error) {
 	item, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Issue, *gitea.Response, error) {
 		return c.Issues.GetIssue(ctx, owner, repo, number)
 	})
-	if IsNotFound(err) {
-		return false, nil
+	switch {
+	case IsNotFound(err):
+		return "", nil
+	case err != nil:
+		return "", err
+	case item.PullRequest != nil:
+		return KindPull, nil
 	}
-	return err == nil && item.PullRequest != nil, err
+	return KindIssue, nil
 }
 
 // issueError names issue number in the failure of a request about it, or its repository when
 // that is what is missing. Some endpoints, such as the timeline, answer a missing issue with
 // HTTP 500 "issue does not exist".
 func (s Issues) issueError(ctx context.Context, err error, number int64) error {
+	kind, unit := "issue", UnitIssues
+	if s.Pulls {
+		kind, unit = "pull request", UnitPulls
+	}
 	key := "#" + strconv.FormatInt(number, 10)
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && strings.Contains(strings.ToLower(apiErr.Message), "issue does not exist") {
-		return &NotFoundError{Kind: "issue", Key: key, Scope: s.Repository, Err: err}
+		return &NotFoundError{Kind: kind, Key: key, Scope: s.Repository, Err: err}
 	}
-	if unitErr := unitError(ctx, s.Client, s.Repository, err, UnitIssues); unitErr != nil {
+	if unitErr := unitError(ctx, s.Client, s.Repository, err, unit); unitErr != nil {
 		return unitErr
 	}
-	return Classify(err, "issue", key, s.Repository)
+	return Classify(err, kind, key, s.Repository)
 }
 
 // listError explains the failure to list discussions of kind "issues", "pulls" or "all".
@@ -209,6 +222,10 @@ type UnitError struct {
 	Unit string
 	// Tracker is the URL of the external issue tracker, if the repository uses one.
 	Tracker string
+	// Instance is the URL of the repository's instance, when known.
+	Instance string
+	// NamesInstance makes the hint name Instance, which commands do not find on their own.
+	NamesInstance bool
 }
 
 func (e *UnitError) Error() string {
@@ -216,7 +233,11 @@ func (e *UnitError) Error() string {
 		return e.Repository + " uses an external issue tracker: " + e.Tracker
 	}
 	flags := map[string]string{UnitIssues: "--enable-issues", UnitPulls: "--enable-pull-requests", unitDiscussions: "--enable-issues --enable-pull-requests"}
-	return fmt.Sprintf("%s are disabled in %s; turn them on with: gt repo edit %s -R %s", e.Unit, e.Repository, flags[e.Unit], e.Repository)
+	repo := e.Repository
+	if e.NamesInstance && e.Instance != "" {
+		repo = strings.TrimSuffix(e.Instance, "/") + "/" + e.Repository
+	}
+	return fmt.Sprintf("%s are disabled in %s; turn them on with: gt repo edit %s -R %s", e.Unit, e.Repository, flags[e.Unit], repo)
 }
 
 // unitError explains a 404 from the issues or pull requests of repository: Gitea answers the
@@ -226,7 +247,18 @@ func unitError(ctx context.Context, client *transport.Client, repository string,
 	if !IsNotFound(err) {
 		return nil
 	}
+	return unitOff(ctx, client, repository, err, unit)
+}
+
+// unitOff returns the UnitError of unit when repository has it turned off, or keeps issues in an
+// external tracker, the not-found error of a missing repository, and nil otherwise. err is the
+// failure of the request that the unit refused.
+func unitOff(ctx context.Context, client *transport.Client, repository string, err error, unit string) error {
 	item, lookupErr := (Repositories{Client: client}).get(ctx, repository)
+	var instance string
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok {
+		instance = apiErr.Instance
+	}
 	switch {
 	case IsNotFound(lookupErr):
 		return lookupErr
@@ -234,9 +266,9 @@ func unitError(ctx context.Context, client *transport.Client, repository string,
 		return nil
 	case unit == unitDiscussions && !item.HasIssues && !item.HasPullRequests,
 		unit == UnitIssues && !item.HasIssues, unit == UnitPulls && !item.HasPullRequests:
-		return &UnitError{Repository: repository, Unit: unit}
+		return &UnitError{Repository: repository, Unit: unit, Instance: instance}
 	case unit == UnitIssues && item.ExternalTracker != nil:
-		return &UnitError{Repository: repository, Unit: unit, Tracker: item.ExternalTracker.ExternalTrackerURL}
+		return &UnitError{Repository: repository, Unit: unit, Tracker: item.ExternalTracker.ExternalTrackerURL, Instance: instance}
 	}
 	return nil
 }
@@ -269,6 +301,12 @@ func (s Issues) Create(ctx context.Context, options IssueOptions) (Issue, error)
 			Deadline: options.Deadline, Milestone: options.Milestone, Labels: options.Labels,
 		})
 	})
+	// Gitea refuses an issue in a repository without issues with a 403 for anyone but admins.
+	if IsForbidden(err) {
+		if unitErr := unitOff(ctx, s.Client, s.Repository, err, UnitIssues); unitErr != nil {
+			return item, unitErr
+		}
+	}
 	return item, s.listError(ctx, err, "issues")
 }
 

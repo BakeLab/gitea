@@ -117,12 +117,15 @@ $ gt browse --no-browser docs/README.md`,
 			case page != "":
 				link += "/" + page
 			case issueNumber.MatchString(arg):
-				// Gitea sends /issues/N of a pull request to an external issue tracker, else to /pulls/N.
-				kind := "/issues/"
-				if t.client != nil {
-					if pull, err := (services.Issues{Client: t.client, Repository: t.Repo}).IsPull(cmd.Context(), number); err == nil && pull {
-						kind = "/pulls/"
-					}
+				client := t.client
+				if client == nil {
+					client = a.instanceClient(t.Host, "", t.host) // The number of a public repository is found without an account.
+				}
+				// Gitea sends /issues/N of a pull request to an external issue tracker, and /pulls/N of an
+				// issue to /issues/N: /pulls/N is right but where pull requests are turned off.
+				kind := "/pulls/"
+				if found, err := (services.Issues{Client: client, Repository: t.Repo}).Kind(cmd.Context(), number); err == nil && found == services.KindIssue {
+					kind = "/issues/"
 				}
 				link += kind + strconv.FormatInt(number, 10)
 			case commitSHA.MatchString(arg):

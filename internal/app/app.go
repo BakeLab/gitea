@@ -169,6 +169,9 @@ func NewRoot(deps Dependencies) *cobra.Command {
 		if _, err := a.colorEnvironment(); err != nil {
 			return err
 		}
+		if cmd.Flags().Changed("user") && strings.TrimSpace(a.options.user) == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--user cannot be empty"))
+		}
 		if cmd.Flags().Changed("sudo") {
 			if a.options.sudo == "" || strings.IndexFunc(a.options.sudo, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
 				return clierr.Wrap(clierr.Usage, errors.New("--sudo requires a username"))

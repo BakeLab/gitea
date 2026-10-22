@@ -74,6 +74,18 @@ func TestExplainKeepsClassifiedErrorsAndAddsHints(t *testing.T) {
 	}
 }
 
+func TestExplainNamesTheInstanceOfATurnedOffUnitElsewhere(t *testing.T) {
+	deps, _, _ := testDeps(t)
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": "https://gitea.example"})
+	for instance, want := range map[string]string{
+		"https://gitea.example": "-R alice/x",
+		"https://other.example": "-R https://other.example/alice/x",
+	} {
+		err := fmt.Errorf("edit: %w", &services.UnitError{Repository: "alice/x", Unit: services.UnitIssues, Instance: instance})
+		require.EqualError(t, Explain(context.Background(), deps, err), "edit: issues are disabled in alice/x; turn them on with: gt repo edit --enable-issues "+want)
+	}
+}
+
 func TestExplainAddsTheNextStepToRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		method, kind, key, message string

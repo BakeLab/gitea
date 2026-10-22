@@ -170,6 +170,14 @@ func TestDoctorExplainsSSHRemoteOnAnotherPort(t *testing.T) {
 	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_INSTANCE_SSH_HOST": "127.0.0.1:2222"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"doctor", "--json=checks"}))
 	require.Contains(t, out.String(), `{"detail":"remotes connect to 127.0.0.1:2222 (GITEA_INSTANCE_SSH_HOST)","name":"SSH","status":"ok"}`)
+	out.Reset()
+	configureHost(t, deps, server.URL, settings.Host{SSHHost: "127.0.0.1:2222"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"doctor", "--json=checks"}))
+	require.Contains(t, out.String(), `{"detail":"remotes connect to 127.0.0.1:2222 (GITEA_INSTANCE_SSH_HOST)","name":"SSH","status":"ok"}`, "the variable is the source even when ssh_host agrees")
+	out.Reset()
+	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_INSTANCE_SSH_HOST": "127.0.0.1:2223"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"doctor", "--json=checks"}))
+	require.Contains(t, out.String(), `{"detail":"the Git remote connects to 127.0.0.1:2222, which is no instance's SSH host","fix":"set GITEA_INSTANCE_SSH_HOST=127.0.0.1:2222","name":"SSH","status":"warning"}`, "ssh_host cannot override the variable")
 }
 
 func TestDoctorReportsBrokenSettingsFile(t *testing.T) {

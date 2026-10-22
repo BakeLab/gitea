@@ -108,14 +108,15 @@ func TestPullCommentsAndAttachmentsRequirePullRequests(t *testing.T) {
 }
 
 func TestPullCommentNamesAMissingPullRequest(t *testing.T) {
+	repository, missing := `{"full_name":"alice/project","has_issues":true,"has_pull_requests":true}`, "issue does not exist [id: 0, repo_id: 1, index: 99]"
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/alice/project" {
-			_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
+			_, _ = w.Write([]byte(repository))
 			return
 		}
 		require.Equal(t, "/api/v1/repos/alice/project/issues/99", r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"message":"issue does not exist [id: 0, repo_id: 1, index: 99]"}`))
+		_, _ = w.Write([]byte(`{"message":"` + missing + `"}`))
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
@@ -125,6 +126,17 @@ func TestPullCommentNamesAMissingPullRequest(t *testing.T) {
 	}
 	err := Execute(context.Background(), deps, []string{"issue", "comment", "99", "-b", "x", "-R", "alice/project"})
 	require.EqualError(t, err, "issue #99 not found in alice/project")
+	// Gitea answers a bare 404 where a unit is turned off, and serves pull requests through the
+	// issue endpoints also without issues.
+	missing = "not found"
+	for units, want := range map[string]string{
+		`"has_issues":false,"has_pull_requests":true`: "pull request #99 not found in alice/project",
+		`"has_issues":true,"has_pull_requests":false`: "pull requests are disabled in alice/project; turn them on with: gt repo edit --enable-pull-requests -R alice/project",
+	} {
+		repository = `{"full_name":"alice/project",` + units + `}`
+		err := Execute(context.Background(), deps, []string{"pr", "comment", "99", "-b", "x", "-R", "alice/project"})
+		require.EqualError(t, err, want, units)
+	}
 }
 
 func TestPullCommentSelectsThePullRequestLikeOtherPullCommands(t *testing.T) {

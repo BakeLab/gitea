@@ -78,10 +78,17 @@ func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) 
 			return nil, s.missing(ctx, title, owner, repo)
 		}
 	}
+	loaded := map[int64]int{}
 	for i := range boards {
+		// Two spellings of a title select the same project, which is loaded once.
+		if first, ok := loaded[boards[i].ID]; ok {
+			boards[i] = boards[first]
+			continue
+		}
 		if err := s.load(ctx, &boards[i], withIssues); err != nil {
 			return nil, err
 		}
+		loaded[boards[i].ID] = i
 	}
 	return boards, nil
 }

@@ -62,7 +62,13 @@ func TestSetupGitConfiguresTheInstanceTLSSettings(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", instance, "--no-input"}))
 	values, err = deps.Git.Output(context.Background(), "", false, "config", "--global", "--get-regexp", `^http\.`)
 	require.NoError(t, err)
-	require.Equal(t, prefix+"sslcert /certs/client.pem\n"+prefix+"sslkey /certs/client.key", values, "the stale sslVerify goes and the environment's is not saved")
+	require.Equal(t, prefix+"sslcert /certs/client.pem\n"+prefix+"sslkey /certs/client.key\n"+prefix+"sslverify false", values, "GITEA_INSTANCE_INSECURE keeps the sslVerify that git needs")
+
+	deps.Getenv = envFunc(nil)
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", instance, "--no-input"}))
+	values, err = deps.Git.Output(context.Background(), "", false, "config", "--global", "--get-regexp", `^http\.`)
+	require.NoError(t, err)
+	require.Equal(t, prefix+"sslcert /certs/client.pem\n"+prefix+"sslkey /certs/client.key", values, "the stale sslVerify goes and the environment's is never saved")
 }
 
 func TestGitCredentialHelperSelectsAccountsAndDoesNotMutateFromGit(t *testing.T) {

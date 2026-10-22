@@ -472,31 +472,47 @@ func (a *application) selectRepository(ctx context.Context, t *target, s setting
 	return nil
 }
 
+// environmentSSHHost reports whether GITEA_INSTANCE_SSH_HOST sets the SSH host of instance, which
+// it does for the GITEA_TOKEN instance whatever its stored ssh_host.
+func (a *application) environmentSSHHost(instance string, hosts map[string]settings.Host) bool {
+	if a.deps.Getenv("GITEA_TOKEN") == "" || a.deps.Getenv("GITEA_INSTANCE_SSH_HOST") == "" {
+		return false
+	}
+	resolved, err := settings.ResolveHost(a.tokenInstance(), hosts)
+	return err == nil && resolved == instance
+}
+
 // environmentSSHRemote completes the SSH remote error of a remote on the GITEA_TOKEN instance when
-// no stored settings name it: only GITEA_INSTANCE_SSH_HOST can then set its SSH host.
+// only GITEA_INSTANCE_SSH_HOST can set its SSH host: no stored settings name the instance, or the
+// variable overrides its ssh_host.
 func (a *application) environmentSSHRemote(err error, raw string, configured map[string]settings.Host) error {
 	remote, ok := errors.AsType[*settings.SSHRemoteError](err)
-	if !ok || remote.Instance != "" || remote.Endpoint == "" || a.deps.Getenv("GITEA_TOKEN") == "" {
+	if !ok || remote.Endpoint == "" || a.deps.Getenv("GITEA_TOKEN") == "" {
 		return err
 	}
 	instance, resolveErr := settings.ResolveHost(a.tokenInstance(), configured)
-	if _, stored := configured[instance]; resolveErr != nil || stored {
+	if resolveErr != nil {
 		return err
 	}
-	remote.Environment = true
+	s, _ := a.settings()
+	_, stored := s.Hosts.Hosts[instance]
+	if stored && !a.environmentSSHHost(instance, configured) {
+		return err
+	}
 	web, webErr := url.Parse(instance)
-	if u, parseErr := settings.ParseRemote(raw); webErr == nil && parseErr == nil && strings.EqualFold(u.Hostname(), web.Hostname()) {
+	if u, parseErr := settings.ParseRemote(raw); remote.Instance == "" && webErr == nil && parseErr == nil && strings.EqualFold(u.Hostname(), web.Hostname()) {
 		remote.Instance = instance
 	}
+	remote.Environment = remote.Instance == instance || (remote.Instance == "" && !stored)
 	return err
 }
 
 // cloneInstance selects the instance of the clone in the working directory for a target that
 // names none, such as a command that needs no repository or a repository named without an
 // instance, when nothing else would select one: no GITEA_CLI_HOST or GITEA_INSTANCE_URL, no
-// default_host and several instances. Outside such a clone it does nothing.
+// default_host and several instances, or none. Outside such a clone it does nothing.
 func (a *application) cloneInstance(ctx context.Context, t *target, s settings.Snapshot) {
-	if value, _ := a.envHost(); value != "" || s.Preferences.DefaultHost != "" || len(s.Hosts.Hosts) < 2 {
+	if value, _ := a.envHost(); value != "" || s.Preferences.DefaultHost != "" || len(s.Hosts.Hosts) == 1 {
 		return
 	}
 	var clone target
@@ -546,8 +562,8 @@ func (a *application) defaultHost(t *target, s settings.Snapshot) error {
 	}
 	candidates := selectableInstances(s.Hosts.Hosts)
 	if t.Host == "" && len(candidates) == 1 {
-		for host := range candidates {
-			t.Host, t.HostSource = host, "sole configured instance"
+		for host, candidate := range candidates {
+			t.Host, t.HostSource = host, soleInstanceSource(candidate)
 		}
 	}
 	if t.Host == "" {
@@ -557,6 +573,14 @@ func (a *application) defaultHost(t *target, s settings.Snapshot) error {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("instance required: select --host or set default_host (instances: %s)", strings.Join(slices.Sorted(maps.Keys(candidates)), ", ")))
 	}
 	return nil
+}
+
+// soleInstanceSource words why the only candidate of selectableInstances was selected.
+func soleInstanceSource(host settings.Host) string {
+	if len(host.Users) == 0 {
+		return "only configured instance"
+	}
+	return "only instance with an account"
 }
 
 // selectableInstances are the instances that gt picks from when nothing names one: those with

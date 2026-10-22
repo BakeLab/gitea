@@ -47,14 +47,7 @@ func requirePull(cmd *cobra.Command, t target, n int64) error {
 // discussion returns the issue or pull request n that a command of kind addresses: pr commands
 // refuse issues, which Gitea would otherwise serve through the same endpoints.
 func discussion(cmd *cobra.Command, t target, n int64, kind refKind) (services.Issue, error) {
-	item, err := (services.Issues{Client: t.client, Repository: t.Repo}).View(cmd.Context(), n)
-	if missing, ok := errors.AsType[*services.NotFoundError](err); ok && kind == pullRef && missing.Kind == "issue" {
-		missing.Kind = "pull request"
-	}
-	// Gitea serves pull requests through the issue endpoints also when issues are turned off.
-	if unit, ok := errors.AsType[*services.UnitError](err); ok && kind == pullRef && unit.Unit == services.UnitIssues {
-		err = services.NotFound("pull request", "#"+strconv.FormatInt(n, 10), t.Repo)
-	}
+	item, err := (services.Issues{Client: t.client, Repository: t.Repo, Pulls: kind == pullRef}).View(cmd.Context(), n)
 	if err == nil && kind == pullRef && item.Kind != services.KindPull {
 		err = fmt.Errorf("#%d in %s is an issue, not a pull request; use %s %d", n, t.Repo, issueCommandPath(cmd), n)
 	}

@@ -74,6 +74,20 @@ func TestIssueEditAddsToAndRemovesFromProjects(t *testing.T) {
 	mutations = nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "Empty", "--add-project", "empty"}))
 	require.Equal(t, []string{"POST /api/v1/orgs/acme/projects/4/columns", "POST /api/v1/orgs/acme/projects/4/columns/20/default", "POST /api/v1/orgs/acme/projects/4/columns/20/issues/70"}, mutations)
+	// Two spellings of a title load the project once.
+	reads := map[string]int{}
+	handler := projectServer(t, &mutations)
+	counting := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "1" {
+			reads[r.URL.Path]++
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	defer counting.Close()
+	deps, _, _ = serverDeps(t, counting.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--remove-project", "Board", "--remove-project", "board"}))
+	require.Equal(t, 1, reads["/api/v1/orgs/acme/projects/3/columns"])
+	require.Equal(t, 1, reads["/api/v1/orgs/acme/projects/3/columns/11/issues"])
 	requireUsageBeforeRequests(t, "project names cannot be empty", "issue", "create", "--title", "x", "--project", " ")
 	requireUsageBeforeRequests(t, "--project cannot be combined with --web", "issue", "create", "--title", "x", "--project", "Board", "--web")
 }

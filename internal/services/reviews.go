@@ -132,7 +132,7 @@ func (s Reviews) List(ctx context.Context, n int64, limit, page int) ([]Review, 
 		return c.PullRequests.ListPullReviews(ctx, owner, name, n, gitea.ListPullReviewsOptions{ListOptions: listOptions(limit, page)})
 	})
 	if err != nil {
-		return nil, repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
+		return nil, pullError(ctx, s.Client, s.Repository, err, n)
 	}
 	return convertAll(reviews, reviewFrom), nil
 }
@@ -150,7 +150,7 @@ func (s Reviews) ListPage(ctx context.Context, n int64, limit, page int) (Page[R
 		return reviews, headers, err
 	})
 	if err != nil {
-		return Page[Review]{}, repositoryItemError(ctx, s.Client, s.Repository, err, "pull request", "#"+strconv.FormatInt(n, 10))
+		return Page[Review]{}, pullError(ctx, s.Client, s.Repository, err, n)
 	}
 	return convertPage(window, reviewFrom), nil
 }
@@ -216,7 +216,7 @@ func (s Reviews) Create(ctx context.Context, n int64, opts ReviewOptions) (Revie
 	item, err := repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
 		return c.PullRequests.CreatePullReview(ctx, owner, name, n, option)
 	})
-	return item, s.closedPullError(ctx, n, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository), "only comment reviews can be submitted")
+	return item, s.closedPullError(ctx, n, pullError(ctx, s.Client, s.Repository, err, n), "only comment reviews can be submitted")
 }
 
 // closedPullError tells whether pull request n is merged or closed when Gitea refuses a review

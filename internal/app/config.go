@@ -54,8 +54,8 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 		host, source = value, key
 	}
 	if candidates := selectableInstances(snapshot.Hosts.Hosts); host == "" && len(candidates) == 1 {
-		for name := range candidates {
-			host, source = name, "sole configured instance"
+		for name, candidate := range candidates {
+			host, source = name, soleInstanceSource(candidate)
 		}
 	}
 	if host != "" {
@@ -167,7 +167,7 @@ func (a *application) settingValues(snapshot settings.Snapshot) (map[string]any,
 		return nil, nil, err
 	}
 	env := overridden[preferences.DefaultHost]
-	if env.SSHHost != host.SSHHost {
+	if a.environmentSSHHost(preferences.DefaultHost, snapshot.Hosts.Hosts) {
 		values["ssh_host"], sources["ssh_host"] = env.SSHHost, "GITEA_INSTANCE_SSH_HOST"
 	}
 	if env.Insecure != host.Insecure {
