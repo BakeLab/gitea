@@ -475,12 +475,20 @@ func rejectSwitchValue(cmd *cobra.Command, args []string, switches ...string) er
 	return nil
 }
 
+// errNotesCleared refuses empty release notes on edit.
+var errNotesCleared = clierr.Wrap(clierr.Usage, errors.New("release notes cannot be cleared because Gitea ignores empty notes; edit them to a placeholder, or delete and recreate the release"))
+
 func (a *application) releaseEditCommand() *cobra.Command {
 	var fields releaseFields
 	command := &cobra.Command{
 		Use:   "edit <tag>...",
 		Short: "Edit releases",
-		Example: `$ gt release edit v1.0.0 --title "1.0.0" --notes-file CHANGELOG.md
+		Long: `Edit the title, notes, tag, target, draft or prerelease state of releases. Without flags on a
+terminal, a form starts from the current values of each release and only what it changes is sent.`,
+		Example: `# Edit a release in a form
+$ gt release edit v1.0.0
+
+$ gt release edit v1.0.0 --title "1.0.0" --notes-file CHANGELOG.md
 $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 		Args: nonBlankArgs(cobra.MinimumNArgs(1), "tag"),
 		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
@@ -500,7 +508,7 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 				return err
 			}
 			if opts.Body != nil && *opts.Body == "" {
-				return clierr.Wrap(clierr.Usage, errors.New("release notes cannot be cleared because Gitea ignores empty notes; edit them to a placeholder, or delete and recreate the release"))
+				return errNotesCleared
 			}
 			if cmd.Flags().Changed("tag") {
 				if len(args) != 1 || strings.TrimSpace(fields.tag) == "" {
@@ -508,7 +516,8 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 				}
 				opts.Tag = &fields.tag
 			}
-			if !fields.editor && opts == (services.ReleaseOptions{}) {
+			form := !localFlagsChanged(cmd) && a.canPrompt() && a.deps.ReleaseForm != nil
+			if !form && !fields.editor && opts == (services.ReleaseOptions{}) {
 				return clierr.Wrap(clierr.Usage, errors.New("supply release fields to edit"))
 			}
 			target, err := a.resolve(cmd.Context(), true)
@@ -516,6 +525,9 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 				return err
 			}
 			service := services.Releases{Client: target.client, Repository: target.Repo}
+			if form {
+				return a.editReleasesInteractively(cmd, target, service, args)
+			}
 			if fields.editor {
 				item, err := service.View(cmd.Context(), args[0])
 				if err != nil {
@@ -527,7 +539,7 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 				opts.Body = &editorDraft.Body
 			}
 			if editorDraft.Body == "" && fields.editor {
-				return clierr.Wrap(clierr.Usage, errors.New("release notes cannot be cleared because Gitea ignores empty notes; edit them to a placeholder, or delete and recreate the release"))
+				return errNotesCleared
 			}
 			return batchDone(a, cmd, args, func(tag string) string { return "release " + tag }, func(tag string) (services.Release, error) {
 				item, err := service.View(cmd.Context(), tag)
@@ -542,6 +554,62 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 	command.Flags().StringVar(&fields.tag, "tag", "", "Change the release's tag (one release only)")
 	command.ValidArgsFunction = a.completeReleases()
 	return command
+}
+
+func (a *application) editReleasesInteractively(cmd *cobra.Command, target target, service services.Releases, tags []string) error {
+	results, failures := applyBatch(cmd, tags, func(tag string) string { return "release " + tag }, func(tag string) (services.Release, error) {
+		item, err := service.View(cmd.Context(), tag)
+		if err != nil {
+			return item, releaseError(err, target.Repo)
+		}
+		current := terminal.ReleaseFormValues{Tag: item.Tag, Title: item.Title, Notes: item.Body, Target: item.Target, Draft: item.Draft, Prerelease: item.Prerelease, Editor: a.editorCommand()}
+		values, err := a.deps.ReleaseForm.EditRelease(cmd.Context(), "Editing release "+item.Tag+" in "+target.Repo, current)
+		if err != nil {
+			return item, abortBatch{err}
+		}
+		opts, err := changedReleaseFields(current, values)
+		if err != nil {
+			return item, err
+		}
+		if opts == (services.ReleaseOptions{}) {
+			a.warn(cmd, "No changes to release %s in %s", item.Tag, target.Repo)
+			return item, nil
+		}
+		if item, err = service.Edit(cmd.Context(), item.ID, opts); err == nil {
+			a.done(cmd, "Edited release %s in %s", item.Tag, target.Repo)
+		}
+		return item, err
+	}, nil)
+	return errors.Join(append(failures, writeBatchJSON(a, cmd, len(tags), results))...)
+}
+
+// changedReleaseFields sets only the fields that the edit form changed, so that an unchanged form
+// writes nothing. An emptied title becomes the tag, as on create.
+func changedReleaseFields(current, values terminal.ReleaseFormValues) (services.ReleaseOptions, error) {
+	var opts services.ReleaseOptions
+	if values.Notes != current.Notes {
+		if strings.TrimSpace(values.Notes) == "" {
+			return opts, errNotesCleared
+		}
+		opts.Body = &values.Notes
+	}
+	if values.Tag != current.Tag {
+		opts.Tag = &values.Tag
+	}
+	if values.Title != current.Title {
+		title := cmp.Or(values.Title, values.Tag)
+		opts.Title = &title
+	}
+	if values.Target != current.Target {
+		opts.Target = &values.Target
+	}
+	if values.Draft != current.Draft {
+		opts.Draft = &values.Draft
+	}
+	if values.Prerelease != current.Prerelease {
+		opts.Prerelease = &values.Prerelease
+	}
+	return opts, nil
 }
 
 // releaseError words the failure to find one release of a batch, which the batch prefixes with

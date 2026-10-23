@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -276,6 +277,51 @@ func TestReleaseCreateAsksInAFormWithoutTagAndFlags(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"release", "create", "v2", "-R", "alice/project"}))
 	require.Equal(t, 1, asked)
 	require.Empty(t, payloads)
+}
+
+func TestReleaseEditWithoutFlagsStartsAFormFromTheRelease(t *testing.T) {
+	var patches []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/releases/tags/v1":
+			_, _ = w.Write([]byte(`{"id":5,"tag_name":"v1","name":"One","body":"Notes","target_commitish":"main","draft":true}`))
+		case "PATCH /api/v1/repos/alice/project/releases/5":
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			patches = append(patches, string(body))
+			_, _ = w.Write([]byte(`{"id":5,"tag_name":"v1"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	var heading string
+	var current terminal.ReleaseFormValues
+	edit := func(values *terminal.ReleaseFormValues) {}
+	deps.ReleaseForm = releaseFormFunc(func(h string, c terminal.ReleaseFormValues) (terminal.ReleaseFormValues, error) {
+		heading, current = h, c
+		edit(&c)
+		return c, nil
+	})
+	edit = func(values *terminal.ReleaseFormValues) { values.Title, values.Draft = "", false }
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "edit", "v1", "-R", "alice/project"}))
+	require.Equal(t, "Editing release v1 in alice/project", heading)
+	require.Equal(t, terminal.ReleaseFormValues{Tag: "v1", Title: "One", Notes: "Notes", Target: "main", Draft: true}, current)
+	require.Len(t, patches, 1)
+	require.JSONEq(t, `{"tag_name":"","target_commitish":"","name":"v1","body":"","draft":false,"prerelease":null}`, patches[0], "only what changed is sent, and an emptied title is the tag")
+	// An unchanged form sends nothing.
+	edit = func(*terminal.ReleaseFormValues) {}
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "edit", "v1", "-R", "alice/project"}))
+	require.Len(t, patches, 1)
+	require.Equal(t, "! No changes to release v1 in alice/project\n", withoutANSI(diagnostics.String()))
+	// Emptied notes are refused, since Gitea would keep them.
+	edit = func(values *terminal.ReleaseFormValues) { values.Notes = "" }
+	err := Execute(context.Background(), deps, []string{"release", "edit", "v1", "-R", "alice/project"})
+	require.ErrorContains(t, err, "release notes cannot be cleared")
+	require.Len(t, patches, 1)
 }
 
 func TestReleaseUploadsRefuseFilesWithTheSameName(t *testing.T) {
