@@ -6,9 +6,9 @@ export PATH := $(shell $(GO) env GOPATH)/bin:$(PATH)
 GOFILES := $(shell find . -name "*.go" -type f)
 
 # Tool packages with pinned versions
-GOFUMPT_PACKAGE ?= mvdan.cc/gofumpt@v0.12.0
-GOLANGCI_LINT_PACKAGE ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
-DEADCODE_PACKAGE ?= golang.org/x/tools/cmd/deadcode@v0.52.0
+GOFUMPT_PACKAGE ?= mvdan.cc/gofumpt@v0.12.0 # renovate: datasource=go
+GOLANGCI_LINT_PACKAGE ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 # renovate: datasource=go
+DEADCODE_PACKAGE ?= golang.org/x/tools/cmd/deadcode@v0.52.0 # renovate: datasource=go
 
 BUILD_VERSION ?= $(shell git describe --tags --match 'v*' --always | sed 's/-/+/' | sed 's/^v//')
 BUILD_VERSION_TAG ?= $(subst +,_,$(BUILD_VERSION))
