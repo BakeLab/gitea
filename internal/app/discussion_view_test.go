@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"gitea.dev/cli/internal/services"
 	"github.com/stretchr/testify/require"
 )
 
@@ -211,6 +212,15 @@ func TestPullViewStates(t *testing.T) {
 			require.Contains(t, out.String(), `"review_decision": "`+tc.decision+`"`)
 		})
 	}
+}
+
+func TestReviewerSummaryKeepsChangesRequestedPastComments(t *testing.T) {
+	reviews := []services.Review{
+		{ID: 1, Author: "bob", State: "REQUEST_CHANGES"},
+		{ID: 2, Author: "bob", State: "COMMENT"},
+		{ID: 3, Author: "carol", State: "COMMENT"},
+	}
+	require.Equal(t, "bob (Changes requested), carol (Commented)", reviewerSummary(services.Pull{}, reviews))
 }
 
 func TestDueTextKeepsTheServerCalendarDate(t *testing.T) {

@@ -345,6 +345,20 @@ func LatestReviews(reviews []Review) []Review {
 	return latest
 }
 
+// EffectiveReviews returns each reviewer's review in effect, in the order of their first review:
+// their latest, except that a comment review leaves an earlier one of another state in effect, as
+// in Gitea, where only an approval or a dismissal lifts a request for changes.
+func EffectiveReviews(reviews []Review) []Review {
+	effective := LatestReviews(reviews)
+	decisive := LatestReviews(slices.DeleteFunc(slices.Clone(reviews), func(review Review) bool { return review.State == string(gitea.ReviewStateComment) }))
+	for i, review := range effective {
+		if j := slices.IndexFunc(decisive, func(d Review) bool { return d.Author == review.Author }); j >= 0 {
+			effective[i] = decisive[j]
+		}
+	}
+	return effective
+}
+
 // RequestedReviewers returns the users and teams with an outstanding review request: each user
 // whose latest review is a request, and each team with a request. Gitea's requested_reviewers
 // also lists users who reviewed, even after their request was canceled, so the reviews decide.
@@ -363,19 +377,12 @@ func RequestedReviewers(reviews []Review) (users, teams []string) {
 	return users, teams
 }
 
-// ReviewDecision summarizes reviews like gh: changes_requested when a reviewer's latest decisive
-// review requests changes, else approved when one approves, else review_required while reviews
-// are requested, else "". Comment reviews are not decisive (as in gh and Gitea) and dismissed
-// reviews do not count.
+// ReviewDecision summarizes reviews like gh: changes_requested when a reviewer's effective review
+// requests changes, else approved when one approves, else review_required while reviews are
+// requested, else "". Dismissed reviews do not count.
 func ReviewDecision(reviews []Review, requested bool) string {
-	decisive := make([]Review, 0, len(reviews))
-	for _, review := range reviews {
-		if review.State != string(gitea.ReviewStateComment) {
-			decisive = append(decisive, review)
-		}
-	}
 	decision := ""
-	for _, review := range LatestReviews(decisive) {
+	for _, review := range EffectiveReviews(reviews) {
 		switch {
 		case review.Dismissed:
 		case review.State == string(gitea.ReviewStateRequestChanges):
@@ -392,11 +399,11 @@ func ReviewDecision(reviews []Review, requested bool) string {
 	return decision
 }
 
-// OfficialApprovals counts the reviewers whose latest decisive review is an official approval
-// that was not dismissed, nor stale with skipStale.
+// OfficialApprovals counts the reviewers whose effective review is an official approval that was
+// not dismissed, nor stale with skipStale.
 func OfficialApprovals(reviews []Review, skipStale bool) int64 {
 	var approvals int64
-	for _, review := range LatestReviews(slices.DeleteFunc(slices.Clone(reviews), func(review Review) bool { return review.State == string(gitea.ReviewStateComment) })) {
+	for _, review := range EffectiveReviews(reviews) {
 		if review.State == string(gitea.ReviewStateApproved) && review.Official && !review.Dismissed && !(skipStale && review.Stale) {
 			approvals++
 		}

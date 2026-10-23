@@ -179,12 +179,12 @@ func pullView(item services.Pull, repo string, details pullDetails) discussionVi
 	}
 }
 
-// reviewerSummary lists each reviewer with their latest review state, then the requested reviewers
-// and teams that have not reviewed yet: "bob (Approved), carol (Requested)".
+// reviewerSummary lists each reviewer with the state of their review in effect, then the requested
+// reviewers and teams that have not reviewed yet: "bob (Approved), carol (Requested)".
 func reviewerSummary(item services.Pull, reviews []services.Review) string {
 	var names []string
 	seen := map[string]bool{}
-	for _, review := range services.LatestReviews(reviews) {
+	for _, review := range services.EffectiveReviews(reviews) {
 		seen[strings.ToLower(review.Author)] = true
 		names = append(names, review.Author+" ("+reviewStateCell(review).Text+")")
 	}
