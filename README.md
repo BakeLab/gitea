@@ -56,7 +56,13 @@ There are different ways to get `gt`:
 
 3. Docker: [gitea-cli at docker hub](https://hub.docker.com/r/gitea/gitea-cli)
 
-4. Install from source: [see *Compilation*](#compilation)
+4. Homebrew on macOS or Linux:
+
+   ```sh
+   brew install gitea-cli
+   ```
+
+5. Install from source: [see *Compilation*](#compilation)
 
 ### Log in to Gitea from gt
 
