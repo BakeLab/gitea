@@ -242,8 +242,6 @@ type NameOrID[T any] struct {
 	// Exact matches names case-sensitively only, for resources such as release assets whose
 	// names may differ only in case.
 	Exact bool
-	// NoIDs marks resources that commands only name by title, such as projects.
-	NoIDs bool
 }
 
 // Find returns the item among items that raw addresses. It fails with a *NotFoundError when
@@ -279,14 +277,7 @@ func (n NameOrID[T]) Find(items []T, raw string) (T, error) {
 			for i, match := range matches {
 				ids[i] = n.ID(match)
 			}
-			ambiguous := &AmbiguousError{Kind: n.Kind, Key: strconv.Quote(raw), Scope: n.Scope, IDs: ids}
-			if n.NoIDs {
-				ambiguous.Hint = "rename one of them"
-				if fold {
-					ambiguous.Hint = "use the exact name"
-				}
-			}
-			return zero, ambiguous
+			return zero, &AmbiguousError{Kind: n.Kind, Key: strconv.Quote(raw), Scope: n.Scope, IDs: ids}
 		}
 	}
 	key := strconv.Quote(raw)

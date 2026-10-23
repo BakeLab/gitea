@@ -439,7 +439,7 @@ func TestIssueCreateNamesMetadataGiteaLeftOut(t *testing.T) {
 	require.Contains(t, created[1], `"labels":[2]`)
 	require.Equal(t, "! Gitea left out the labels of the issue template, as you cannot write to the issues of owner/repo\n", diagnostics.String())
 	err = run("--project", "board")
-	require.EqualError(t, err, `issue #1 was created, but follow-up steps failed: add to project "Board": permission denied by the Gitea instance: user should have a permission to write to a repo; add it later with: gt issue edit 1 --add-project "Board" -R owner/repo`)
+	require.EqualError(t, err, `issue #1 was created, but follow-up steps failed: add to project "Board": permission denied by the Gitea instance: user should have a permission to write to a repo; add it later with: gt issue edit 1 --add-project 3 -R owner/repo`)
 	require.Len(t, created, 3)
 }
 

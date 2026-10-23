@@ -120,6 +120,39 @@ func TestIssueEditTellsProjectsApartThatDifferOnlyInCase(t *testing.T) {
 	require.Equal(t, []string{"POST /api/v1/orgs/acme/projects/3/columns/11/issues/70", "DELETE /api/v1/orgs/acme/projects/6/columns/12/issues/70"}, mutations)
 }
 
+func TestIssueEditNamesProjectsByIDBeforeTitle(t *testing.T) {
+	var mutations []string
+	projects := projectServer(t, &mutations)
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/acme/app/projects":
+			if r.URL.Query().Get("state") == "closed" {
+				writeFirstPage(w, r, `[]`)
+			} else {
+				writeFirstPage(w, r, `[{"id":7,"title":"3"},{"id":8,"title":"2027"}]`)
+			}
+		case "GET /api/v1/repos/acme/app/projects/8/columns":
+			writeFirstPage(w, r, `[{"id":12,"title":"Todo","default":true}]`)
+		case "GET /api/v1/repos/acme/app/projects/8/columns/12/issues":
+			writeFirstPage(w, r, `[]`)
+		case "POST /api/v1/repos/acme/app/projects/8/columns/12/issues/70":
+			mutations = append(mutations, r.Method+" "+r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			projects.ServeHTTP(w, r)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	// 3 is the ID of the organization's "Board" before it is the title of a repository project.
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "3", "--add-project", "2027"}))
+	require.Equal(t, []string{"POST /api/v1/orgs/acme/projects/3/columns/11/issues/70", "POST /api/v1/repos/acme/app/projects/8/columns/12/issues/70"}, mutations)
+	err := Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "5"})
+	require.ErrorContains(t, err, `project "5" is closed`)
+	err = Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "99"})
+	require.ErrorContains(t, err, `project "99" not found in acme/app`)
+}
+
 func TestPullEditChangesProjectsOnlyOnceTheEditSucceeded(t *testing.T) {
 	var mutations []string
 	projects, rejectEdit := projectServer(t, &mutations), true

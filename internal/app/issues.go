@@ -395,7 +395,7 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to")
 	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339 or Unix timestamp; only the date counts, as the end of that day in UTC")
 	flags.StringArrayVar(&attachmentPaths, "attachment", nil, "`File` to attach after creation (repeatable)")
-	flags.StringArrayVarP(&projects, "project", "p", nil, "Add the issue to the project with this `title`, the repository's or its owner's (repeatable)")
+	flags.StringArrayVarP(&projects, "project", "p", nil, "Add the issue to the repository's or its owner's project with this ID or `title`, a number being an ID first (repeatable)")
 	flags.BoolVarP(&web, "web", "w", false, "Continue in the browser with the new-issue page")
 	_ = cmd.RegisterFlagCompletionFunc("label", a.completeLabels())
 	_ = cmd.RegisterFlagCompletionFunc("assignee", a.completeUsers())
@@ -459,11 +459,12 @@ func hasLabel(item services.Issue, id int64) bool {
 	return slices.ContainsFunc(item.Labels, func(label services.Label) bool { return label.ID == id })
 }
 
-// projectFlags are the issue edit flags that add an issue to boards.
+// projectFlags are the issue edit flags that add an issue to boards, by ID as titles can be
+// ambiguous.
 func projectFlags(boards []services.Board) string {
 	flags := make([]string, len(boards))
 	for i, board := range boards {
-		flags[i] = "--add-project " + strconv.Quote(board.Title)
+		flags[i] = "--add-project " + strconv.FormatInt(board.ID, 10)
 	}
 	return strings.Join(flags, " ")
 }

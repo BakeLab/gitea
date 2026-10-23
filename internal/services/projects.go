@@ -32,44 +32,67 @@ type Board struct {
 	columns       map[int64]int64
 }
 
-// Boards resolves the open projects titled titles, a title's case mattering only to tell two
-// projects apart: the repository's, else its owner's. It loads each board once, however
-// many issues are then put on it or taken off; withIssues also reads which issues each holds,
-// which issues that are not new need.
-func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) ([]Board, error) {
-	if len(titles) == 0 {
+// Boards resolves the open projects that refs name by ID or title: a number is an ID before it is
+// a title, and a title's case matters only to tell two projects apart. Titles are looked up in the
+// repository's projects, else its owner's. It loads each board once, however many issues are then
+// put on it or taken off; withIssues also reads which issues each holds, which issues that are not
+// new need.
+func (s Projects) Boards(ctx context.Context, refs []string, withIssues bool) ([]Board, error) {
+	if len(refs) == 0 {
 		return nil, nil
 	}
 	owner, repo, err := splitRepository(s.Repository)
 	if err != nil {
 		return nil, err
 	}
-	find := NameOrID[*gitea.Project]{Kind: "project", Scope: s.Repository, ByName: true, NoIDs: true, ID: func(p *gitea.Project) int64 { return p.ID }, Name: func(p *gitea.Project) string { return p.Title }}
-	boards := make([]Board, len(titles))
-	for listed, err := range s.scopes(ctx, owner, repo, gitea.StateOpen) {
-		if err != nil {
-			return nil, err
+	var listed []scopedProjects
+	next, stop := iter.Pull2(s.scopes(ctx, owner, repo, gitea.StateOpen))
+	defer stop()
+	// scope lists the projects of the ith scope once; false when there are fewer scopes.
+	scope := func(i int) (scopedProjects, bool, error) {
+		for len(listed) <= i {
+			projects, err, ok := next()
+			if !ok || err != nil {
+				return scopedProjects{}, false, err
+			}
+			listed = append(listed, projects)
 		}
-		for i, title := range titles {
-			if boards[i].Project != nil {
-				continue
+		return listed[i], true, nil
+	}
+	find := NameOrID[*gitea.Project]{Kind: "project", Scope: s.Repository, ByName: true, ID: func(p *gitea.Project) int64 { return p.ID }, Name: func(p *gitea.Project) string { return p.Title }}
+	resolve := func(ref string) (Board, error) {
+		if id, err := strconv.ParseInt(strings.TrimSpace(ref), 10, 64); err == nil {
+			for i := 0; ; i++ {
+				projects, ok, err := scope(i)
+				if !ok {
+					if err != nil {
+						return Board{}, err
+					}
+					break
+				}
+				if j := slices.IndexFunc(projects.projects, func(p *gitea.Project) bool { return p.ID == id }); j >= 0 {
+					return Board{scope: projects.scope, Project: projects.projects[j]}, nil
+				}
 			}
-			project, err := find.Find(listed.projects, title)
-			if _, missing := errors.AsType[*NotFoundError](err); missing {
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
-			boards[i] = Board{scope: listed.scope, Project: project}
 		}
-		if !slices.ContainsFunc(boards, func(b Board) bool { return b.Project == nil }) {
-			break
+		for i := 0; ; i++ {
+			projects, ok, err := scope(i)
+			if !ok {
+				if err != nil {
+					return Board{}, err
+				}
+				return Board{}, s.missing(ctx, ref, owner, repo)
+			}
+			project, err := find.Find(projects.projects, ref)
+			if _, missing := errors.AsType[*NotFoundError](err); !missing {
+				return Board{scope: projects.scope, Project: project}, err
+			}
 		}
 	}
-	for i, title := range titles {
-		if boards[i].Project == nil {
-			return nil, s.missing(ctx, title, owner, repo)
+	boards := make([]Board, len(refs))
+	for i, ref := range refs {
+		if boards[i], err = resolve(ref); err != nil {
+			return nil, err
 		}
 	}
 	loaded := map[int64]int{}
@@ -87,18 +110,20 @@ func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) 
 	return boards, nil
 }
 
-// missing reports the open project titled title as not found, or as closed when a closed one has
-// the title.
-func (s Projects) missing(ctx context.Context, title, owner, repo string) error {
+// missing reports the open project that ref names as not found, or as closed when a closed one
+// has it as ID or title.
+func (s Projects) missing(ctx context.Context, ref, owner, repo string) error {
+	id, err := strconv.ParseInt(strings.TrimSpace(ref), 10, 64)
+	numeric := err == nil
 	for listed, err := range s.scopes(ctx, owner, repo, gitea.StateClosed) {
 		if err != nil {
 			return err
 		}
-		if slices.ContainsFunc(listed.projects, func(p *gitea.Project) bool { return strings.EqualFold(p.Title, title) }) {
-			return fmt.Errorf("project %q is closed", title)
+		if slices.ContainsFunc(listed.projects, func(p *gitea.Project) bool { return numeric && p.ID == id || strings.EqualFold(p.Title, ref) }) {
+			return fmt.Errorf("project %q is closed", ref)
 		}
 	}
-	return NotFound("project", strconv.Quote(title), s.Repository)
+	return NotFound("project", strconv.Quote(ref), s.Repository)
 }
 
 // scopedProjects are the projects of one scope.
