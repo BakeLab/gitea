@@ -37,11 +37,7 @@ func (a *application) remoteCredentials(ctx context.Context, t target, remote st
 }
 
 func (a *application) checkoutRemote(ctx context.Context, target target, snapshot settings.Snapshot) (string, error) {
-	explicit := a.options.remote
-	if explicit == "" {
-		explicit = snapshot.Preferences.Remote
-	}
-	if explicit != "" {
+	if explicit := a.options.remote; explicit != "" {
 		raw, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", explicit)
 		if err == nil && target.ownsRemote(raw) {
 			return explicit, nil
@@ -55,6 +51,9 @@ func (a *application) checkoutRemote(ctx context.Context, target target, snapsho
 	preferredRemotes := []string{"upstream", "origin"}
 	if _, tracking := git.CurrentUpstreamRemote(ctx, a.gitProbe(), a.options.cwd); tracking != "" {
 		preferredRemotes = append([]string{tracking}, preferredRemotes...)
+	}
+	if preference := snapshot.Preferences.Remote; preference != "" {
+		preferredRemotes = append([]string{preference}, preferredRemotes...)
 	}
 	for _, preferred := range preferredRemotes {
 		if slices.Contains(matches, preferred) {

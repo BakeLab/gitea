@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
@@ -158,6 +159,16 @@ func TestPullCreateSkipsPushWhenHeadAlreadyPublished(t *testing.T) {
 	for _, call := range runner.calls {
 		require.NotContains(t, call, "push --")
 	}
+}
+
+func TestPullCreateWithoutARemoteOfTheBaseIgnoresTheRemotePreference(t *testing.T) {
+	creates := 0
+	deps, runner, pushKey := publishCreateEnv(t, &creates)
+	require.NoError(t, deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error { s.Preferences.Remote = "origin"; return nil }))
+	runner.results["remote get-url origin"] = "https://github.com/example/project.git"
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--head", "feature", "--base", "main", "--json=number", "--no-input"}))
+	require.Equal(t, 1, creates)
+	require.NotContains(t, runner.calls, pushKey)
 }
 
 func TestPullCreateChecksTheBaseBeforePushing(t *testing.T) {

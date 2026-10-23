@@ -14,16 +14,13 @@ import (
 // ErrAmbiguousRemote reports that repository discovery cannot choose between several remotes.
 var ErrAmbiguousRemote = errors.New("ambiguous repository: select --remote or --repo")
 
-// DiscoverRemote names the remote used for repository discovery: preferred when set, otherwise
+// DiscoverRemote names the remote used for repository discovery: preferred when it exists, then
 // the base remote pr checkout recorded for the current branch, the current branch's upstream
 // remote unless it is a pulls/<owner>/<repo> head remote or origin beside an upstream remote (a fork clone), then upstream, origin, or the only remote.
 // When repository is not nil, it names the repository of a remote gt can act on, or returns ""
 // for one on another forge. Those steps then skip such remotes, and the other remotes decide when
 // they name exactly one repository; with none of them usable the choice is the name-based one.
 func DiscoverRemote(ctx context.Context, runner Runner, dir, preferred string, repository func(remote string) string) (string, error) {
-	if preferred != "" {
-		return preferred, nil
-	}
 	usable := func(remote string) bool { return repository == nil || repository(remote) != "" }
 	// fallback is the remote chosen by name alone, used when no remote is usable.
 	var fallback string
@@ -39,12 +36,15 @@ func DiscoverRemote(ctx context.Context, runner Runner, dir, preferred string, r
 		checked = append(checked, remote)
 		return false
 	}
+	names, namesErr := runner.Output(ctx, dir, false, "remote")
+	available := strings.Fields(names)
+	if slices.Contains(available, preferred) && try(preferred) {
+		return preferred, nil
+	}
 	branch, tracking := CurrentUpstreamRemote(ctx, runner, dir)
 	if strings.HasPrefix(tracking, "pulls/") {
 		tracking = ""
 	}
-	names, namesErr := runner.Output(ctx, dir, false, "remote")
-	available := strings.Fields(names)
 	// In a fork clone, branches pushed to the fork track origin, but the base repository is upstream.
 	if tracking == "origin" && slices.Contains(available, "upstream") {
 		tracking = ""

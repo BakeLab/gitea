@@ -305,7 +305,7 @@ Preferences:
   color           auto, always or never
   hyperlinks      auto, always or never, for clickable links in terminals
   markdown        auto renders Markdown on a terminal, raw prints the source
-  remote          Git remote used to find the repository of a clone
+  remote          Git remote tried first to find the repository of a clone and to push to
   http_timeout    longest wait for the instance to answer a request, such as 30s, or for more
                   data while a transfer stalls; 0 waits as long as it takes; a transfer that
                   keeps moving and migrations are not cut off. The wait for an answer starts

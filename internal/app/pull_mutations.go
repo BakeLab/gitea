@@ -78,7 +78,7 @@ func (a *application) ensureHeadPublished(cmd *cobra.Command, t target, snapshot
 	}
 	if remote == "" {
 		if remote, err = a.checkoutRemote(ctx, t, snapshot); err != nil {
-			if a.options.remote == "" && snapshot.Preferences.Remote == "" && errors.Is(err, errNoMatchingRemote) {
+			if a.options.remote == "" && errors.Is(err, errNoMatchingRemote) {
 				return head, nil
 			}
 			return head, clierr.Wrap(clierr.Usage, err)

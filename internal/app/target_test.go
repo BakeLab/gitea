@@ -304,14 +304,18 @@ func TestRepositoryDiscoveryFindsGiteaRemoteBesideAnotherForge(t *testing.T) {
 		remotes map[string]string
 		args    []string
 		env     map[string]string
+		remote  string
 		want    string
 	}{
-		{"origin on GitHub", map[string]string{"origin": "https://github.com/example/project.git", "gitea": server.URL + "/alice/project.git"}, nil, nil, "alice/project"},
-		{"no origin", map[string]string{"github": "https://github.com/example/project.git", "gitea": server.URL + "/alice/project.git"}, nil, nil, "alice/project"},
-		{"--host selects its remote", map[string]string{"origin": "https://gitea.com/alice/project.git", "gitea": server.URL + "/bob/tool.git"}, []string{"--host", server.URL}, nil, "bob/tool"},
-		{"GITEA_TOKEN selects its instance", map[string]string{"origin": "https://gitea.com/carol/project.git", "gitea": server.URL + "/alice/project.git"}, nil, map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL}, "alice/project"},
-		{"remotes naming one repository", map[string]string{"origin": "https://github.com/example/project.git", "gitea": server.URL + "/alice/project.git", "gitea-ssh": "git@127.0.0.1:alice/project.git"}, nil, nil, "alice/project"},
-		{"remote with credentials", map[string]string{"origin": strings.Replace(server.URL, "://", "://alice:secret@", 1) + "/alice/project.git"}, nil, nil, "alice/project"},
+		{"origin on GitHub", map[string]string{"origin": "https://github.com/example/project.git", "gitea": server.URL + "/alice/project.git"}, nil, nil, "", "alice/project"},
+		{"no origin", map[string]string{"github": "https://github.com/example/project.git", "gitea": server.URL + "/alice/project.git"}, nil, nil, "", "alice/project"},
+		{"--host selects its remote", map[string]string{"origin": "https://gitea.com/alice/project.git", "gitea": server.URL + "/bob/tool.git"}, []string{"--host", server.URL}, nil, "", "bob/tool"},
+		{"GITEA_TOKEN selects its instance", map[string]string{"origin": "https://gitea.com/carol/project.git", "gitea": server.URL + "/alice/project.git"}, nil, map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL}, "", "alice/project"},
+		{"remotes naming one repository", map[string]string{"origin": "https://github.com/example/project.git", "gitea": server.URL + "/alice/project.git", "gitea-ssh": "git@127.0.0.1:alice/project.git"}, nil, nil, "", "alice/project"},
+		{"remote with credentials", map[string]string{"origin": strings.Replace(server.URL, "://", "://alice:secret@", 1) + "/alice/project.git"}, nil, nil, "", "alice/project"},
+		{"preferred remote missing", map[string]string{"origin": "https://github.com/example/project.git", "zzgitea": server.URL + "/alice/project.git"}, nil, nil, "gitea", "alice/project"},
+		{"preferred remote on another forge", map[string]string{"origin": "https://github.com/example/project.git", "gitea": server.URL + "/alice/project.git"}, nil, nil, "origin", "alice/project"},
+		{"preferred remote before origin", map[string]string{"origin": server.URL + "/alice/project.git", "fork": server.URL + "/bob/tool.git"}, nil, nil, "fork", "bob/tool"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, out, _ := testDeps(t)
@@ -320,6 +324,7 @@ func TestRepositoryDiscoveryFindsGiteaRemoteBesideAnotherForge(t *testing.T) {
 			}
 			configureAccounts(t, deps, server.URL, "alice", "alice")
 			configureAccounts(t, deps, "https://gitea.com", "carol", "carol")
+			require.NoError(t, deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error { s.Preferences.Remote = tc.remote; return nil }))
 			results := map[string]string{"remote": strings.Join(slices.Sorted(maps.Keys(tc.remotes)), "\n")}
 			for name, url := range tc.remotes {
 				results["remote get-url "+name] = url
@@ -332,8 +337,11 @@ func TestRepositoryDiscoveryFindsGiteaRemoteBesideAnotherForge(t *testing.T) {
 	deps, _, _ := testDeps(t)
 	configureAccounts(t, deps, server.URL, "alice", "alice")
 	configureAccounts(t, deps, "https://gitea.com", "carol", "carol")
+	deps.Git = &fakeGit{results: map[string]string{"remote": "gitea\norigin", "remote get-url origin": "https://github.com/example/project.git", "remote get-url gitea": server.URL + "/alice/project.git"}}
+	err := Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "--remote", "origin"})
+	require.ErrorContains(t, err, `no account for https://github.com (instance from git remote "origin")`)
 	deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": "https://gitea.com/carol/project.git"}}
-	err := Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "--remote", "origin", "--host", server.URL})
+	err = Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "--remote", "origin", "--host", server.URL})
 	require.EqualError(t, err, "--host "+server.URL+" does not match the instance https://gitea.com of remote origin")
 	err = Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "-R", "https://gitea.com/carol/project", "--host", server.URL})
 	require.EqualError(t, err, "--host "+server.URL+" cannot be combined with https://gitea.com from --repo")

@@ -31,7 +31,8 @@ func TestDiscoverRemote(t *testing.T) {
 		want      string
 		wantErr   error
 	}{
-		{name: "preferred", preferred: "fork", want: "fork"},
+		{name: "preferred", runner: discoverRunner{head: "main", tracking: "origin", "remote": "origin\nfork"}, preferred: "fork", want: "fork"},
+		{name: "missing preferred", runner: discoverRunner{"remote": "origin\nfork"}, preferred: "gitea", want: "origin"},
 		{name: "branch upstream", runner: discoverRunner{head: "main", tracking: "fork", "remote": "origin\nfork"}, want: "fork"},
 		{name: "branch upstream with slashes", runner: discoverRunner{head: "main", tracking: "team/fork", "remote": "origin\nteam/fork"}, want: "team/fork"},
 		{name: "pull head remote", runner: discoverRunner{head: "main", tracking: "pulls/bob/project", "remote": "origin\npulls/bob/project"}, want: "origin"},
@@ -72,12 +73,16 @@ func TestDiscoverRemoteSkipsUnusableRemotes(t *testing.T) {
 		}
 	}
 	for _, test := range []struct {
-		name    string
-		runner  discoverRunner
-		usable  func(string) string
-		want    string
-		wantErr error
+		name      string
+		runner    discoverRunner
+		preferred string
+		usable    func(string) string
+		want      string
+		wantErr   error
 	}{
+		{name: "unusable preferred", runner: discoverRunner{"remote": "gitea\norigin"}, preferred: "origin", usable: gitea("gitea"), want: "gitea"},
+		{name: "usable preferred", runner: discoverRunner{"remote": "fork\nupstream"}, preferred: "fork", usable: gitea("fork", "upstream"), want: "fork"},
+		{name: "nothing usable keeps the preferred name", runner: discoverRunner{"remote": "fork\norigin"}, preferred: "fork", usable: gitea(), want: "fork"},
 		{name: "origin on another forge", runner: discoverRunner{"remote": "gitea\norigin"}, usable: gitea("gitea"), want: "gitea"},
 		{name: "no upstream or origin", runner: discoverRunner{"remote": "gitea\ngithub"}, usable: gitea("gitea"), want: "gitea"},
 		{name: "usable upstream keeps priority", runner: discoverRunner{"remote": "fork\norigin\nupstream"}, usable: gitea("fork", "upstream"), want: "upstream"},
@@ -92,7 +97,7 @@ func TestDiscoverRemoteSkipsUnusableRemotes(t *testing.T) {
 		{name: "nothing usable stays ambiguous", runner: discoverRunner{"remote": "one\ntwo"}, usable: gitea(), wantErr: ErrAmbiguousRemote},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			remote, err := DiscoverRemote(context.Background(), test.runner, "/work", "", test.usable)
+			remote, err := DiscoverRemote(context.Background(), test.runner, "/work", test.preferred, test.usable)
 			require.ErrorIs(t, err, test.wantErr)
 			require.Equal(t, test.want, remote)
 		})

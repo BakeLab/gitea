@@ -31,6 +31,12 @@ func TestCheckoutRemoteUsesOnlyMatchingRepository(t *testing.T) {
 	remote, err := a.checkoutRemote(context.Background(), target, snapshot)
 	require.NoError(t, err)
 	require.Equal(t, "tracking", remote)
+	for preference, want := range map[string]string{"origin": "origin", "upstream": "tracking", "gone": "tracking"} {
+		snapshot.Preferences.Remote = preference
+		remote, err = a.checkoutRemote(context.Background(), target, snapshot)
+		require.NoError(t, err, preference)
+		require.Equal(t, want, remote, preference)
+	}
 	a.options.remote = "upstream"
 	_, err = a.checkoutRemote(context.Background(), target, snapshot)
 	require.ErrorContains(t, err, "does not match")

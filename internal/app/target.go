@@ -370,7 +370,6 @@ func (a *application) discoverRepository(ctx context.Context, t *target, s setti
 		t.RepoSource = "git config gt.repository"
 		return saved, nil
 	}
-	remote := cmp.Or(a.options.remote, s.Preferences.Remote)
 	hosts, err := a.repositoryHosts(s.Hosts.Hosts)
 	if err != nil {
 		return "", err
@@ -391,12 +390,15 @@ func (a *application) discoverRepository(ctx context.Context, t *target, s setti
 		}
 		return instance + "/" + strings.ToLower(slug)
 	}
-	remote, err = git.DiscoverRemote(ctx, a.gitProbe(), a.options.cwd, remote, repository)
-	if errors.Is(err, git.ErrAmbiguousRemote) {
-		return "", clierr.Wrap(clierr.Usage, err)
-	}
-	if err != nil {
-		return "", clierr.Wrap(clierr.Usage, errRepositoryRequired)
+	remote := a.options.remote
+	if remote == "" {
+		remote, err = git.DiscoverRemote(ctx, a.gitProbe(), a.options.cwd, s.Preferences.Remote, repository)
+		if errors.Is(err, git.ErrAmbiguousRemote) {
+			return "", clierr.Wrap(clierr.Usage, err)
+		}
+		if err != nil {
+			return "", clierr.Wrap(clierr.Usage, errRepositoryRequired)
+		}
 	}
 	raw, known := urls[remote]
 	if !known {
