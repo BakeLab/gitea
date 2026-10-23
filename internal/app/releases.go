@@ -233,6 +233,8 @@ func (a *application) releaseCreateCommand() *cobra.Command {
 		Short:   "Create a release",
 		Long: `Create a release for a tag, and upload the files that follow the tag as its assets. Gitea creates
 the tag at --target (the default branch) when it does not exist yet. The title defaults to the tag.
+Without a tag and flags on a terminal, a form asks for the tag, title, notes, target, and whether
+the release is a draft or a prerelease.
 
 gt never pushes: commits and tags that only exist in your clone are not on the server, so push them
 first (git push <remote> <tag>). In a clone, a tag that only exists locally is refused unless
@@ -240,7 +242,10 @@ first (git push <remote> <tag>). In a clone, a tag that only exists locally is r
 head of the default branch on the server. A --target that is no branch on the server, such as HEAD
 or a short SHA, names the commit it resolves to in the clone. --verify-tag refuses any tag that is
 not on the server yet.`,
-		Example: `# Create a release with notes from a file and two assets
+		Example: `# Create a release in a form
+$ gt release create
+
+# Create a release with notes from a file and two assets
 $ gt release create v1.0.0 dist/gt-linux dist/gt-darwin --notes-file CHANGELOG.md
 
 # Create a draft prerelease of a new tag on a branch
@@ -249,6 +254,7 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			var editorDraft terminal.Draft
 			defer finishDraft(&editorDraft, &runErr)
+			form := len(args) == 0 && !localFlagsChanged(cmd) && a.canPrompt() && a.deps.ReleaseForm != nil
 			if len(args) > 0 {
 				fields.tag, assets = args[0], append(args[1:], assets...)
 			}
@@ -270,18 +276,34 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 			if err != nil {
 				return err
 			}
-			prompted, err := a.requireInput(cmd, &fields.tag, "tag", "Tag", nil)
-			if err != nil {
-				return err
-			}
-			title := cmp.Or(fields.title, fields.tag)
-			opts.Tag, opts.Title, opts.Draft, opts.Prerelease = &fields.tag, &title, &fields.draft, &fields.prerelease
-			target, err := a.resolve(cmd.Context(), true)
+			target, err := a.resolve(cmd.Context(), true) // before the form, which a failure would discard
 			if err != nil {
 				return err
 			}
 			// Only the clone of the selected repository says anything about its tags and commits.
 			remote := a.cloneRemote(cmd.Context(), target)
+			prompted := false
+			if form {
+				initial := terminal.ReleaseFormValues{Editor: a.editorCommand()}
+				if remote != "" {
+					initial.Target = "HEAD" // the commit of the clone, not whatever the default branch is at
+				}
+				values, err := a.deps.ReleaseForm.EditRelease(cmd.Context(), "", initial)
+				if err != nil {
+					return err
+				}
+				fields.tag, fields.title, fields.draft, fields.prerelease = values.Tag, values.Title, values.Draft, values.Prerelease
+				if values.Notes != "" {
+					opts.Body = &values.Notes
+				}
+				if fields.target = values.Target; fields.target != "" {
+					opts.Target = &fields.target
+				}
+			} else if prompted, err = a.requireInput(cmd, &fields.tag, "tag", "Tag", nil); err != nil {
+				return err
+			}
+			title := cmp.Or(fields.title, fields.tag)
+			opts.Tag, opts.Title, opts.Draft, opts.Prerelease = &fields.tag, &title, &fields.draft, &fields.prerelease
 			service := services.Releases{Client: target.client, Repository: target.Repo}
 			if opts.Target != nil {
 				resolved, err := a.releaseTarget(cmd.Context(), target, remote, fields.target)

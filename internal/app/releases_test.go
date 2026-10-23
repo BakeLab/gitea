@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -235,6 +236,46 @@ func TestReleaseCreateTagsTheCommitOfTheClone(t *testing.T) {
 	target = "unset"
 	require.NoError(t, Execute(context.Background(), deps, []string{"release", "create", "v1"}))
 	require.Empty(t, target)
+	// The form starts from the commit of the clone.
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	deps.ReleaseForm = releaseFormFunc(func(_ string, current terminal.ReleaseFormValues) (terminal.ReleaseFormValues, error) {
+		require.Equal(t, "HEAD", current.Target)
+		return terminal.ReleaseFormValues{Tag: "v1", Target: current.Target}, nil
+	})
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "create"}))
+	require.Equal(t, local, target)
+}
+
+type releaseFormFunc func(heading string, current terminal.ReleaseFormValues) (terminal.ReleaseFormValues, error)
+
+func (f releaseFormFunc) EditRelease(_ context.Context, heading string, current terminal.ReleaseFormValues) (terminal.ReleaseFormValues, error) {
+	return f(heading, current)
+}
+
+func TestReleaseCreateAsksInAFormWithoutTagAndFlags(t *testing.T) {
+	payloads := []string{
+		`{"tag_name":"v1.1.0","name":"v1.1.0","body":"Notes","target_commitish":"main","draft":false,"prerelease":true}`,
+		`{"tag_name":"v2","name":"v2","draft":false,"prerelease":false}`,
+	}
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "POST /api/v1/repos/alice/project/releases", r.Method+" "+r.URL.Path)
+		requirePayload(t, payloads[0], r.Body)
+		payloads = payloads[1:]
+		_, _ = w.Write([]byte(`{"id":9,"tag_name":"v1.1.0"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	asked := 0
+	deps.ReleaseForm = releaseFormFunc(func(string, terminal.ReleaseFormValues) (terminal.ReleaseFormValues, error) {
+		asked++
+		return terminal.ReleaseFormValues{Tag: "v1.1.0", Notes: "Notes", Target: "main", Prerelease: true}, nil
+	})
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "create", "-R", "alice/project"}))
+	// A tag skips the form.
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "create", "v2", "-R", "alice/project"}))
+	require.Equal(t, 1, asked)
+	require.Empty(t, payloads)
 }
 
 func TestReleaseUploadsRefuseFilesWithTheSameName(t *testing.T) {
