@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/auth"
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/settings"
@@ -211,6 +212,23 @@ func TestEnvironmentTokenCannotCrossInstances(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
 	require.NotContains(t, err.Error(), "secret")
+}
+
+func TestEnvironmentTokenWithoutItsInstanceNamesTheVariables(t *testing.T) {
+	deps, _, _ := testDeps(t)
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "secret"})
+	err := Execute(context.Background(), deps, []string{"api", "user"})
+	require.EqualError(t, err, "GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	// --host never names the token's instance: a credential helper always passes one.
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("the token reached --host") }))
+	defer server.Close()
+	err = Execute(context.Background(), deps, []string{"api", "user", "--host", server.URL})
+	require.EqualError(t, err, "GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL matching the selected instance")
+	// A sole stored login does not become the token's instance either.
+	require.NoError(t, testManager(t, deps).Register(server.URL, "alice", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "stored"}))
+	err = Execute(context.Background(), deps, []string{"api", "user"})
+	require.EqualError(t, err, "GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance")
 }
 
 func TestEnvironmentTokenBelongsToTheDefaultEnvironmentInstance(t *testing.T) {

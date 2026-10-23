@@ -573,6 +573,9 @@ func (a *application) defaultHost(t *target, s settings.Snapshot) error {
 		t.Host, t.HostSource = s.Preferences.DefaultHost, "config.yml default_host"
 	}
 	candidates := selectableInstances(s.Hosts.Hosts)
+	if t.Host == "" && a.deps.Getenv("GITEA_TOKEN") != "" {
+		return clierr.Wrap(clierr.Usage, errors.New("GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance"))
+	}
 	if t.Host == "" && len(candidates) == 1 {
 		for host, candidate := range candidates {
 			t.Host, t.HostSource = host, soleInstanceSource(candidate)
