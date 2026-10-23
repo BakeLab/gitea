@@ -1148,6 +1148,8 @@ type MergeOptions struct {
 	// HeadSHA is the head commit the user chose to merge; Gitea refuses the merge once the head
 	// moved past it. Empty merges the current head.
 	HeadSHA string
+	// Commit is the commit that merged the pull request outside Gitea, for the manually-merged method.
+	Commit string
 }
 
 // MergeSettings are the merge styles a repository allows, in Gitea's order, and its merge defaults.
@@ -1203,7 +1205,7 @@ func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 	}
 	option := gitea.MergePullRequestOption{
 		Style: gitea.MergeStyle(opts.Method), Title: opts.Title, Message: opts.Message, DeleteBranchAfterMerge: &opts.DeleteBranch,
-		MergeWhenChecksSucceed: opts.Auto,
+		MergeWhenChecksSucceed: opts.Auto, MergeCommitID: opts.Commit,
 	}
 	if option.HeadCommitId = opts.HeadSHA; option.HeadCommitId == "" && pull.Head != nil {
 		option.HeadCommitId = pull.Head.Sha

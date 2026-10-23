@@ -492,10 +492,13 @@ var mergeVerbs = map[string]string{
 	"merge": "Merged", "rebase": "Rebased and merged", "rebase-merge": "Rebased and merged", "squash": "Squashed and merged", "fast-forward-only": "Merged",
 }
 
-var mergeMethods = []string{"merge", "rebase", "rebase-merge", "squash", "fast-forward-only"}
+// manualMerge marks a pull request merged outside Gitea as merged by a commit of its base branch.
+const manualMerge = "manually-merged"
+
+var mergeMethods = []string{"merge", "rebase", "rebase-merge", "squash", "fast-forward-only", manualMerge}
 
 func (a *application) pullMergeCommand() *cobra.Command {
-	var method, title, message, messageFile string
+	var method, title, message, messageFile, commit string
 	var deleteBranch, useEditor, auto bool
 	var style struct{ merge, squash, rebase bool }
 	cmd := &cobra.Command{Use: "merge [<number> | <url> | <branch>]", Short: "Merge a pull request", Long: `Merge a pull request on Gitea.
@@ -506,7 +509,12 @@ the method or --delete-branch asks for them, preselecting the repository's defau
 the base branch.
 
 --delete-branch deletes the head branch of a pull request from a fork too, when you can push
-to that fork: your own, or any as a site administrator. A fork you cannot push to keeps it.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+to that fork: your own, or any as a site administrator. A fork you cannot push to keeps it.
+
+For a pull request merged outside Gitea, such as with git merge and git push, --method
+manually-merged --commit SHA marks it as merged by that commit of the base branch. The
+repository must allow it (gt repo edit --allow-manual-merge). Gitea does not check that the
+commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var editorDraft terminal.Draft
 		defer finishDraft(&editorDraft, &runErr)
 		for name, set := range map[string]bool{"merge": style.merge, "squash": style.squash, "rebase": style.rebase} {
@@ -515,6 +523,22 @@ to that fork: your own, or any as a site administrator. A fork you cannot push t
 			}
 			if set {
 				method = name
+			}
+		}
+		manual := method == manualMerge
+		switch {
+		case manual && commit == "":
+			return clierr.Wrap(clierr.Usage, errors.New("--method manually-merged requires --commit"))
+		case !manual && cmd.Flags().Changed("commit"):
+			return clierr.Wrap(clierr.Usage, errors.New("--commit requires --method manually-merged"))
+		case manual && !commitSHA.MatchString(commit):
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--commit requires a commit SHA of 7 to 64 hexadecimal digits, got %q", commit))
+		}
+		if manual {
+			for _, name := range []string{"auto", "title", "message", "message-file", "editor"} {
+				if cmd.Flags().Changed(name) {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("--method manually-merged cannot be combined with --%s", name))
+				}
 			}
 		}
 		if err := validateTextSources(cmd, "message", "message-file"); err != nil {
@@ -552,7 +576,7 @@ to that fork: your own, or any as a site administrator. A fork you cannot push t
 		askMethod, askDelete := method == "", !cmd.Flags().Changed("delete-branch") && !item.HeadRemoteDeleted && item.Head != ""
 		if method == "" {
 			method = repoSettings.Default
-		} else if !slices.Contains(repoSettings.Styles, method) {
+		} else if !manual && !slices.Contains(repoSettings.Styles, method) { // the SDK does not read allow_manual_merge, so Gitea checks manual merges
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("%s merges are disabled in %s; use one of: %s", method, t.Repo, strings.Join(repoSettings.Styles, ", ")))
 		}
 		// The repository setting deletes the branch on Gitea only; the local branch goes when
@@ -561,7 +585,11 @@ to that fork: your own, or any as a site administrator. A fork you cannot push t
 		if !cmd.Flags().Changed("delete-branch") {
 			deleteBranch = repoSettings.DeleteBranch
 		}
-		header := fmt.Sprintf("Merge #%d %q (%s → %s) in %s", n, item.Title, pullHead(item, t.Repo), item.Base, t.Repo)
+		pull := fmt.Sprintf("#%d %q (%s → %s) in %s", n, item.Title, pullHead(item, t.Repo), item.Base, t.Repo)
+		header, action := "Merge "+pull, fmt.Sprintf("merge %s#%d", t.Repo, n)
+		if manual {
+			header, action = "Mark "+pull+" as merged by "+commit, fmt.Sprintf("mark %s#%d as merged", t.Repo, n)
+		}
 		if (askMethod || askDelete) && !a.options.yes && a.canPrompt() && a.deps.MergeForm != nil {
 			choices := terminal.MergeFormChoices{Header: header, Method: method, DeleteBranch: deleteBranch}
 			if askMethod {
@@ -578,7 +606,7 @@ to that fork: your own, or any as a site administrator. A fork you cannot push t
 			if askDelete {
 				deleteLocal = deleteBranch
 			}
-		} else if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: header + "?", DefaultYes: true, NonTTY: "merge " + t.Repo + "#" + fmt.Sprint(n)}); err != nil {
+		} else if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: header + "?", DefaultYes: true, NonTTY: action}); err != nil {
 			return err
 		}
 		if useEditor {
@@ -587,10 +615,18 @@ to that fork: your own, or any as a site administrator. A fork you cannot push t
 			}
 			message = editorDraft.Body
 		}
-		if err := service.Merge(cmd.Context(), n, services.MergeOptions{Method: method, Title: title, Message: message, DeleteBranch: deleteBranch, Auto: auto, HeadSHA: item.HeadSHA}); err != nil {
-			// Gitea answers a diverged fast-forward-only merge with a server error carrying Git's hints.
-			if apiErr, ok := errors.AsType[*transport.APIError](err); ok && strings.Contains(apiErr.Message, "DivergingFastForwardOnly") {
-				return explain(err, "cannot fast-forward pull request %s: the base branch has commits the head lacks; rebase the head branch or choose another merge method", ref)
+		// Gitea ignores delete_branch_after_merge for manual merges; gt deletes the branch itself.
+		if err := service.Merge(cmd.Context(), n, services.MergeOptions{Method: method, Title: title, Message: message, DeleteBranch: deleteBranch && !manual, Auto: auto, HeadSHA: item.HeadSHA, Commit: commit}); err != nil {
+			if apiErr, ok := errors.AsType[*transport.APIError](err); ok {
+				switch {
+				case manual && strings.Contains(apiErr.Message, "merge strategy is not allowed"):
+					return explain(err, "manual merges are disabled in %s; allow them with: gt repo edit --allow-manual-merge -R %s", t.Repo, t.Repo)
+				case manual && strings.Contains(apiErr.Message, "commit not found in base"):
+					return explain(err, "commit %s is not on the base branch %s of %s", commit, item.Base, t.Repo)
+				// Gitea answers a diverged fast-forward-only merge with a server error carrying Git's hints.
+				case strings.Contains(apiErr.Message, "DivergingFastForwardOnly"):
+					return explain(err, "cannot fast-forward pull request %s: the base branch has commits the head lacks; rebase the head branch or choose another merge method", ref)
+				}
 			}
 			return err
 		}
@@ -601,9 +637,13 @@ to that fork: your own, or any as a site administrator. A fork you cannot push t
 		if auto && !merged.Merged {
 			a.done(cmd, "Pull request %s will be merged when its checks succeed", ref)
 		} else {
-			a.done(cmd, "%s pull request %s", mergeVerbs[method], ref)
+			if manual {
+				a.done(cmd, "Marked pull request %s as merged by %s", ref, shortSHA(commit))
+			} else {
+				a.done(cmd, "%s pull request %s", mergeVerbs[method], ref)
+			}
 			if deleteBranch {
-				merged = a.deleteHead(cmd, service, merged, !item.HeadRemoteDeleted, deleteLocal)
+				merged = a.deleteHead(cmd, service, merged, !manual && !item.HeadRemoteDeleted, deleteLocal)
 			}
 		}
 		return a.pullResult(cmd, t, merged)
@@ -618,9 +658,10 @@ to that fork: your own, or any as a site administrator. A fork you cannot push t
 	cmd.Flags().StringVarP(&message, "message", "b", "", "Merge commit message")
 	cmd.Flags().StringVarP(&messageFile, "message-file", "F", "", "Read the merge commit message from `file`, or - for stdin")
 	cmd.Flags().BoolVarP(&useEditor, "editor", "e", false, "Write the merge commit message in your editor")
+	cmd.Flags().StringVar(&commit, "commit", "", "Commit `sha` on the base branch that merged the pull request outside Gitea (with --method manually-merged)")
 	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
 		if strings.Contains(err.Error(), "flag needs an argument: 's' in -s") {
-			return clierr.Wrap(clierr.Usage, errors.New("-s takes a method (merge, rebase, rebase-merge, squash or fast-forward-only); for gh-style use --squash"))
+			return clierr.Wrap(clierr.Usage, errors.New("-s takes a method (merge, rebase, rebase-merge, squash, fast-forward-only or manually-merged); for gh-style use --squash"))
 		}
 		return c.Root().FlagErrorFunc()(c, err)
 	})
@@ -632,7 +673,10 @@ $ gt pr merge
 $ gt pr merge 13 --squash --delete-branch
 
 # Merge once the checks pass, without prompts
-$ gt pr merge 13 --auto --yes`
+$ gt pr merge 13 --auto --yes
+
+# Mark #13 as merged by a commit pushed to the base branch outside Gitea
+$ gt pr merge 13 --method manually-merged --commit 4b825dc --delete-branch`
 	return cmd
 }
 

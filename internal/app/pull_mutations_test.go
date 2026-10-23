@@ -378,6 +378,51 @@ func TestPullMergeKeepsAHeadBranchThatGiteaKept(t *testing.T) {
 	}
 }
 
+func TestPullMergeMarksAPullRequestAsManuallyMerged(t *testing.T) {
+	for _, tc := range []struct {
+		name, refusal, want string
+		deleted             bool
+	}{
+		{"allowed", "", "", true},
+		{"disallowed", `{"message":"merge strategy is not allowed or is invalid [repo_id: 1, strategy: manually-merged]"}`, "manual merges are disabled in alice/project; allow them with: gt repo edit --allow-manual-merge -R alice/project", false},
+		{"commit not on base", `{"message":"commit not found in base branch"}`, "commit abc1234 is not on the base branch main of alice/project", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var payload map[string]any
+			deleted := false
+			pulls := mergeServer(t, openPull, &payload)
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls/3/merge" && tc.refusal != "":
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(tc.refusal))
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3" && payload != nil:
+					_, _ = w.Write([]byte(`{"number":3,"title":"Add login","state":"closed","merged":true,"merge_commit_sha":"abc1234def","base":{"ref":"main"},"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"alice/project","permissions":{"push":true}}}}`))
+				case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/repos/alice/project/branches/feature":
+					deleted = true
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					pulls.ServeHTTP(w, r)
+				}
+			}))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --quiet HEAD": "main"}}
+			err := Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "-s", "manually-merged", "--commit", "abc1234", "--delete-branch", "--yes"})
+			if tc.want != "" {
+				require.EqualError(t, err, tc.want)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, "manually-merged", payload["Do"])
+			require.Equal(t, "abc1234", payload["MergeCommitID"])
+			require.Equal(t, false, payload["delete_branch_after_merge"])
+			require.Equal(t, tc.deleted, deleted)
+		})
+	}
+}
+
 func TestPullMergeRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		name, pull string
@@ -443,8 +488,13 @@ func TestPullMergeMethodFlags(t *testing.T) {
 	}{
 		{[]string{"pr", "merge", "3", "--squash", "--rebase"}, "choose one merge method: --merge, --squash, --rebase or --method"},
 		{[]string{"pr", "merge", "3", "--squash", "-s", "merge"}, "choose one merge method"},
-		{[]string{"pr", "merge", "3", "-s"}, "-s takes a method (merge, rebase, rebase-merge, squash or fast-forward-only); for gh-style use --squash"},
-		{[]string{"pr", "merge", "3", "-s", "bogus"}, "--method must be merge, rebase, rebase-merge, squash, or fast-forward-only"},
+		{[]string{"pr", "merge", "3", "-s"}, "-s takes a method (merge, rebase, rebase-merge, squash, fast-forward-only or manually-merged); for gh-style use --squash"},
+		{[]string{"pr", "merge", "3", "-s", "bogus"}, "--method must be merge, rebase, rebase-merge, squash, fast-forward-only, or manually-merged"},
+		{[]string{"pr", "merge", "3", "-s", "manually-merged"}, "--method manually-merged requires --commit"},
+		{[]string{"pr", "merge", "3", "--squash", "--commit", "abc1234"}, "--commit requires --method manually-merged"},
+		{[]string{"pr", "merge", "3", "-s", "manually-merged", "--commit", "main"}, `--commit requires a commit SHA of 7 to 64 hexadecimal digits, got "main"`},
+		{[]string{"pr", "merge", "3", "-s", "manually-merged", "--commit", "abc1234", "--auto"}, "--method manually-merged cannot be combined with --auto"},
+		{[]string{"pr", "merge", "3", "-s", "manually-merged", "--commit", "abc1234", "-t", "x"}, "--method manually-merged cannot be combined with --title"},
 	} {
 		t.Run(tc.args[len(tc.args)-1], func(t *testing.T) {
 			requireUsageBeforeRequests(t, tc.want, tc.args...)
