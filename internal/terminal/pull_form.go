@@ -136,13 +136,13 @@ type pullBranchFields struct {
 // fields asks for the branches; offerAgit adds the choice of an AGit push for users who cannot
 // push to the base repository.
 func (b *pullBranchFields) fields(offerAgit bool) []huh.Field {
-	fields := []huh.Field{lineField("Base branch (required):", &b.base, false).Validate(requiredText(&b.base))}
+	fields := []huh.Field{requiredLineField("Base branch", &b.base)}
 	if offerAgit {
 		fields = append(fields, huh.NewConfirm().Title("Push through AGit (refs/for) instead of a branch of your own?").Value(&b.agit))
 	}
 	return append(fields,
 		lineField("Head repository owner:", &b.headOwner, true),
-		lineField("Head branch (required):", &b.headBranch, false).Validate(requiredText(&b.headBranch)),
+		requiredLineField("Head branch", &b.headBranch),
 		lineField("AGit topic (when pushing through AGit):", &b.topic, true),
 		huh.NewConfirm().Title("Allow maintainers to push to the head branch?").Value(&b.allowEdits),
 	)

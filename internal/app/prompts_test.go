@@ -50,5 +50,5 @@ func TestRequireInputPromptsWithTheLabel(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, asked)
 	require.Equal(t, "bug", name)
-	require.Equal(t, []string{"Label name"}, prompt.asked)
+	require.Equal(t, []string{"Label name (required):"}, prompt.asked)
 }

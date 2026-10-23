@@ -139,18 +139,18 @@ func TestRequireInput(t *testing.T) {
 
 	asker := &askingPrompt{answers: []string{"", "red", "d73a4a"}}
 	value := ""
-	asked, err := RequireInput(context.Background(), &value, "color", "Color (hex)", hex, streams, policy, asker)
+	asked, err := RequireInput(context.Background(), &value, "color", "Color", hex, streams, policy, asker)
 	require.NoError(t, err)
 	require.True(t, asked)
 	require.Equal(t, "d73a4a", value)
 	require.Equal(t, []string{"", "red"}, asker.rejected)
-	require.Equal(t, []string{"Color (hex)"}, asker.titles)
+	require.Equal(t, []string{"Color (required):"}, asker.titles)
 
-	asked, err = RequireInput(context.Background(), &value, "color", "Color (hex)", hex, Streams{}, policy, asker)
+	asked, err = RequireInput(context.Background(), &value, "color", "Color", hex, Streams{}, policy, asker)
 	require.NoError(t, err, "a supplied value needs no prompt")
 	require.False(t, asked)
 	value = ""
-	_, err = RequireInput(context.Background(), &value, "color", "Color (hex)", hex, Streams{}, policy, asker)
+	_, err = RequireInput(context.Background(), &value, "color", "Color", hex, Streams{}, policy, asker)
 	require.EqualError(t, err, "missing required input: supply --color")
 }
 

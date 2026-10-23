@@ -33,7 +33,7 @@ func (p *FormPrompter) EditMilestone(ctx context.Context, heading string, curren
 	}
 	descriptionField := bodyField("Milestone description (markdown):", &description).withEditor(current.Editor)
 	if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(
-		lineField("Milestone title (required):", &title, false).Validate(requiredText(&title)),
+		requiredLineField("Milestone title", &title),
 		descriptionField,
 		dueDateInput("Milestone deadline:", &deadline),
 	).Title(SafeLine(heading)))); err != nil {

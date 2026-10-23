@@ -330,7 +330,7 @@ func TestConfirmationsNameResolvedValues(t *testing.T) {
 		inputs map[string]string
 		want   string
 	}{
-		{[]string{"release", "create"}, map[string]string{"Tag": "v1.0.0"}, "Create release v1.0.0 in alice/project?"},
+		{[]string{"release", "create"}, map[string]string{"Tag (required):": "v1.0.0"}, "Create release v1.0.0 in alice/project?"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -359,8 +359,8 @@ func TestPromptedCreateSubmitsWithoutConfirmation(t *testing.T) {
 	}{
 		{[]string{"secret", "set", "TOKEN"}, nil, "private", "PUT /api/v1/repos/alice/project/actions/secrets/TOKEN"},
 		{[]string{"variable", "set", "MODE"}, map[string]string{"Value of MODE:": "fast"}, "", "POST /api/v1/repos/alice/project/actions/variables/MODE"},
-		{[]string{"webhook", "create"}, map[string]string{"Payload URL": "https://hooks.test/path"}, "", "POST /api/v1/repos/alice/project/hooks"},
-		{[]string{"team", "create", "acme"}, map[string]string{"Team name": "Developers"}, "", "POST /api/v1/orgs/acme/teams"},
+		{[]string{"webhook", "create"}, map[string]string{"Payload URL (required):": "https://hooks.test/path"}, "", "POST /api/v1/repos/alice/project/hooks"},
+		{[]string{"team", "create", "acme"}, map[string]string{"Team name (required):": "Developers"}, "", "POST /api/v1/orgs/acme/teams"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			var writes []string

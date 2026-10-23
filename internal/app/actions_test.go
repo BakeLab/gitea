@@ -155,7 +155,7 @@ func TestWorkflowRunDispatchesOnTheDefaultBranch(t *testing.T) {
 		},
 		{
 			"prompts", "https://gitea.test/alice/project/actions/runs/51\n", "✓ Dispatched CI (ci.yml) on trunk → run 51\n  Watch it: gt run watch 51 -R alice/project\n",
-			nil, &dispatchingPrompter{choosingPrompter: choosingPrompter{scriptedPrompter: scriptedPrompter{inputs: map[string]string{"note — Free-form note": "ship"}}}},
+			nil, &dispatchingPrompter{choosingPrompter: choosingPrompter{scriptedPrompter: scriptedPrompter{inputs: map[string]string{"note — Free-form note (required)": "ship"}}}},
 			`{"ref":"trunk","inputs":{"dry_run":"false","note":"ship","target":"staging"}}`,
 		},
 	} {
@@ -172,7 +172,7 @@ func TestWorkflowRunDispatchesOnTheDefaultBranch(t *testing.T) {
 			require.Equal(t, []string{"GET actions/workflows", "GET ", "GET contents/.gitea/workflows/ci.yml", "POST actions/workflows/ci.yml/dispatches " + tc.payload}, *requests)
 			if tc.prompter != nil {
 				require.Equal(t, []string{"target — Deploy target"}, tc.prompter.titles)
-				require.Equal(t, []string{"dry_run", "note — Free-form note"}, tc.prompter.asked)
+				require.Equal(t, []string{"dry_run", "note — Free-form note (required)"}, tc.prompter.asked)
 			}
 		})
 	}

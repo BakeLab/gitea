@@ -48,7 +48,13 @@ func requiredText(value *string) func(string) error {
 
 // titleField is the required one-line title of an issue, pull request or similar resource.
 func titleField(value *string) *lineInput {
-	return lineField("Title (required):", value, false).Validate(requiredText(value))
+	return requiredLineField("Title", value)
+}
+
+// requiredLineField is a one-line field marked as required, like RequireInput's prompts, that
+// refuses an empty answer.
+func requiredLineField(label string, value *string) *lineInput {
+	return lineField(label+" (required):", value, false).Validate(requiredText(value))
 }
 
 // clearAnswer is the accessible answer that clears an optional one-line field.

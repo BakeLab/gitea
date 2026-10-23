@@ -399,7 +399,8 @@ func inputValue(input services.WorkflowInput, value string) (string, error) {
 }
 
 // askInput asks for one workflow input: a selection for a choice, yes or no for a boolean, and
-// text otherwise, where an empty answer keeps the default.
+// text otherwise, where an empty answer keeps the default and a required one without a default
+// is marked "(required)".
 func (a *application) askInput(cmd *cobra.Command, input services.WorkflowInput) (string, error) {
 	title := input.Name
 	if input.Description != "" {
@@ -418,6 +419,8 @@ func (a *application) askInput(cmd *cobra.Command, input services.WorkflowInput)
 	}
 	if input.Default != "" {
 		title += " (default " + input.Default + ")"
+	} else if input.Required {
+		title += " (required)"
 	}
 	validate := func(answer string) error {
 		if answer == "" {

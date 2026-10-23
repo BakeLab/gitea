@@ -28,7 +28,7 @@ func TestAdminPromptAndFlagsReachEquivalentPayloads(t *testing.T) {
 	deps.Streams.InTTY = true
 	deps.Streams.ErrTTY = true
 	require.NoError(t, Execute(context.Background(), deps, []string{"admin", "user", "create", "account", "--full-name", "Test Account"}))
-	require.Equal(t, []string{"Email address"}, prompt.asked)
+	require.Equal(t, []string{"Email address (required):"}, prompt.asked)
 	require.Len(t, prompt.secrets, 2)
 	require.Empty(t, prompt.confirmations)
 	out.Reset()

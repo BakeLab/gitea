@@ -174,14 +174,14 @@ func TestLabelCreatePicksAColorAndPrompts(t *testing.T) {
 	deps, _, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "create", "triage", "-R", "alice/project"}))
 	require.Contains(t, labelColors, created[0]["color"])
-	prompt := &scriptedPrompter{inputs: map[string]string{"Label name": "prompted", "Color (hex, e.g. d73a4a; empty = random):": "#00AA00", "Description (optional):": "From a prompt"}}
+	prompt := &scriptedPrompter{inputs: map[string]string{"Label name (required):": "prompted", "Color (hex, e.g. d73a4a; empty = random):": "#00AA00", "Description (optional):": "From a prompt"}}
 	deps.Prompter = prompt
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	require.NoError(t, Execute(context.Background(), deps, []string{"label", "create", "-R", "alice/project"}))
 	require.Equal(t, "prompted", created[1]["name"])
 	require.Equal(t, "00AA00", created[1]["color"])
 	require.Equal(t, "From a prompt", created[1]["description"])
-	require.Equal(t, []string{"Label name", "Color (hex, e.g. d73a4a; empty = random):", "Description (optional):"}, prompt.asked)
+	require.Equal(t, []string{"Label name (required):", "Color (hex, e.g. d73a4a; empty = random):", "Description (optional):"}, prompt.asked)
 }
 
 func TestLabelEditAndForceKeepArchivedStateAndColor(t *testing.T) {
