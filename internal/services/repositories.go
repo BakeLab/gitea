@@ -84,6 +84,8 @@ type RepositoryEdit struct {
 	MergeCommits   *bool   `json:"allow_merge_commits,omitempty"`
 	Squash         *bool   `json:"allow_squash_merge,omitempty"`
 	Rebase         *bool   `json:"allow_rebase,omitempty"`
+	ManualMerge    *bool   `json:"allow_manual_merge,omitempty"`
+	DetectMerge    *bool   `json:"autodetect_manual_merge,omitempty"`
 	MergeStyle     *string `json:"default_merge_style,omitempty"`
 	DeleteBranch   *bool   `json:"default_delete_branch_after_merge,omitempty"`
 }
@@ -301,7 +303,7 @@ func (s Repositories) Edit(ctx context.Context, repo string, opts RepositoryEdit
 			Description: opts.Description, Private: opts.Private, Archived: opts.Archived, Template: opts.Template,
 			HasIssues: opts.Issues, HasWiki: opts.Wiki, HasPullRequests: opts.PullRequests, HasProjects: opts.Projects,
 			AllowMerge: opts.MergeCommits, AllowSquash: opts.Squash, AllowRebase: opts.Rebase, DefaultMergeStyle: mergeStyle,
-			DefaultDeleteBranchAfterMerge: opts.DeleteBranch,
+			DefaultDeleteBranchAfterMerge: opts.DeleteBranch, AllowManualMerge: opts.ManualMerge, AutodetectManualMerge: opts.DetectMerge,
 		})
 	})
 	err = Classify(err, "repository", repo, "")

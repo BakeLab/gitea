@@ -22,7 +22,7 @@ func TestRepositoryEditPreservesExplicitClearsAndFalse(t *testing.T) {
 		case "GET /api/v1/repos/alice/project/branches/main":
 			_, _ = w.Write([]byte(`{"name":"main"}`))
 		case "PATCH /api/v1/repos/alice/project":
-			requirePayload(t, `{"website":"","default_branch":"main","private":false,"template":false,"has_actions":false,"has_wiki":false,"default_merge_style":"squash"}`, r.Body)
+			requirePayload(t, `{"website":"","default_branch":"main","private":false,"template":false,"has_actions":false,"has_wiki":false,"default_merge_style":"squash","allow_manual_merge":true,"autodetect_manual_merge":false}`, r.Body)
 			_, _ = w.Write([]byte(`{"name":"project","full_name":"alice/project","website":"","default_branch":"main"}`))
 		case "GET /api/v1/repos/alice/project":
 			_, _ = w.Write([]byte(`{"name":"project","full_name":"alice/project","website":"","default_branch":"main"}`))
@@ -32,7 +32,7 @@ func TestRepositoryEditPreservesExplicitClearsAndFalse(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "edit", "-R", "alice/project", "--website=", "--default-branch", "main", "--private=false", "--as-template=false", "--actions=false", "--enable-wiki=false", "--default-merge-style", "squash", "--json=name,website,default_branch"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "edit", "-R", "alice/project", "--website=", "--default-branch", "main", "--private=false", "--as-template=false", "--actions=false", "--enable-wiki=false", "--allow-manual-merge", "--autodetect-manual-merge=false", "--default-merge-style", "squash", "--json=name,website,default_branch"}))
 	require.JSONEq(t, `{"name":"project","website":"","default_branch":"main"}`, out.String())
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/branches/main", "PATCH /api/v1/repos/alice/project", "GET /api/v1/repos/alice/project"}, requests)
 }

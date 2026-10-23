@@ -33,6 +33,8 @@ var repositorySwitches = []struct {
 	{"allow-merge-commit", "Allow merging pull requests with a merge commit", func(e *services.RepositoryEdit) **bool { return &e.MergeCommits }},
 	{"allow-squash", "Allow squash merging pull requests", func(e *services.RepositoryEdit) **bool { return &e.Squash }},
 	{"allow-rebase", "Allow rebase merging pull requests", func(e *services.RepositoryEdit) **bool { return &e.Rebase }},
+	{"allow-manual-merge", "Allow marking pull requests merged outside Gitea as merged", func(e *services.RepositoryEdit) **bool { return &e.ManualMerge }},
+	{"autodetect-manual-merge", "Mark pull requests as merged when their commits reach the base branch outside Gitea", func(e *services.RepositoryEdit) **bool { return &e.DetectMerge }},
 	{"delete-branch-on-merge", "Delete head branches after merging pull requests", func(e *services.RepositoryEdit) **bool { return &e.DeleteBranch }},
 }
 
@@ -74,7 +76,10 @@ $ gt repo edit --description "Command line tool" --website https://example.com
 $ gt repo edit alice/project --visibility private --enable-wiki=false
 
 # Squash pull requests by default and tag the repository
-$ gt repo edit --default-merge-style squash --add-topic cli --add-topic go`,
+$ gt repo edit --default-merge-style squash --add-topic cli --add-topic go
+
+# Let pull requests merged outside Gitea be marked as merged
+$ gt repo edit --allow-manual-merge`,
 		Annotations: map[string]string{"gt.arguments": repositoryArguments},
 		Args:        nonBlankArgs(cobra.MaximumNArgs(1), "repository"),
 		RunE: func(cmd *cobra.Command, args []string) error {
