@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -206,6 +207,57 @@ func TestLabelEditAndForceKeepArchivedStateAndColor(t *testing.T) {
 	for _, patch := range patches {
 		require.Contains(t, patch, `"is_archived":true`)
 		require.Contains(t, patch, `"color":null`)
+	}
+}
+
+type labelFormFunc func(string, terminal.LabelFormValues, func(string) error) terminal.LabelFormValues
+
+func (f labelFormFunc) EditLabel(_ context.Context, heading string, current terminal.LabelFormValues, validColor func(string) error) (terminal.LabelFormValues, error) {
+	return f(heading, current, validColor), nil
+}
+
+func TestLabelEditImplicitInteractiveForm(t *testing.T) {
+	var patches []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeFirstPage(w, r, `[{"id":11,"name":"bug","color":"d73a4a","description":"Something is broken"}]`)
+		case http.MethodPatch:
+			body, _ := io.ReadAll(r.Body)
+			patches = append(patches, string(body))
+			_, _ = w.Write([]byte(`{"id":11,"name":"bug","color":"00ff00"}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		edit    func(*terminal.LabelFormValues)
+		want    string
+		warning string
+	}{
+		{func(*terminal.LabelFormValues) {}, "", `No changes to label "bug" in alice/project`},
+		{func(v *terminal.LabelFormValues) { v.Color = "D73A4A" }, "", `No changes to label "bug" in alice/project`},
+		{func(v *terminal.LabelFormValues) { v.Color = "#00ff00" }, `{"color":"00ff00"}`, ""},
+	} {
+		patches = nil
+		deps, _, diagnostics := serverDeps(t, server.URL)
+		deps.LabelForm = labelFormFunc(func(heading string, current terminal.LabelFormValues, validColor func(string) error) terminal.LabelFormValues {
+			require.Equal(t, `Editing label "bug" in alice/project`, heading)
+			require.Equal(t, terminal.LabelFormValues{Name: "bug", Color: "d73a4a", Description: "Something is broken"}, current)
+			require.Error(t, validColor("red"))
+			tc.edit(&current)
+			return current
+		})
+		deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+		require.NoError(t, Execute(context.Background(), deps, []string{"label", "edit", "bug", "-R", "alice/project"}))
+		require.Contains(t, diagnostics.String(), tc.warning)
+		if tc.want == "" {
+			require.Empty(t, patches)
+			continue
+		}
+		require.Len(t, patches, 1)
+		requirePayload(t, tc.want, strings.NewReader(patches[0])) // only what changed is sent
 	}
 }
 

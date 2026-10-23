@@ -51,6 +51,7 @@ type Dependencies struct {
 	MilestoneForm terminal.MilestoneForm
 	ReleaseForm   terminal.ReleaseForm
 	RepoForm      terminal.RepoForm
+	LabelForm     terminal.LabelForm
 	Getenv        func(string) string
 	LookupEnv     func(string) (string, bool)
 	Client        func(string, string, bool) *transport.Client
@@ -61,7 +62,7 @@ func System() Dependencies {
 	streams := terminal.System()
 	store := settings.New(os.Getenv("GITEA_CLI_CONFIG_DIR"))
 	prompter := &terminal.FormPrompter{Streams: streams}
-	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: streams.ErrOut}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, ReleaseForm: prompter, RepoForm: prompter, Getenv: os.Getenv, LookupEnv: os.LookupEnv, Client: transport.New}
+	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: streams.ErrOut}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, ReleaseForm: prompter, RepoForm: prompter, LabelForm: prompter, Getenv: os.Getenv, LookupEnv: os.LookupEnv, Client: transport.New}
 }
 
 type options struct {

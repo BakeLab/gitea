@@ -197,10 +197,10 @@ $ gt label create bug -c ee0701 --force`, Args: usageArgs(cobra.MaximumNArgs(1))
 func (a *application) askLabelDetails(cmd *cobra.Command, opts *services.LabelOptions) error {
 	if opts.Color == nil {
 		color, err := a.deps.Prompter.Ask(cmd.Context(), "Color (hex, e.g. d73a4a; empty = random):", func(s string) error {
-			if s != "" && !labelColor.MatchString(strings.TrimPrefix(s, "#")) {
-				return errors.New("use six hexadecimal digits")
+			if s == "" {
+				return nil
 			}
-			return nil
+			return labelColorAnswer(s)
 		})
 		if err != nil {
 			return err
@@ -219,6 +219,14 @@ func (a *application) askLabelDetails(cmd *cobra.Command, opts *services.LabelOp
 	return nil
 }
 
+// labelColorAnswer checks a color typed at a prompt, which may start with #.
+func labelColorAnswer(s string) error {
+	if !labelColor.MatchString(strings.TrimPrefix(s, "#")) {
+		return errors.New("use six hexadecimal digits")
+	}
+	return nil
+}
+
 // forceHint points at --force when a label exists already.
 func forceHint(err error) error {
 	if conflict, ok := errors.AsType[*services.ConflictError](err); ok && conflict.Reason == services.ReasonExists {
@@ -230,14 +238,17 @@ func forceHint(err error) error {
 func (a *application) labelEditCommand(scope labelScope, complete cobra.CompletionFunc) *cobra.Command {
 	var fields labelFields
 	var byName bool
-	cmd := &cobra.Command{Use: "edit <label>", Short: "Edit a label", Example: `$ gt label edit bug --name defect --color b60205
+	cmd := &cobra.Command{Use: "edit <label>", Short: "Edit a label", Long: `Edit the name, color or description of a label, or whether it is exclusive or archived.
+Without flags on a terminal, a form edits the name, color and description, starting from their
+current values.`, Example: `$ gt label edit bug --name defect --color b60205
 $ gt label edit "kind/question" --description "Further information is requested"
 $ gt label edit old-stuff --archived`, Annotations: map[string]string{"gt.arguments": labelArguments}, Args: nonBlankArgs(cobra.ExactArgs(1), "label name"), RunE: func(cmd *cobra.Command, args []string) error {
 		opts, err := fields.options(cmd)
 		if err != nil {
 			return err
 		}
-		if opts == (services.LabelOptions{}) {
+		form := !localFlagsChanged(cmd, "by-name") && a.canPrompt() && a.deps.LabelForm != nil
+		if !form && opts == (services.LabelOptions{}) {
 			return clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --name or --color (see --help)"))
 		}
 		s, err := scope(cmd)
@@ -252,6 +263,26 @@ $ gt label edit old-stuff --archived`, Annotations: map[string]string{"gt.argume
 		current, err := s.FindIn(existing, args[0], byName)
 		if err != nil {
 			return err
+		}
+		if form {
+			initial := terminal.LabelFormValues{Name: current.Name, Color: strings.TrimPrefix(current.Color, "#"), Description: current.Description}
+			values, err := a.deps.LabelForm.EditLabel(cmd.Context(), "Editing "+labelName(s, current), initial, labelColorAnswer)
+			if err != nil {
+				return err
+			}
+			if values.Name != initial.Name {
+				opts.Name = &values.Name
+			}
+			if color := strings.TrimPrefix(values.Color, "#"); !strings.EqualFold(color, initial.Color) {
+				opts.Color = &color
+			}
+			if values.Description != initial.Description {
+				opts.Description = &values.Description
+			}
+			if opts == (services.LabelOptions{}) {
+				a.warn(cmd, "No changes to %s", labelName(s, current))
+				return a.jsonResult(cmd, current)
+			}
 		}
 		item, err := s.EditUnique(cmd.Context(), existing, current, opts)
 		if err != nil {
