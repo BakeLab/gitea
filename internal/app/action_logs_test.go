@@ -212,7 +212,7 @@ func TestRunLogsSelectJobsAndFollowSeveral(t *testing.T) {
 	server, _ := actionsAPI(t, map[string]string{
 		"GET actions/runs/29/jobs": failedJobsFixture,
 		"GET actions/jobs/30/logs": "compiled\nlinked",
-		"GET actions/jobs/31/logs": "boom\n",
+		"GET actions/jobs/31/logs": "go test\nboom\n",
 	})
 	for _, tc := range []struct {
 		name          string
@@ -220,9 +220,13 @@ func TestRunLogsSelectJobsAndFollowSeveral(t *testing.T) {
 		out, progress string
 		err           string
 	}{
-		{"failed jobs", []string{"--failed"}, "boom\n", "test (job 31)\n", ""},
+		{"failed jobs", []string{"--failed"}, "go test\nboom\n", "test (job 31)\n", ""},
+		{"the end of failed jobs", []string{"--failed", "--tail", "1"}, "boom\n", "test (job 31)\n", ""},
+		{"the end of a job without a last line break", []string{"--job", "Build", "--tail", "1"}, "linked", "build (job 30)\n", ""},
+		{"a tail longer than the log", []string{"--failed", "--tail", "5"}, "go test\nboom\n", "test (job 31)\n", ""},
+		{"tail while following", []string{"--follow", "--tail", "1"}, "", "", "--follow cannot be combined with --tail"},
 		{"a job by name", []string{"--job", "Build"}, "compiled\nlinked", "build (job 30)\n", ""},
-		{"follow several jobs", []string{"--follow", "--interval=1ms"}, "build\tcompiled\nbuild\tlinked\ntest\tboom\n", "build (job 30)\ntest (job 31)\n", ""},
+		{"follow several jobs", []string{"--follow", "--interval=1ms"}, "build\tcompiled\nbuild\tlinked\ntest\tgo test\ntest\tboom\n", "build (job 30)\ntest (job 31)\n", ""},
 		{"unknown job", []string{"--job", "deploy"}, "", "", `job "deploy" not found in run 29`},
 		{"failed with a job", []string{"--job", "Build", "--failed"}, "", "", "--failed cannot be combined with --job"},
 		{"clobber without a download", []string{"--clobber"}, "", "", "--clobber requires --output or --dir"},

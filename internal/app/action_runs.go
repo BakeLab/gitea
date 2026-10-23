@@ -268,7 +268,7 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 				if err != nil {
 					return err
 				}
-				return a.printJobLogs(cmd, service, jobs)
+				return a.printJobLogs(cmd, service, jobs, 0)
 			}
 			run, err := service.RunDetails(cmd.Context(), id)
 			if err != nil {

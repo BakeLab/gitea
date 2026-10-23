@@ -240,6 +240,8 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"run", "download", "1", "--zip", "--name", "build", "--output", "-", "--clobber"}, "--clobber cannot be combined with --output -"},
 		{[]string{"run", "download", "1", "--clobber", "--skip-existing"}, "--clobber cannot be combined with --skip-existing"},
 		{[]string{"run", "watch", "1", "--expect-head", "main"}, "--expect-head requires a commit SHA, or a revision of the local clone"},
+		{[]string{"run", "logs", "1", "--tail", "0"}, "--tail must be positive"},
+		{[]string{"run", "logs", "1", "--tail", "5", "--output", "logs.zip"}, "--output and --dir download the whole run and cannot be combined with --job, --failed, --follow or --tail"},
 		{[]string{"run", "list", "--since=-1h"}, "invalid --since: relative duration cannot be negative"},
 		{[]string{"run", "list", "--until="}, "invalid --until: use a date, RFC3339 timestamp, or duration such as 24h"},
 		{[]string{"run", "list", "--since=1h", "--until=2h"}, "--since must not be later than --until"},
