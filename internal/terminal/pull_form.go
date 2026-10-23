@@ -27,6 +27,8 @@ type PullFormChoices struct {
 	// CanPush offers metadata, which needs push access; without it, changing branches offers AGit.
 	CanPush  bool
 	EditBody BodyEditor
+	// SeedBody seeds the body in place of Body when the branches asked first change.
+	SeedBody func(ctx context.Context, base, headBranch string) (string, error)
 }
 
 // PullFormValues holds interactively collected pull request create fields.
@@ -66,6 +68,13 @@ func (p *FormPrompter) CreatePull(ctx context.Context, choices PullFormChoices) 
 	if strings.TrimSpace(branches.base) == "" || strings.TrimSpace(branches.headBranch) == "" || sameBranch {
 		if err := p.runForm(ctx, huh.NewForm(huh.NewGroup(branches.fields(!choices.CanPush)...))); err != nil {
 			return PullFormValues{}, err
+		}
+		base, head := strings.TrimSpace(branches.base), strings.TrimSpace(branches.headBranch)
+		if (base != choices.Base || head != choices.HeadBranch) && choices.SeedBody != nil {
+			var err error
+			if choices.Body, err = choices.SeedBody(ctx, base, head); err != nil {
+				return PullFormValues{}, err
+			}
 		}
 	}
 	fmt.Fprintln(p.Streams.ErrOut, SafeLine(branches.header(choices.Repo, choices.BaseOwner)))

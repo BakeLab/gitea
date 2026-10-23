@@ -52,6 +52,24 @@ func TestPullFormAsksTitleBodyThenWhatsNext(t *testing.T) {
 			rendered: []string{"Base branch (required) [main]:", "Push through AGit", "Head branch (required):", "Creating pull request for bob:fix-typo into main in alice/x"},
 		},
 		{
+			name: "another base asked first seeds its body", input: "release\nn\n\nfix\n\n\nFix\n\n1\n", choices: PullFormChoices{
+				Repo: "alice/x", BaseOwner: "alice", Base: "main", Body: "Template of main",
+				SeedBody: func(_ context.Context, base, head string) (string, error) {
+					return "Template of " + base + " for " + head, nil
+				},
+			},
+			want: PullFormValues{IssueFormValues: IssueFormValues{Title: "Fix", Body: "Template of release for fix"}, Base: "release", Head: "fix"},
+		},
+		{
+			name: "another head asked first seeds its body", input: "\nn\n\nfix\n\n\nFix\n\n1\n", choices: PullFormChoices{
+				Repo: "alice/x", BaseOwner: "alice", Base: "main", HeadBranch: "main", Body: "Commit on main",
+				SeedBody: func(_ context.Context, base, head string) (string, error) {
+					return "Template of " + base + " for " + head, nil
+				},
+			},
+			want: PullFormValues{IssueFormValues: IssueFormValues{Title: "Fix", Body: "Template of main for fix"}, Base: "main", Head: "fix", Topic: "main"},
+		},
+		{
 			name: "metadata", input: "Seeded\n\n3\n2\n2026-12-24\n1\n", choices: func() PullFormChoices {
 				c := known
 				c.CanPush, c.Milestones = true, []IssueMilestoneChoice{{Title: "v1.0", ID: 4}}

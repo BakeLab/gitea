@@ -790,8 +790,7 @@ func TestPullCreateImplicitInteractiveForm(t *testing.T) {
 	server := newAuthenticatedServer(selectablesHandler(t, true, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/repos/alice/project/raw/.github/pull_request_template.md":
-			require.Equal(t, "main", r.URL.Query().Get("ref"))
-			_, _ = w.Write([]byte("## Summary\n"))
+			_, _ = w.Write([]byte(map[string]string{"main": "## Summary\n", "release": "## Release\n"}[r.URL.Query().Get("ref")]))
 		case strings.HasPrefix(r.URL.Path, "/api/v1/repos/alice/project/raw/"):
 			w.WriteHeader(http.StatusNotFound)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls":
@@ -830,6 +829,9 @@ func TestPullCreateImplicitInteractiveForm(t *testing.T) {
 	require.Equal(t, 1, form.calls)
 	require.Equal(t, "Add login", form.choices.Title)
 	require.Equal(t, "## Summary\n", form.choices.Body)
+	seeded, err := form.choices.SeedBody(context.Background(), "release", "feature")
+	require.NoError(t, err)
+	require.Equal(t, "## Release\n", seeded)
 	require.NotNil(t, form.choices.EditBody)
 	require.True(t, form.choices.CanPush)
 	require.Equal(t, "main", form.choices.Base)

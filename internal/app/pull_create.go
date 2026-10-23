@@ -456,6 +456,17 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 		Repo: target.Repo, BaseOwner: baseOwner, Base: repo.DefaultBranch, HeadOwner: headOwner, HeadBranch: headBranch, Title: title, Body: body,
 		AllowMaintainerEdits: true, CanPush: selectables.CanPush, Assignees: selectables.Assignees,
 		EditBody: a.bodyEditor(cmd, terminal.BodyTitle),
+		SeedBody: func(ctx context.Context, base, headBranch string) (string, error) {
+			template, err := loaded.Template, error(nil)
+			if base != repo.DefaultBranch {
+				template, err = service.Template(ctx, base)
+			}
+			if template != "" || err != nil {
+				return template, err
+			}
+			_, body, _ := a.singleCommitMessage(ctx, base, headBranch)
+			return body, nil
+		},
 	}
 	choices.Milestones, choices.Labels = milestoneChoices(selectables.Milestones), labelChoices(selectables.Labels)
 	values, err := a.deps.PullForm.CreatePull(cmd.Context(), choices)
