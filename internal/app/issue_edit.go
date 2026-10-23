@@ -213,21 +213,7 @@ func (a *application) editIssuesInteractively(cmd *cobra.Command, target target,
 		if err != nil {
 			return details, itemError(err, target.Repo)
 		}
-		choices := terminal.IssueEditFormChoices{
-			Heading: "Editing " + refLabel(target.Repo, n, current.Title),
-			Title:   current.Title, Body: current.Body, Assignees: current.Assignees,
-			AvailableAssignees: selectables.Assignees, Milestones: milestones, AvailableLabels: labels,
-			EditBody: a.bodyEditor(cmd, terminal.BodyTitle),
-		}
-		if current.Milestone != nil {
-			choices.Milestone = &terminal.IssueMilestoneChoice{Title: current.Milestone.Title, ID: current.Milestone.ID}
-		}
-		choices.Labels = labelChoices(current.Labels)
-		if current.Deadline != nil {
-			if parsed, err := time.Parse(time.RFC3339, *current.Deadline); err == nil {
-				choices.Deadline = &parsed
-			}
-		}
+		choices := a.issueEditChoices(cmd, target, current, selectables.Assignees, milestones, labels)
 		values, err := a.deps.IssueEditForm.EditIssue(cmd.Context(), choices)
 		defer finishDraft(&values.Draft, &err)
 		if err != nil {
@@ -253,6 +239,25 @@ func (a *application) editIssuesInteractively(cmd *cobra.Command, target target,
 		return details, err
 	}, nil)
 	return errors.Join(append(append(failures, leftOut...), writeBatchJSON(a, cmd, len(numbers), results))...)
+}
+
+// issueEditChoices seeds the edit form with the current values of an issue or pull request.
+func (a *application) issueEditChoices(cmd *cobra.Command, target target, current services.Issue, assignees []string, milestones []terminal.IssueMilestoneChoice, labels []terminal.IssueLabelChoice) terminal.IssueEditFormChoices {
+	choices := terminal.IssueEditFormChoices{
+		Heading: "Editing " + refLabel(target.Repo, current.Number, current.Title),
+		Title:   current.Title, Body: current.Body, Assignees: current.Assignees, Labels: labelChoices(current.Labels),
+		AvailableAssignees: assignees, Milestones: milestones, AvailableLabels: labels,
+		EditBody: a.bodyEditor(cmd, terminal.BodyTitle),
+	}
+	if current.Milestone != nil {
+		choices.Milestone = &terminal.IssueMilestoneChoice{Title: current.Milestone.Title, ID: current.Milestone.ID}
+	}
+	if current.Deadline != nil {
+		if parsed, err := time.Parse(time.RFC3339, *current.Deadline); err == nil {
+			choices.Deadline = &parsed
+		}
+	}
+	return choices
 }
 
 // changedIssueFields sets only the fields that the edit form changed, so that an unchanged form

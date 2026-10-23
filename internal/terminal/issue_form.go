@@ -110,6 +110,8 @@ type issueFields struct {
 	assignees             []string
 	milestone             int64
 	labels                []int64
+	// base, when set, is the base branch of an edited pull request.
+	base *string
 }
 
 // groups builds the content group, titled heading, and the metadata groups. The labels name no
@@ -118,9 +120,12 @@ func (f *issueFields) groups(heading string, editBody BodyEditor, assignees []st
 	return append([]*huh.Group{f.content(heading, editBody)}, f.metadata(assignees, milestones, labels)...)
 }
 
-// content asks for the title and, without editBody, the body.
+// content asks for the title, the base branch when set and, without editBody, the body.
 func (f *issueFields) content(heading string, editBody BodyEditor) *huh.Group {
 	fields := []huh.Field{titleField(&f.title)}
+	if f.base != nil {
+		fields = append(fields, requiredLineField("Base branch", f.base))
+	}
 	if editBody == nil {
 		fields = append(fields, bodyField(BodyTitle, &f.body))
 	}

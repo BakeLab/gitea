@@ -83,4 +83,18 @@ func TestEditIssueOffersMetadataWithoutPush(t *testing.T) {
 	require.Contains(t, rendered.String(), "Due date:")
 	require.NotNil(t, values.Deadline)
 	require.Equal(t, "2027-03-04", values.Deadline.Format(time.DateOnly))
+	require.NotContains(t, rendered.String(), "Base branch", "issues have no base branch")
+}
+
+func TestEditIssueAsksForTheBaseOfAPullRequest(t *testing.T) {
+	p, rendered := accessiblePrompter(t, "\n stable \n\n")
+	values, err := p.EditIssue(context.Background(), IssueEditFormChoices{Title: "Title", Base: "main", EditBody: noEdit})
+	require.NoError(t, err)
+	require.Contains(t, rendered.String(), "Base branch")
+	require.Equal(t, "stable", values.Base)
+
+	p, _ = accessiblePrompter(t, "\n\n\n")
+	values, err = p.EditIssue(context.Background(), IssueEditFormChoices{Title: "Title", Base: "main", EditBody: noEdit})
+	require.NoError(t, err)
+	require.Equal(t, "main", values.Base, "an empty answer keeps the base")
 }

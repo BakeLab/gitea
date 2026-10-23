@@ -22,16 +22,28 @@ func (a *application) pullEditCommand() *cobra.Command {
 	var reviewers services.ReviewRequestChanges
 	var addProjects, removeProjects []string
 	cmd := &cobra.Command{Use: "edit [<number> | <url> | <branch>]", Short: "Edit a pull request", Long: `Edit the title, body, base branch, reviewers, labels, assignees, milestone or due date of a
-pull request, or mark it as a draft or ready for review.
+pull request, or mark it as a draft or ready for review. Without flags on a terminal, a form edits
+the title, base branch, body, assignees, milestone, labels and due date, starting from their
+current values, and sends only what changed.
 
 Gitea changes the milestone, assignees and due date only for people who can write to the pull
 requests of the repository, and leaves them as they were for the author of a pull request who
-cannot: gt then names the flags it left out and fails. Gitea refuses their label changes
+cannot: gt then names the flags or form fields it left out and fails. Gitea refuses their label changes
 outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var editorDraft terminal.Draft
 		defer finishDraft(&editorDraft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
 			return err
+		}
+		if !localFlagsChanged(cmd) {
+			if !a.canPrompt() || a.deps.IssueEditForm == nil {
+				return errPullNothingToEdit
+			}
+			t, n, err := a.pullSelectorAny(cmd, args)
+			if err != nil {
+				return err
+			}
+			return a.editPullInteractively(cmd, t, n)
 		}
 		if draft && ready {
 			return clierr.Wrap(clierr.Usage, errors.New("--draft cannot be combined with --ready"))
@@ -82,7 +94,7 @@ outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnot
 			return err
 		}
 		if opts == (services.PullEdit{}) && !useEditor && !draft && !ready && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone") && !removeMilestone && len(addProjects)+len(removeProjects) == 0 {
-			return clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --title (see gt pr edit --help)"))
+			return errPullNothingToEdit
 		}
 		t, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
@@ -173,7 +185,7 @@ outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnot
 		}
 		a.done(cmd, "Edited pull request %s", refLabel(t.Repo, n, item.Title))
 		// The edit stands and is reported; what Gitea left out fails the command after.
-		return errors.Join(followUpError(fmt.Sprintf("pull request #%d", n), "edited", failures), pullEditLeftOut(cmd, n, opts, item, t.Repo), a.pullResult(cmd, t, item))
+		return errors.Join(followUpError(fmt.Sprintf("pull request #%d", n), "edited", failures), pullEditLeftOut(n, opts, item, t.Repo, issueEditFlags(cmd)), a.pullResult(cmd, t, item))
 	}}
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Pull request title")
 	cmd.Flags().StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339 or Unix timestamp; only the date counts, as the end of that day in UTC; empty clears it")
@@ -205,16 +217,65 @@ $ gt pr edit 13 --editor`
 	return cmd
 }
 
+var errPullNothingToEdit = clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --title (see gt pr edit --help)"))
+
+// editPullInteractively edits pull request n in the issue edit form, which also asks for its base
+// branch, and sends only what changed.
+func (a *application) editPullInteractively(cmd *cobra.Command, t target, n int64) (err error) {
+	service := services.Pulls{Client: t.client, Repository: t.Repo}
+	current, err := service.View(cmd.Context(), n)
+	if err != nil {
+		return err
+	}
+	selectables, err := services.Issues{Client: t.client, Repository: t.Repo}.EditSelectables(cmd.Context())
+	if err != nil {
+		return err
+	}
+	asIssue := services.Issue{
+		Kind: services.KindPull, Number: n, Title: draftTitle(current.Title, false), Body: current.Body,
+		Assignees: current.Assignees, Milestone: current.Milestone, Labels: current.Labels, Deadline: current.Deadline,
+	}
+	choices := a.issueEditChoices(cmd, t, asIssue, selectables.Assignees, milestoneChoices(selectables.Milestones), labelChoices(selectables.Labels))
+	choices.Base = current.Base
+	values, err := a.deps.IssueEditForm.EditIssue(cmd.Context(), choices)
+	defer finishDraft(&values.Draft, &err)
+	if err != nil {
+		return err
+	}
+	changed := changedIssueFields(asIssue, choices, values)
+	opts := services.PullEdit{
+		Title: changed.Title, Body: changed.Body, Assignees: changed.Assignees, Labels: changed.Labels,
+		Milestone: changed.Milestone, Deadline: changed.Deadline, RemoveDeadline: changed.RemoveDeadline,
+	}
+	if opts.Title != nil {
+		title := draftTitle(*opts.Title, current.Draft) // gt pr ready changes the draft state, as with --title
+		opts.Title = &title
+	}
+	if values.Base != current.Base {
+		opts.Base = &values.Base
+	}
+	if opts == (services.PullEdit{}) {
+		a.warn(cmd, "No changes to pull request %s", refLabel(t.Repo, n, current.Title))
+		return a.pullResult(cmd, t, current)
+	}
+	item, err := service.EditFrom(cmd.Context(), n, opts, &current)
+	if err != nil {
+		return err
+	}
+	a.done(cmd, "Edited pull request %s", refLabel(t.Repo, n, item.Title))
+	return errors.Join(pullEditLeftOut(n, opts, item, t.Repo, issueMetadataFields), a.pullResult(cmd, t, item))
+}
+
 // pullEditLeftOut fails, as issue edit does, when pull request n, edited without an error, lacks
-// a change to its milestone, assignees or due date that opts asked for. Gitea leaves them out
-// without an error for an author who cannot write to the pull requests, and drops the due date
-// too when a milestone sends the edit through the issue endpoint.
-func pullEditLeftOut(cmd *cobra.Command, n int64, opts services.PullEdit, item services.Pull, repository string) error {
+// a change to its milestone, assignees or due date that opts asked for, named by names. Gitea
+// leaves them out without an error for an author who cannot write to the pull requests, and drops
+// the due date too when a milestone sends the edit through the issue endpoint.
+func pullEditLeftOut(n int64, opts services.PullEdit, item services.Pull, repository string, names issueMetadataNames) error {
 	return editLeftOut(services.IssueEdit{
 		Assignees: opts.Assignees, Milestone: opts.Milestone, Deadline: opts.Deadline, RemoveDeadline: opts.RemoveDeadline, Changes: opts.Changes,
 	}, services.Issue{
 		Kind: services.KindPull, Number: n, Assignees: item.Assignees, Milestone: item.Milestone, Deadline: item.Deadline,
-	}, repository, issueEditFlags(cmd))
+	}, repository, names)
 }
 
 // draftTitle marks a title as a draft, the way Gitea recognizes drafts, or removes the marker.

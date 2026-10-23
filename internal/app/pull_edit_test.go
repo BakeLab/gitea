@@ -7,13 +7,16 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
 	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/require"
 )
@@ -77,6 +80,65 @@ func TestPullEditAddsAssigneesWithoutExtraReads(t *testing.T) {
 	deps, _, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "edit", "7", "-R", "alice/project", "--add-assignee", "bob,Alice", "--json=number"}))
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/issues/7", "PATCH /api/v1/repos/alice/project/pulls/7"}, calls)
+}
+
+func TestPullEditImplicitInteractiveForm(t *testing.T) {
+	var patches []string
+	title := "Old"
+	server := newAuthenticatedServer(selectablesHandler(t, true, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/7":
+			_, _ = w.Write([]byte(`{"number":7,"title":"` + title + `","draft":` + strconv.FormatBool(title != "Old") + `,"body":"Old body","state":"open","base":{"ref":"main"},"head":{"ref":"feature"},` +
+				`"assignees":[{"login":"alice"}],"labels":[{"id":2,"name":"bug"}],"milestone":{"id":4,"title":"Release"},"due_date":"2028-01-15T23:59:59Z"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/alice/project/pulls/7":
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			patches = append(patches, string(body))
+			_, _ = w.Write([]byte(`{"number":7,"title":"Edited","base":{"ref":"stable"},"assignees":[{"login":"alice"}],"milestone":{"id":4},"due_date":"2028-01-15T23:59:59Z"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		title   string
+		edit    func(*terminal.IssueEditFormValues)
+		want    string
+		warning string
+	}{
+		{"Old", func(*terminal.IssueEditFormValues) {}, "", "No changes to pull request alice/project#7 (Old)"},
+		{"Old", func(v *terminal.IssueEditFormValues) { v.Title, v.Base = "Edited", "stable" }, `{"title":"Edited","base":"stable"}`, ""},
+		// A draft keeps its marker, as with --title.
+		{"WIP: Old", func(v *terminal.IssueEditFormValues) { v.Title = "Edited" }, `{"title":"WIP: Edited"}`, ""},
+	} {
+		patches, title = nil, tc.title
+		deps, out, diagnostics := serverDeps(t, server.URL)
+		deps.IssueEditForm = issueEditFormFunc(func(_ context.Context, choices terminal.IssueEditFormChoices) (terminal.IssueEditFormValues, error) {
+			require.Equal(t, "Old", choices.Title)
+			require.Equal(t, "main", choices.Base)
+			require.Equal(t, "Old body", choices.Body)
+			require.Equal(t, []string{"alice", "bob"}, choices.AvailableAssignees)
+			due, err := time.Parse(time.DateOnly, choices.Deadline.Format(time.DateOnly))
+			require.NoError(t, err)
+			values := terminal.IssueEditFormValues{
+				Title: choices.Title, Body: choices.Body, Base: choices.Base, Assignees: choices.Assignees,
+				Milestone: choices.Milestone.ID, Labels: []int64{choices.Labels[0].ID}, Deadline: &due,
+			}
+			tc.edit(&values)
+			return values, nil
+		})
+		deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+		require.NoError(t, Execute(context.Background(), deps, []string{"pr", "edit", "7", "-R", "alice/project", "--json=number", "--interactive"}))
+		require.JSONEq(t, `{"number":7}`, out.String())
+		require.Contains(t, diagnostics.String(), tc.warning)
+		if tc.want == "" {
+			require.Empty(t, patches)
+			continue
+		}
+		require.Len(t, patches, 1)
+		requirePayload(t, tc.want, strings.NewReader(patches[0])) // only what changed is sent
+	}
 }
 
 func TestPullEditNamesWhatGiteaLeftOutForAnAuthor(t *testing.T) {

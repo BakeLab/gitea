@@ -12,12 +12,14 @@ import (
 	"charm.land/huh/v2"
 )
 
-// IssueEditFormChoices supplies current issue values and selectable options for edit.
+// IssueEditFormChoices supplies current issue or pull request values and selectable options for edit.
 // Current values missing from the options stay selectable.
 type IssueEditFormChoices struct {
 	// Heading names the edited issue above the form, such as "Editing alice/x#2 (Fix login)".
-	Heading            string
-	Title, Body        string
+	Heading     string
+	Title, Body string
+	// Base, set for a pull request, is its base branch, which the form asks for after the title.
+	Base               string
 	Assignees          []string
 	Milestone          *IssueMilestoneChoice
 	Labels             []IssueLabelChoice
@@ -32,6 +34,7 @@ type IssueEditFormChoices struct {
 // only when the due date changed.
 type IssueEditFormValues struct {
 	Title, Body    string
+	Base           string
 	Assignees      []string
 	Milestone      int64
 	ClearMilestone bool
@@ -54,6 +57,10 @@ func (p *FormPrompter) EditIssue(ctx context.Context, choices IssueEditFormChoic
 		deadline = choices.Deadline.Format(time.DateOnly)
 	}
 	fields := issueFields{title: choices.Title, body: choices.Body, deadline: deadline, assignees: choices.Assignees}
+	base := choices.Base
+	if base != "" {
+		fields.base = &base
+	}
 	milestones := choices.Milestones
 	if choices.Milestone != nil {
 		fields.milestone, milestones = choices.Milestone.ID, withCurrent(milestones, *choices.Milestone)
@@ -66,6 +73,9 @@ func (p *FormPrompter) EditIssue(ctx context.Context, choices IssueEditFormChoic
 		return IssueEditFormValues{}, err
 	}
 	values := IssueEditFormValues{Title: titleResult(choices.Title, fields.title), Assignees: fields.assignees, Milestone: fields.milestone, Labels: fields.labels}
+	if choices.Base != "" {
+		values.Base = titleResult(choices.Base, base)
+	}
 	values.ClearMilestone = fields.milestone == 0 && choices.Milestone != nil
 	if choices.EditBody == nil {
 		fields.body = fieldResult(choices.Body, fields.body)
