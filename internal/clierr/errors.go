@@ -14,6 +14,10 @@ const (
 	Usage          = 2
 	Canceled       = 3
 	Authentication = 4
+	// Unsuccessful reports a run that completed without success, unlike a Failure of gt itself.
+	Unsuccessful = 5
+	// HeadMismatch reports a run for another commit than gt run watch --expect-head names.
+	HeadMismatch = 6
 	// Pending reports checks that have not finished, like gh pr checks.
 	Pending     = 8
 	Interrupted = 130

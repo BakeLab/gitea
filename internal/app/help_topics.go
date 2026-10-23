@@ -337,6 +337,8 @@ Preferences in config.yml are described in gt config --help.`},
   3    canceled: a declined confirmation, a prompt left with Esc (or Ctrl-D with TERM=dumb),
        or a timeout
   4    authentication is missing or was rejected
+  5    gt run watch and gt workflow run --follow: the run completed without success
+  6    gt run watch --expect-head: the run is for another commit
   8    gt pr checks: some checks are still pending
   130  interrupted with Ctrl-C, also at a prompt
 

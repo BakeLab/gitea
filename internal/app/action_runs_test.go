@@ -359,7 +359,8 @@ func TestRunWatchExitStatusAndTimeout(t *testing.T) {
 		code                                 int
 	}{
 		{"success", succeeded, `{"jobs":[]}`, `{"id":7,"conclusion":"success","workflow":"CI"}`, "", "run 7: success\n", 0},
-		{"failure", strings.Replace(succeeded, `"success"`, `"failure"`, 1), `{"jobs":[]}`, `{"id":7,"conclusion":"failure","workflow":"CI"}`, "run 7 (CI) completed with failure", "run 7: failure\n", clierr.Failure},
+		{"failure", strings.Replace(succeeded, `"success"`, `"failure"`, 1), `{"jobs":[]}`, `{"id":7,"conclusion":"failure","workflow":"CI"}`, "run 7 (CI) completed with failure", "run 7: failure\n", clierr.Unsuccessful},
+		{"request error", `400 {"message":"bad request"}`, `{"jobs":[]}`, "", "Gitea API returned HTTP 400 for GET /api/v1/repos/alice/project/actions/runs/7: bad request", "", clierr.Failure},
 		{
 			"timeout", strings.Replace(queuedRunFixture, `"id":47`, `"id":7`, 1), queuedJobsFixture, "",
 			`timed out after 100ms waiting for run 7 (still queued; is a runner registered for "ubuntu-latest"?)`, "run 7: queued (build: queued, test: waiting)\n", clierr.Canceled,
@@ -399,6 +400,7 @@ func TestRunWatchExpectHeadFailsBeforeWaitingForAnotherCommit(t *testing.T) {
 	}
 	err := watch("HEAD")
 	require.EqualError(t, err, "run 47 is for commit "+full+", not 209d545a"+strings.Repeat("0", 32))
+	require.Equal(t, clierr.HeadMismatch, clierr.ExitCode(err))
 	require.Equal(t, []string{"GET actions/workflows", "GET actions/runs/47", "GET actions/runs/47/jobs"}, *requests, "no waiting")
 	require.Empty(t, out.String())
 	require.EqualError(t, watch("209D545"), "run 47 is for commit "+full+", not 209d545")

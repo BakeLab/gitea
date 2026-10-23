@@ -240,7 +240,7 @@ func TestWorkflowRunFollowStreamsTheLogsOfItsJobs(t *testing.T) {
 	// Like gt run watch, following a run that fails fails.
 	err := Execute(context.Background(), deps, []string{"workflow", "run", "ci", "-R", "alice/project", "--ref", "main", "--follow", "--interval=1ms"})
 	require.EqualError(t, err, "run 11 (CI) completed with failure")
-	require.Equal(t, 1, clierr.ExitCode(err))
+	require.Equal(t, clierr.Unsuccessful, clierr.ExitCode(err))
 	require.Equal(t, "https://gitea.test/alice/project/actions/runs/11\nbuild\tcompiled\ntest\tboom\n", out.String())
 	require.Equal(t, "build (job 30)\ntest (job 31)\n", diagnostics.String())
 	succeeded, _ := actionsAPI(t, map[string]string{

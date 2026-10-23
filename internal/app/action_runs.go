@@ -588,12 +588,13 @@ func (a *application) runWatchCommand() *cobra.Command {
 		Short: "Watch a run until it completes",
 		Long: `Watch a run until it completes, refreshing its jobs and steps on a terminal.
 
-The command fails when the run completes without success. It polls on through an outage of the
-instance of up to 5 minutes.
+The command exits with 5 when the run completes without success, with 3 when --timeout expires,
+and with 1 when gt itself fails, such as on a rejected request. It polls on through an outage of
+the instance of up to 5 minutes.
 
-With --expect-head, it fails before waiting when the run is for another commit, such as one an
-earlier push triggered. A full or abbreviated SHA matches the start of the run's commit; another
-revision, such as HEAD, is resolved in the local clone.`,
+With --expect-head, it exits with 6 before waiting when the run is for another commit, such as
+one an earlier push triggered. A full or abbreviated SHA matches the start of the run's commit;
+another revision, such as HEAD, is resolved in the local clone.`,
 		Example: `# watch a run
 $ gt run watch 34
 # pick one of the runs in progress
@@ -696,15 +697,15 @@ func (a *application) watchRun(cmd *cobra.Command, t target, id int64, head stri
 
 // headMismatch reports a run for another commit than --expect-head names.
 func headMismatch(run services.Run, head string) error {
-	return fmt.Errorf("run %d is for commit %s, not %s", run.ID, cmp.Or(terminal.SafeLine(run.Commit), "(unknown)"), head)
+	return clierr.Wrap(clierr.HeadMismatch, fmt.Errorf("run %d is for commit %s, not %s", run.ID, cmp.Or(terminal.SafeLine(run.Commit), "(unknown)"), head))
 }
 
-// runFailure fails for a completed run that did not succeed.
+// runFailure fails with Unsuccessful for a completed run that did not succeed.
 func runFailure(run services.Run) error {
 	if services.SuccessfulRun(run) {
 		return nil
 	}
-	return fmt.Errorf("run %d (%s) completed with %s", run.ID, terminal.SafeLine(run.Workflow), terminal.SafeLine(cmp.Or(run.Conclusion, run.Status)))
+	return clierr.Wrap(clierr.Unsuccessful, fmt.Errorf("run %d (%s) completed with %s", run.ID, terminal.SafeLine(run.Workflow), terminal.SafeLine(cmp.Or(run.Conclusion, run.Status))))
 }
 
 // runProgress is one line about the state of a run and its jobs, for watching without a

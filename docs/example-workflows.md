@@ -16,7 +16,7 @@ gt workflow enable deploy.yml --no-input
 Workflow dispatch requires a `workflow_dispatch` trigger in the workflow. Dispatch
 and watching are separate commands; find the run with `gt run list`, then use
 `gt run watch RUN_ID --timeout 10m --no-input`. Unsuccessful completed runs return
-a nonzero exit code.
+exit code 5, and a failure of gt itself, such as a rejected request, exits with 1.
 
 For an explicitly authorized merge in CI:
 

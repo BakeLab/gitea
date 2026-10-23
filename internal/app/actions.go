@@ -176,7 +176,8 @@ gt workflow list.
 Without --ref, the workflow runs on the checked-out branch, which must be on the server, or on
 the default branch when the repository does not come from the working directory.
 
-With --follow, the command fails like gt run watch when the run completes without success.`,
+With --follow, the command exits with 5, like gt run watch, when the run completes without
+success.`,
 		Example: `# run a workflow on the default or current branch
 $ gt workflow run CI
 # run it on a branch with inputs
