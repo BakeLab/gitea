@@ -5,6 +5,7 @@ package terminal
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -52,9 +53,24 @@ func titleField(value *string) *lineInput {
 }
 
 // requiredLineField is a one-line field marked as required, like RequireInput's prompts, that
-// refuses an empty answer.
-func requiredLineField(label string, value *string) *lineInput {
-	return lineField(label+" (required):", value, false).Validate(requiredText(value))
+// refuses an empty answer and an answer that a non-nil check rejects.
+func requiredLineField(label string, value *string, check ...func(string) error) *lineInput {
+	required := requiredText(value)
+	return lineField(label+" (required):", value, false).Validate(func(s string) error {
+		if err := required(s); err != nil {
+			return err
+		}
+		// An accessible form checks the typed line, which is empty when it keeps the value.
+		answer := strings.TrimSpace(cmp.Or(s, inputText(*value)))
+		for _, c := range check {
+			if c != nil {
+				if err := c(answer); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // clearAnswer is the accessible answer that clears an optional one-line field.
@@ -352,6 +368,11 @@ func fieldResult(seed, answer string) string {
 		lineBreak = "\r\n"
 	}
 	return strings.Join(lines, lineBreak)
+}
+
+// singleSelect lists up to ten options before it scrolls, like the other selects.
+func singleSelect[T comparable](title string, options []huh.Option[T], value *T) *huh.Select[T] {
+	return huh.NewSelect[T]().Title(title).Options(options...).Height(min(len(options), 10) + 2).Value(value)
 }
 
 // multiSelect lists every option, scrolling past maxVisibleOptions. Without an explicit height,

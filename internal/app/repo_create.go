@@ -45,7 +45,11 @@ administrators can also create one for another user as USER/NAME.
 
 --auto-init adds a first commit with a README, .gitignore and license; --template copies another
 repository. --source adds the new repository as a remote of a local Git repository, and --push
-pushes its current branch there.`,
+pushes its current branch there.
+
+On a terminal, without a name or flags, it asks for the owner, name, description and visibility,
+whether to add a README with a license and .gitignore templates, and whether to clone the new
+repository.`,
 		Example: `# Create a private repository with a README and an MIT license
 $ gt repo create project --private --auto-init --license MIT
 
@@ -124,12 +128,16 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 			return err
 		}
 	}
-	prompted, err := a.requireInput(cmd, &f.opts.Name, "name", "Repository name", validateRepositoryName)
-	if err != nil {
-		return err
-	}
-	if err := validateRepositoryName(f.opts.Name); err != nil {
-		return err
+	form := f.opts.Name == "" && !localFlagsChanged(cmd) && a.canPrompt() && a.deps.RepoForm != nil
+	prompted := form
+	if !form {
+		var err error
+		if prompted, err = a.requireInput(cmd, &f.opts.Name, "name", "Repository name", validateRepositoryName); err != nil {
+			return err
+		}
+		if err := validateRepositoryName(f.opts.Name); err != nil {
+			return err
+		}
 	}
 	selected := &application{deps: a.deps, options: a.options}
 	selected.options.repo = f.template
@@ -137,15 +145,19 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 	if err != nil {
 		return err
 	}
+	service := services.Repositories{Client: target.client}
+	if form {
+		if err := a.askRepoSettings(cmd, target, service, f); err != nil {
+			return err
+		}
+	} else if err := validateTemplates(cmd.Context(), service, &f.opts); err != nil {
+		return err
+	}
 	if !cmd.Flags().Changed("org") && strings.EqualFold(f.org, target.User) {
 		if f.team != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--team requires a repository owned by an organization"))
 		}
 		f.org = ""
-	}
-	service := services.Repositories{Client: target.client}
-	if err := validateTemplates(cmd.Context(), service, &f.opts); err != nil {
-		return err
 	}
 	if prompted {
 		visibility := "public"
@@ -215,6 +227,33 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 	return a.created(cmd, item, item.URL)
 }
 
+// askRepoSettings fills f from the interactive repository create form.
+func (a *application) askRepoSettings(cmd *cobra.Command, t target, service services.Repositories, f *repoCreateFlags) error {
+	loaded, err := service.CreateChoices(cmd.Context())
+	if err != nil {
+		return err
+	}
+	choices := terminal.RepoFormChoices{
+		Owners: append([]string{t.User}, loaded.Organizations...), Licenses: loaded.Licenses, Gitignores: loaded.Gitignores,
+		ValidateName: validateRepositoryName, ValidateDescription: validateRepositoryDescription,
+	}
+	values, err := a.deps.RepoForm.CreateRepo(cmd.Context(), choices)
+	if err != nil {
+		return err
+	}
+	f.org, f.opts.Name, f.opts.Description, f.opts.Private = values.Owner, values.Name, values.Description, values.Private
+	f.opts.AutoInit, f.opts.License, f.opts.Gitignores = values.AutoInit, values.License, strings.Join(values.Gitignores, ",")
+	f.clone = values.Clone
+	return nil
+}
+
+func validateRepositoryDescription(description string) error {
+	if utf8.RuneCountInString(description) > 2048 {
+		return clierr.Wrap(clierr.Usage, errors.New("description cannot exceed 2048 characters"))
+	}
+	return nil
+}
+
 // validateCreateFlags rejects combinations of repo create flags that cannot work, before any request.
 func validateCreateFlags(cmd *cobra.Command, opts services.RepositoryOptions, org, team, template, localSource string, clone bool) error {
 	changed := func(names ...string) bool { return slices.ContainsFunc(names, cmd.Flags().Changed) }
@@ -223,8 +262,6 @@ func validateCreateFlags(cmd *cobra.Command, opts services.RepositoryOptions, or
 		return clierr.Wrap(clierr.Usage, errors.New("--team requires --org and a team name"))
 	case changed("template") && template == "":
 		return clierr.Wrap(clierr.Usage, errors.New("--template requires owner/repo or a repository URL"))
-	case utf8.RuneCountInString(opts.Description) > 2048:
-		return clierr.Wrap(clierr.Usage, errors.New("description cannot exceed 2048 characters"))
 	case template == "" && (opts.Gitignores != "" || opts.License != "" || opts.Readme != "" || opts.DefaultBranch != "") && !opts.AutoInit:
 		return clierr.Wrap(clierr.Usage, errors.New("initial content and default branch options require --auto-init"))
 	case template != "" && changed("auto-init", "label-template", "gitignores", "license", "readme", "as-template", "trust-model", "object-format"):
@@ -235,6 +272,9 @@ func validateCreateFlags(cmd *cobra.Command, opts services.RepositoryOptions, or
 		return clierr.Wrap(clierr.Usage, errors.New("--source publishes a local repository; it cannot be combined with --clone, --template or --auto-init"))
 	case localSource == "" && changed("push", "remote-name"):
 		return clierr.Wrap(clierr.Usage, errors.New("--push and --remote-name require --source"))
+	}
+	if err := validateRepositoryDescription(opts.Description); err != nil {
+		return err
 	}
 	if opts.DefaultBranch != "" {
 		return validateBranch(opts.DefaultBranch)

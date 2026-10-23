@@ -11,7 +11,6 @@ import (
 	"path"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
@@ -175,13 +174,14 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 func validateMigrationFlags(cmd *cobra.Command, opts services.RepositoryMigrationOptions, passwordFile, tokenFile string) error {
 	changed := cmd.Flags().Changed
 	metadata := opts.Issues || opts.Milestones || opts.Labels || opts.PullRequests || opts.Releases
+	if err := validateRepositoryDescription(opts.Description); err != nil {
+		return err
+	}
 	switch {
 	case changed("server-path") && (opts.Service != "git" || opts.AuthUser != "" || changed("auth-password") || changed("auth-password-file") || changed("auth-token") || changed("auth-token-file")):
 		return clierr.Wrap(clierr.Usage, errors.New("server path imports use --service git without remote credentials"))
 	case opts.Timeout <= 0:
 		return clierr.Wrap(clierr.Usage, errors.New("--timeout must be positive"))
-	case utf8.RuneCountInString(opts.Description) > 2048:
-		return clierr.Wrap(clierr.Usage, errors.New("description cannot exceed 2048 characters"))
 	case opts.LFSEndpoint != "" && !opts.LFS:
 		return clierr.Wrap(clierr.Usage, errors.New("--lfs-endpoint requires --lfs"))
 	case opts.Mirror && metadata:

@@ -76,6 +76,31 @@ func (s Repositories) LabelTemplates(ctx context.Context) ([]string, error) {
 	return names, err
 }
 
+// RepositoryCreateChoices are what interactive repository creation offers: the organizations of
+// the account and the server's license and .gitignore templates.
+type RepositoryCreateChoices struct {
+	Organizations, Licenses, Gitignores []string
+}
+
+// CreateChoices loads the choices of interactive repository creation.
+func (s Repositories) CreateChoices(ctx context.Context) (RepositoryCreateChoices, error) {
+	var choices RepositoryCreateChoices
+	err := loadTogether(
+		func() error {
+			orgs, err := listEvery(50, func(limit, page int) (Page[Organization], error) {
+				return Organizations{Client: s.Client}.List(ctx, true, "", limit, page)
+			})
+			for _, org := range orgs {
+				choices.Organizations = append(choices.Organizations, org.Name)
+			}
+			return err
+		},
+		func() (err error) { choices.Licenses, err = s.Licenses(ctx); return err },
+		func() (err error) { choices.Gitignores, err = s.Gitignores(ctx); return err },
+	)
+	return choices, err
+}
+
 // RepositoryMigrationOptions is explicit server-side import input. Credentials stay in request bodies.
 type RepositoryMigrationOptions struct {
 	Name           string        `json:"repo_name"`

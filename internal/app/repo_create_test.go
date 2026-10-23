@@ -12,9 +12,11 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -102,6 +104,65 @@ func TestRepositoryCreateReportsFailedCloneAfterCreating(t *testing.T) {
 	err := Execute(context.Background(), deps, []string{"repo", "create", "project", "--clone", "--no-input", "--json=full_name"})
 	require.ErrorContains(t, err, "created alice/project, but could not clone it")
 	require.JSONEq(t, `{"full_name":"alice/project"}`, out.String())
+}
+
+type repoFormFunc func(terminal.RepoFormChoices) (terminal.RepoFormValues, error)
+
+func (f repoFormFunc) CreateRepo(_ context.Context, choices terminal.RepoFormChoices) (terminal.RepoFormValues, error) {
+	return f(choices)
+}
+
+func TestRepositoryCreateInteractiveForm(t *testing.T) {
+	var mu sync.Mutex // the form's choices load concurrently
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/user/orgs":
+			writeFirstPage(w, r, `[{"username":"acme"}]`)
+		case "GET /api/v1/licenses":
+			_, _ = w.Write([]byte(`[{"key":"MIT","name":"MIT"}]`))
+		case "GET /api/v1/gitignore/templates":
+			_, _ = w.Write([]byte(`["Go","Node"]`))
+		case "POST /api/v1/orgs/acme/repos":
+			requirePayload(t, `{"name":"tool","description":"A tool","private":true,"auto_init":true,"license":"MIT","gitignores":"Go,Node"}`, r.Body)
+			_, _ = fmt.Fprintf(w, `{"full_name":"acme/tool","clone_url":%q}`, "http://"+r.Host+"/acme/tool.git")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	call := credentialCall(t, deps, server.URL, "alice", "clone", "--", server.URL+"/acme/tool.git")
+	runner := &fakeGit{results: map[string]string{call: ""}}
+	deps.Git = runner
+	var offered terminal.RepoFormChoices
+	deps.RepoForm = repoFormFunc(func(choices terminal.RepoFormChoices) (terminal.RepoFormValues, error) {
+		offered = choices
+		return terminal.RepoFormValues{Owner: "acme", Name: "tool", Description: "A tool", Private: true, AutoInit: true, License: "MIT", Gitignores: []string{"Go", "Node"}, Clone: true}, nil
+	})
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "create", "--yes", "--json=full_name", "--interactive"}))
+	require.Equal(t, []string{"alice", "acme"}, offered.Owners)
+	require.Equal(t, []string{"MIT"}, offered.Licenses)
+	require.Equal(t, []string{"Go", "Node"}, offered.Gitignores)
+	require.Contains(t, requests, "POST /api/v1/orgs/acme/repos")
+	require.Equal(t, []string{call}, runner.calls)
+	require.JSONEq(t, `{"full_name":"acme/tool"}`, out.String())
+
+	// --no-input or a flag skips the form.
+	deps.RepoForm = repoFormFunc(func(terminal.RepoFormChoices) (terminal.RepoFormValues, error) {
+		t.Fatal("form should not run")
+		return terminal.RepoFormValues{}, nil
+	})
+	err := Execute(context.Background(), deps, []string{"repo", "create", "--no-input"})
+	require.EqualError(t, err, "missing required input: Repository name (pass it as an argument)")
+	requests = nil
+	err = Execute(context.Background(), deps, []string{"repo", "create", "--license", "MIT"})
+	require.EqualError(t, err, "initial content and default branch options require --auto-init")
+	require.Empty(t, requests)
 }
 
 func TestRepositoryCreateValidatesTemplatesBeforeCreating(t *testing.T) {
