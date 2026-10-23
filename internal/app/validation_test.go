@@ -53,7 +53,7 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"browse", "--branch", "main", "--commit"}, "--branch cannot be combined with --commit"},
 		{[]string{"browse", "--wiki", "--releases"}, "--releases cannot be combined with --wiki"},
 		{[]string{"browse", "#3", "--branch", "main"}, "--branch cannot be combined with an issue or pull request number"},
-		{[]string{"browse", "77507cd", "--commit"}, "--commit cannot be combined with a commit SHA"},
+		{[]string{"browse", "77507cd", "--commit=1234abc"}, "--commit cannot be combined with a commit SHA"},
 		{[]string{"browse", "docs", "--settings"}, "--settings cannot be combined with a path"},
 		{[]string{"browse", "--branch="}, "invalid branch name"},
 		{[]string{"config", "set", "prompt", "invalid"}, "prompt must be enabled or disabled"},

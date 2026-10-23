@@ -56,6 +56,8 @@ func TestBrowseURLs(t *testing.T) {
 		{[]string{"--branch", "feature/x"}, repo + "/src/branch/feature/x", nil},
 		{[]string{"docs/a b.md:3-5", "-b", "feature/x"}, repo + "/src/branch/feature/x/docs/a%20b.md?display=source#L3-L5", nil},
 		{[]string{"--commit=77507cd", "../docs/"}, repo + "/src/commit/77507cd/docs", nil},
+		{[]string{"-c", "77507cd", "../docs/"}, repo + "/src/commit/77507cd/docs", nil},
+		{[]string{"--commit", "77507cd"}, repo + "/src/commit/77507cd", nil},
 		{[]string{"cmd/main.go:7"}, repo + "/src/branch/release/1.0/cmd/main.go?display=source#L7", []string{"/api/v1/repos/alice/project"}},
 	} {
 		requests = nil

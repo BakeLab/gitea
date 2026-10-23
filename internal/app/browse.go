@@ -54,11 +54,16 @@ $ gt browse 217
 $ gt browse internal/app/app.go:42 --branch develop
 $ gt browse 77507cd
 $ gt browse --commit
+$ gt browse --commit 77507cd docs
 $ gt browse --releases -R alice/project
 $ gt browse --no-browser docs/README.md`,
 		Annotations: textOutput("browse opens a web page"),
-		Args:        nonBlankArgs(cobra.MaximumNArgs(1), "number, path or commit SHA"),
+		Args: func(cmd *cobra.Command, args []string) error {
+			_, args = spacedCommit(cmd, commit, args)
+			return nonBlankArgs(cobra.MaximumNArgs(1), "number, path or commit SHA")(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			commit, args = spacedCommit(cmd, commit, args)
 			arg := ""
 			if len(args) > 0 {
 				arg = args[0]
@@ -179,6 +184,15 @@ $ gt browse --no-browser docs/README.md`,
 	_ = command.RegisterFlagCompletionFunc("branch", a.completeBranches())
 	command.ValidArgsFunction = firstArg(completeFiles)
 	return command
+}
+
+// spacedCommit takes the SHA of "--commit SHA" from args, where the optional value of --commit
+// leaves it.
+func spacedCommit(cmd *cobra.Command, commit string, args []string) (string, []string) {
+	if flag := cmd.Flags().Lookup("commit"); flag.Changed && commit == flag.NoOptDefVal && len(args) > 0 && commitSHA.MatchString(args[0]) {
+		return args[0], args[1:]
+	}
+	return commit, args
 }
 
 // repositoryPath resolves a path argument of gt browse against the repository root: relative to
