@@ -112,6 +112,21 @@ func TestPullFiltersAreEncodedBeforeListing(t *testing.T) {
 	require.True(t, items[0].Mergeable)
 }
 
+func TestPullListOfEmptyRepositoryIsEmpty(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","empty":true,"has_pull_requests":true}`))
+			return
+		}
+		http.Error(w, `{"message":"not found"}`, http.StatusNotFound)
+	}))
+	items, more, err := (Pulls{Client: client, Repository: "alice/project"}).List(context.Background(), PullListOptions{State: "open", Limit: 30, Page: 1})
+	require.NoError(t, err)
+	require.Empty(t, items)
+	require.NotNil(t, items)
+	require.False(t, more)
+}
+
 func TestPullTemplateLookup(t *testing.T) {
 	for _, tc := range []struct {
 		name, want, wantErr string

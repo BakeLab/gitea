@@ -237,7 +237,16 @@ func (s Pulls) listPage(ctx context.Context, options PullListOptions) (Page[Pull
 	// TODO(sdk): ListPullRequestsOptions lacks the poster, base_branch, and labels filters.
 	page, err := rawPage[*gitea.PullRequest](ctx, s.Client, "repos/"+s.Repository+"/pulls", query, options.Limit, options.Page)
 	if err != nil {
-		return Page[Pull]{}, (Issues{Client: s.Client, Repository: s.Repository}).listError(ctx, err, "pulls")
+		if IsNotFound(err) {
+			repo, lookupErr := (Repositories{Client: s.Client}).get(ctx, s.Repository)
+			if lookupErr == nil && repo.Empty && repo.HasPullRequests {
+				return Page[Pull]{Items: []Pull{}, Counted: true}, nil // Gitea answers 404 for the pull requests of a repository without commits
+			}
+			if unitErr := unitOffIn(repo, lookupErr, s.Repository, err, UnitPulls); unitErr != nil {
+				return Page[Pull]{}, unitErr
+			}
+		}
+		return Page[Pull]{}, Classify(err, "repository", s.Repository, "")
 	}
 	return convertPage(page, pullFrom), nil
 }

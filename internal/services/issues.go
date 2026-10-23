@@ -255,6 +255,11 @@ func unitError(ctx context.Context, client *transport.Client, repository string,
 // failure of the request that the unit refused.
 func unitOff(ctx context.Context, client *transport.Client, repository string, err error, unit string) error {
 	item, lookupErr := (Repositories{Client: client}).get(ctx, repository)
+	return unitOffIn(item, lookupErr, repository, err, unit)
+}
+
+// unitOffIn is unitOff with the repository already looked up.
+func unitOffIn(item *gitea.Repository, lookupErr error, repository string, err error, unit string) error {
 	var instance string
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok {
 		instance = apiErr.Instance
