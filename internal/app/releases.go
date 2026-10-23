@@ -377,8 +377,8 @@ func (a *application) checkReleaseTag(ctx context.Context, t target, service ser
 	case verify:
 		return explain(missing, "%s; create it first or drop --verify-tag", missing)
 	}
-	head, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
-	if err != nil || head == "" {
+	head := a.localCommit(ctx, "HEAD")
+	if head == "" {
 		return nil
 	}
 	repository, err := services.Repositories{Client: t.client}.View(ctx, t.Repo)
@@ -402,14 +402,14 @@ func (a *application) releaseTarget(ctx context.Context, t target, remote, ref s
 	if isFullSHA(ref) || remote == "" {
 		return ref, nil
 	}
-	sha, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
-	if err != nil || !isFullSHA(sha) {
+	sha := a.localCommit(ctx, ref)
+	if sha == "" {
 		return ref, nil
 	}
 	if ref == "HEAD" { // no branch can be named HEAD
 		return sha, nil
 	}
-	_, err = services.Branches{Client: t.client}.View(ctx, t.Repo, ref)
+	_, err := services.Branches{Client: t.client}.View(ctx, t.Repo, ref)
 	switch {
 	case err == nil:
 		return ref, nil

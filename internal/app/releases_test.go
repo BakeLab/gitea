@@ -218,7 +218,6 @@ func TestReleaseCreateTagsTheCommitOfTheClone(t *testing.T) {
 	deps, _, _ := serverDeps(t, api.URL)
 	clone := map[string]string{
 		"remote": "origin", "remote get-url origin": api.URL + "/alice/project.git",
-		"rev-parse --verify --quiet HEAD^{commit}":                     local,
 		"rev-parse --verify --quiet --end-of-options HEAD^{commit}":    local,
 		"rev-parse --verify --quiet --end-of-options 1111111^{commit}": local,
 		"rev-parse --verify --quiet --end-of-options main^{commit}":    local,
@@ -233,7 +232,7 @@ func TestReleaseCreateTagsTheCommitOfTheClone(t *testing.T) {
 		require.NoError(t, Execute(context.Background(), deps, []string{"release", "create", "v1", "--target", ref}), ref)
 		require.Equal(t, want, target, ref)
 	}
-	clone["rev-parse --verify --quiet HEAD^{commit}"] = server
+	clone["rev-parse --verify --quiet --end-of-options HEAD^{commit}"] = server
 	target = "unset"
 	require.NoError(t, Execute(context.Background(), deps, []string{"release", "create", "v1"}))
 	require.Empty(t, target)
@@ -244,7 +243,7 @@ func TestReleaseCreateTagsTheCommitOfTheClone(t *testing.T) {
 		return terminal.ReleaseFormValues{Tag: "v1", Target: current.Target}, nil
 	})
 	require.NoError(t, Execute(context.Background(), deps, []string{"release", "create"}))
-	require.Equal(t, local, target)
+	require.Equal(t, server, target)
 }
 
 type releaseFormFunc func(heading string, current terminal.ReleaseFormValues) (terminal.ReleaseFormValues, error)

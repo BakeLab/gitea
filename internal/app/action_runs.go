@@ -128,11 +128,36 @@ func (a *application) fullCommitSHA(ctx context.Context, commit string) (string,
 	if commit == "" || isFullSHA(strings.ToLower(commit)) {
 		return strings.ToLower(commit), nil
 	}
-	full, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "--quiet", "--end-of-options", commit+"^{commit}")
-	if err != nil || !isFullSHA(full) {
+	full := a.localCommit(ctx, commit)
+	if full == "" {
 		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("--commit requires a full commit SHA, or a revision of the local clone; %q is neither", commit))
 	}
 	return full, nil
+}
+
+// localCommit returns the full SHA of revision rev in the local clone, or "" when it has none.
+func (a *application) localCommit(ctx context.Context, rev string) string {
+	full, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "--quiet", "--end-of-options", rev+"^{commit}")
+	if err != nil || !isFullSHA(full) {
+		return ""
+	}
+	return full
+}
+
+// expectedHead returns the commit --expect-head names: a revision of the local clone as its full
+// SHA, else a full or abbreviated SHA, which matches a run's commit by prefix.
+func (a *application) expectedHead(ctx context.Context, rev string) (string, error) {
+	lower := strings.ToLower(rev)
+	if isFullSHA(lower) {
+		return lower, nil
+	}
+	if full := a.localCommit(ctx, rev); full != "" {
+		return full, nil
+	}
+	if commitSHA.MatchString(lower) {
+		return lower, nil
+	}
+	return "", clierr.Wrap(clierr.Usage, fmt.Errorf("--expect-head requires a commit SHA, or a revision of the local clone; %q is neither", rev))
 }
 
 // isFullSHA reports whether s is a full SHA-1 or SHA-256 commit ID in lowercase hex.
@@ -557,41 +582,56 @@ func (a *application) accountNote(cmd *cobra.Command, t target, hint string) {
 
 func (a *application) runWatchCommand() *cobra.Command {
 	var interval, timeout time.Duration
+	var head string
 	cmd := &cobra.Command{
 		Use:   "watch [<run-id>]",
 		Short: "Watch a run until it completes",
 		Long: `Watch a run until it completes, refreshing its jobs and steps on a terminal.
 
 The command fails when the run completes without success. It polls on through an outage of the
-instance of up to 5 minutes.`,
+instance of up to 5 minutes.
+
+With --expect-head, it fails before waiting when the run is for another commit, such as one an
+earlier push triggered. A full or abbreviated SHA matches the start of the run's commit; another
+revision, such as HEAD, is resolved in the local clone.`,
 		Example: `# watch a run
 $ gt run watch 34
 # pick one of the runs in progress
 $ gt run watch
 # wait for a run in a script, for at most 10 minutes
-$ gt run watch 34 --timeout 10m && echo deployed`,
+$ gt run watch 34 --timeout 10m && echo deployed
+# wait only if the run is for the commit checked out
+$ gt run watch 34 --expect-head HEAD`,
 		Args:        usageArgs(cobra.MaximumNArgs(1)),
 		Annotations: map[string]string{"gt.arguments": runArguments},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if interval <= 0 || timeout <= 0 {
 				return clierr.Wrap(clierr.Usage, errors.New("--interval and --timeout must be positive"))
 			}
+			if cmd.Flags().Changed("expect-head") {
+				var err error
+				if head, err = a.expectedHead(cmd.Context(), head); err != nil {
+					return err
+				}
+			}
 			t, id, err := a.runArg(cmd, args, true)
 			if err != nil {
 				return err
 			}
-			return a.watchRun(cmd, t, id, interval, timeout)
+			return a.watchRun(cmd, t, id, head, interval, timeout)
 		},
 	}
 	cmd.Flags().DurationVarP(&interval, "interval", "i", 3*time.Second, "Refresh interval")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "Maximum time to wait")
+	cmd.Flags().StringVar(&head, "expect-head", "", "Fail unless the run is for this `commit`: a SHA, or a revision of the local clone")
 	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	return jsonOutput(cmd, jsonFields[services.Run]())
 }
 
 // watchRun polls run id until it completes, redrawing the run view on the alternate screen of a
-// terminal, or else reporting each change of state on stderr.
-func (a *application) watchRun(cmd *cobra.Command, t target, id int64, interval, timeout time.Duration) error {
+// terminal, or else reporting each change of state on stderr. A non-empty head fails the watch
+// unless the run's commit starts with it.
+func (a *application) watchRun(cmd *cobra.Command, t target, id int64, head string, interval, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
 	out := cmd.OutOrStdout()
@@ -609,6 +649,9 @@ func (a *application) watchRun(cmd *cobra.Command, t target, id int64, interval,
 	last := ""
 	service := services.Actions{Client: t.client, Repository: t.Repo}
 	run, err := service.Watch(ctx, id, interval, func(run services.Run) error {
+		if head != "" && !strings.HasPrefix(strings.ToLower(run.Commit), head) {
+			return headMismatch(run, head)
+		}
 		if live {
 			d := a.display()
 			_, err := fmt.Fprintf(out, "\x1b[H\x1b[J%s\n\n%s", terminal.Colorize("muted", fmt.Sprintf("Refreshing run status every %s. Press Ctrl+C to quit.", shortDuration(interval)), d.Color), renderRun(run, d, nil))
@@ -649,6 +692,11 @@ func (a *application) watchRun(cmd *cobra.Command, t target, id int64, interval,
 	}
 	a.done(cmd, "Run %d (%s) completed with %s%s", run.ID, run.Workflow, conclusion, took)
 	return nil
+}
+
+// headMismatch reports a run for another commit than --expect-head names.
+func headMismatch(run services.Run, head string) error {
+	return fmt.Errorf("run %d is for commit %s, not %s", run.ID, cmp.Or(terminal.SafeLine(run.Commit), "(unknown)"), head)
 }
 
 // runFailure fails for a completed run that did not succeed.

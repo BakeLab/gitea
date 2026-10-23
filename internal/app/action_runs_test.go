@@ -385,6 +385,32 @@ func TestRunWatchExitStatusAndTimeout(t *testing.T) {
 	}
 }
 
+func TestRunWatchExpectHeadFailsBeforeWaitingForAnotherCommit(t *testing.T) {
+	full := "f0c151dde0c0ef6c" + strings.Repeat("0", 24)
+	server, requests := actionsAPI(t, map[string]string{
+		"GET actions/workflows":    workflowsFixture,
+		"GET actions/runs/47":      strings.Replace(queuedRunFixture, `"f0c151dde0c0ef6c"`, `"`+full+`"`, 1),
+		"GET actions/runs/47/jobs": queuedJobsFixture,
+	})
+	deps, out, _ := actionsDeps(t, server.URL, false)
+	deps.Git = &fakeGit{results: map[string]string{"rev-parse --verify --quiet --end-of-options HEAD^{commit}": "209d545a" + strings.Repeat("0", 32)}}
+	watch := func(head string) error {
+		return Execute(context.Background(), deps, []string{"run", "watch", "47", "-R", "alice/project", "--interval=1ms", "--timeout=50ms", "--expect-head", head})
+	}
+	err := watch("HEAD")
+	require.EqualError(t, err, "run 47 is for commit "+full+", not 209d545a"+strings.Repeat("0", 32))
+	require.Equal(t, []string{"GET actions/workflows", "GET actions/runs/47", "GET actions/runs/47/jobs"}, *requests, "no waiting")
+	require.Empty(t, out.String())
+	require.EqualError(t, watch("209D545"), "run 47 is for commit "+full+", not 209d545")
+	// A matching full or abbreviated SHA waits for the run.
+	for _, head := range []string{"F0C151D", full} {
+		require.Equal(t, clierr.Canceled, clierr.ExitCode(watch(head)))
+	}
+	err = watch("main")
+	require.EqualError(t, err, `--expect-head requires a commit SHA, or a revision of the local clone; "main" is neither`)
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+}
+
 func TestRunWatchSummaryBypassesThePager(t *testing.T) {
 	server, _ := actionsAPI(t, map[string]string{
 		"GET actions/workflows":   workflowsFixture,
