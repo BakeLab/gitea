@@ -8,7 +8,6 @@
 - Never rewrite git history unless asked, update PRs with new commits and normal push
 - Comments: write almost none, short and preferably same-line, explaining why for a future reader. Never narrate code, the change or the prompt. Preserve existing ones that still apply
 - Add the current year to copyright headers of new `.go` files
-- Never edit `CHANGELOG.md`, it is generated
 - All Gitea API access goes through `internal/services` on `gitea.dev/sdk`; `internal/app` never calls the API. Raw requests are only for SDK gaps, in `raw.go`, marked `// TODO(sdk): <missing piece>`
 - Return usage errors as `clierr.Wrap(clierr.Usage, …)` before any request, worded like "X requires Y" or "X cannot be combined with Y"; `TestUsageErrorsPrecedeRequests` checks this
 - Keep help text, examples and `JSON FIELDS` in sync with behavior. JSON goes to stdout, diagnostics and prompts to stderr; text from the server reaches a terminal only through `terminal.SafeWriter`
