@@ -235,8 +235,11 @@ func (a *application) releaseCreateCommand() *cobra.Command {
 the tag at --target (the default branch) when it does not exist yet. The title defaults to the tag.
 
 gt never pushes: commits and tags that only exist in your clone are not on the server, so push them
-first (git push <remote> <tag>). A tag that only exists in your clone is refused unless --target
-says where Gitea creates it; --verify-tag refuses any tag that is not on the server yet.`,
+first (git push <remote> <tag>). In a clone, a tag that only exists locally is refused unless
+--target says where Gitea creates it, and a new tag without --target is refused unless HEAD is the
+head of the default branch on the server. A --target that is no branch on the server, such as HEAD
+or a short SHA, names the commit it resolves to in the clone. --verify-tag refuses any tag that is
+not on the server yet.`,
 		Example: `# Create a release with notes from a file and two assets
 $ gt release create v1.0.0 dist/gt-linux dist/gt-darwin --notes-file CHANGELOG.md
 
@@ -277,8 +280,17 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 			if err != nil {
 				return err
 			}
+			// Only the clone of the selected repository says anything about its tags and commits.
+			remote := a.cloneRemote(cmd.Context(), target)
 			service := services.Releases{Client: target.client, Repository: target.Repo}
-			if err := a.checkReleaseTag(cmd, target, service, fields.tag, opts.Target != nil, verifyTag); err != nil {
+			if opts.Target != nil {
+				resolved, err := a.releaseTarget(cmd.Context(), target, remote, fields.target)
+				if err != nil {
+					return err
+				}
+				opts.Target = &resolved
+			}
+			if err := a.checkReleaseTag(cmd.Context(), target, service, remote, fields.tag, opts.Target != nil, verifyTag); err != nil {
 				return err
 			}
 			if fields.editor {
@@ -294,7 +306,7 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 			}
 			item, err := service.Create(cmd.Context(), opts)
 			if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Kind == "target" {
-				if hint := a.pushHint(cmd.Context(), target, *opts.Target); hint != "" {
+				if hint := a.pushHint(cmd.Context(), target, fields.target); hint != "" {
 					err = explain(err, "%s; %s", err, hint)
 				}
 			}
@@ -321,28 +333,68 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 }
 
 // checkReleaseTag guards against a release whose tag Gitea would create from the default branch
-// instead of from the local commit the tag names: a tag that only exists locally is refused unless
-// --target names where to create it, and --verify-tag refuses any tag the server lacks.
-func (a *application) checkReleaseTag(cmd *cobra.Command, t target, service services.Releases, tag string, hasTarget, verify bool) error {
-	// Only the clone of the selected repository says anything about its tags.
-	remote := a.cloneRemote(cmd.Context(), t)
-	local := remote != "" && a.localRefExists(cmd.Context(), "refs/tags/"+tag)
-	if !verify && (!local || hasTarget) {
+// instead of from the local commit: a tag that only exists locally is refused unless --target
+// names where to create it, a new tag without --target is refused unless HEAD is the head of the
+// default branch, and --verify-tag refuses any tag the server lacks.
+func (a *application) checkReleaseTag(ctx context.Context, t target, service services.Releases, remote, tag string, hasTarget, verify bool) error {
+	if !verify && (remote == "" || hasTarget) {
 		return nil
 	}
-	exists, err := service.TagExists(cmd.Context(), tag)
+	exists, err := service.TagExists(ctx, tag)
 	if err != nil || exists {
 		return err
 	}
-	hint := "create it first or drop --verify-tag"
-	if local {
-		hint = "push it first: git push " + remote + " " + tag
+	missing := services.NotFound("tag", tag, t.Repo)
+	switch {
+	case remote != "" && a.localRefExists(ctx, "refs/tags/"+tag):
+		hint := "push it first: git push " + remote + " " + tag
 		if !verify {
 			hint += ", or pass --target to create it on the server"
 		}
+		return explain(missing, "%s; %s", missing, hint)
+	case verify:
+		return explain(missing, "%s; create it first or drop --verify-tag", missing)
 	}
-	missing := services.NotFound("tag", tag, t.Repo)
-	return explain(missing, "%s; %s", missing, hint)
+	head, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	if err != nil || head == "" {
+		return nil
+	}
+	repository, err := services.Repositories{Client: t.client}.View(ctx, t.Repo)
+	if err != nil || repository.DefaultBranch == "" {
+		return err
+	}
+	branch, err := services.Branches{Client: t.client}.View(ctx, t.Repo, repository.DefaultBranch)
+	if services.IsNotFound(err) || err == nil && branch.SHA == head {
+		return nil // Gitea itself refuses a release in an empty repository.
+	}
+	if err != nil {
+		return err
+	}
+	return explain(missing, "%s, and Gitea would create it at %s (%s), not at HEAD (%s); pass --target HEAD to create it at HEAD, or --target %s",
+		missing, repository.DefaultBranch, shortSHA(branch.SHA), shortSHA(head), repository.DefaultBranch)
+}
+
+// releaseTarget resolves a --target that Gitea would resolve on the server, such as HEAD or a
+// short SHA, to the commit it names in the clone; a branch of the server stays as it is.
+func (a *application) releaseTarget(ctx context.Context, t target, remote, ref string) (string, error) {
+	if isFullSHA(ref) || remote == "" {
+		return ref, nil
+	}
+	sha, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	if err != nil || !isFullSHA(sha) {
+		return ref, nil
+	}
+	if ref == "HEAD" { // no branch can be named HEAD
+		return sha, nil
+	}
+	_, err = services.Branches{Client: t.client}.View(ctx, t.Repo, ref)
+	switch {
+	case err == nil:
+		return ref, nil
+	case services.IsNotFound(err):
+		return sha, nil
+	}
+	return "", err
 }
 
 // pushHint tells how to publish a ref that only the local clone has, or returns "".

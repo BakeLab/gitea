@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -188,6 +189,52 @@ func TestReleaseCreateRefusesATagOnlyTheCloneHas(t *testing.T) {
 	deps.Git = &fakeGit{results: map[string]string{`config --get-regexp ^remote\..*\.url$`: "remote.upstream.url " + server.URL + "/alice/project.git", "rev-parse --verify --quiet refs/tags/v1": "abc"}}
 	err = Execute(context.Background(), deps, []string{"release", "create", "v1", "-R", "alice/project"})
 	require.EqualError(t, err, "tag v1 not found in alice/project; push it first: git push upstream v1, or pass --target to create it on the server")
+}
+
+func TestReleaseCreateTagsTheCommitOfTheClone(t *testing.T) {
+	const local, server = "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"
+	var requests []string
+	var target any
+	api := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","default_branch":"main"}`))
+		case "/api/v1/repos/alice/project/branches/main":
+			_, _ = w.Write([]byte(`{"name":"main","commit":{"id":"` + server + `"}}`))
+		case "/api/v1/repos/alice/project/releases":
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			target = body["target_commitish"]
+			_, _ = w.Write([]byte(`{"id":9,"tag_name":"v1"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		}
+	}))
+	defer api.Close()
+	deps, _, _ := serverDeps(t, api.URL)
+	clone := map[string]string{
+		"remote": "origin", "remote get-url origin": api.URL + "/alice/project.git",
+		"rev-parse --verify --quiet HEAD^{commit}":                     local,
+		"rev-parse --verify --quiet --end-of-options HEAD^{commit}":    local,
+		"rev-parse --verify --quiet --end-of-options 1111111^{commit}": local,
+		"rev-parse --verify --quiet --end-of-options main^{commit}":    local,
+	}
+	deps.Git = &fakeGit{results: clone}
+	// Without --target, Gitea would tag the head of the default branch, which is not the local HEAD.
+	err := Execute(context.Background(), deps, []string{"release", "create", "v1"})
+	require.EqualError(t, err, "tag v1 not found in alice/project, and Gitea would create it at main (2222222), not at HEAD (1111111); pass --target HEAD to create it at HEAD, or --target main")
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/tags/v1", "GET /api/v1/repos/alice/project", "GET /api/v1/repos/alice/project/branches/main"}, requests)
+	// Revisions Gitea would resolve on the server name the commit of the clone; a server branch stays.
+	for ref, want := range map[string]string{"HEAD": local, "1111111": local, "main": "main"} {
+		require.NoError(t, Execute(context.Background(), deps, []string{"release", "create", "v1", "--target", ref}), ref)
+		require.Equal(t, want, target, ref)
+	}
+	clone["rev-parse --verify --quiet HEAD^{commit}"] = server
+	target = "unset"
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "create", "v1"}))
+	require.Empty(t, target)
 }
 
 func TestReleaseUploadsRefuseFilesWithTheSameName(t *testing.T) {
