@@ -395,7 +395,7 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to")
 	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339 or Unix timestamp; only the date counts, as the end of that day in UTC")
 	flags.StringArrayVar(&attachmentPaths, "attachment", nil, "`File` to attach after creation (repeatable)")
-	flags.StringArrayVarP(&projects, "project", "p", nil, "Add the issue to the project with this `title`, the repository's or its organization's (repeatable)")
+	flags.StringArrayVarP(&projects, "project", "p", nil, "Add the issue to the project with this `title`, the repository's or its owner's (repeatable)")
 	flags.BoolVarP(&web, "web", "w", false, "Continue in the browser with the new-issue page")
 	_ = cmd.RegisterFlagCompletionFunc("label", a.completeLabels())
 	_ = cmd.RegisterFlagCompletionFunc("assignee", a.completeUsers())

@@ -149,3 +149,36 @@ func TestPullEditChangesProjectsOnlyOnceTheEditSucceeded(t *testing.T) {
 	require.ErrorContains(t, err, `pull request #12 was edited, but follow-up steps failed: add to project "Board"`)
 	require.JSONEq(t, `{"title":"Fix"}`, out.String())
 }
+
+func TestIssueEditAddsToProjectsOfTheUserOwningTheRepository(t *testing.T) {
+	var mutations []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/notes/issues/3", "GET /api/v1/repos/bob/notes/issues/3":
+			_, _ = w.Write([]byte(`{"id":71,"number":3,"title":"Todo"}`))
+		case "GET /api/v1/repos/alice/notes/projects", "GET /api/v1/repos/bob/notes/projects":
+			writeFirstPage(w, r, `[]`)
+		case "GET /api/v1/user/projects":
+			writeFirstPage(w, r, `[{"id":8,"title":"Personal"}]`)
+		case "GET /api/v1/user/projects/8/columns":
+			writeFirstPage(w, r, `[{"id":30,"title":"Backlog","default":true}]`)
+		case "GET /api/v1/user/projects/8/columns/30/issues":
+			writeFirstPage(w, r, `[]`)
+		case "POST /api/v1/user/projects/8/columns/30/issues/71":
+			mutations = append(mutations, r.Method+" "+r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		case "GET /api/v1/orgs/alice/projects", "GET /api/v1/orgs/bob/projects":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "3", "-R", "alice/notes", "--add-project", "Personal"}))
+	require.Equal(t, []string{"POST /api/v1/user/projects/8/columns/30/issues/71"}, mutations)
+	// Gitea lets only the user who owns a repository put its issues on their projects.
+	err := Execute(context.Background(), deps, []string{"issue", "edit", "3", "-R", "bob/notes", "--add-project", "Personal"})
+	require.ErrorContains(t, err, `project "Personal" not found in bob/notes`)
+}

@@ -29,7 +29,7 @@ func validateProjectChanges(add, remove []string) error {
 }
 
 // projectChanges are the project boards that issues or pull requests are put on or taken off,
-// resolved once for all of them; projects of the repository come before its organization's.
+// resolved once for all of them; projects of the repository come before its owner's.
 type projectChanges struct {
 	service     services.Projects
 	add, remove []services.Board

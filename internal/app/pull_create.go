@@ -65,7 +65,7 @@ commands on the branch keep selecting the repository rather than the fork.`, Ann
 	create.Flags().StringSliceVarP(&f.reviewers, "reviewer", "r", nil, "Request reviews from users; @me for yourself")
 	create.Flags().StringSliceVar(&f.reviewerTeams, "reviewer-team", nil, "Request reviews from teams within the repository's organization")
 	create.Flags().StringArrayVar(&f.attachments, "attachment", nil, "Attach a file to the pull request (repeatable)")
-	create.Flags().StringArrayVarP(&f.projects, "project", "p", nil, "Add the pull request to the project with this `title`, the repository's or its organization's (repeatable)")
+	create.Flags().StringArrayVarP(&f.projects, "project", "p", nil, "Add the pull request to the project with this `title`, the repository's or its owner's (repeatable)")
 	create.Flags().StringVar(&f.topic, "topic", "", "AGit topic name (default: head branch); requires --agit")
 	_ = create.RegisterFlagCompletionFunc("assignee", a.completeUsers())
 	_ = create.RegisterFlagCompletionFunc("reviewer", a.completeUsers())

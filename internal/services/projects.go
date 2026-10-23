@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,7 +17,7 @@ import (
 )
 
 // Projects places the issues and pull requests of a repository on its project boards, or on
-// those of the organization that owns it.
+// those of the organization or user that owns it.
 type Projects struct {
 	Client     *transport.Client
 	Repository string
@@ -32,7 +33,7 @@ type Board struct {
 }
 
 // Boards resolves the open projects titled titles, a title's case mattering only to tell two
-// projects apart: the repository's, else its organization's. It loads each board once, however
+// projects apart: the repository's, else its owner's. It loads each board once, however
 // many issues are then put on it or taken off; withIssues also reads which issues each holds,
 // which issues that are not new need.
 func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) ([]Board, error) {
@@ -45,17 +46,7 @@ func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) 
 	}
 	find := NameOrID[*gitea.Project]{Kind: "project", Scope: s.Repository, ByName: true, NoIDs: true, ID: func(p *gitea.Project) int64 { return p.ID }, Name: func(p *gitea.Project) string { return p.Title }}
 	boards := make([]Board, len(titles))
-	for _, scope := range []gitea.ProjectScope{gitea.RepoProjectScope(owner, repo), gitea.OrgProjectScope(owner)} {
-		if !slices.ContainsFunc(boards, func(b Board) bool { return b.Project == nil }) {
-			break
-		}
-		projects, err := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Project, *gitea.Response, error) {
-			return c.Projects.ListProjects(ctx, scope, gitea.ListProjectsOptions{ListOptions: list})
-		})
-		// A user rather than an organization owns the repository, or projects are off.
-		if IsNotFound(err) {
-			continue
-		}
+	for listed, err := range s.scopes(ctx, owner, repo, gitea.StateOpen) {
 		if err != nil {
 			return nil, err
 		}
@@ -63,14 +54,17 @@ func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) 
 			if boards[i].Project != nil {
 				continue
 			}
-			project, err := find.Find(projects, title)
+			project, err := find.Find(listed.projects, title)
 			if _, missing := errors.AsType[*NotFoundError](err); missing {
 				continue
 			}
 			if err != nil {
 				return nil, err
 			}
-			boards[i] = Board{scope: scope, Project: project}
+			boards[i] = Board{scope: listed.scope, Project: project}
+		}
+		if !slices.ContainsFunc(boards, func(b Board) bool { return b.Project == nil }) {
+			break
 		}
 	}
 	for i, title := range titles {
@@ -96,18 +90,53 @@ func (s Projects) Boards(ctx context.Context, titles []string, withIssues bool) 
 // missing reports the open project titled title as not found, or as closed when a closed one has
 // the title.
 func (s Projects) missing(ctx context.Context, title, owner, repo string) error {
-	for _, scope := range []gitea.ProjectScope{gitea.RepoProjectScope(owner, repo), gitea.OrgProjectScope(owner)} {
-		closed, err := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Project, *gitea.Response, error) {
-			return c.Projects.ListProjects(ctx, scope, gitea.ListProjectsOptions{ListOptions: list, State: gitea.StateClosed})
-		})
-		if err != nil && !IsNotFound(err) {
+	for listed, err := range s.scopes(ctx, owner, repo, gitea.StateClosed) {
+		if err != nil {
 			return err
 		}
-		if slices.ContainsFunc(closed, func(p *gitea.Project) bool { return strings.EqualFold(p.Title, title) }) {
+		if slices.ContainsFunc(listed.projects, func(p *gitea.Project) bool { return strings.EqualFold(p.Title, title) }) {
 			return fmt.Errorf("project %q is closed", title)
 		}
 	}
 	return NotFound("project", strconv.Quote(title), s.Repository)
+}
+
+// scopedProjects are the projects of one scope.
+type scopedProjects struct {
+	scope    gitea.ProjectScope
+	projects []*gitea.Project
+}
+
+// scopes lists the projects in state that the issues of the repository owner/repo can be put on:
+// the repository's, then its owner's. Gitea changes a user's projects only for that user, so
+// those of a user who owns the repository count for that user alone.
+func (s Projects) scopes(ctx context.Context, owner, repo string, state gitea.StateType) iter.Seq2[scopedProjects, error] {
+	return func(yield func(scopedProjects, error) bool) {
+		list := func(scope gitea.ProjectScope) (scopedProjects, error) {
+			projects, err := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Project, *gitea.Response, error) {
+				return c.Projects.ListProjects(ctx, scope, gitea.ListProjectsOptions{ListOptions: list, State: state})
+			})
+			return scopedProjects{scope, projects}, err
+		}
+		listed, err := list(gitea.RepoProjectScope(owner, repo))
+		// Projects are off for the repository.
+		if !IsNotFound(err) && !yield(listed, err) {
+			return
+		}
+		listed, err = list(gitea.OrgProjectScope(owner))
+		if IsNotFound(err) {
+			var account string
+			if account, err = CurrentAccount(ctx, s.Client); err == nil {
+				if !strings.EqualFold(account, owner) {
+					return
+				}
+				listed, err = list(gitea.CurrentUserProjectScope())
+			}
+		}
+		if !IsNotFound(err) {
+			yield(listed, err)
+		}
+	}
 }
 
 // load reads the columns of board and, withIssues, the issues each holds.
