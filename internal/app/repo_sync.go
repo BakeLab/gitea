@@ -42,6 +42,11 @@ $ gt repo sync bob/project`,
 			if cmd.Flags().Changed("branch") && strings.TrimSpace(branch) == "" {
 				return clierr.Wrap(clierr.Usage, errors.New("--branch cannot be empty"))
 			}
+			if branch != "" {
+				if err := validateBranch(branch); err != nil {
+					return err
+				}
+			}
 			if err := a.repositoryArgument(args); err != nil {
 				return err
 			}

@@ -336,7 +336,8 @@ access proxy needs, "Name:" removes it, and a value of $NAME or ${NAME} is read 
 environment variable when sent; client_cert and client_key name the PEM files of a TLS client
 certificate for an instance that requires one; without client_key, the key is read from
 client_cert.
-Account settings: ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint.`,
+Account settings: ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint. As in Git,
+GIT_SSH_COMMAND in the environment takes precedence over ssh_key.`,
 		Example: `$ gt config set editor "code --wait"
 $ gt config set ssh_host git.example.com:2222 --host https://example.com
 $ gt config set ssh_key ~/.ssh/id_ed25519 --host https://example.com --user alice`,

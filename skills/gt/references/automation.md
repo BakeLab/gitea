@@ -2,8 +2,9 @@
 
 ## Non-interactive defaults
 
-- `--no-input` disables prompts, the editor and the browser. Without a terminal gt already
-  does not prompt, but `--no-input` makes the intent explicit and fails fast.
+- `--no-input` disables prompts and the implicit editor and browser. Without a terminal gt
+  already does not prompt, but `--no-input` makes the intent explicit and fails fast. An
+  explicit `--editor` or `--web` still opens the editor or browser, so do not pass them.
 - A confirmation that cannot be asked fails with exit code 2 and
   `confirmation required…; rerun with --yes`. Add `--yes` only for actions that were approved.
 - `--json` and `--jq` give stable output; text output may change between releases.

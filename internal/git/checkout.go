@@ -65,7 +65,7 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 	}
 	if !options.Detached {
 		if _, err := run("check-ref-format", "--branch", options.Branch); err != nil {
-			return CheckoutResult{}, fmt.Errorf("invalid checkout branch: %w", err)
+			return CheckoutResult{}, fmt.Errorf("invalid branch name %q", options.Branch)
 		}
 	}
 	status, err := run("status", "--porcelain=v1", "--untracked-files=no")

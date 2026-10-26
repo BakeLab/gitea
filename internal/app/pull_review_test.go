@@ -538,6 +538,7 @@ func TestReviewRefusesOwnApprovalBeforeTheEditor(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"EDITOR": "vi"})
 	editor := &failingPathEditor{}
 	deps.Editor = editor
 	err := Execute(context.Background(), deps, []string{"pr", "review", "13", "-R", "alice/x", "--approve", "--editor"})

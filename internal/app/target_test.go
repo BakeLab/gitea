@@ -363,6 +363,13 @@ func TestRepositoryDiscoveryFindsGiteaRemoteBesideAnotherForge(t *testing.T) {
 	require.EqualError(t, err, "--host "+server.URL+" does not match the instance https://gitea.com of remote origin")
 	err = Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "-R", "https://gitea.com/carol/project", "--host", server.URL})
 	require.EqualError(t, err, "--host "+server.URL+" cannot be combined with https://gitea.com from --repo")
+	err = Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "--remote", "nope"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.EqualError(t, err, `Git remote "nope" does not exist`)
+	deps.Git = &fakeGit{results: map[string]string{"remote": ""}}
+	err = Execute(context.Background(), deps, []string{"repo", "view", "--no-input"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.ErrorContains(t, err, "repository required")
 }
 
 func TestRepositoryArgumentsAcceptShorthands(t *testing.T) {

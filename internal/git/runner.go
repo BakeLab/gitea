@@ -76,25 +76,30 @@ func networkSubcommand(args []string) bool {
 // batchSSHEnv makes SSH fail instead of prompting. A per-operation core.sshCommand
 // is preserved, and a GIT_SSH program (such as plink) is left untouched.
 func batchSSHEnv(ctx context.Context, dir string, env, args []string) []string {
-	sshCommand, sshProgram := "", ""
+	sshCommand, sshProgram, variant := "", "", ""
 	for _, entry := range env {
 		if value, ok := strings.CutPrefix(entry, "GIT_SSH_COMMAND="); ok {
 			sshCommand = value
 		} else if value, ok := strings.CutPrefix(entry, "GIT_SSH="); ok {
 			sshProgram = value
+		} else if value, ok := strings.CutPrefix(entry, "GIT_SSH_VARIANT="); ok {
+			variant = value
 		}
 	}
-	if sshCommand == "" {
+	config := func(key string) string {
 		configArgs := []string{}
 		for index := 0; index+1 < len(args) && args[index] == "-c"; index += 2 {
 			configArgs = append(configArgs, args[index:index+2]...)
 		}
-		configArgs = append(configArgs, "config", "--get", "core.sshCommand")
-		config := exec.CommandContext(ctx, "git", configArgs...)
-		config.Dir = dir
-		config.Env = env
-		data, _ := config.Output()
-		sshCommand = strings.TrimSpace(string(data))
+		configArgs = append(configArgs, "config", "--get", key)
+		command := exec.CommandContext(ctx, "git", configArgs...)
+		command.Dir = dir
+		command.Env = env
+		data, _ := command.Output()
+		return strings.TrimSpace(string(data))
+	}
+	if sshCommand == "" {
+		sshCommand = config("core.sshCommand")
 	}
 	if sshCommand == "" {
 		if sshProgram != "" {
@@ -102,29 +107,28 @@ func batchSSHEnv(ctx context.Context, dir string, env, args []string) []string {
 		}
 		sshCommand = "ssh"
 	}
-	if plink(env, sshCommand) {
+	if variant == "" {
+		variant = config("ssh.variant")
+	}
+	if plink(variant, sshCommand) {
 		return setEnv(env, "GIT_SSH_COMMAND", sshCommand+" -batch")
 	}
 	return setEnv(env, "GIT_SSH_COMMAND", sshCommand+" -oBatchMode=yes")
 }
 
 // plink reports whether Git treats sshCommand as PuTTY's plink, which rejects OpenSSH options.
-// Like Git, it honors GIT_SSH_VARIANT and otherwise looks at the program's base name.
-func plink(env []string, sshCommand string) bool {
-	variant := ""
-	for _, entry := range env {
-		if value, ok := strings.CutPrefix(entry, "GIT_SSH_VARIANT="); ok {
-			variant = value
-		}
-	}
-	if variant == "" {
+// Like Git, it honors the variant from GIT_SSH_VARIANT or ssh.variant and otherwise looks at the
+// program's base name.
+func plink(variant, sshCommand string) bool {
+	variant = strings.ToLower(variant)
+	if variant == "" || variant == "auto" {
 		program, _, _ := strings.Cut(sshCommand, " ")
 		if quote := sshCommand[0]; quote == '"' || quote == '\'' {
 			program, _, _ = strings.Cut(sshCommand[1:], string(quote))
 		}
 		variant = strings.TrimSuffix(strings.ToLower(program[strings.LastIndexAny(program, `/\`)+1:]), ".exe")
 	}
-	return variant == "plink" || variant == "tortoiseplink"
+	return variant == "plink" || variant == "putty" || variant == "tortoiseplink"
 }
 
 // Output runs Git, suppressing credential prompts when interaction is disabled.

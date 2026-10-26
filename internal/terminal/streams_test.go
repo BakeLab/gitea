@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -225,6 +226,10 @@ func (s *screen) String() string {
 	return s.text.String()
 }
 
+// csiSequence matches the escape sequences, such as colors from the environment, that split the
+// text a step waits for.
+var csiSequence = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]")
+
 // keyStep sends key once the form drew show after the previous step's key.
 type keyStep struct{ show, key string }
 
@@ -245,7 +250,7 @@ func screenPrompter(t *testing.T, steps ...keyStep) (*FormPrompter, *screen, con
 		defer out.Close()
 		shown := 0
 		for _, step := range steps {
-			for !strings.Contains(drawn.String()[shown:], step.show) {
+			for !strings.Contains(csiSequence.ReplaceAllString(drawn.String()[shown:], ""), step.show) {
 				select {
 				case <-ctx.Done():
 					return

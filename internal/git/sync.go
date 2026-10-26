@@ -41,7 +41,7 @@ func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResul
 		return SyncResult{}, errors.New("sync requires a remote and branch")
 	}
 	if _, err := run("check-ref-format", "--branch", opts.Branch); err != nil {
-		return SyncResult{}, err
+		return SyncResult{}, fmt.Errorf("invalid branch name %q", opts.Branch)
 	}
 	if err := requireWorkTree(run, "sync"); err != nil {
 		return SyncResult{}, err

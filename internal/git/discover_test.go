@@ -45,7 +45,7 @@ func TestDiscoverRemote(t *testing.T) {
 		{name: "origin remote", runner: discoverRunner{"remote": "fork\norigin"}, want: "origin"},
 		{name: "sole remote", runner: discoverRunner{"remote": "fork"}, want: "fork"},
 		{name: "ambiguous", runner: discoverRunner{"remote": "one\ntwo"}, wantErr: ErrAmbiguousRemote},
-		{name: "no remotes", runner: discoverRunner{"remote": ""}, wantErr: ErrAmbiguousRemote},
+		{name: "no remotes", runner: discoverRunner{"remote": ""}, wantErr: errNoRemote},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			remote, err := DiscoverRemote(context.Background(), test.runner, "/work", test.preferred, nil)

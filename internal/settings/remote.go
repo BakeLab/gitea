@@ -11,17 +11,27 @@ import (
 	"strings"
 )
 
-// RemoteIsSSH reports whether a Git remote uses SSH: an ssh:// URL or an scp-style user@host:path.
+// RemoteIsSSH reports whether a Git remote uses SSH: an ssh:// URL or an scp-style [user@]host:path.
 func RemoteIsSSH(remote string) bool {
 	return strings.HasPrefix(remote, "ssh://") || scpLike(remote)
 }
 
+// scpLike follows Git's rule for [user@]host:path, except that HOST:PORT/OWNER/NAME without a user
+// stays a repository shorthand.
 func scpLike(remote string) bool {
-	return !strings.Contains(remote, "://") && strings.Contains(remote, "@")
+	host, path, ok := strings.Cut(remote, ":")
+	if !ok || host == "" || strings.ContainsAny(host, `/\`) || strings.Contains(remote, "://") {
+		return false
+	}
+	if len(host) == 1 && (strings.HasPrefix(path, "/") || strings.HasPrefix(path, `\`)) {
+		return false // A Windows drive such as C:\repo.
+	}
+	port, _, _ := strings.Cut(path, "/")
+	return strings.Contains(host, "@") || port == "" || strings.Trim(port, "0123456789") != ""
 }
 
-// ParseRemote parses a Git remote URL, reading scp-style user@host:path as ssh://user@host/path
-// without interpreting shell syntax.
+// ParseRemote parses a Git remote URL, reading scp-style [user@]host:path as
+// ssh://[user@]host/path without interpreting shell syntax.
 func ParseRemote(raw string) (*url.URL, error) {
 	if user, path, ok := strings.Cut(raw, ":"); ok && scpLike(raw) {
 		raw = "ssh://" + user + "/" + path

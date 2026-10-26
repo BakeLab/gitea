@@ -49,6 +49,8 @@ func TestBatchSSHUsesPlinkOption(t *testing.T) {
 		}
 		require.Contains(t, batchSSHEnv(context.Background(), "", env, []string{"fetch"}), "GIT_SSH_COMMAND="+tc.want, tc.command)
 	}
+	env := []string{"GIT_SSH_COMMAND=/usr/local/bin/wrapper"}
+	require.Contains(t, batchSSHEnv(context.Background(), "", env, []string{"-c", "ssh.variant=plink", "fetch"}), "GIT_SSH_COMMAND=/usr/local/bin/wrapper -batch")
 }
 
 func TestNetworkSubcommand(t *testing.T) {

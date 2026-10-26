@@ -132,6 +132,11 @@ func (a *application) resolveTarget(ctx context.Context, requireRepo, authentica
 }
 
 func (a *application) resolveRequest(ctx context.Context, req targetRequest) (target, error) {
+	if a.options.editor {
+		if _, _, err := a.editor(); err != nil {
+			return target{}, err
+		}
+	}
 	t, err := a.connect(ctx, req)
 	if err != nil {
 		return t, err
@@ -408,6 +413,9 @@ func (a *application) discoverRepository(ctx context.Context, t *target, s setti
 	raw, known := urls[remote]
 	if !known {
 		if raw, err = probe("remote", "get-url", remote); err != nil {
+			if a.options.remote != "" {
+				return "", clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %q does not exist", remote))
+			}
 			return "", fmt.Errorf("cannot read the URL of Git remote %q: %w", remote, err)
 		}
 		raw = settings.WithoutCredentials(raw)

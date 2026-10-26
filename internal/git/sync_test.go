@@ -195,7 +195,7 @@ func TestSyncBranchValidatesItsInput(t *testing.T) {
 	_, err := SyncBranch(context.Background(), f.runner, SyncOptions{Directory: f.work, Remote: "origin"})
 	require.ErrorContains(t, err, "requires a remote and branch")
 	_, err = f.sync("bad..name")
-	require.Error(t, err)
+	require.EqualError(t, err, `invalid branch name "bad..name"`)
 	_, err = SyncBranch(context.Background(), f.runner, SyncOptions{Directory: t.TempDir(), Remote: "origin", Branch: "main"})
 	require.Error(t, err)
 }

@@ -64,6 +64,14 @@ request.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": 
 			if cmd.Flags().Changed("branch") && strings.TrimSpace(branch) == "" {
 				return clierr.Wrap(clierr.Usage, errors.New("--branch cannot be empty"))
 			}
+			if err := validateBranches(targets); err != nil {
+				return err
+			}
+			if branch != "" {
+				if err := validateBranch(branch); err != nil {
+					return err
+				}
+			}
 		}
 		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 0 {
 			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))

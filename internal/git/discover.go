@@ -14,6 +14,8 @@ import (
 // ErrAmbiguousRemote reports that repository discovery cannot choose between several remotes.
 var ErrAmbiguousRemote = errors.New("ambiguous repository: select --remote or --repo")
 
+var errNoRemote = errors.New("no Git remote")
+
 // DiscoverRemote names the remote used for repository discovery: preferred when it exists, then
 // the base remote pr checkout recorded for the current branch, the current branch's upstream
 // remote unless it is a pulls/<owner>/<repo> head remote or origin beside an upstream remote (a fork clone), then upstream, origin, or the only remote.
@@ -87,7 +89,10 @@ func DiscoverRemote(ctx context.Context, runner Runner, dir, preferred string, r
 	if fallback != "" {
 		return fallback, nil
 	}
-	if len(available) == 1 {
+	switch len(available) {
+	case 0:
+		return "", errNoRemote
+	case 1:
 		return available[0], nil
 	}
 	return "", ErrAmbiguousRemote

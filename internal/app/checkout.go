@@ -39,7 +39,10 @@ func (a *application) remoteCredentials(ctx context.Context, t target, remote st
 func (a *application) checkoutRemote(ctx context.Context, target target, snapshot settings.Snapshot) (string, error) {
 	if explicit := a.options.remote; explicit != "" {
 		raw, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", explicit)
-		if err == nil && target.ownsRemote(raw) {
+		if err != nil {
+			return "", clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %q does not exist", explicit))
+		}
+		if target.ownsRemote(raw) {
 			return explicit, nil
 		}
 		return "", errors.New("selected remote does not match the resolved instance and repository")
@@ -81,6 +84,11 @@ that git push updates it and pr commands without an argument select the pull req
 		}
 		if cmd.Flags().Changed("branch") && strings.TrimSpace(branch) == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--branch cannot be empty"))
+		}
+		if branch != "" {
+			if err := validateBranch(branch); err != nil {
+				return err
+			}
 		}
 		if !a.insideClone(cmd.Context()) {
 			return clierr.Wrap(clierr.Usage, errors.New("pr checkout must run inside a Git clone"))

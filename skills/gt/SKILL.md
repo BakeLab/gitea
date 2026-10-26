@@ -29,7 +29,8 @@ instead of assuming `gh` behaviour.
 
 ## Rules for agents
 
-- Pass `--no-input` on every command so gt never waits for a prompt or opens an editor.
+- Pass `--no-input` on every command so gt never waits for a prompt or opens an editor on its
+  own, and never pass `--editor` or `--web`, which open one even then.
 - Read with `--json` and filter with `--jq`; the text output is for people and may change.
   `--jq` runs inside gt, so `jq` need not be installed, and strings print without quotes.
 - An unknown `--json` field fails and names the available ones; `gt help formatting`

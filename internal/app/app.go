@@ -82,6 +82,8 @@ type options struct {
 	json, jq                      string
 	noInput, interactive, yes     bool
 	debug                         bool
+	// editor is the command's --editor, which needs a configured editor before any request.
+	editor bool
 }
 
 type application struct {
@@ -196,6 +198,11 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		if _, err := a.colorEnvironment(); err != nil {
 			return err
 		}
+		if a.options.cwd != "" {
+			if info, err := os.Stat(a.options.cwd); err != nil || !info.IsDir() {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("--cwd %s is not a directory", a.options.cwd))
+			}
+		}
 		if cmd.Flags().Changed("user") && strings.TrimSpace(a.options.user) == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--user cannot be empty"))
 		}
@@ -209,6 +216,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 				}
 			}
 		}
+		a.options.editor, _ = cmd.Flags().GetBool("editor")
 		if offline(cmd) {
 			return nil
 		}
