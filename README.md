@@ -116,6 +116,24 @@ man (gt man | psub)
 gt man --output-file ./gt.man
 ```
 
+### Agent skill
+
+An [agent skill](https://agentskills.io) teaches coding agents to drive `gt`: checking CI and
+reading the logs of failed jobs, turning an issue into a pull request, commenting and reviewing.
+It replaces [gitea-tea-skill](https://gitea.com/gitea/gitea-tea-skill). Install it with
+[skills](https://github.com/vercel-labs/skills):
+
+```shell
+# for the current project
+npx skills add https://gitea.com/gitea/cli.git --skill gt
+
+# for all your projects
+npx skills add https://gitea.com/gitea/cli.git --skill gt -g
+
+# after upgrading gt
+npx skills update gt
+```
+
 ## Compilation
 
 Make sure you have a current Go version installed (1.27 or newer).
