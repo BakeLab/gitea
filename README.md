@@ -36,7 +36,7 @@ There are different ways to get `gt`:
    checksum and installs `gt`; `GITEA_CLI_VERSION` and `GITEA_CLI_INSTALL_DIR` choose another
    version or directory, and the version `nightly` installs the latest build of the main branch.
 
-   On Linux, macOS or FreeBSD:
+   On Linux, macOS, FreeBSD or OpenBSD:
 
    ```sh
    curl -fsSL https://gitea.com/gitea/cli/raw/branch/main/scripts/install.sh | sh

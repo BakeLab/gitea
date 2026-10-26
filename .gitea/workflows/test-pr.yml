@@ -34,6 +34,9 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Vet the other release systems
+        run: for os in darwin freebsd openbsd windows; do GOOS=$os go vet ./... || exit 1; done
+
       - name: Unit test and coverage
         run: make unit-test-coverage
 

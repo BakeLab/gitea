@@ -32,6 +32,8 @@ fetch() {
     curl -fsSL -o "$2" "$1"
   elif command -v wget >/dev/null 2>&1; then
     wget -q -O "$2" "$1"
+  elif [ "$(uname -s)" = OpenBSD ]; then
+    ftp -MV -o "$2" "$1" # base OpenBSD has neither curl nor wget, but its ftp speaks HTTPS
   else
     fail "curl or wget is required"
   fi
@@ -42,6 +44,7 @@ platform() {
     Linux) os=linux ;;
     Darwin) os=darwin ;;
     FreeBSD) os=freebsd ;;
+    OpenBSD) os=openbsd ;;
     *) fail "unsupported system $(uname -s); download gt from $download_url" ;;
   esac
   case $(uname -m) in
@@ -54,6 +57,7 @@ platform() {
   esac
   case $os-$arch in
     freebsd-arm*) fail "no gt build for FreeBSD on $(uname -m); download gt from $download_url" ;;
+    openbsd-arm-*) fail "no gt build for OpenBSD on $(uname -m); download gt from $download_url" ;;
   esac
   echo "$os-$arch"
 }
@@ -65,13 +69,15 @@ latest_version() {
   echo "$version"
 }
 
-sha256() {
+digest() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | cut -d' ' -f1
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | cut -d' ' -f1
+  elif command -v sha256 >/dev/null 2>&1; then
+    sha256 -q "$1"
   else
-    fail "sha256sum or shasum is required to verify the download"
+    fail "sha256sum, shasum or sha256 is required to verify the download"
   fi
 }
 
@@ -116,7 +122,7 @@ echo "Downloading gt $version ($file)"
 fetch "$download_url/$version/$file" "$work/$file" || fail "cannot download $download_url/$version/$file"
 fetch "$download_url/$version/$file.sha256" "$work/$file.sha256" || fail "cannot download the checksum of $file"
 expected=$(cut -d' ' -f1 "$work/$file.sha256")
-[ "$(sha256 "$work/$file")" = "$expected" ] || fail "checksum mismatch for $file; not installing"
+[ "$(digest "$work/$file")" = "$expected" ] || fail "checksum mismatch for $file; not installing"
 
 binary="$work/gt"
 case $file in
