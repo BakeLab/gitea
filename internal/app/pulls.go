@@ -24,7 +24,7 @@ one select the pull request of the current branch. pr attachment takes a number 
 	group.Example = `$ gt pr list --author @me
 $ gt pr create --fill
 $ gt pr merge --squash --delete-branch`
-	group.AddCommand(a.pullChecksCommand(), a.pullCheckoutCommand(), a.pullCleanCommand(), a.statusCommand(true))
+	group.AddCommand(a.pullChecksCommand(), a.pullCheckoutCommand(), a.pullBackportCommand(), a.pullCleanCommand(), a.statusCommand(true))
 	group.AddCommand(a.pullListCommand(), a.pullViewCommand())
 	a.addPullMutations(group)
 	group.AddCommand(a.pullEditCommand(), a.pullReadyCommand())

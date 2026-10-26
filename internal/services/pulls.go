@@ -43,8 +43,10 @@ type Pull struct {
 	MergedBy string `json:"merged_by"`
 	// MergeCommitSHA is the commit the merge created on the base branch, or null.
 	MergeCommitSHA *string `json:"merge_commit_sha"`
-	Mergeable      bool    `json:"mergeable"`
-	Draft          bool    `json:"draft"`
+	// MergeBase is the commit of the base branch the pull request's own commits start from.
+	MergeBase string `json:"-"`
+	Mergeable bool   `json:"mergeable"`
+	Draft     bool   `json:"draft"`
 	// ReviewDecision summarizes the reviews like gh: approved, changes_requested, review_required
 	// or "". Only commands that read the reviews fill it.
 	ReviewDecision    string `json:"review_decision"`
@@ -99,7 +101,7 @@ func pullFrom(pull *gitea.PullRequest) Pull {
 		Assignees: convertAll(pull.Assignees, login), Milestone: issueMilestoneFrom(pull.Milestone), Labels: convertAll(pull.Labels, labelFrom),
 		Deadline: optionalTimestamp(pull.Deadline), ID: pull.ID, Number: pull.Index, Title: pull.Title, Body: pull.Body,
 		URL: pull.HTMLURL, State: string(pull.State), Merged: pull.HasMerged, MergedAt: optionalTimestamp(pull.Merged), MergedBy: login(pull.MergedBy),
-		MergeCommitSHA: pull.MergedCommitID, Mergeable: pull.Mergeable, Draft: pull.Draft, AllowMaintainerEdit: pull.AllowMaintainerEdit,
+		MergeCommitSHA: pull.MergedCommitID, MergeBase: pull.MergeBase, Mergeable: pull.Mergeable, Draft: pull.Draft, AllowMaintainerEdit: pull.AllowMaintainerEdit,
 		Base: base.Ref, Head: headBranch, HeadSHA: head.Sha, HeadRemoteDeleted: remoteDeleted,
 		Reviewers: convertAll(pull.RequestedReviewers, login), Reviews: []Review{}, Comments: int64(pull.Comments),
 		ReviewerTeams: convertAll(pull.RequestedReviewersTeams, func(team *gitea.Team) string { return team.Name }),

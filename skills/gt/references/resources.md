@@ -174,10 +174,12 @@ gt pr review resolve 1234 --no-input
 gt pr merge 18 --squash --delete-branch --no-input --yes
 gt pr merge 18 --auto --no-input --yes          # merge once required checks succeed
 gt pr clean 18 --no-input --yes                 # delete the branches of a merged pull request
+gt pr backport 18 --to release/v1.2 --no-input --yes --json pull
 ```
 
 Merging is irreversible and visible: only on the user's explicit request. Without a method gt
-uses the repository's default merge style.
+uses the repository's default merge style. A backport pushes a branch and opens a pull request,
+so it also needs the user's request; on a conflict it changes nothing and fails.
 
 ## Repositories
 
