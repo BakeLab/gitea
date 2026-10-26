@@ -38,7 +38,8 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		if repository.DefaultBranch == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("repository has no default branch; cannot clean while checked out on the feature branch"))
 		}
-		pull, err := (services.Pulls{Client: target.client, Repository: target.Repo}).View(cmd.Context(), n)
+		service := services.Pulls{Client: target.client, Repository: target.Repo}
+		pull, err := service.View(cmd.Context(), n)
 		if err != nil {
 			return err
 		}
@@ -66,7 +67,19 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		if err != nil {
 			return clierr.Wrap(clierr.Usage, err)
 		}
+		// Gitea reports a moved branch's tip as the head of a closed pull request, so the local
+		// branch found by it holds those commits too.
+		if pull.Head != "" && !pull.HeadRemoteDeleted {
+			if moved, err := service.HeadMoved(cmd.Context(), pull); err == nil && moved {
+				return fmt.Errorf("branch %s has commits that are not in pull request %s; delete it yourself if they are not needed", pull.Head, refLabel(target.Repo, n, pull.Title))
+			}
+		}
 		deleteRemote := pull.Head != "" && !pull.HeadRemoteDeleted && pull.HeadCanPush
+		kept := ""
+		if deleteRemote {
+			kept = a.headKeptFor(cmd.Context(), service, pull)
+			deleteRemote = kept == ""
+		}
 		if deleteRemote && remote == "" {
 			switch len(matchingRemotes) {
 			case 0:
@@ -104,7 +117,7 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		}
 		result, err := git.CleanPull(cmd.Context(), a.deps.Git, git.CleanOptions{
 			Directory: a.options.cwd, DefaultBranch: repository.DefaultBranch, LocalBranch: localBranch,
-			Remote: remote, RemoteBranch: pull.Head, CredentialArgs: credentialArgs,
+			Remote: remote, RemoteBranch: pull.Head, RemoteSHA: pull.HeadSHA, CredentialArgs: credentialArgs,
 			Prompt: a.policy(snapshot).CanPrompt(a.deps.Streams), DeleteRemote: deleteRemote,
 		})
 		if err != nil {
@@ -116,6 +129,9 @@ func (a *application) pullCleanCommand() *cobra.Command {
 			// An AGit pull request has no remote branch.
 		case result.RemoteDeleted:
 			a.done(cmd, "Deleted remote branch %s/%s", result.Remote, result.RemoteBranch)
+		case kept != "":
+			result.RemoteSkipReason = kept
+			a.warn(cmd, "Kept remote branch %s: %s", pull.Head, kept)
 		case pull.HeadRemoteDeleted:
 			a.warn(cmd, "Remote branch %s was already deleted", pull.Head)
 		case !pull.HeadCanPush:

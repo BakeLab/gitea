@@ -32,17 +32,18 @@ func (r *cleanRunner) Output(_ context.Context, dir string, prompt bool, args ..
 		if len(args) > 1 && args[1] == "--is-inside-work-tree" {
 			return "true", nil
 		}
-		if len(args) > 2 && strings.HasPrefix(args[2], "refs/heads/") {
-			if r.missingLocal && strings.Contains(args[2], "feature") {
+		ref := args[len(args)-1]
+		if strings.HasPrefix(ref, "refs/heads/") {
+			if r.missingLocal && strings.Contains(ref, "feature") {
 				return "", &CommandError{ExitCode: 1}
 			}
-			if r.missingDefault && strings.Contains(args[2], "main") {
+			if r.missingDefault && strings.Contains(ref, "main") {
 				return "", &CommandError{ExitCode: 1}
 			}
 			return "abc123", nil
 		}
-		if len(args) > 2 && strings.HasPrefix(args[2], "refs/remotes/") {
-			if sha, ok := r.remoteTracking[args[2]]; ok {
+		if strings.HasPrefix(ref, "refs/remotes/") {
+			if sha, ok := r.remoteTracking[ref]; ok {
 				return sha, nil
 			}
 			return "", &CommandError{ExitCode: 1}
@@ -118,10 +119,15 @@ func TestFindCleanBranchIgnoreSHAPrefersTheBranchRecordedForThePull(t *testing.T
 
 func TestFindCleanBranchRejectsAmbiguity(t *testing.T) {
 	runner := &cleanRunner{branches: "abc123\tone\t\nabc123\ttwo\t\n"}
-	_, _, err := FindCleanBranch(context.Background(), runner, FindCleanBranchOptions{
-		Directory: "/work", HeadSHA: "abc123", HeadBranch: "feature", MatchingRemotes: []string{"origin"},
-	})
+	options := FindCleanBranchOptions{
+		Directory: "/work", HeadSHA: "abc123", HeadBranch: "feature", PreferredNames: []string{"one", "two"}, MatchingRemotes: []string{"origin"},
+	}
+	_, _, err := FindCleanBranch(context.Background(), runner, options)
 	require.ErrorContains(t, err, "multiple local branches")
+	// A branch that only shares the head commit, such as one started from it, is not the pull request's.
+	options.PreferredNames = nil
+	_, _, err = FindCleanBranch(context.Background(), runner, options)
+	require.EqualError(t, err, `local branch "feature" was not found, and the branches at its head commit (one, two) neither have its name nor track it; rename the one to clean to feature`)
 }
 
 func TestFindCleanBranchSkipsDefaultBranch(t *testing.T) {
@@ -183,6 +189,39 @@ func TestFindCleanBranchMatchesTheRemotesThatPullCheckoutAdds(t *testing.T) {
 	require.Equal(t, "pulls/bob/project", remote)
 }
 
+// A branch tracking a same-named branch of the base repository must not lead to deleting that
+// branch instead of the fork's.
+func TestFindCleanBranchUsesOnlyARemoteOfTheHeadRepository(t *testing.T) {
+	runner := &cleanRunner{branches: "abc123\tfeature\torigin\n"}
+	branch, remote, err := FindCleanBranch(context.Background(), runner, FindCleanBranchOptions{
+		Directory: "/work", HeadSHA: "abc123", HeadBranch: "feature",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "feature", branch)
+	require.Empty(t, remote)
+}
+
+func TestFindCleanBranchProbesRemoteBranchesQuietly(t *testing.T) {
+	gittest.Isolate(t)
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "--quiet", "--initial-branch=main"},
+		{"-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "--quiet", "--allow-empty", "--message=x"},
+		{"branch", "feature"},
+		{"remote", "add", "origin", "https://example.org/alice/project.git"},
+	} {
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	var stderr strings.Builder
+	branch, _, err := FindCleanBranch(context.Background(), System{ErrOut: &stderr}, FindCleanBranchOptions{
+		Directory: dir, HeadBranch: "feature", DefaultBranch: "main", IgnoreSHA: true, MatchingRemotes: []string{"origin"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "feature", branch)
+	require.Empty(t, stderr.String())
+}
+
 func TestFindCleanBranchIgnoresATagWithTheSameName(t *testing.T) {
 	gittest.Isolate(t)
 	dir := t.TempDir()
@@ -218,10 +257,53 @@ func TestCleanPullDeletesTheRemoteBranchBesideATagWithTheSameName(t *testing.T) 
 	run(dir, "tag", "feature")
 	run(dir, "remote", "add", "origin", remote)
 	run(dir, "push", "--quiet", "origin", "refs/heads/main", "refs/heads/feature", "refs/tags/feature")
-	result, err := CleanPull(context.Background(), System{}, CleanOptions{
+	opts := CleanOptions{
 		Directory: dir, DefaultBranch: "main", LocalBranch: "feature", Remote: "origin", RemoteBranch: "feature", DeleteRemote: true,
-	})
+		RemoteSHA: strings.Repeat("1", 40),
+	}
+	// A remote branch that moved past the expected commit stays.
+	_, err := CleanPull(context.Background(), System{}, opts)
+	require.ErrorContains(t, err, "deleting remote branch feature failed")
+	require.Equal(t, "refs/heads/feature\nrefs/heads/main\nrefs/tags/feature\n", run(remote, "for-each-ref", "--format=%(refname)"))
+	run(dir, "branch", "feature")
+	opts.RemoteSHA = strings.TrimSpace(run(dir, "rev-parse", "main"))
+	result, err := CleanPull(context.Background(), System{}, opts)
 	require.NoError(t, err)
 	require.True(t, result.RemoteDeleted)
 	require.Equal(t, "refs/heads/main\nrefs/tags/feature\n", run(remote, "for-each-ref", "--format=%(refname)"))
+}
+
+// The base branch of a pull request into a release branch often exists only as a remote-tracking
+// branch, and the default branch is often checked out in another worktree.
+func TestCleanPullSwitchesToABaseBranchThatIsNotCheckedOutHere(t *testing.T) {
+	gittest.Isolate(t)
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+		return strings.TrimSpace(string(out))
+	}
+	remote, dir := t.TempDir(), t.TempDir()
+	run(remote, "init", "--quiet", "--bare")
+	run(dir, "init", "--quiet", "--initial-branch=main")
+	run(dir, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "--quiet", "--allow-empty", "--message=x")
+	run(dir, "remote", "add", "origin", remote)
+	run(dir, "push", "--quiet", "origin", "main:release-1")
+	run(dir, "fetch", "--quiet", "origin")
+	run(dir, "switch", "--quiet", "--create", "feature")
+	var stderr strings.Builder
+	result, err := CleanPull(context.Background(), System{ErrOut: &stderr}, CleanOptions{Directory: dir, DefaultBranch: "release-1", LocalBranch: "feature"})
+	require.NoError(t, err)
+	require.Equal(t, "release-1", result.DefaultBranch)
+	require.Equal(t, "release-1", run(dir, "symbolic-ref", "--short", "HEAD"))
+	require.Equal(t, "origin/release-1", run(dir, "rev-parse", "--abbrev-ref", "release-1@{upstream}"))
+	require.Empty(t, stderr.String())
+
+	linked := t.TempDir()
+	run(dir, "switch", "--quiet", "--create", "feature")
+	run(dir, "worktree", "add", "--quiet", linked, "release-1")
+	_, err = CleanPull(context.Background(), System{}, CleanOptions{Directory: dir, DefaultBranch: "release-1", LocalBranch: "feature"})
+	require.NoError(t, err)
+	require.Equal(t, run(dir, "rev-parse", "release-1"), run(dir, "rev-parse", "HEAD"))
+	require.Equal(t, "", run(dir, "branch", "--list", "feature"))
 }

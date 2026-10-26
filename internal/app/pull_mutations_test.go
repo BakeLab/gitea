@@ -86,6 +86,8 @@ func TestPullCloseCommentsFirstAndDeletesTheBranchOnlyWhenAsked(t *testing.T) {
 		server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requests = append(requests, r.Method+" "+r.URL.Path)
 			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls":
+				writeFirstPage(w, r, `[]`)
 			case r.Method == http.MethodGet:
 				_, _ = w.Write([]byte(`{"number":3,"title":"Add login","state":"open","base":{"ref":"main"},"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"alice/project","permissions":{"push":true}}}}`))
 			case r.Method == http.MethodPatch:
@@ -264,6 +266,12 @@ const mergeRepository = `{"full_name":"alice/project","allow_merge_commits":true
 
 // mergeServer serves pull request 3, "Add login" from feature into main, and records merges into
 // payload. After a merge the pull request reads as merged with its head branch deleted.
+// writePullRef answers a request for refs/pull/N/head, the head a pull request had when it was
+// last open.
+func writePullRef(w http.ResponseWriter, n int, sha string) {
+	_, _ = fmt.Fprintf(w, `[{"ref":"refs/pull/%d/head","object":{"type":"commit","sha":%q}}]`, n, sha)
+}
+
 func mergeServer(t *testing.T, pull string, payload *map[string]any) http.Handler {
 	t.Helper()
 	merged := false
@@ -275,6 +283,10 @@ func mergeServer(t *testing.T, pull string, payload *map[string]any) http.Handle
 			_, _ = w.Write([]byte(`{"number":3,"title":"Add login","state":"closed","merged":true,"base":{"ref":"main"},"head":{"ref":"refs/pull/3/head","label":"feature","sha":"abc123"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
 			_, _ = w.Write([]byte(pull))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls":
+			writeFirstPage(w, r, `[]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/git/refs/pull/3/head":
+			writePullRef(w, 3, "abc123")
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls/3/merge":
 			merged = true
 			require.NoError(t, json.NewDecoder(r.Body).Decode(payload))
@@ -432,6 +444,7 @@ func TestPullMergeRefusals(t *testing.T) {
 	}{
 		{"draft", `{"number":3,"title":"WIP: x","state":"open","draft":true}`, nil, "pull request alice/project#3 (WIP: x) is a draft; mark it ready with: gt pr ready 3", clierr.Failure},
 		{"closed", `{"number":3,"title":"Old","state":"closed"}`, nil, "pull request alice/project#3 (Old) is closed; reopen it with: gt pr reopen 3", clierr.Failure},
+		{"head branch deleted", `{"number":3,"title":"Add login","state":"open","base":{"ref":"main"},"head":{"ref":"refs/pull/3/head","label":"feature","sha":"abc123"}}`, nil, "pull request alice/project#3 (Add login) cannot be merged: its head branch feature was deleted; push it again to merge", clierr.Failure},
 		{"disallowed method", openPull, []string{"--method", "fast-forward-only"}, "fast-forward-only merges are disabled in alice/project; use one of: merge, rebase, squash", clierr.Usage},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -479,6 +492,43 @@ func TestPullMergeAlreadyMergedIsANoOp(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project"}))
 	require.Equal(t, "! Pull request alice/project#3 (Done) is already merged\n", diagnostics.String())
 	require.Nil(t, payload)
+}
+
+// Like pr close -d on a closed pull request, -d still cleans up after a merged one.
+func TestPullMergeDeletesTheBranchOfAnAlreadyMergedPullRequest(t *testing.T) {
+	deleted := false
+	pulls := mergeServer(t, `{"number":3,"title":"Done","state":"closed","merged":true,"base":{"ref":"main"},"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"alice/project","permissions":{"push":true}}}}`, new(map[string]any))
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete && r.URL.Path == "/api/v1/repos/alice/project/branches/feature" {
+			deleted = true
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		pulls.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --quiet HEAD": "main"}}
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "-d", "--yes"}))
+	require.True(t, deleted)
+}
+
+// Gitea refuses to schedule a pull request twice with a 409 naming its internal ID.
+func TestPullMergeAutoIsANoOpWhenAlreadyScheduled(t *testing.T) {
+	pulls := mergeServer(t, openPull, new(map[string]any))
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls/3/merge" {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"message":"pull request is already scheduled to auto merge when checks succeed [pull_id: 33]"}`))
+			return
+		}
+		pulls.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "--auto", "--delete-branch=false", "--yes", "--json", "number"}))
+	require.Equal(t, "! Pull request alice/project#3 (Add login) is already scheduled to merge when its checks succeed\n", diagnostics.String())
+	require.JSONEq(t, `{"number":3}`, out.String())
 }
 
 func TestPullMergeMethodFlags(t *testing.T) {
@@ -572,26 +622,46 @@ func TestPullMergeReportsNoBranchDeletionForAGitPullRequests(t *testing.T) {
 
 func TestPullCloseReportsTheDeletedHeadBranch(t *testing.T) {
 	pull := `{"number":3,"title":"Add login","state":"STATE","base":{"ref":"main"},"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"alice/project","permissions":{"push":true}}}}`
-	deletes := 0
-	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
-			_, _ = w.Write([]byte(strings.Replace(pull, "STATE", "open", 1)))
-		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
-			_, _ = w.Write([]byte(strings.Replace(pull, "STATE", "closed", 1)))
-		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/repos/alice/project/branches/feature":
-			deletes++
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-	deps, out, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "close", "3", "-R", "alice/project", "--delete-branch", "--json", "state,head_remote_deleted"}))
-	require.Equal(t, 1, deletes)
-	require.JSONEq(t, `{"state":"closed","head_remote_deleted":true}`, out.String())
+	for _, tc := range []struct {
+		name, open, ref, json, warning string
+		deletes                        int
+	}{
+		{"deleted", `[{"number":3,"state":"open","head":{"ref":"feature","repo":{"full_name":"alice/project"}}},{"number":4,"state":"open","head":{"ref":"feature","repo":{"full_name":"bob/project"}}}]`, "abc123", `{"state":"closed","head_remote_deleted":true}`, "", 1},
+		// Deleting the branch would close the other pull request from it.
+		{"used by another pull request", `[{"number":5,"title":"Backport","state":"open","head":{"ref":"feature","repo":{"full_name":"alice/project"}}}]`, "abc123", `{"state":"closed","head_remote_deleted":false}`, "! Kept remote and local branch feature: it is the head of open pull request alice/project#5 (Backport)\n", 0},
+		// Gitea reports the moved branch as the head of the closed pull request.
+		{"moved on", `[]`, "def456", `{"state":"closed","head_remote_deleted":false}`, "! Kept remote and local branch feature: it has commits that are not in pull request #3\n", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deletes := 0
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
+					_, _ = w.Write([]byte(strings.Replace(pull, "STATE", "open", 1)))
+				case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
+					_, _ = w.Write([]byte(strings.Replace(pull, "STATE", "closed", 1)))
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls":
+					writeFirstPage(w, r, tc.open)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/git/refs/pull/3/head":
+					writePullRef(w, 3, tc.ref)
+				case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/repos/alice/project/branches/feature":
+					deletes++
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			deps, out, diagnostics := serverDeps(t, server.URL)
+			require.NoError(t, Execute(context.Background(), deps, []string{"pr", "close", "3", "-R", "alice/project", "--delete-branch", "--json", "state,head_remote_deleted"}))
+			require.Equal(t, tc.deletes, deletes)
+			require.JSONEq(t, tc.json, out.String())
+			if tc.warning != "" {
+				require.Equal(t, tc.warning, diagnostics.String())
+			}
+		})
+	}
 }
 
 func TestPullDeleteBranchDeletesAForkBranchOnlyWhereYouCanPush(t *testing.T) {
@@ -605,6 +675,10 @@ func TestPullDeleteBranchDeletesAForkBranchOnlyWhereYouCanPush(t *testing.T) {
 					_, _ = w.Write([]byte(strings.Replace(pull, "STATE", "open", 1)))
 				case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
 					_, _ = w.Write([]byte(strings.Replace(pull, "STATE", "closed", 1)))
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls":
+					writeFirstPage(w, r, `[]`)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/git/refs/pull/3/head":
+					writePullRef(w, 3, "abc123")
 				case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/repos/bob/project/branches/feature":
 					deletes++
 					w.WriteHeader(http.StatusNoContent)

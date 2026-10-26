@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -368,6 +369,14 @@ func (a *application) deleteHead(cmd *cobra.Command, service services.Pulls, ite
 	case merging:
 		a.warn(cmd, "Kept remote branch %s: Gitea did not delete it (it is protected, the default branch, or used by another open pull request)", item.Head)
 	default:
+		reason := a.headKeptFor(cmd.Context(), service, item)
+		if moved, err := service.HeadMoved(cmd.Context(), item); reason == "" && err == nil && moved {
+			reason = fmt.Sprintf("it has commits that are not in pull request #%d", item.Number)
+		}
+		if reason != "" {
+			a.warn(cmd, "Kept remote and local branch %s: %s", item.Head, reason)
+			return item
+		}
 		if err := service.DeleteHead(cmd.Context(), item); err != nil {
 			a.warn(cmd, "Kept remote branch %s: %v", item.Head, err)
 		} else {
@@ -379,6 +388,19 @@ func (a *application) deleteHead(cmd *cobra.Command, service services.Pulls, ite
 		a.deleteLocalHead(cmd, item)
 	}
 	return item
+}
+
+// headKeptFor tells why the head branch of item must stay: deleting it would close another open
+// pull request from it.
+func (a *application) headKeptFor(ctx context.Context, service services.Pulls, item services.Pull) string {
+	other, found, err := service.OtherOpenWithHead(ctx, item)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("could not check for other open pull requests from it: %v", err)
+	case found:
+		return "it is the head of open pull request " + refLabel(service.Repository, other.Number, other.Title)
+	}
+	return ""
 }
 
 // deleteLocalHead deletes the checked-out branch when it is at the head of the pull request,
@@ -561,11 +583,16 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 		switch {
 		case item.Merged:
 			a.warn(cmd, "Pull request %s is already merged", ref)
+			if deleteBranch {
+				item = a.deleteHead(cmd, service, item, false, true)
+			}
 			return a.pullResult(cmd, t, item)
 		case item.State == "closed":
 			return fmt.Errorf("pull request %s is closed; reopen it with: gt pr reopen %d", ref, n)
 		case item.Draft:
 			return fmt.Errorf("pull request %s is a draft; mark it ready with: gt pr ready %d", ref, n)
+		case item.HeadRemoteDeleted && item.Head != "" && !manual:
+			return fmt.Errorf("pull request %s cannot be merged: its head branch %s was deleted; push it again to merge", ref, item.Head)
 		}
 		repoSettings, err := service.MergeSettings(cmd.Context())
 		if err != nil {
@@ -617,6 +644,9 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 		if err := service.Merge(cmd.Context(), n, services.MergeOptions{Method: method, Title: title, Message: message, DeleteBranch: deleteBranch && !manual, Auto: auto, HeadSHA: item.HeadSHA, Commit: commit}); err != nil {
 			if apiErr, ok := errors.AsType[*transport.APIError](err); ok {
 				switch {
+				case auto && apiErr.Status == http.StatusConflict && strings.Contains(apiErr.Message, "already scheduled to auto merge"):
+					a.warn(cmd, "Pull request %s is already scheduled to merge when its checks succeed", ref)
+					return a.pullResult(cmd, t, item)
 				case manual && strings.Contains(apiErr.Message, "merge strategy is not allowed"):
 					return explain(err, "manual merges are disabled in %s; allow them with: gt repo edit --allow-manual-merge -R %s", t.Repo, t.Repo)
 				case manual && strings.Contains(apiErr.Message, "commit not found in base"):

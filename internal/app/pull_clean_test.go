@@ -37,12 +37,17 @@ func TestPullCleanRejectsOpenPullBeforeGitMutation(t *testing.T) {
 }
 
 func TestPullCleanDeletesLocalAndRemoteBranches(t *testing.T) {
+	open, ref := `[]`, "abc123"
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/pulls":
+			writeFirstPage(w, r, open)
+		case "/api/v1/repos/alice/project/git/refs/pull/7/head":
+			writePullRef(w, 7, ref)
 		case "/api/v1/repos/alice/project":
 			_, _ = fmt.Fprint(w, `{"full_name":"alice/project","default_branch":"main","clone_url":"https://example.org/alice/project.git"}`)
 		case "/api/v1/repos/alice/project/pulls/7":
-			_, _ = fmt.Fprint(w, `{"number":7,"state":"closed","merged":true,"head":{"sha":"abc123","ref":"feature","label":"alice:feature","repo":{"full_name":"alice/project","clone_url":"https://example.org/alice/project.git","ssh_url":"ssh://git@example.org/alice/project.git","permissions":{"push":true}}}}`)
+			_, _ = fmt.Fprint(w, `{"number":7,"title":"Add login","state":"closed","merged":true,"head":{"sha":"abc123","ref":"feature","label":"alice:feature","repo":{"full_name":"alice/project","clone_url":"https://example.org/alice/project.git","ssh_url":"ssh://git@example.org/alice/project.git","permissions":{"push":true}}}}`)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -51,21 +56,21 @@ func TestPullCleanDeletesLocalAndRemoteBranches(t *testing.T) {
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
 	configureHost(t, deps, server.URL, settings.Host{User: "alice", Users: tokenAccounts(settings.StoreFile, "alice")})
-	deleteRemote := credentialCall(t, deps, server.URL, "alice", "push", "--delete", "--", "origin", "refs/heads/feature")
+	deleteRemote := credentialCall(t, deps, server.URL, "alice", "push", "--delete", "--force-with-lease=refs/heads/feature:abc123", "--", "origin", "refs/heads/feature")
 	runner := &fakeGit{results: map[string]string{
 		deleteRemote:                      "",
 		"remote":                          "origin",
 		"remote get-url origin":           "https://example.org/alice/project.git",
 		"rev-parse --is-inside-work-tree": "true",
 		"for-each-ref --format=%(objectname)%09%(refname:lstrip=2)%09%(upstream:remotename) refs/heads/": "abc123\tpr/7\torigin",
-		"check-ref-format --branch pr/7":              "",
-		"check-ref-format --branch main":              "",
-		"status --porcelain=v1 --untracked-files=no":  "",
-		"rev-parse --verify refs/heads/pr/7^{commit}": "abc123",
-		"rev-parse --verify refs/heads/main^{commit}": "mainsha",
-		"symbolic-ref --quiet HEAD":                   "pr/7",
-		"switch --quiet -- main":                      "",
-		"branch -D -- pr/7":                           "",
+		"check-ref-format --branch pr/7":                      "",
+		"check-ref-format --branch main":                      "",
+		"status --porcelain=v1 --untracked-files=no":          "",
+		"rev-parse --verify refs/heads/pr/7^{commit}":         "abc123",
+		"rev-parse --verify --quiet refs/heads/main^{commit}": "mainsha", "worktree list --porcelain": "",
+		"symbolic-ref --quiet HEAD": "pr/7",
+		"switch --quiet -- main":    "",
+		"branch -D -- pr/7":         "",
 	}}
 	deps.Git = runner
 	err := Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input", "--json"})
@@ -96,6 +101,24 @@ func TestPullCleanDeletesLocalAndRemoteBranches(t *testing.T) {
 	require.Contains(t, runner.calls, deleteRemote)
 	require.Contains(t, out.String(), `"local_branch":"pr/7"`)
 	require.Contains(t, out.String(), `"remote_deleted":true`)
+
+	// Deleting the branch would close the other pull request from it.
+	open = `[{"number":8,"title":"Backport","state":"open","head":{"ref":"feature","repo":{"full_name":"alice/project"}}}]`
+	runner.calls = nil
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input", "--json", "--yes"}))
+	require.Contains(t, runner.calls, "branch -D -- pr/7")
+	require.NotContains(t, runner.calls, deleteRemote)
+	require.Contains(t, out.String(), `"remote_skip_reason":"it is the head of open pull request alice/project#8 (Backport)"`)
+
+	// Gitea reports the moved branch as the head of the closed pull request, and the local
+	// branch found by it holds the new commits too.
+	open, ref = `[]`, "def456"
+	runner.calls = nil
+	out.Reset()
+	err = Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input", "--yes"})
+	require.EqualError(t, err, "branch feature has commits that are not in pull request alice/project#7 (Add login); delete it yourself if they are not needed")
+	assertNoMutation()
 }
 
 func TestPullCleanRequiresIgnoreSHAWhenHeadMissingLocally(t *testing.T) {
@@ -143,13 +166,13 @@ func TestPullCleanFindsTheLocalBranchOfAnAGitPullRequestByItsCommit(t *testing.T
 		"remote get-url origin":           "https://example.org/alice/project.git",
 		"rev-parse --is-inside-work-tree": "true",
 		"for-each-ref --format=%(objectname)%09%(refname:lstrip=2)%09%(upstream:remotename) refs/heads/": "abc123\tpr/7\t",
-		"check-ref-format --branch pr/7":              "",
-		"check-ref-format --branch main":              "",
-		"status --porcelain=v1 --untracked-files=no":  "",
-		"rev-parse --verify refs/heads/pr/7^{commit}": "abc123",
-		"rev-parse --verify refs/heads/main^{commit}": "mainsha",
-		"symbolic-ref --quiet HEAD":                   "main",
-		"branch -D -- pr/7":                           "",
+		"check-ref-format --branch pr/7":                      "",
+		"check-ref-format --branch main":                      "",
+		"status --porcelain=v1 --untracked-files=no":          "",
+		"rev-parse --verify refs/heads/pr/7^{commit}":         "abc123",
+		"rev-parse --verify --quiet refs/heads/main^{commit}": "mainsha", "worktree list --porcelain": "",
+		"symbolic-ref --quiet HEAD": "main",
+		"branch -D -- pr/7":         "",
 	}}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--yes"}))
@@ -191,13 +214,13 @@ func TestPullCleanOfAnAGitPullRequestWithADivergedBranch(t *testing.T) {
 				"remote get-url origin":           "https://example.org/alice/project.git",
 				"rev-parse --is-inside-work-tree": "true",
 				"for-each-ref --format=%(objectname)%09%(refname:lstrip=2)%09%(upstream:remotename) refs/heads/": "def456\ttopic\t",
-				"check-ref-format --branch topic":              "",
-				"check-ref-format --branch main":               "",
-				"status --porcelain=v1 --untracked-files=no":   "",
-				"rev-parse --verify refs/heads/topic^{commit}": "def456",
-				"rev-parse --verify refs/heads/main^{commit}":  "mainsha",
-				"symbolic-ref --quiet HEAD":                    "main",
-				"branch -D -- topic":                           "",
+				"check-ref-format --branch topic":                     "",
+				"check-ref-format --branch main":                      "",
+				"status --porcelain=v1 --untracked-files=no":          "",
+				"rev-parse --verify refs/heads/topic^{commit}":        "def456",
+				"rev-parse --verify --quiet refs/heads/main^{commit}": "mainsha", "worktree list --porcelain": "",
+				"symbolic-ref --quiet HEAD": "main",
+				"branch -D -- topic":        "",
 			}}
 			if test.recorded != "" {
 				runner.results[`config --get-regexp ^branch\..*\.gitea-cli-pr$`] = test.recorded

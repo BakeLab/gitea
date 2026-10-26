@@ -1135,6 +1135,34 @@ func (s Pulls) DeleteHead(ctx context.Context, item Pull) error {
 	return err
 }
 
+// OtherOpenWithHead returns an open pull request other than item from the same head branch,
+// which deleting that branch would close, and whether there is one.
+func (s Pulls) OtherOpenWithHead(ctx context.Context, item Pull) (Pull, bool, error) {
+	items, err := s.ListOpen(ctx)
+	if err != nil {
+		return Pull{}, false, err
+	}
+	for _, other := range items {
+		if other.Number != item.Number && other.Head == item.Head && strings.EqualFold(other.HeadRepo, item.HeadRepo) {
+			return other, true, nil
+		}
+	}
+	return Pull{}, false, nil
+}
+
+// HeadMoved reports whether the head branch of item has commits beyond the pull request: Gitea
+// reports the branch's tip as its head, but keeps the commit the pull request was merged or
+// closed at in its pull ref.
+func (s Pulls) HeadMoved(ctx context.Context, item Pull) (bool, error) {
+	ref, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Reference, *gitea.Response, error) {
+		return c.Git.GetRepoRef(ctx, owner, name, fmt.Sprintf("refs/pull/%d/head", item.Number))
+	})
+	if err != nil {
+		return false, err
+	}
+	return ref.Object != nil && item.HeadSHA != "" && ref.Object.SHA != item.HeadSHA, nil
+}
+
 // Files lists the paths of the files a pull request changes.
 func (s Pulls) Files(ctx context.Context, n int64) ([]string, error) {
 	owner, name, err := splitRepository(s.Repository)
