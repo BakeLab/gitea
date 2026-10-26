@@ -109,6 +109,9 @@ $ gt repo edit --allow-manual-merge`,
 				options.Website = &website
 			}
 			if changed("description") {
+				if err := validateRepositoryDescription(description); err != nil {
+					return err
+				}
 				options.Description = &description
 			}
 			if changed("visibility") {
@@ -143,7 +146,11 @@ $ gt repo edit --allow-manual-merge`,
 					if !services.IsNotFound(err) {
 						return services.Classify(err, "branch", strconv.Quote(defaultBranch), t.Repo)
 					}
-					if item, viewErr := service.View(cmd.Context(), t.Repo); viewErr != nil || !item.Empty {
+					item, viewErr := service.View(cmd.Context(), t.Repo)
+					if viewErr != nil {
+						return viewErr
+					}
+					if !item.Empty {
 						return services.Classify(err, "branch", strconv.Quote(defaultBranch), t.Repo)
 					}
 				}
@@ -153,6 +160,9 @@ $ gt repo edit --allow-manual-merge`,
 			setTopics := false
 			if len(addTopics)+len(removeTopics) > 0 {
 				current, err := service.Topics(cmd.Context(), t.Repo)
+				if services.IsNotFound(err) {
+					return services.Classify(err, "repository", t.Repo, "")
+				}
 				if err != nil {
 					return fmt.Errorf("list topics: %w", err)
 				}

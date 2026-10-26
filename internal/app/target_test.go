@@ -313,15 +313,15 @@ func TestRepositoryResolutionPrecedence(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "owner/explicit", resolved.Repo)
 	require.Empty(t, runner.calls)
-	application.options.repo = ""
+	application.options.repo, application.options.remote = "", "upstream"
+	resolved, err = application.resolve(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, "owner/upstream", resolved.Repo, "an explicit --remote wins over gt.repository")
+	application.options.remote = ""
 	delete(runner.results, "config --get gt.repository")
 	resolved, err = application.resolve(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, "owner/current", resolved.Repo)
-	application.options.remote = "upstream"
-	resolved, err = application.resolve(context.Background(), true)
-	require.NoError(t, err)
-	require.Equal(t, "owner/upstream", resolved.Repo)
 	require.False(t, runner.prompt)
 }
 

@@ -374,14 +374,16 @@ func (a *application) repositorySource(ctx context.Context, t *target, s setting
 	return a.discoverRepository(ctx, t, s)
 }
 
-// discoverRepository returns the raw repository of the clone in the working directory, the saved
-// gt.repository or a Git remote on an instance gt can act on, and records its source.
+// discoverRepository returns the raw repository of the clone in the working directory: the --remote
+// remote, the saved gt.repository or a Git remote on an instance gt can act on, and records its source.
 func (a *application) discoverRepository(ctx context.Context, t *target, s settings.Snapshot) (string, error) {
 	// Discovery probes fail outside a checkout; Git's diagnostics would only precede gt's own error.
 	probe := func(args ...string) (string, error) { return a.gitProbe().Output(ctx, a.options.cwd, false, args...) }
-	if saved, err := probe("config", "--get", "gt.repository"); err == nil && saved != "" {
-		t.RepoSource = "git config gt.repository"
-		return saved, nil
+	if a.options.remote == "" {
+		if saved, err := probe("config", "--get", "gt.repository"); err == nil && saved != "" {
+			t.RepoSource = "git config gt.repository"
+			return saved, nil
+		}
 	}
 	hosts, err := a.repositoryHosts(s.Hosts.Hosts)
 	if err != nil {

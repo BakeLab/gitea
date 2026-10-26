@@ -80,6 +80,12 @@ func SyncBranch(ctx context.Context, runner Runner, opts SyncOptions) (SyncResul
 	fetch := append([]string{}, opts.CredentialArgs...)
 	fetch = append(fetch, "fetch", "--quiet", "--no-tags", "--", opts.Remote, ref)
 	if _, err := run(fetch...); err != nil {
+		lsRemote := append(append([]string{}, opts.CredentialArgs...), "ls-remote", "--exit-code", "--heads", "--", opts.Remote, ref)
+		if _, lsErr := run(lsRemote...); lsErr != nil {
+			if failure, ok := errors.AsType[*CommandError](lsErr); ok && failure.ExitCode == 2 {
+				return SyncResult{}, fmt.Errorf("branch %q not found on remote %s", opts.Branch, opts.Remote)
+			}
+		}
 		return SyncResult{}, err
 	}
 	commit, err := run("rev-parse", "--verify", "FETCH_HEAD^{commit}")

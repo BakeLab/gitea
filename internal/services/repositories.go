@@ -394,6 +394,10 @@ func (s Repositories) Fork(ctx context.Context, repo string, opts ForkOptions) (
 	})
 	apiErr, ok := errors.AsType[*transport.APIError](err)
 	if ok && apiErr.Status == http.StatusNotFound {
+		// Gitea answers a missing source and a missing organization with the same 404.
+		if opts.Organization != "" && missingRepository(ctx, s.Client, repo) == nil {
+			return fork, false, &NotFoundError{Kind: "organization", Key: strconv.Quote(opts.Organization), Err: err}
+		}
 		return fork, false, Classify(err, "repository", repo, "")
 	}
 	if !ok || apiErr.Status != http.StatusConflict || !strings.Contains(apiErr.Message, "already forked") {

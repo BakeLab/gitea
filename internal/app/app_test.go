@@ -177,6 +177,25 @@ func TestSudoSendsHeaderAfterIdentityCheck(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"--sudo", "bob", "repo", "view", "--repo", "alice/project", "--json=full_name"}))
 	require.Equal(t, []string{"/api/v1/user ", "/api/v1/repos/alice/project bob"}, seen)
 	require.JSONEq(t, `{"full_name":"alice/project"}`, out.String())
+	// Gitea answers every request for an unknown Sudo user with a bare 404.
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/user":
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		case r.Header.Get("Sudo") == "" && r.URL.Path == "/api/v1/users/bob":
+			_, _ = w.Write([]byte(`{"login":"bob"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ = serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"--sudo", "nobody", "repo", "view", "--repo", "alice/project"})
+	require.EqualError(t, err, `--sudo user "nobody" not found`)
+	err = Execute(context.Background(), deps, []string{"--sudo", "nobody", "repo", "create", "project", "--no-input"})
+	require.EqualError(t, err, `--sudo user "nobody" not found`)
+	err = Execute(context.Background(), deps, []string{"--sudo", "bob", "repo", "view", "--repo", "alice/project"})
+	require.EqualError(t, err, "repository alice/project not found")
 	requireUsageBeforeRequests(t, "--sudo cannot be combined with auth commands", "auth", "status", "--sudo", "bob")
 	requireUsageBeforeRequests(t, "--sudo requires a username", "repo", "view", "--sudo", "")
 }

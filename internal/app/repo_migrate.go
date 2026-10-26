@@ -117,7 +117,7 @@ $ gt repo migrate https://github.com/acme/tool --service github --issues --pull-
 			if err != nil {
 				return err
 			}
-			destination := cmp.Or(opts.Owner, target.User) + "/" + opts.Name
+			destination := cmp.Or(opts.Owner, target.login()) + "/" + opts.Name
 			if prompted || named {
 				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Import %s into %s on %s?", opts.CloneURL, destination, target.Host), DefaultYes: true}); err != nil {
 					return err

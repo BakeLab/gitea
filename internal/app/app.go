@@ -474,6 +474,11 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 	if services.IsUnauthorized(err) {
 		return clierr.Wrap(clierr.Authentication, err)
 	}
+	if services.IsNotFound(err) && a.options.sudo != "" {
+		if missing := services.MissingSudoUser(ctx, a.lastTarget().client); missing != nil {
+			return missing
+		}
+	}
 	if notPull, ok := errors.AsType[*services.NotPullError](err); ok {
 		if issue, _, findErr := root.Find(strings.Fields(issueCommandPath(cmd))[1:]); findErr == nil && issue.Name() == cmd.Name() {
 			repo := ""

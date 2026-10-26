@@ -305,8 +305,8 @@ func helpTopics(globals *pflag.FlagSet) []*cobra.Command {
 
 ` + indent(flagUsages(flags)) + `
 
-gt selects the repository from --repo, GITEA_CLI_REPO, git config gt.repository (gt repo
-set-default) or a Git remote (--remote, else the remote preference, the base remote pr
+gt selects the repository from --repo, GITEA_CLI_REPO, the Git remote --remote, git config
+gt.repository (gt repo set-default) or a Git remote (the remote preference, the base remote pr
 checkout recorded, the current branch's remote, upstream or origin, skipping remotes on
 instances without an account, or not on --host or the GITEA_TOKEN instance). Like gh,
 a clone with upstream and origin targets upstream: a branch tracking origin

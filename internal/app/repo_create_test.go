@@ -77,6 +77,28 @@ func TestRepositoryCreateGrantsTeamAccess(t *testing.T) {
 	require.Empty(t, out.String())
 }
 
+func TestRepositoryCreateForTheActingAccount(t *testing.T) {
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path+" "+r.Header.Get("Sudo"))
+		_, _ = w.Write([]byte(`{"full_name":"owner/project"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"repo", "create", "project", "--org", "ALICE"}, "POST /api/v1/user/repos "},
+		{[]string{"--sudo", "bob", "repo", "create", "bob/project"}, "POST /api/v1/user/repos bob"},
+		{[]string{"--sudo", "bob", "repo", "create", "alice/project"}, "POST /api/v1/orgs/alice/repos bob"},
+	} {
+		requests = nil
+		require.NoError(t, Execute(context.Background(), deps, append(test.args, "--no-input")))
+		require.Equal(t, []string{test.want}, requests, "%v", test.args)
+	}
+}
+
 func TestRepositoryCreateClonesNewRepository(t *testing.T) {
 	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +107,7 @@ func TestRepositoryCreateClonesNewRepository(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
-	call := credentialCall(t, deps, server.URL, "alice", "clone", "--", server.URL+"/alice/project.git")
+	call := credentialCall(t, deps, server.URL, "alice", "clone", "--", server.URL+"/alice/project.git", "project")
 	runner := &fakeGit{results: map[string]string{call: ""}}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "create", "project", "--clone", "--no-input", "--json=id,full_name"}))
@@ -128,7 +150,7 @@ func TestRepositoryCreateInteractiveForm(t *testing.T) {
 			_, _ = w.Write([]byte(`["Go","Node"]`))
 		case "POST /api/v1/orgs/acme/repos":
 			requirePayload(t, `{"name":"tool","description":"A tool","private":true,"auto_init":true,"license":"MIT","gitignores":"Go,Node"}`, r.Body)
-			_, _ = fmt.Fprintf(w, `{"full_name":"acme/tool","clone_url":%q}`, "http://"+r.Host+"/acme/tool.git")
+			_, _ = fmt.Fprintf(w, `{"name":"tool","full_name":"acme/tool","clone_url":%q}`, "http://"+r.Host+"/acme/tool.git")
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -136,7 +158,7 @@ func TestRepositoryCreateInteractiveForm(t *testing.T) {
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
-	call := credentialCall(t, deps, server.URL, "alice", "clone", "--", server.URL+"/acme/tool.git")
+	call := credentialCall(t, deps, server.URL, "alice", "clone", "--", server.URL+"/acme/tool.git", "tool")
 	runner := &fakeGit{results: map[string]string{call: ""}}
 	deps.Git = runner
 	var offered terminal.RepoFormChoices
@@ -195,22 +217,31 @@ func TestRepositoryCreatePublishesALocalRepository(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		created++
 		requirePayload(t, `{"name":"project"}`, r.Body)
-		_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","html_url":"https://gitea.test/alice/project","clone_url":"http://%s/alice/project.git"}`, r.Host)
+		_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","html_url":"https://gitea.test/alice/project","clone_url":"http://%s/alice/project.git","empty":true,"default_branch":"main"}`, r.Host)
 	}))
 	defer server.Close()
-	deps, _, diagnostics := repoTTYDeps(t, server.URL)
+	deps, out, diagnostics := repoTTYDeps(t, server.URL)
 	dir := t.TempDir()
 	remote := server.URL + "/alice/project.git"
-	push := credentialCall(t, deps, server.URL, "alice", "push", "--quiet", "--set-upstream", "origin", "HEAD")
+	push := credentialCall(t, deps, server.URL, "alice", "push", "--quiet", "--set-upstream", "--", "origin", "HEAD")
 	head, branch := "rev-parse --verify --quiet HEAD^{commit}", "symbolic-ref --quiet HEAD"
-	runner := &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", head: "abc", branch: "refs/heads/main", "remote add -- origin " + remote: "", push: ""}}
+	runner := &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", head: "abc", branch: "refs/heads/trunk", "remote add -- origin " + remote: "", push: ""}}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "create", "project", "--public", "--source", dir, "--push"}))
 	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", head, branch, "remote add -- origin " + remote, push}, runner.calls)
 	require.Equal(t, []string{dir, dir, dir, dir, dir, dir}, runner.dirs)
 	require.Equal(t, "✓ Created repository alice/project\n✓ Added Git remote origin for alice/project\n✓ Pushed the current branch to alice/project\n", diagnostics.String())
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "create", "project", "--source", dir, "--push", "--json=empty,default_branch"}))
+	require.JSONEq(t, `{"empty":false,"default_branch":"trunk"}`, out.String())
 	err := Execute(context.Background(), deps, []string{"repo", "create", "project", "--source", dir, "--auto-init"})
 	require.ErrorContains(t, err, "--source publishes a local repository")
+	runner.calls, created = nil, 0
+	err = Execute(context.Background(), deps, []string{"repo", "create", "project", "--source", dir, "--remote-name", "-x"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, "--remote-name requires a valid Git remote name")
+	require.Empty(t, runner.calls)
+	require.Zero(t, created)
 	// On a detached HEAD, nothing is created.
 	delete(runner.results, branch)
 	runner.calls = nil

@@ -171,7 +171,7 @@ func TestCloneUsesTheInstanceTLSSettings(t *testing.T) {
 		return nil
 	}))
 	prefix := "-c http." + server.URL + ".sslCert=/certs/client.pem -c http." + server.URL + ".sslKey=/certs/client.pem -c http." + server.URL + ".sslVerify=false "
-	clone := prefix + credentialCall(t, deps, server.URL, "alice", "clone", "--", server.URL+"/alice/project.git")
+	clone := prefix + credentialCall(t, deps, server.URL, "alice", "clone", "--", server.URL+"/alice/project.git", "project")
 	persist := "config --local --replace-all http." + server.URL + "."
 	persisted := []string{persist + "sslCert /certs/client.pem", persist + "sslKey /certs/client.pem", persist + "sslVerify false"}
 	runner := &fakeGit{results: map[string]string{clone: ""}}
@@ -283,10 +283,10 @@ func TestClonePassesGitFlagsAndNamesTheUpstreamRemote(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, _, diagnostics := repoTTYDeps(t, server.URL)
-	clone := credentialCall(t, deps, server.URL, "alice", "clone", "--branch", "dev", "--", server.URL+"/bob/project.git")
+	clone := credentialCall(t, deps, server.URL, "alice", "clone", "--branch", "dev", "--", server.URL+"/bob/project.git", "project")
 	parent := server.URL + "/alice/project.git"
 	fetch := credentialCall(t, deps, server.URL, "alice", "fetch", "--quiet", "--depth", "1", "--", "parent")
-	shallow := credentialCall(t, deps, server.URL, "alice", "clone", "--depth", "1", "--branch", "dev", "--", server.URL+"/bob/project.git")
+	shallow := credentialCall(t, deps, server.URL, "alice", "clone", "--depth", "1", "--branch", "dev", "--", server.URL+"/bob/project.git", "project")
 	runner := &fakeGit{results: map[string]string{
 		clone: "", shallow: "", "remote": "fork", "remote add -- parent " + parent: "", fetch: "", "config branch.main.remote parent": "",
 		"config branch.main.merge refs/heads/main": "", "config branch.main.pushRemote fork": "",
@@ -298,5 +298,15 @@ func TestClonePassesGitFlagsAndNamesTheUpstreamRemote(t *testing.T) {
 	runner.calls = nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "--no-upstream", "--", "--branch", "dev"}))
 	require.Equal(t, []string{clone}, runner.calls)
+	// A bare clone is named project.git, so its remotes must be set up there.
+	bare := credentialCall(t, deps, server.URL, "alice", "clone", "--bare", "--", server.URL+"/bob/project.git", "project.git")
+	fetch = credentialCall(t, deps, server.URL, "alice", "fetch", "--quiet", "--", "parent")
+	runner.results[bare], runner.results[fetch] = "", ""
+	runner.calls, runner.dirs = nil, nil
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "-u", "parent", "--", "--bare"}))
+	require.Equal(t, bare, runner.calls[0])
+	for _, dir := range runner.dirs[1:] {
+		require.Equal(t, "project.git", filepath.Base(dir))
+	}
 	require.ErrorContains(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "a", "b"}), "too many arguments")
 }

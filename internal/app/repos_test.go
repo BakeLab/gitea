@@ -103,8 +103,8 @@ View this repository on Gitea: https://gitea.test/bob/project
 `, out.String())
 	deps, out, _ = serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "view", "bob/project", "-b", "develop"}))
-	require.Equal(t, "title:\tbob/project\ndescription:\tDemo\nforked from:\talice/project\nmirror of:\t\ndefault branch:\tmain\nwebsite:\t\ntopics:\t\n"+
-		"clone:\thttps://gitea.test/bob/project.git\nssh:\t\nurl:\thttps://gitea.test/bob/project\n--\nHello **there**\n", out.String())
+	require.Equal(t, "title:\tbob/project\nvisibility:\tpublic\nstate:\tfork, archived\ndescription:\tDemo\nforked from:\talice/project\nmirror of:\t\ndefault branch:\tmain\nwebsite:\t\ntopics:\t\n"+
+		"stars:\t1\nforks:\t0\nopen issues:\t2\nopen pull requests:\t1\nclone:\thttps://gitea.test/bob/project.git\nssh:\t\nurl:\thttps://gitea.test/bob/project\n--\nHello **there**\n", out.String())
 }
 
 func TestRepoSetDefaultValidatesTheRepository(t *testing.T) {

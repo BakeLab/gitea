@@ -255,6 +255,9 @@ $ gt repo transfer bob -R alice/project`,
 		Args:        nonBlankArgs(cobra.ExactArgs(1), "new owner"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			newOwner := strings.TrimSpace(args[0])
+			if cmd.Flags().Changed("team") && len(teams) == 0 {
+				return clierr.Wrap(clierr.Usage, errors.New("--team requires a team name"))
+			}
 			if err := requireNames("team", "", teams); err != nil {
 				return err
 			}

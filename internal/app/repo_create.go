@@ -120,11 +120,16 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 		}
 		f.opts.Private = false
 	}
+	var pushBranch string
 	if f.localSource != "" {
 		if !filepath.IsAbs(f.localSource) {
 			f.localSource = filepath.Join(a.options.cwd, f.localSource)
 		}
-		if err := a.checkPublishSource(cmd.Context(), f.localSource, f.remote, f.push); err != nil {
+		if err := validateRemoteName("remote-name", f.remote); err != nil {
+			return err
+		}
+		var err error
+		if pushBranch, err = a.checkPublishSource(cmd.Context(), f.localSource, f.remote, f.push); err != nil {
 			return err
 		}
 	}
@@ -145,6 +150,9 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 	if err != nil {
 		return err
 	}
+	a.mu.Lock()
+	a.resolved = selected.lastTarget()
+	a.mu.Unlock()
 	service := services.Repositories{Client: target.client}
 	if form {
 		if err := a.askRepoSettings(cmd, target, service, f); err != nil {
@@ -153,7 +161,7 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 	} else if err := validateTemplates(cmd.Context(), service, &f.opts); err != nil {
 		return err
 	}
-	if !cmd.Flags().Changed("org") && strings.EqualFold(f.org, target.User) {
+	if strings.EqualFold(f.org, target.login()) {
 		if f.team != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--team requires a repository owned by an organization"))
 		}
@@ -164,7 +172,7 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 		if f.opts.Private {
 			visibility = "private"
 		}
-		owner := cmp.Or(f.org, target.User)
+		owner := cmp.Or(f.org, target.login())
 		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Create %s repository %s/%s on %s?", visibility, owner, f.opts.Name, target.Host), DefaultYes: true}); err != nil {
 			return err
 		}
@@ -220,6 +228,10 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 		return nil
 	case f.localSource != "":
 		err = a.publishRepository(cmd, target, item, f.localSource, f.remote, f.push)
+		if err == nil && f.push {
+			// Gitea makes the first pushed branch of an empty repository its default branch.
+			item.Empty, item.DefaultBranch = false, pushBranch
+		}
 	}
 	if err != nil {
 		return err
@@ -234,7 +246,7 @@ func (a *application) askRepoSettings(cmd *cobra.Command, t target, service serv
 		return err
 	}
 	choices := terminal.RepoFormChoices{
-		Owners: append([]string{t.User}, loaded.Organizations...), Licenses: loaded.Licenses, Gitignores: loaded.Gitignores,
+		Owners: append([]string{t.login()}, loaded.Organizations...), Licenses: loaded.Licenses, Gitignores: loaded.Gitignores,
 		ValidateName: validateRepositoryName, ValidateDescription: validateRepositoryDescription,
 	}
 	values, err := a.deps.RepoForm.CreateRepo(cmd.Context(), choices)
@@ -327,24 +339,25 @@ func (a *application) completeTemplates(list func(services.Repositories, context
 }
 
 // checkPublishSource fails unless dir is a Git working tree without a remote named remote and,
-// for push, with a commit on a checked-out branch to push.
-func (a *application) checkPublishSource(ctx context.Context, dir, remote string, push bool) error {
+// for push, with a commit on a checked-out branch to push, which it returns.
+func (a *application) checkPublishSource(ctx context.Context, dir, remote string, push bool) (string, error) {
 	if inside, _ := a.gitProbe().Output(ctx, dir, false, "rev-parse", "--is-inside-work-tree"); inside != "true" {
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("--source %s is not a Git repository; run git init first", dir))
+		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("--source %s is not a Git repository; run git init first", dir))
 	}
 	if _, err := a.gitProbe().Output(ctx, dir, false, "remote", "get-url", remote); err == nil {
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("--source %s already has a remote %s; pass --remote-name", dir, remote))
+		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("--source %s already has a remote %s; pass --remote-name", dir, remote))
 	}
 	if !push {
-		return nil
+		return "", nil
 	}
 	if _, err := a.gitProbe().Output(ctx, dir, false, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err != nil {
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("--push requires a commit in --source %s; commit first", dir))
+		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("--push requires a commit in --source %s; commit first", dir))
 	}
-	if _, err := a.gitProbe().Output(ctx, dir, false, "symbolic-ref", "--quiet", "HEAD"); err != nil {
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("--push requires a checked-out branch in --source %s", dir))
+	branch, err := a.gitProbe().Output(ctx, dir, false, "symbolic-ref", "--quiet", "HEAD")
+	if err != nil {
+		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("--push requires a checked-out branch in --source %s", dir))
 	}
-	return nil
+	return strings.TrimPrefix(branch, "refs/heads/"), nil
 }
 
 // publishRepository adds item as the remote of the local repository in dir and, with push,
@@ -365,7 +378,7 @@ func (a *application) publishRepository(cmd *cobra.Command, t target, item servi
 	if err != nil {
 		return err
 	}
-	if _, err := a.gitIn(cmd.Context(), dir, append(credentials, "push", "--quiet", "--set-upstream", remote, "HEAD")...); err != nil {
+	if _, err := a.gitIn(cmd.Context(), dir, append(credentials, "push", "--quiet", "--set-upstream", "--", remote, "HEAD")...); err != nil {
 		return fmt.Errorf("created %s, but could not push to it: %w", item.FullName, err)
 	}
 	a.done(cmd, "Pushed the current branch to %s", item.FullName)

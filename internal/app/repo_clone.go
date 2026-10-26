@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -230,6 +231,14 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 			case cmd.Flags().Changed("remote-name") && !addRemote:
 				return clierr.Wrap(clierr.Usage, errors.New("--remote-name requires --remote"))
 			}
+			if err := validateRemoteName("remote-name", remoteName); err != nil {
+				return err
+			}
+			if cmd.Flags().Changed("fork-name") {
+				if err := validateRepositoryName(opts.Name); err != nil {
+					return err
+				}
+			}
 			if err := a.repositoryArgument(args); err != nil {
 				return err
 			}
@@ -237,13 +246,13 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 			if err != nil {
 				return err
 			}
-			owner := t.owner()
-			if strings.EqualFold(owner, cmp.Or(opts.Organization, t.User)) {
+			owner, forkOwner := t.owner(), cmp.Or(opts.Organization, t.login())
+			if strings.EqualFold(owner, forkOwner) {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("cannot fork %s into %s: it already owns it; pass --org to fork it into an organization", t.Repo, owner))
 			}
 			rename, current := false, ""
 			if addRemote {
-				if rename, current, err = a.checkForkRemote(cmd, t, remoteName, cmp.Or(opts.Organization, t.User)); err != nil {
+				if rename, current, err = a.checkForkRemote(cmd, t, remoteName, forkOwner); err != nil {
 					return err
 				}
 			}
@@ -253,7 +262,7 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 			}
 			if _, name, _ := strings.Cut(fork.FullName, "/"); existed && opts.Name != "" && !strings.EqualFold(name, opts.Name) {
 				// Gitea allows one fork per owner, so --fork-name cannot give a second one.
-				return fmt.Errorf("--fork-name %s was not applied: %s already forked %s as %s, and Gitea allows one fork per owner", opts.Name, cmp.Or(opts.Organization, t.User), t.Repo, fork.FullName)
+				return fmt.Errorf("--fork-name %s was not applied: %s already forked %s as %s, and Gitea allows one fork per owner", opts.Name, forkOwner, t.Repo, fork.FullName)
 			}
 			if existed {
 				a.warn(cmd, "%s already exists", fork.FullName)
@@ -336,7 +345,7 @@ func (a *application) addForkRemote(cmd *cobra.Command, t target, fork services.
 		return nil
 	}
 	if rename {
-		if _, err := a.git(ctx, "remote", "rename", name, "upstream"); err != nil {
+		if _, err := a.git(ctx, "remote", "rename", "--", name, "upstream"); err != nil {
 			return fmt.Errorf("forked to %s, but could not rename Git remote %s to upstream: %w", fork.FullName, name, err)
 		}
 		a.done(cmd, "Renamed Git remote %s to upstream", name)
@@ -372,7 +381,7 @@ func argsBeforeDash(cmd *cobra.Command, args []string) int {
 
 // cloneOptions are the choices of repo clone, and of repo create and repo fork with --clone.
 type cloneOptions struct {
-	// directory is the clone's path; empty lets Git name it after the repository.
+	// directory is the clone's path; empty names it after the repository, as Git does.
 	directory string
 	depth     int
 	gitFlags  []string
@@ -403,11 +412,18 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 		gitArgs = append(gitArgs, "--depth", fmt.Sprint(depth))
 	}
 	gitArgs = append(gitArgs, opts.gitFlags...)
+	if directory == "" {
+		if directory = filepath.Base(strings.TrimSuffix(item.Name, ".git")); directory == "" || directory == "." || directory == "/" {
+			directory = item.Name
+		}
+		if slices.ContainsFunc(opts.gitFlags, func(flag string) bool { return flag == "--bare" || flag == "--mirror" }) {
+			directory += ".git"
+		}
+	}
 	gitArgs = append(gitArgs, "--", remote)
 	if directory != "" {
+		// Named explicitly, so that the setup below runs where Git cloned to.
 		gitArgs = append(gitArgs, directory)
-	} else if directory = filepath.Base(strings.TrimSuffix(item.Name, ".git")); directory == "" || directory == "." || directory == "/" {
-		directory = item.Name
 	}
 	credentialArgs, err := a.gitTransportArguments(t, remoteIsSSH)
 	if err != nil {

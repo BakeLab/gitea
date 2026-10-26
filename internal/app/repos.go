@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -310,11 +311,12 @@ $ gt repo view alice/project --web`,
 }
 
 func (a *application) repositoryView(item services.Repository, readme string) terminal.View {
+	info := repositoryInfo(item)
 	badges := []terminal.Cell{{Text: "public", Color: "green"}}
 	if item.Private {
 		badges[0] = terminal.Cell{Text: "private", Color: "yellow"}
 	}
-	for _, kind := range repositoryInfo(item)[1:] {
+	for _, kind := range info[1:] {
 		badge := terminal.Cell{Text: kind, Muted: true}
 		if kind == "archived" {
 			badge = terminal.Cell{Text: "archived (read-only)", Color: "yellow"}
@@ -331,12 +333,18 @@ func (a *application) repositoryView(item services.Repository, readme string) te
 	view := terminal.View{
 		Title: item.FullName, Badges: badges, Meta: strings.Join(meta, " · "), Body: readme, Kind: "repository", URL: item.URL,
 		Fields: []terminal.Field{
+			{Label: "Visibility", Value: info[0], PipedOnly: true},
+			{Label: "State", Value: strings.Join(info[1:], ", "), PipedOnly: true},
 			{Label: "Description", Value: item.Description},
 			{Label: "Forked from", Value: parentName(item)},
 			{Label: "Mirror of", Value: mirrorSourceURL(item)},
 			{Label: "Default branch", Value: item.DefaultBranch},
 			{Label: "Website", Value: item.Website},
 			{Label: "Topics", Value: strings.Join(item.Topics, ", ")},
+			{Label: "Stars", Value: strconv.Itoa(item.Stars), PipedOnly: true},
+			{Label: "Forks", Value: strconv.Itoa(item.Forks), PipedOnly: true},
+			{Label: "Open issues", Value: strconv.Itoa(item.OpenIssues), PipedOnly: true},
+			{Label: "Open pull requests", Value: strconv.Itoa(item.OpenPulls), PipedOnly: true},
 			{Label: "Clone", Value: item.CloneURL},
 			{Label: "SSH", Value: item.SSHURL},
 		},

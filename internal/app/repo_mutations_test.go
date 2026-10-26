@@ -178,14 +178,22 @@ func TestRepoForkReportsAnExistingFork(t *testing.T) {
 }
 
 func TestRepoForkRefusesTheOwnersRepository(t *testing.T) {
+	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		requests = append(requests, r.Method+" "+r.URL.Path+" "+r.Header.Get("Sudo"))
+		_, _ = w.Write([]byte(`{"full_name":"bob/project"}`))
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
 	err := Execute(context.Background(), deps, []string{"repo", "fork", "alice/project"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
 	require.ErrorContains(t, err, "cannot fork alice/project into alice: it already owns it; pass --org")
+	err = Execute(context.Background(), deps, []string{"--sudo", "bob", "repo", "fork", "bob/project"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.ErrorContains(t, err, "cannot fork bob/project into bob: it already owns it")
+	require.Empty(t, requests)
+	require.NoError(t, Execute(context.Background(), deps, []string{"--sudo", "bob", "repo", "fork", "alice/project"}))
+	require.Equal(t, []string{"POST /api/v1/repos/alice/project/forks bob"}, requests)
 }
 
 func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
@@ -207,14 +215,14 @@ func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
 	deps, out, diagnostics := repoTTYDeps(t, server.URL)
 	fork := server.URL + "/alice/mine.git"
 	runner := &fakeGit{results: map[string]string{
-		"rev-parse --is-inside-work-tree": "true",
-		"remote get-url origin":           server.URL + "/bob/project.git",
-		"remote rename origin upstream":   "",
-		"remote add -- origin " + fork:    "",
+		"rev-parse --is-inside-work-tree":  "true",
+		"remote get-url origin":            server.URL + "/bob/project.git",
+		"remote rename -- origin upstream": "",
+		"remote add -- origin " + fork:     "",
 	}}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"}))
-	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", "remote get-url upstream", "remote rename origin upstream", "remote add -- origin " + fork}, runner.calls)
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", "remote get-url upstream", "remote rename -- origin upstream", "remote add -- origin " + fork}, runner.calls)
 	require.Equal(t, "✓ Forked bob/project to alice/mine\n✓ Renamed Git remote origin to upstream\n✓ Added Git remote origin for alice/mine\n", diagnostics.String())
 	require.Equal(t, "https://gitea.test/alice/mine\n", out.String())
 	// A second run finds origin pointing to the fork.

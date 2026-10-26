@@ -462,6 +462,23 @@ func userExists(ctx context.Context, client *transport.Client, username string) 
 	return err
 }
 
+// MissingSudoUser returns a *NotFoundError when the Sudo user of client does not exist, which
+// Gitea answers like any missing resource, with a bare 404.
+func MissingSudoUser(ctx context.Context, client *transport.Client) error {
+	if client == nil || client.Sudo == "" {
+		return nil
+	}
+	plain := *client
+	plain.Sudo = ""
+	if err := userExists(ctx, &plain, client.Sudo); IsNotFound(err) {
+		if missing, ok := errors.AsType[*NotFoundError](err); ok {
+			missing.Kind = "--sudo user"
+		}
+		return err
+	}
+	return nil
+}
+
 // OwnerExists fails with a *NotFoundError when no user or organization is called name.
 func OwnerExists(ctx context.Context, client *transport.Client, name string) error {
 	err := userExists(ctx, client, name)

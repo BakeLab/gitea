@@ -37,10 +37,14 @@ func TestRepositoryEditPreservesExplicitClearsAndFalse(t *testing.T) {
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/branches/main", "PATCH /api/v1/repos/alice/project", "GET /api/v1/repos/alice/project"}, requests)
 }
 
-func TestRepositoryEditRejectsAMissingDefaultBranch(t *testing.T) {
+func TestRepositoryEditNamesWhatIsMissing(t *testing.T) {
 	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
+			return
+		}
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
@@ -48,6 +52,10 @@ func TestRepositoryEditRejectsAMissingDefaultBranch(t *testing.T) {
 	err := Execute(context.Background(), deps, []string{"repo", "edit", "alice/project", "--default-branch", "nope"})
 	require.EqualError(t, err, `branch "nope" not found in alice/project`)
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/branches/nope", "GET /api/v1/repos/alice/project"}, requests)
+	for _, flag := range []string{"--add-topic", "--default-branch"} {
+		err = Execute(context.Background(), deps, []string{"repo", "edit", "alice/missing", flag, "x"})
+		require.EqualError(t, err, "repository alice/missing not found", flag)
+	}
 }
 
 func TestRepositoryEditReportsTheChangedSettings(t *testing.T) {

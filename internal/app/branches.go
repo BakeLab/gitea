@@ -28,6 +28,14 @@ func validateBranch(name string) error {
 	return nil
 }
 
+// validateRemoteName rejects what Git refuses as a remote name, and names Git would read as options.
+func validateRemoteName(flag, name string) error {
+	if validateBranch(name) != nil {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s requires a valid Git remote name", flag))
+	}
+	return nil
+}
+
 func validateBranches(names []string) error {
 	for _, name := range names {
 		if err := validateBranch(name); err != nil {

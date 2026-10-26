@@ -23,6 +23,9 @@ func TestCreatesAndListingsNameWhatIsMissingOrTaken(t *testing.T) {
 		"POST /api/v1/admin/users":                            {409, "user already exists [name: bob]"},
 		"GET /api/v1/orgs/nobody/labels":                      {404, "not found"},
 		"POST /api/v1/repos/nobody/none/forks":                {404, "not found"},
+		"GET /api/v1/repos/nobody/none":                       {404, "not found"},
+		"POST /api/v1/repos/alice/x/forks":                    {404, "not found"},
+		"GET /api/v1/repos/alice/x":                           {200, ""},
 		"POST /api/v1/repos/alice/x/branches":                 {409, "The branch already exists."},
 		"GET /api/v1/repos/alice/missing/labels":              {404, "not found"},
 		"POST /api/v1/repos/alice/missing/branch_protections": {404, "not found"},
@@ -47,6 +50,10 @@ func TestCreatesAndListingsNameWhatIsMissingOrTaken(t *testing.T) {
 	require.EqualError(t, err, `repository alice/missing not found`)
 	_, _, err = (Repositories{Client: client}).Fork(ctx, "nobody/none", ForkOptions{})
 	require.EqualError(t, err, `repository nobody/none not found`)
+	_, _, err = (Repositories{Client: client}).Fork(ctx, "nobody/none", ForkOptions{Organization: "nobody"})
+	require.EqualError(t, err, `repository nobody/none not found`)
+	_, _, err = (Repositories{Client: client}).Fork(ctx, "alice/x", ForkOptions{Organization: "nobody"})
+	require.EqualError(t, err, `organization "nobody" not found`)
 	_, err = (Branches{Client: client}).Protect(ctx, "alice/missing", Protection{Rule: "release/*"})
 	require.EqualError(t, err, `repository alice/missing not found`)
 	for _, source := range []string{"", "v1.0"} {
