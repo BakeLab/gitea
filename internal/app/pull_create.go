@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -59,10 +60,10 @@ commands on the branch keep selecting the repository rather than the fork.`, Ann
 	create.Flags().StringVarP(&f.options.Base, "base", "B", "", "Base branch (default: the repository's default branch)")
 	create.Flags().BoolVarP(&f.draft, "draft", "d", false, "Create a draft pull request")
 	create.Flags().BoolVarP(&f.fill, "fill", "f", false, "Skip the questions and take the title and body from the commits")
-	create.Flags().BoolVarP(&f.web, "web", "w", false, "Open the comparison page in the browser to create the pull request there")
+	create.Flags().BoolVarP(&f.web, "web", "w", false, "Open the comparison of --head and --base in the browser to create the pull request there")
 	create.Flags().BoolVar(&f.allowMaintainerEdits, "allow-maintainer-edits", true, "Allow maintainers to push to the head branch")
 	create.Flags().BoolVar(&f.agit, "agit", false, "Create the pull request through AGit push (refs/for)")
-	create.Flags().StringSliceVarP(&f.reviewers, "reviewer", "r", nil, "Request reviews from users; @me for yourself")
+	create.Flags().StringSliceVarP(&f.reviewers, "reviewer", "r", nil, "Request reviews from users")
 	create.Flags().StringSliceVar(&f.reviewerTeams, "reviewer-team", nil, "Request reviews from teams within the repository's organization")
 	create.Flags().StringArrayVar(&f.attachments, "attachment", nil, "Attach a file to the pull request (repeatable)")
 	create.Flags().StringArrayVarP(&f.projects, "project", "p", nil, "Add the pull request to the repository's or its owner's project with this ID or `title`, a number being an ID first (repeatable)")
@@ -108,6 +109,11 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	} else if f.topic != "" {
 		return clierr.Wrap(clierr.Usage, errors.New("--topic requires --agit"))
 	}
+	if f.web {
+		if err := requireWebFlags(cmd, "head", "base"); err != nil {
+			return err
+		}
+	}
 	if id, err := strconv.ParseInt(f.milestone, 10, 64); err == nil && id < 0 {
 		return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
 	}
@@ -118,6 +124,9 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		return err
 	}
 	trimNames(f.reviewers, f.reviewerTeams)
+	if slices.Contains(f.reviewers, "@me") {
+		return clierr.Wrap(clierr.Usage, errors.New("--reviewer cannot include @me; Gitea does not let the author review their pull request"))
+	}
 	reviews := services.ReviewRequestChanges{Add: services.ReviewRequestInput{Users: f.reviewers, Teams: f.reviewerTeams}}
 	requestReviews := len(f.reviewers)+len(f.reviewerTeams) > 0
 	if requestReviews {
@@ -159,7 +168,6 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		}
 	}
 	t.expandMeAll(f.options.Assignees)
-	t.expandMeAll(f.reviewers)
 	if f.options.Head == "" {
 		owner, branch := a.defaultPullHead(cmd.Context())
 		if branch == "" {
@@ -185,7 +193,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	}
 	base.branch = f.options.Base
 	if !f.agit {
-		if err := refuseSameBranch(f.options.Head, f.options.Base); err != nil {
+		if err := refuseSameBranch(f.options.Head, f.options.Base, cmd.Flags().Changed("head")); err != nil {
 			return err
 		}
 		if err := a.refuseEmptyPull(cmd.Context(), t, f.options.Base, f.options.Head); err != nil {
@@ -201,7 +209,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	}
 	var commitBody string
 	if f.options.Title == "" {
-		if subject, body, ok := a.singleCommitMessage(cmd.Context(), f.options.Base, f.options.Head); ok {
+		if subject, body, ok := a.singleCommitMessage(cmd.Context(), f.options.Base, a.localHead(cmd.Context(), t, f.options.Head)); ok {
 			f.options.Title, commitBody = subject, body
 		} else if f.options.Title = terminal.DefaultPullTitle(f.options.Head); f.options.Title == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("supply --title"))
@@ -337,14 +345,15 @@ func (a *application) recordAgitPull(ctx context.Context, t target, opts git.Agi
 
 func (a *application) defaultPullHead(ctx context.Context) (owner, branch string) {
 	probe := a.gitProbe()
-	branch, remote := git.CurrentUpstreamRemote(ctx, probe, a.options.cwd)
-	if branch == "" {
+	config, err := git.CurrentBranchConfig(ctx, probe, a.options.cwd)
+	if err != nil {
 		return "", ""
 	}
-	if remote == "" {
+	branch = config.Name
+	if config.Remote == "" || config.Merge != branch { // a branch started from another, such as origin/main, is pushed on its own
 		return "", branch
 	}
-	raw, err := probe.Output(ctx, a.options.cwd, false, "remote", "get-url", remote)
+	raw, err := probe.Output(ctx, a.options.cwd, false, "remote", "get-url", config.Remote)
 	if err != nil || raw == "" {
 		return "", branch
 	}
@@ -360,12 +369,10 @@ func (a *application) defaultPullHead(ctx context.Context) (owner, branch string
 	return owner, branch
 }
 
-// singleCommitMessage returns the subject and body of the only commit head has ahead of base.
+// singleCommitMessage returns the subject and body of the only commit the local branch head has
+// ahead of base.
 // Any Git failure, or a head with zero or several commits, reports ok=false.
 func (a *application) singleCommitMessage(ctx context.Context, base, head string) (subject, body string, ok bool) {
-	if _, branch, found := strings.Cut(head, ":"); found {
-		head = branch
-	}
 	if base == "" || head == "" || strings.HasPrefix(base, "-") || strings.HasPrefix(head, "-") {
 		return "", "", false
 	}
@@ -397,20 +404,36 @@ func (a *application) singleCommitMessage(ctx context.Context, base, head string
 
 // refuseSameBranch rejects a head that is the base branch of the same repository, before anything
 // is pushed: such a pull request has no commits, and pushing would publish the base branch itself.
-func refuseSameBranch(head, base string) error {
-	if head != "" && head == base {
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("must be on a branch named differently than %q; create a branch or pass --head", base))
+func refuseSameBranch(head, base string, explicit bool) error {
+	if head == "" || head != base {
+		return nil
 	}
-	return nil
+	if explicit {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("--head cannot be the base branch %q", base))
+	}
+	return clierr.Wrap(clierr.Usage, fmt.Errorf("must be on a branch named differently than %q; create a branch or pass --head", base))
+}
+
+// localHead returns the local branch that holds head, or "" when head is OWNER:BRANCH and the local
+// branch BRANCH does not track its namesake on a remote of OWNER, being someone else's branch.
+func (a *application) localHead(ctx context.Context, t target, head string) string {
+	owner, branch, cross := strings.Cut(head, ":")
+	if !cross {
+		return head
+	}
+	config := git.ReadBranchConfig(ctx, a.gitProbe(), a.options.cwd, branch)
+	tracked, _, _ := strings.Cut(a.remoteRepository(ctx, t, config.Remote), "/")
+	if config.Merge != branch || tracked == "" || !strings.EqualFold(tracked, owner) {
+		return ""
+	}
+	return branch
 }
 
 // refuseEmptyPull rejects a local head branch without commits ahead of the base branch, before
 // anything is pushed, since Gitea would open a pull request without changes. It compares with the
 // remote-tracking base branch of the base repository and lets the head pass when Git cannot.
 func (a *application) refuseEmptyPull(ctx context.Context, t target, base, head string) error {
-	if _, branch, ok := strings.Cut(head, ":"); ok {
-		head = branch
-	}
+	head = a.localHead(ctx, t, head)
 	if base == "" || head == "" || strings.HasPrefix(base, "-") || strings.HasPrefix(head, "-") {
 		return nil
 	}
@@ -496,7 +519,7 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 		Labels: values.Labels, Deadline: values.Deadline, Base: values.Base, Head: values.Head,
 		AllowMaintainerEdit: &values.AllowMaintainerEdits,
 	}
-	if err := refuseSameBranch(options.Head, options.Base); err != nil {
+	if err := refuseSameBranch(options.Head, options.Base, false); err != nil {
 		return err
 	}
 	if err := a.refuseEmptyPull(cmd.Context(), target, options.Base, options.Head); err != nil {

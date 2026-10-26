@@ -6,9 +6,11 @@ package git
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/git/gittest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,6 +20,7 @@ type checkoutRunner struct {
 	localCommit      string
 	diverged         bool
 	worktrees        string
+	recordedPull     string
 }
 
 func (r *checkoutRunner) Output(_ context.Context, dir string, prompt bool, args ...string) (string, error) {
@@ -41,6 +44,10 @@ func (r *checkoutRunner) Output(_ context.Context, dir string, prompt bool, args
 		return "abc123", nil
 	case "worktree":
 		return r.worktrees, nil
+	case "config":
+		if args[1] == "--get" && strings.HasSuffix(args[2], ".gitea-cli-pr") {
+			return r.recordedPull, nil
+		}
 	case "status":
 		if r.dirty {
 			return "?? file", nil
@@ -146,7 +153,7 @@ func TestPullCheckoutUpdatesOnlyByFastForward(t *testing.T) {
 		_, err := CheckoutPull(context.Background(), runner, CheckoutOptions{Directory: "/work", Remote: "origin", Number: 7, Branch: "pr/7", ExpectedCommit: "abc123", Update: true})
 		require.Contains(t, runner.calls, "merge-base --is-ancestor previous abc123")
 		if diverged {
-			require.EqualError(t, err, "local branch pr/7 has commits that pull request #7 does not have, so it cannot be fast-forwarded; choose another checkout branch with --branch")
+			require.EqualError(t, err, "local branch pr/7 has commits that pull request #7 does not have, so it cannot be fast-forwarded; choose another checkout branch with --branch, or drop them with: git checkout -B pr/7 abc123")
 			for _, call := range runner.calls {
 				require.False(t, strings.HasPrefix(call, "switch "))
 				require.False(t, strings.HasPrefix(call, "merge "))
@@ -158,6 +165,12 @@ func TestPullCheckoutUpdatesOnlyByFastForward(t *testing.T) {
 	}
 }
 
+func TestPullCheckoutReportsARewrittenPullRequest(t *testing.T) {
+	runner := &checkoutRunner{collision: true, localCommit: "previous", diverged: true, recordedPull: "7"}
+	_, err := CheckoutPull(context.Background(), runner, CheckoutOptions{Directory: "/work", Remote: "origin", Number: 7, Branch: "pr/7", ExpectedCommit: "abc123", Update: true})
+	require.EqualError(t, err, "pull request #7 was rewritten, such as by a force push, since branch pr/7 was checked out; to drop the commits it no longer has, run: git checkout -B pr/7 abc123")
+}
+
 func TestPullCheckoutTracksHeadBranch(t *testing.T) {
 	runner := &checkoutRunner{}
 	result, err := CheckoutPull(context.Background(), runner, CheckoutOptions{
@@ -166,7 +179,7 @@ func TestPullCheckoutTracksHeadBranch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, CheckoutResult{Branch: "pr/7", Commit: "abc123", Remote: "pulls/bob", Tracking: "pulls/bob/feature"}, result)
-	require.Contains(t, runner.calls, "check-ref-format --branch feature")
+	require.Contains(t, runner.calls, "check-ref-format refs/heads/feature")
 	require.Contains(t, runner.calls, "fetch --quiet --no-tags -- pulls/bob refs/heads/feature")
 	require.Contains(t, runner.calls, "config branch.pr/7.remote pulls/bob")
 	require.Contains(t, runner.calls, "config branch.pr/7.merge refs/heads/feature")
@@ -190,4 +203,27 @@ func TestPullCheckoutRejectsBranchCheckedOutInAnotherWorktree(t *testing.T) {
 	runner = &checkoutRunner{collision: true, localCommit: "abc123", worktrees: "worktree abc123\nHEAD 1\nbranch refs/heads/pr/7\n"}
 	_, err = CheckoutPull(context.Background(), runner, options)
 	require.NoError(t, err)
+}
+
+func TestPullCheckoutTracksAHeadBranchStartingWithADash(t *testing.T) {
+	gittest.Isolate(t)
+	remote, dir := t.TempDir(), t.TempDir()
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+		return strings.TrimSpace(string(out))
+	}
+	run(remote, "init", "--quiet", "--bare")
+	run(dir, "init", "--quiet", "--initial-branch=main")
+	run(dir, "commit", "--quiet", "--allow-empty", "--message=x")
+	run(dir, "remote", "add", "origin", remote)
+	run(dir, "push", "--quiet", "origin", "main:refs/heads/-dash")
+	result, err := CheckoutPull(context.Background(), System{}, CheckoutOptions{
+		Directory: dir, Remote: "origin", Number: 7, Branch: "pr/7", ExpectedCommit: run(dir, "rev-parse", "main"),
+		HeadRemote: "origin", HeadBranch: "-dash",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "origin/-dash", result.Tracking)
+	require.Equal(t, "refs/heads/-dash", run(dir, "config", "branch.pr/7.merge"))
 }

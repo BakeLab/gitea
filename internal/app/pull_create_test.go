@@ -47,7 +47,7 @@ func publishCreateEnv(t *testing.T, creates *int) (Dependencies, *fakeGit, strin
 		*creates++
 		var payload map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
-		require.Equal(t, "feature", payload["head"])
+		require.Contains(t, []any{"feature", "bob:feature"}, payload["head"])
 		_, _ = w.Write([]byte(`{"number":7,"title":"PR","html_url":"https://example.test/pulls/7"}`))
 	}))
 	t.Cleanup(server.Close)
@@ -490,9 +490,12 @@ func TestPullCreateRefusesAHeadWithoutCommitsBeforePushing(t *testing.T) {
 	require.Zero(t, creates)
 	require.NotContains(t, runner.calls, pushKey)
 
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--fill", "--head", "bob:feature", "--base", "main", "--json=number", "--no-input", "--yes"}), "the local feature is not bob's")
+	require.Equal(t, 1, creates)
+
 	runner.results["rev-list --count refs/remotes/origin/main..refs/heads/feature"] = "2"
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--fill", "--head", "feature", "--base", "main", "--json=number", "--no-input", "--yes"}))
-	require.Equal(t, 1, creates)
+	require.Equal(t, 2, creates)
 }
 
 func TestPullCreateRequiresYesWhenHeadUnpublishedWithoutInput(t *testing.T) {
@@ -703,7 +706,7 @@ func TestPullCreateEditorSeedsPullRequestTemplate(t *testing.T) {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			_, _ = w.Write([]byte("## Checklist\n"))
+			_, _ = w.Write([]byte("---\nname: Pull request\ntitle: \"[PR] \"\n---\n## Checklist\n"))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls":
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
 			_, _ = w.Write([]byte(`{"number":7}`))
@@ -764,6 +767,10 @@ func TestPullCreateRefusesHeadEqualToBaseBeforePushing(t *testing.T) {
 	creates := 0
 	deps, runner, _ := publishCreateEnv(t, &creates)
 	err := Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--head", "main", "--base", "main", "--no-input", "--yes"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, `--head cannot be the base branch "main"`)
+	runner.results["symbolic-ref --quiet HEAD"] = "refs/heads/main"
+	err = Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--base", "main", "--no-input", "--yes"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.ErrorContains(t, err, `must be on a branch named differently than "main"`)
 	require.Zero(t, creates)
@@ -881,6 +888,7 @@ func testPullCreateDefaultsFromForkBranch(t *testing.T, remote string) {
 	deps.Git = &fakeGit{results: map[string]string{
 		"symbolic-ref --quiet HEAD":           "über-fix",
 		"config --get branch.über-fix.remote": remote,
+		"config --get branch.über-fix.merge":  "refs/heads/über-fix",
 		"remote get-url " + remote:            server.URL + "/bob/project.git",
 	}}
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--no-input"}))
@@ -892,10 +900,11 @@ func testPullCreateDefaultsFromForkBranch(t *testing.T, remote string) {
 
 func TestPullCreatePushesAForkBranchThatTracksItsNamesake(t *testing.T) {
 	for _, test := range []struct {
-		name, head, want string
-		push             bool
+		name, head, merge, want string
+		push                    bool
 	}{
 		{name: "current branch of a fork clone", want: "bob:feature", push: true},
+		{name: "current branch started from the fork's main", merge: "refs/heads/main", want: "bob:feature", push: true},
 		{name: "explicit OWNER:BRANCH it tracks", head: "bob:feature", want: "bob:feature", push: true},
 		{name: "OWNER:BRANCH of another owner", head: "carol:feature", want: "carol:feature"},
 	} {
@@ -917,6 +926,10 @@ func TestPullCreatePushesAForkBranchThatTracksItsNamesake(t *testing.T) {
 					_, _ = w.Write([]byte(`{"full_name":"alice/project","has_pull_requests":true}`))
 					return
 				}
+				if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/bob/project" {
+					_, _ = w.Write([]byte(`{"full_name":"bob/project","has_pull_requests":true,"fork":true,"parent":{"full_name":"alice/project"},"permissions":{"push":true}}`))
+					return
+				}
 				t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 				w.WriteHeader(http.StatusNotFound)
 			}))
@@ -924,12 +937,13 @@ func TestPullCreatePushesAForkBranchThatTracksItsNamesake(t *testing.T) {
 			deps, _, _ := serverDeps(t, server.URL)
 			pushKey := credentialCall(t, deps, server.URL, "alice", "push", "--set-upstream", "--quiet", "--", "origin", "refs/heads/feature")
 			runner := &fakeGit{results: map[string]string{
-				"symbolic-ref --quiet HEAD":                                       "refs/heads/feature",
-				"rev-parse --is-inside-work-tree":                                 "true",
-				"rev-parse --verify refs/heads/feature^{commit}":                  "localsha",
-				"config --get branch.feature.remote":                              "origin",
-				"config --get branch.feature.merge":                               "refs/heads/feature",
-				"remote get-url origin":                                           server.URL + "/bob/project.git",
+				"symbolic-ref --quiet HEAD":                      "refs/heads/feature",
+				"rev-parse --is-inside-work-tree":                "true",
+				"rev-parse --verify refs/heads/feature^{commit}": "localsha",
+				"remote":                             "origin",
+				"config --get branch.feature.remote": "origin",
+				"config --get branch.feature.merge":  cmp.Or(test.merge, "refs/heads/feature"),
+				"remote get-url origin":              server.URL + "/bob/project.git",
 				"for-each-ref --format=%(objectname) refs/remotes/origin/feature": "oldsha",
 				pushKey: "",
 			}}

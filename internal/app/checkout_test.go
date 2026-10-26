@@ -6,11 +6,16 @@ package app
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
+	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/git/gittest"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"github.com/stretchr/testify/require"
@@ -69,18 +74,28 @@ func TestCheckoutMatchesRemoteThroughEnvironmentSSHHost(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"number":7,"head":{"sha":"abc123","ref":"feature","repo":{"full_name":"alice/project","ssh_url":"git@ssh.example.org:alice/project.git"}}}`)
 	}))
 	defer server.Close()
-	deps, out, _ := testDeps(t)
+	deps, out, diagnostics := testDeps(t)
 	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_INSTANCE_SSH_HOST": "ssh.example.org"})
-	deps.Git = &fakeGit{results: map[string]string{
+	runner := &fakeGit{results: map[string]string{
 		"remote": "origin", "remote get-url origin": "git@ssh.example.org:alice/project.git",
-		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch feature": "",
+		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch feature": "", "check-ref-format refs/heads/feature": "",
 		"status --porcelain=v1 --untracked-files=no": "", "for-each-ref --format=%(refname) refs/heads/": "",
 		"fetch --quiet --no-tags -- origin refs/heads/feature": "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --quiet --create feature abc123": "",
 		"config branch.feature.remote origin": "", "config branch.feature.merge refs/heads/feature": "",
 		"config branch.feature.gitea-cli-pr 7": "", "config branch.feature.gitea-cli-base-remote origin": "",
 	}}
+	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", "7", "--repo", "alice/project", "--remote", "origin", "--no-input", "--json"}))
 	require.JSONEq(t, `{"branch":"feature","commit":"abc123","detached":false,"remote":"origin","tracking":"origin/feature"}`, out.String())
+
+	maps.Copy(runner.results, map[string]string{
+		"check-ref-format --branch local": "", "switch --quiet --create local abc123": "",
+		"config branch.local.remote origin": "", "config branch.local.merge refs/heads/feature": "",
+		"config branch.local.gitea-cli-pr 7": "", "config branch.local.gitea-cli-base-remote origin": "",
+	})
+	deps.Streams.OutTTY = true
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", "7", "--repo", "alice/project", "--remote", "origin", "--branch", "local", "--no-input"}))
+	require.Contains(t, diagnostics.String(), "Checked out #7 into local; push to it with: git push origin HEAD:feature")
 }
 
 func TestSSHCheckoutUsesAccountKeyOnlyForFetch(t *testing.T) {
@@ -99,7 +114,7 @@ func TestSSHCheckoutUsesAccountKeyOnlyForFetch(t *testing.T) {
 	fetch := strings.Join(append(sshArgs, "fetch", "--quiet", "--no-tags", "--", "origin", "refs/heads/feature"), " ")
 	runner := &fakeGit{results: map[string]string{
 		"remote": "origin", "remote get-url origin": "ssh://git@git.example.org:2222/alice/project.git",
-		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch feature": "",
+		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch feature": "", "check-ref-format refs/heads/feature": "",
 		"status --porcelain=v1 --untracked-files=no": "", "for-each-ref --format=%(refname) refs/heads/": "",
 		fetch: "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --quiet --create feature abc123": "",
 		"config branch.feature.remote origin": "", "config branch.feature.merge refs/heads/feature": "",
@@ -138,10 +153,24 @@ func TestCheckoutNamesTheBranchAfterTheHead(t *testing.T) {
 		{"fork head name taken", fork, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "other"}, "bob/feature"},
 		{"fork names taken", fork, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "other", "rev-parse --verify refs/heads/bob/feature^{commit}": "other"}, "pr/7"},
 		{"deleted head", services.Pull{Number: 7, Head: "feature", HeadRemoteDeleted: true}, nil, "pr/7"},
+		{"head name starting with a dash", services.Pull{Number: 7, Head: "-feature", HeadSHA: "abc123", HeadRepo: "alice/project"}, nil, "pr/7"},
+		{"fork head name starting with a dash", services.Pull{Number: 7, Head: "-feature", HeadSHA: "abc123", HeadRepo: "bob/project"}, nil, "bob/-feature"},
 		{"fork branch at the head without upstream", fork, map[string]string{"rev-parse --verify refs/heads/feature^{commit}": "abc123"}, "feature"},
 		{"fork default branch tracking origin", services.Pull{Number: 7, Head: "main", HeadSHA: "abc123", HeadRepo: "bob/project"}, map[string]string{
 			"rev-parse --verify refs/heads/main^{commit}": "abc123", "config --get branch.main.remote": "origin",
 		}, "bob/main"},
+		{"head name tracking the head behind it", same, map[string]string{
+			"rev-parse --verify refs/heads/feature^{commit}": "old", "config --get branch.feature.remote": "origin",
+			"config --get branch.feature.merge": "refs/heads/feature", "remote get-url origin": "https://example.org/alice/project.git",
+		}, "feature"},
+		{"fork head name tracking the fork's head", fork, map[string]string{
+			"rev-parse --verify refs/heads/feature^{commit}": "abc123", "config --get branch.feature.remote": "origin",
+			"config --get branch.feature.merge": "refs/heads/feature", "remote get-url origin": "https://example.org/bob/project.git",
+		}, "feature"},
+		{"fork head name tracking the base's namesake", fork, map[string]string{
+			"rev-parse --verify refs/heads/feature^{commit}": "abc123", "config --get branch.feature.remote": "origin",
+			"config --get branch.feature.merge": "refs/heads/feature", "remote get-url origin": "https://example.org/alice/project.git",
+		}, "bob/feature"},
 		{"branch above the head name", services.Pull{Number: 7, Head: "feature/login", HeadSHA: "abc123", HeadRepo: "alice/project"}, map[string]string{
 			"rev-parse --verify refs/heads/feature^{commit}": "other",
 		}, "pr/7"},
@@ -153,7 +182,42 @@ func TestCheckoutNamesTheBranchAfterTheHead(t *testing.T) {
 			deps, _, _ := testDeps(t)
 			deps.Git = &fakeGit{results: tc.branches}
 			a := &application{deps: deps}
-			require.Equal(t, tc.want, a.checkoutBranchName(context.Background(), target{Repo: "alice/project"}, tc.pull))
+			require.Equal(t, tc.want, a.checkoutBranchName(context.Background(), target{Repo: "alice/project", Host: "https://example.org"}, tc.pull))
 		})
+	}
+}
+
+func TestCheckoutRejectsAnInvalidBranchBeforeRequests(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer server.Close()
+	deps, _, _ := testDeps(t)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
+	runner := &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true"}}
+	deps.Git = runner
+	err := Execute(context.Background(), deps, []string{"pr", "checkout", "7", "--branch", "bad..name", "--no-input"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.EqualError(t, err, "invalid branch name")
+}
+
+func TestCheckoutHeadRemoteFallsBackForANameGitRefuses(t *testing.T) {
+	gittest.Isolate(t)
+	dir := t.TempDir()
+	out, err := exec.Command("git", "-C", dir, "init", "--quiet").CombinedOutput()
+	require.NoError(t, err, string(out))
+	deps, _, _ := testDeps(t)
+	deps.Git = git.System{}
+	a := &application{deps: deps, options: options{cwd: dir}}
+	target := target{Host: "https://example.org", Repo: "alice/project"}
+	for repo, want := range map[string]string{"bob/project": "pulls/bob/project", "bob/project.lock": ""} {
+		pull := services.Pull{Number: 7, Head: "feature", HeadRepo: repo, HeadCloneURL: "https://example.org/" + repo + ".git"}
+		name, _, undo, err := a.ensureHeadRemote(context.Background(), target, pull)
+		require.NoError(t, err, repo)
+		require.Equal(t, want, name, repo)
+		if undo != nil {
+			undo()
+		}
 	}
 }

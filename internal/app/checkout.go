@@ -78,7 +78,8 @@ func (a *application) pullCheckoutCommand() *cobra.Command {
 	var branch string
 	var detached, update bool
 	cmd := &cobra.Command{Use: "checkout {<number> | <url> | <branch>}", Aliases: []string{"co"}, Short: "Check out a pull request", Long: `Check out the head of a pull request in a local branch that tracks the head branch, so
-that git push updates it and pr commands without an argument select the pull request.`, Annotations: pullArgumentRequiredAnnotation(nil), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+that pr commands without an argument select the pull request, and git push updates it when the
+branch is named like the head branch. gt prints the push command for a branch named otherwise.`, Annotations: pullArgumentRequiredAnnotation(nil), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if detached && (cmd.Flags().Changed("branch") || update) {
 			return clierr.Wrap(clierr.Usage, errors.New("--detach cannot be combined with --branch or --update"))
 		}
@@ -151,6 +152,8 @@ that git push updates it and pr commands without an argument select the pull req
 		}
 		if result.Detached {
 			a.done(cmd, "Checked out #%d at %s (detached HEAD)", n, shortSHA(result.Commit))
+		} else if options.HeadBranch != "" && result.Branch != options.HeadBranch {
+			a.done(cmd, "Checked out #%d into %s; push to it with: git push %s HEAD:%s", n, result.Branch, options.HeadRemote, options.HeadBranch)
 		} else {
 			a.done(cmd, "Checked out #%d into %s", n, result.Branch)
 		}
@@ -168,14 +171,18 @@ $ gt pr checkout 13 --update`
 
 // checkoutBranchName names the local branch for a pull request: its head branch name when
 // that is free or already at the head, else OWNER/BRANCH for a fork, else pr/NUMBER. A branch that
-// an earlier checkout of the same pull request created is reused, so that --update can advance it.
-// A fork's head name is not reused when that local branch tracks something else, such as main.
+// an earlier checkout of the same pull request created, or that tracks the head branch, such as the
+// author's own, is reused, so that --update can advance it. A fork's head name is not reused when
+// that local branch tracks something else, such as main.
 func (a *application) checkoutBranchName(ctx context.Context, t target, pull services.Pull) string {
 	fallback := fmt.Sprintf("pr/%d", pull.Number)
 	if pull.HeadRemoteDeleted || pull.Head == "" {
 		return fallback
 	}
-	candidates := []string{pull.Head}
+	var candidates []string
+	if !strings.HasPrefix(pull.Head, "-") { // a valid remote branch name, but not a local one
+		candidates = append(candidates, pull.Head)
+	}
 	if owner, _, _ := strings.Cut(pull.HeadRepo, "/"); owner != "" && !strings.EqualFold(pull.HeadRepo, t.Repo) {
 		candidates = append(candidates, owner+"/"+pull.Head)
 	}
@@ -189,7 +196,8 @@ func (a *application) checkoutBranchName(ctx context.Context, t target, pull ser
 			continue
 		}
 		config := git.ReadBranchConfig(ctx, a.gitProbe(), a.options.cwd, name)
-		if config.PullNumber == pull.Number || (tip == pull.HeadSHA && (sameRepo || config.Remote == "")) {
+		tracksHead := config.Merge == pull.Head && pull.HeadRepo != "" && strings.EqualFold(a.remoteRepository(ctx, t, config.Remote), pull.HeadRepo)
+		if config.PullNumber == pull.Number || tracksHead || (tip == pull.HeadSHA && (sameRepo || config.Remote == "")) {
 			return name
 		}
 	}
@@ -246,6 +254,9 @@ func (a *application) ensureHeadRemote(ctx context.Context, target target, pull 
 	name = "pulls/" + pull.HeadRepo
 	if pull.HeadRepo == "" {
 		name = "pulls/head"
+	}
+	if _, err := a.gitProbe().Output(ctx, a.options.cwd, false, "check-ref-format", "refs/remotes/"+name+"/head"); err != nil {
+		return "", "", nil, nil // such as for a repository named x.lock, which Git refuses as a remote name
 	}
 	if _, err := a.git(ctx, "remote", "add", "--", name, remoteURL); err != nil {
 		return "", "", nil, fmt.Errorf("could not add head remote %s: %w", name, err)

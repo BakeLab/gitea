@@ -25,7 +25,8 @@ import (
 const pullArgumentFormats = `A pull request can be supplied as argument in any of the following formats:
 - by number, such as "13" or "#13"
 - by URL, such as "https://gitea.com/OWNER/REPO/pulls/13"
-- by the name of its head branch, such as "feature/login" or "bob:feature/login"`
+- by the name of its head branch, such as "feature/login" or "bob:feature/login"; a branch that
+  reads as OWNER/REPO#N, such as "fix/login#2", needs the OWNER:BRANCH form`
 
 const pullArguments = pullArgumentFormats + `
 

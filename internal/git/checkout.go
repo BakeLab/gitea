@@ -108,7 +108,7 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 	fetchRef := fmt.Sprintf("refs/pull/%d/head", options.Number)
 	tracking := ""
 	if options.HeadBranch != "" {
-		if _, err := run("check-ref-format", "--branch", options.HeadBranch); err != nil {
+		if _, err := run("check-ref-format", "refs/heads/"+options.HeadBranch); err != nil {
 			return CheckoutResult{}, fmt.Errorf("invalid head branch: %w", err)
 		}
 		fetchRemote = options.HeadRemote
@@ -139,7 +139,10 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 			// merge-base --is-ancestor exits with status 1 to answer that it is not an ancestor.
 			if _, err := run("merge-base", "--is-ancestor", localCommit, commit); err != nil {
 				if failure, ok := errors.AsType[*CommandError](err); ok && failure.ExitCode == 1 {
-					return CheckoutResult{}, fmt.Errorf("local branch %s has commits that pull request #%d does not have, so it cannot be fast-forwarded; choose another checkout branch with --branch", options.Branch, options.Number)
+					if ReadBranchConfig(ctx, runner, options.Directory, options.Branch).PullNumber == options.Number {
+						return CheckoutResult{}, fmt.Errorf("pull request #%d was rewritten, such as by a force push, since branch %s was checked out; to drop the commits it no longer has, run: git checkout -B %s %s", options.Number, options.Branch, options.Branch, commit)
+					}
+					return CheckoutResult{}, fmt.Errorf("local branch %s has commits that pull request #%d does not have, so it cannot be fast-forwarded; choose another checkout branch with --branch, or drop them with: git checkout -B %s %s", options.Branch, options.Number, options.Branch, commit)
 				}
 				return CheckoutResult{}, err
 			}

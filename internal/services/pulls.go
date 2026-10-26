@@ -20,6 +20,7 @@ import (
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
+	"gopkg.in/yaml.v3"
 )
 
 // Pull is the stable command representation of a pull request.
@@ -1294,10 +1295,36 @@ func (s Pulls) Template(ctx context.Context, ref string) (string, error) {
 	wg.Wait()
 	for _, p := range probes {
 		if !p.missing {
-			return p.content, p.err
+			return withoutFrontMatter(p.content), p.err
 		}
 	}
 	return "", nil
+}
+
+// withoutFrontMatter drops the YAML front matter of a Markdown template, which Gitea reads as the
+// template's metadata, such as its name, rather than as part of the body.
+func withoutFrontMatter(content string) string {
+	first, rest, ok := strings.Cut(content, "\n")
+	if !ok || !isFrontMatterSeparator(first) {
+		return content
+	}
+	offset := 0
+	for line := range strings.Lines(rest) {
+		if isFrontMatterSeparator(line) {
+			var metadata map[string]any
+			if front := rest[:offset]; strings.TrimSpace(front) == "" || yaml.Unmarshal([]byte(front), &metadata) != nil {
+				return content
+			}
+			return rest[offset+len(line):]
+		}
+		offset += len(line)
+	}
+	return content
+}
+
+func isFrontMatterSeparator(line string) bool {
+	line = strings.TrimRight(line, " \t\r\n")
+	return len(line) >= 3 && strings.Trim(line, "-") == ""
 }
 
 // templateAt reads one template path; missing reports a 404.
