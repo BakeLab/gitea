@@ -83,11 +83,11 @@ func (a *application) tokenInstance() string {
 	return host
 }
 
-// environmentHosts applies GITEA_INSTANCE_INSECURE and GITEA_INSTANCE_SSH_HOST to the instance
-// of a GITEA_TOKEN login, without persisting them.
+// environmentHosts adds the instance of a GITEA_TOKEN login, so that a bare host naming it takes its
+// scheme, and applies GITEA_INSTANCE_INSECURE and GITEA_INSTANCE_SSH_HOST to it, without persisting them.
 func (a *application) environmentHosts(hosts map[string]settings.Host) (map[string]settings.Host, error) {
 	insecure, sshHost := a.deps.Getenv("GITEA_INSTANCE_INSECURE"), a.deps.Getenv("GITEA_INSTANCE_SSH_HOST")
-	if a.deps.Getenv("GITEA_TOKEN") == "" || (insecure == "" && sshHost == "") {
+	if a.deps.Getenv("GITEA_TOKEN") == "" || a.tokenInstance() == "" {
 		return hosts, nil
 	}
 	instance, err := settings.ResolveHost(a.tokenInstance(), hosts)
@@ -214,6 +214,9 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 	newClient := func(token string) *transport.Client { return a.instanceClient(t.Host, token, host) }
 	token := a.deps.Getenv("GITEA_TOKEN")
 	environmentCredential := token != ""
+	if strings.ContainsAny(token, "\r\n") {
+		return t, clierr.Wrap(clierr.Authentication, errors.New("GITEA_TOKEN must contain one token"))
+	}
 	if token != "" {
 		normalized, err := settings.ResolveHost(a.tokenInstance(), s.Hosts.Hosts)
 		if err != nil || normalized != t.Host {
@@ -582,13 +585,13 @@ func (a *application) defaultHost(t *target, s settings.Snapshot) error {
 		}
 		t.Host, t.HostSource = host, key
 	}
+	if t.Host == "" && a.deps.Getenv("GITEA_TOKEN") != "" {
+		return clierr.Wrap(clierr.Usage, errors.New("GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance"))
+	}
 	if t.Host == "" && s.Preferences.DefaultHost != "" {
 		t.Host, t.HostSource = s.Preferences.DefaultHost, "config.yml default_host"
 	}
 	candidates := selectableInstances(s.Hosts.Hosts)
-	if t.Host == "" && a.deps.Getenv("GITEA_TOKEN") != "" {
-		return clierr.Wrap(clierr.Usage, errors.New("GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance"))
-	}
 	if t.Host == "" && len(candidates) == 1 {
 		for host, candidate := range candidates {
 			t.Host, t.HostSource = host, soleInstanceSource(candidate)

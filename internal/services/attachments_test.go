@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/transport"
+	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,4 +62,15 @@ func TestUploadOfAFileIsSignedWithoutBuffering(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{""}, signer.contents, "the upload is hashed, not buffered for the signer")
 	require.Equal(t, []string{digest}, signer.digests)
+}
+
+func TestAttachmentHiddenFromASignatureNamesTheCause(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	client := transport.New(server.URL, "", false)
+	_, err := downloadAttachment(context.Background(), client, &gitea.Attachment{UUID: "a1"})
+	require.True(t, IsNotFound(err))
+	client.Signer = &digestSigner{}
+	_, err = downloadAttachment(context.Background(), client, &gitea.Attachment{UUID: "a1"})
+	require.ErrorIs(t, err, errAttachmentSignature)
 }

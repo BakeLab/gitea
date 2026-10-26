@@ -75,16 +75,17 @@ $ gt auth status --host gitea.com --json`,
 					return clierr.Wrap(clierr.Usage, err)
 				}
 			}
+			user, _ := a.selectedUser()
 			rows := []authStatusRow{}
 			for instance, host := range s.Hosts.Hosts {
 				if selectedHost != "" && instance != selectedHost {
 					continue
 				}
-				for user := range host.Users {
-					if !services.MatchAccount(a.options.user, user) {
+				for name := range host.Users {
+					if !services.MatchAccount(user, name) {
 						continue
 					}
-					rows = append(rows, a.accountStatus(cmd.Context(), s, instance, user, verify))
+					rows = append(rows, a.accountStatus(cmd.Context(), s, instance, name, verify))
 				}
 			}
 			if row, ok := a.environmentStatus(cmd.Context(), s, verify); ok && (selectedHost == "" || row.Host == selectedHost) {
@@ -98,7 +99,7 @@ $ gt auth status --host gitea.com --json`,
 						a.warn(cmd, "GITEA_TOKEN authenticates as %s, not the active account %s; commands on %s act as %s", terminal.SafeLine(row.User), terminal.SafeLine(rows[i].User), row.Host, terminal.SafeLine(row.User))
 					}
 				}
-				if services.MatchAccount(a.options.user, cmp.Or(row.User, a.options.user)) {
+				if services.MatchAccount(user, cmp.Or(row.User, user)) {
 					rows = append(rows, row)
 				}
 			}
@@ -121,6 +122,11 @@ $ gt auth status --host gitea.com --json`,
 				return a.writeJSON(cmd, rows)
 			}
 			if len(rows) == 0 {
+				if user != "" {
+					if err := unknownAccountError(s.Hosts.Hosts, selectedHost, user); err != nil {
+						return clierr.Wrap(clierr.Authentication, err)
+					}
+				}
 				if selectedHost != "" {
 					return clierr.Wrap(clierr.Authentication, fmt.Errorf("not logged in to %s; run gt auth login --host %s", selectedHost, selectedHost))
 				}
@@ -129,14 +135,45 @@ $ gt auth status --host gitea.com --json`,
 			if err := a.writeAuthStatus(cmd, rows); err != nil {
 				return err
 			}
-			if failed := len(slices.DeleteFunc(slices.Clone(rows), authStatusRow.usable)); failed > 0 {
-				return clierr.Wrap(clierr.Authentication, fmt.Errorf("%d of %d credentials cannot authenticate; log in again with gt auth login", failed, len(rows)))
+			if failed := slices.DeleteFunc(slices.Clone(rows), authStatusRow.usable); len(failed) > 0 {
+				// Logging in cannot help while GITEA_TOKEN replaces the stored account.
+				advice := "log in again with gt auth login"
+				if i := slices.IndexFunc(failed, authStatusRow.environment); i >= 0 {
+					advice = "fix or unset GITEA_TOKEN"
+					if failed[i].Host == "" {
+						advice = "set GITEA_INSTANCE_URL to the instance of GITEA_TOKEN"
+					}
+					if len(failed) > 1 {
+						advice += ", or log in again with gt auth login"
+					}
+				}
+				return clierr.Wrap(clierr.Authentication, fmt.Errorf("%d of %d credentials cannot authenticate; %s", len(failed), len(rows), advice))
 			}
 			return nil
 		},
 	}
 	status.Flags().BoolVar(&verify, "verify", false, "Check each credential against its instance")
 	return jsonOutput(status, jsonFields[authStatusRow]())
+}
+
+// unknownAccountError names the stored accounts when user is none of them, on selectedHost or on the
+// only instance with accounts.
+func unknownAccountError(hosts map[string]settings.Host, selectedHost, user string) error {
+	instances := []string{}
+	for instance, host := range hosts {
+		if len(host.Users) > 0 && (selectedHost == "" || instance == selectedHost) {
+			instances = append(instances, instance)
+		}
+	}
+	switch {
+	case selectedHost != "":
+		return target{Host: selectedHost, host: hosts[selectedHost]}.accountError(user)
+	case len(instances) == 1:
+		return target{Host: instances[0], host: hosts[instances[0]]}.accountError(user)
+	case len(instances) > 1:
+		return fmt.Errorf("account %q is not logged in on any instance", user)
+	}
+	return nil
 }
 
 // accountStatus reports a stored account without revealing its credential.
@@ -208,7 +245,7 @@ func (a *application) environmentStatus(ctx context.Context, s settings.Snapshot
 		verified := err == nil
 		row.User, row.Verified = user, &verified
 		if err != nil {
-			row.Error = err.Error()
+			row.Error = Explain(ctx, a.deps, err).Error()
 		} else {
 			row.Scopes, _ = services.TokenScopes(ctx, client)
 		}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,6 +117,36 @@ func TestDoctorReportsEveryCheckInsteadOfFailingFirst(t *testing.T) {
 				require.NoError(t, err)
 			}
 		})
+	}
+}
+
+func TestDoctorTellsARejectedCredentialFromTheInstance(t *testing.T) {
+	answers := doctorServer(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		answers.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		env map[string]string
+		fix string
+	}{
+		{map[string]string{"GITEA_CLI_HOST": server.URL}, "gt auth login --host " + server.URL},
+		{map[string]string{"GITEA_CLI_HOST": server.URL, "GITEA_TOKEN": "revoked"}, "export a valid GITEA_TOKEN, or unset it"},
+	} {
+		deps, out, _ := testDeps(t)
+		deps.Git = &fakeGit{results: map[string]string{"--version": "git version 2.50.1"}}
+		deps.Getenv = envFunc(tc.env)
+		configureAccounts(t, deps, server.URL, "alice", "alice")
+		require.Error(t, Execute(context.Background(), deps, []string{"doctor", "--json=checks"}))
+		var report doctorReport
+		require.NoError(t, json.Unmarshal(out.Bytes(), &report), out.String())
+		require.Contains(t, report.Checks[1].Detail, "Gitea 28.1.0 · ")
+		require.Equal(t, "Account", report.Checks[2].Name)
+		require.Equal(t, tc.fix, report.Checks[2].Fix)
 	}
 }
 

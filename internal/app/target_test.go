@@ -225,10 +225,14 @@ func TestEnvironmentTokenWithoutItsInstanceNamesTheVariables(t *testing.T) {
 	defer server.Close()
 	err = Execute(context.Background(), deps, []string{"api", "user", "--host", server.URL})
 	require.EqualError(t, err, "GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL matching the selected instance")
-	// A sole stored login does not become the token's instance either.
+	// A sole stored login or default_host does not become the token's instance either.
 	require.NoError(t, testManager(t, deps).Register(server.URL, "alice", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "stored"}))
 	err = Execute(context.Background(), deps, []string{"api", "user"})
 	require.EqualError(t, err, "GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance")
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "default_host", server.URL}))
+	err = Execute(context.Background(), deps, []string{"api", "user"})
+	require.EqualError(t, err, "GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 }
 
 func TestEnvironmentTokenBelongsToTheDefaultEnvironmentInstance(t *testing.T) {
@@ -238,9 +242,18 @@ func TestEnvironmentTokenBelongsToTheDefaultEnvironmentInstance(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _ := testDeps(t)
-	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": server.URL, "GITEA_INSTANCE_URL": "https://other.example.org", "GITEA_TOKEN": "secret"})
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": server.URL, "GITEA_INSTANCE_URL": "https://other.example.org", "GITEA_TOKEN": "secret\n"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user", "--jq", ".login"}))
 	require.Equal(t, "alice\n", out.String())
+	// A bare host takes the scheme of the token's instance, as it does for a stored login.
+	bare := strings.TrimPrefix(server.URL, "http://")
+	deps.Getenv = envFunc(map[string]string{"GITEA_INSTANCE_URL": server.URL, "GITEA_TOKEN": "secret"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user", "--host", bare}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "repos/{owner}/{repo}", "-R", bare + "/alice/project"}))
+	deps.Getenv = envFunc(map[string]string{"GITEA_INSTANCE_URL": server.URL, "GITEA_TOKEN": "secret\nother"})
+	err := Execute(context.Background(), deps, []string{"api", "user"})
+	require.EqualError(t, err, "GITEA_TOKEN must contain one token")
+	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
 }
 
 func TestEnvironmentLoginHonorsInstanceInsecureAndSSHHost(t *testing.T) {

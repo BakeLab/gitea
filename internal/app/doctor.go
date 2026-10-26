@@ -167,6 +167,13 @@ func (a *application) instanceCheck(ctx context.Context, t target, client *trans
 	defer cancel()
 	start := time.Now()
 	version, err := services.ServerVersion(ctx, client)
+	if (services.IsUnauthorized(err) || services.IsForbidden(err)) && (client.Token != "" || client.Signer != nil) {
+		// A rejected credential is the account check's to report; the instance may answer without it.
+		anonymous := a.instanceClient(t.Host, "", t.host)
+		if anonymousVersion, anonymousErr := services.ServerVersion(ctx, anonymous); anonymousErr == nil {
+			version, err, client = anonymousVersion, nil, anonymous
+		}
+	}
 	where := t.Host + " (" + describeSource(t.HostSource) + ")"
 	latency := max(time.Since(start).Milliseconds(), 1)
 	if services.IsUnauthorized(err) || services.IsForbidden(err) {
@@ -187,6 +194,10 @@ func (a *application) instanceCheck(ctx context.Context, t target, client *trans
 // accountCheck reports whether the account authenticates, and the scopes of its token.
 func (a *application) accountCheck(ctx context.Context, t target, snapshot settings.Snapshot, authenticated target, err error) doctorCheck {
 	login := "gt auth login --host " + t.Host
+	if a.deps.Getenv("GITEA_TOKEN") != "" {
+		// Stored accounts are not used while GITEA_TOKEN is set.
+		login = "export a valid GITEA_TOKEN, or unset it"
+	}
 	if a.deps.Getenv("GITEA_TOKEN") != "" && err != nil {
 		instance, resolveErr := settings.ResolveHost(a.tokenInstance(), snapshot.Hosts.Hosts)
 		switch {

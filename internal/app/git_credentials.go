@@ -126,6 +126,9 @@ $ gt auth setup-git --host gitea.com
 # Only for the current repository, always as alice
 $ gt auth setup-git --local --user alice`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if local && !a.insideClone(cmd.Context()) {
+				return clierr.Wrap(clierr.Usage, errors.New("setup-git --local must run inside a Git clone"))
+			}
 			t, err := a.instanceTarget(cmd.Context())
 			if err != nil {
 				return err
@@ -153,10 +156,17 @@ func (a *application) requireGitAccount(t target) error {
 		}
 	}
 	pinned, _ := a.selectedUser()
-	if _, ok := findAccountKey(t.host.Users, pinned); ok || (pinned == "" && len(t.host.Users) > 0) {
-		return nil
+	user, ok := findAccountKey(t.host.Users, pinned)
+	if pinned == "" && len(t.host.Users) > 0 {
+		user, ok = t.host.User, true
 	}
-	return clierr.Wrap(clierr.Authentication, t.accountError(pinned))
+	if !ok {
+		return clierr.Wrap(clierr.Authentication, t.accountError(pinned))
+	}
+	if t.host.Users[user].Tokenless() {
+		return clierr.Wrap(clierr.Authentication, fmt.Errorf("%s on %s signs requests with an SSH key and has no token", user, t.Host))
+	}
+	return nil
 }
 
 // setupGit configures Git to ask gt for the credentials of instance, globally or in the repository,

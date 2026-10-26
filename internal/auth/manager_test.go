@@ -238,6 +238,21 @@ func TestRegisterReplacesAnAccountOnlyWhenAsked(t *testing.T) {
 	}
 }
 
+func TestReplacingAnAccountRenamedInCaseKeepsOneAccount(t *testing.T) {
+	config := settings.New(t.TempDir())
+	keyring := &memoryKeyring{values: map[string]string{}}
+	manager := newTestManager(t, config, &Store{Dir: config.Dir, Keyring: keyring})
+	require.NoError(t, manager.Register("https://example.org", "alice", settings.StoreKeyring, settings.AuthToken, HostOptions{}, Credential{AccessToken: "old"}))
+	require.ErrorIs(t, manager.Register("https://example.org", "Alice", settings.StoreKeyring, settings.AuthToken, HostOptions{}, Credential{AccessToken: "new"}), ErrAccountExists)
+	require.NoError(t, manager.Register("https://example.org", "Alice", settings.StoreKeyring, settings.AuthToken, HostOptions{Replace: true}, Credential{AccessToken: "new"}))
+	s, err := config.Load()
+	require.NoError(t, err)
+	host := s.Hosts.Hosts["https://example.org"]
+	require.Equal(t, "Alice", host.User)
+	require.Equal(t, map[string]settings.Account{"Alice": {AuthMethod: settings.AuthToken, CredentialStore: settings.StoreKeyring}}, host.Users)
+	require.Len(t, keyring.values, 1)
+}
+
 func TestFailedReplacementRestoresTheCredential(t *testing.T) {
 	config := settings.New(t.TempDir())
 	keyring := &memoryKeyring{values: map[string]string{}}

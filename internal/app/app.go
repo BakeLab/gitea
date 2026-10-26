@@ -142,6 +142,14 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 	if deps.Editor == nil {
 		deps.Editor = terminal.SystemEditor{Streams: deps.Streams}
 	}
+	if getenv := deps.Getenv; getenv != nil {
+		deps.Getenv = func(key string) string {
+			if key == "GITEA_TOKEN" { // A token read from a file keeps its trailing newline.
+				return strings.TrimSpace(getenv(key))
+			}
+			return getenv(key)
+		}
+	}
 	if deps.LookupEnv == nil && deps.Getenv != nil {
 		// Without LookupEnv, a variable is set when Getenv reads a value for it.
 		getenv := deps.Getenv

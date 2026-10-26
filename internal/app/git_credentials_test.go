@@ -37,6 +37,19 @@ func TestSetupGitRequiresAnAccountOfTheInstance(t *testing.T) {
 		require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
 		require.Empty(t, git.calls, "no helper is configured")
 	}
+	git := &fakeGit{}
+	deps.Git = git
+	err := Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", instance, "--local", "--no-input"})
+	require.EqualError(t, err, "setup-git --local must run inside a Git clone")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree"}, git.calls)
+
+	git.calls = nil
+	configureHost(t, deps, instance, settings.Host{User: "alice", Users: map[string]settings.Account{"alice": {AuthMethod: settings.AuthHTTPSign, SSHKey: "/keys/id"}}})
+	err = Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", instance, "--no-input"})
+	require.EqualError(t, err, "alice on "+instance+" signs requests with an SSH key and has no token")
+	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
+	require.Empty(t, git.calls, "no helper is configured")
 }
 
 func TestSetupGitConfiguresTheInstanceTLSSettings(t *testing.T) {

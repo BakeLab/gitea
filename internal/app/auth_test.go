@@ -198,6 +198,14 @@ func TestAuthStatusFiltersBeforeReadingCredentials(t *testing.T) {
 	require.EqualError(t, err, "not logged in to https://unconfigured.example.org; run gt auth login --host https://unconfigured.example.org")
 	require.Empty(t, out.String())
 	require.Empty(t, keyring.reads)
+	err = Execute(context.Background(), deps, []string{"auth", "status", "--host", "https://example.org/base", "--user", "nobody"})
+	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
+	require.EqualError(t, err, `account "nobody" is not logged in on https://example.org/base (accounts: alice, bob)`)
+	require.EqualError(t, Execute(context.Background(), deps, []string{"auth", "status", "--user", "nobody"}), `account "nobody" is not logged in on any instance`)
+	require.Empty(t, keyring.reads)
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_USER": "BOB"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--host", "https://example.org/base", "--json", "user"}))
+	require.JSONEq(t, `[{"user":"bob"}]`, out.String())
 }
 
 func TestLogoutSelectsAccountWithoutAuthentication(t *testing.T) {
@@ -757,6 +765,17 @@ func TestAuthStatusShowsAccountsByInstance(t *testing.T) {
 	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
 	require.EqualError(t, err, "1 of 1 credentials cannot authenticate; log in again with gt auth login")
 	require.Equal(t, instance+"\talice\ttrue\ttoken\tfile\tfalse\t\t\tcredential unavailable; run gt auth login for this instance and account\n", out.String())
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
+	defer server.Close()
+	deps, out, _ = testDeps(t)
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "rejected", "GITEA_CLI_HOST": server.URL})
+	err = Execute(context.Background(), deps, []string{"auth", "status", "--verify"})
+	require.EqualError(t, err, "1 of 1 credentials cannot authenticate; fix or unset GITEA_TOKEN")
+	require.Equal(t, server.URL+"\t\ttrue\ttoken\tenvironment\ttrue\tfalse\t\tGITEA_TOKEN was rejected by "+server.URL+"; fix or unset GITEA_TOKEN\n", out.String())
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "token"})
+	err = Execute(context.Background(), deps, []string{"auth", "status"})
+	require.EqualError(t, err, "1 of 1 credentials cannot authenticate; set GITEA_INSTANCE_URL to the instance of GITEA_TOKEN")
 }
 
 func TestAuthStatusWarnsWhenTheEnvironmentTokenIsAnotherAccount(t *testing.T) {

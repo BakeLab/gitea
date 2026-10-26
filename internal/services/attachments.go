@@ -139,11 +139,18 @@ func downloadAttachment(ctx context.Context, client *transport.Client, attachmen
 		return nil, errors.New("invalid attachment identifier from Gitea")
 	}
 	response, err := client.DownloadSigned(ctx, strings.TrimRight(client.BaseURL, "/")+"/attachments/"+url.PathEscape(attachment.UUID))
+	if failure, ok := errors.AsType[*transport.APIError](err); ok && client.Signer != nil && failure.Status == http.StatusNotFound && failure.Storage == "" {
+		return nil, errAttachmentSignature
+	}
 	if err != nil {
 		return nil, err
 	}
 	return response.Body, nil
 }
+
+// errAttachmentSignature explains the 404 that Gitea answers an SSH key account with for an
+// attachment it just listed: its download route ignores HTTP signatures, so private files stay hidden.
+var errAttachmentSignature = errors.New("Gitea does not accept SSH key accounts for attachment downloads from private repositories; log in with a token: gt auth login --with-token")
 
 // downloadAPI opens the content an API endpoint serves, following one signed storage redirect,
 // such as Gitea's to object storage that serves files directly, without credentials. The SDK's

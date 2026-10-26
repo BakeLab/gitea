@@ -16,7 +16,7 @@
 export GITEA_CLI_HOST=https://gitea.example.org   # or GITEA_INSTANCE_URL
 export GITEA_TOKEN=...                            # from the CI secret store
 export GITEA_CLI_REPO=OWNER/REPO                  # optional, like --repo
-gt auth status --no-input --json host,user,method,credential_available
+gt auth status --no-input --verify --json host,user,verified,error
 ```
 
 - Environment credentials are never written to `config.yml` or `hosts.yml`. Never put a token

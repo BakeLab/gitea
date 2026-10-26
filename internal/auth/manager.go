@@ -6,6 +6,7 @@ package auth
 import (
 	"cmp"
 	"errors"
+	"strings"
 
 	"gitea.dev/cli/internal/settings"
 )
@@ -74,7 +75,16 @@ func (m Manager) register(instance, user string, account settings.Account, optio
 		if host.Users == nil {
 			host.Users = map[string]settings.Account{}
 		}
-		previous, exists := host.Users[user]
+		// A login renamed only in case replaces the account stored under its former spelling.
+		key := user
+		if _, exact := host.Users[user]; !exact {
+			for name := range host.Users {
+				if strings.EqualFold(name, user) {
+					key = name
+				}
+			}
+		}
+		previous, exists := host.Users[key]
 		if exists && !options.Replace {
 			return nil, ErrAccountExists
 		}
@@ -88,11 +98,11 @@ func (m Manager) register(instance, user string, account settings.Account, optio
 		}
 		// A replaced token is restored if publishing fails, and removed from a store the account leaves.
 		if exists && !previous.Tokenless() {
-			if old, err := m.credentials.Load(instance, user, previous.CredentialStore); err == nil {
-				undo = append(undo, func() error { return m.credentials.Save(instance, user, previous.CredentialStore, old) })
+			if old, err := m.credentials.Load(instance, key, previous.CredentialStore); err == nil {
+				undo = append(undo, func() error { return m.credentials.Save(instance, key, previous.CredentialStore, old) })
 			}
-			if credential == nil || previous.CredentialStore != account.CredentialStore {
-				if err := m.credentials.Delete(instance, user, previous.CredentialStore); err != nil {
+			if credential == nil || previous.CredentialStore != account.CredentialStore || key != user {
+				if err := m.credentials.Delete(instance, key, previous.CredentialStore); err != nil {
 					return nil, err
 				}
 			}
@@ -109,6 +119,7 @@ func (m Manager) register(instance, user string, account settings.Account, optio
 			kept.AuthMethod, kept.CredentialStore = account.AuthMethod, account.CredentialStore
 			account = kept
 		}
+		delete(host.Users, key)
 		host = options.Apply(host)
 		host.Users[user] = account
 		host.User = user
