@@ -108,7 +108,7 @@ are addressed by the %s number and the attachment ID that attachment list shows.
 
 	var uploadName string
 	upload := &cobra.Command{Use: "upload {<number> | <url>} <file>", Short: "Attach a file", Example: fmt.Sprintf(`$ gt %[1]s attachment upload %[2]s crash.log
-$ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.group, words.example), Annotations: annotations, Args: argsExact(2), ValidArgsFunction: pathArgs(1, false, completeFiles, completeFirst), RunE: func(cmd *cobra.Command, args []string) error {
+$ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.group, words.example), Annotations: annotations, Args: nonBlankArgs(cobra.ExactArgs(2), kind.noun(), "file"), ValidArgsFunction: pathArgs(1, false, completeFiles, completeFirst), RunE: func(cmd *cobra.Command, args []string) error {
 		name := uploadName
 		if cmd.Flags().Changed("name") && strings.TrimSpace(name) == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--name cannot be empty"))

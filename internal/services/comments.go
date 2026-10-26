@@ -103,11 +103,25 @@ func (s Comments) Create(ctx context.Context, n int64, body string) (Comment, er
 	return item, Issues{Client: s.Client, Repository: s.Repository}.issueError(ctx, err, n)
 }
 
+// timelineEvent reports a comment ID that names a timeline event, such as a label or title change,
+// which Gitea answers without a body on edit and with HTTP 400 on delete.
+func (s Comments) timelineEvent(id int64, verb string) error {
+	return fmt.Errorf("comment %d in %s is a timeline event, such as a label or title change, which cannot be %s", id, s.Repository, verb)
+}
+
 // Edit replaces the body of a repository comment.
 func (s Comments) Edit(ctx context.Context, id int64, body string) (Comment, error) {
+	status := 0
 	item, err := repoConvert(ctx, s.Client, s.Repository, commentFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Comment, *gitea.Response, error) {
-		return c.Issues.EditIssueComment(ctx, owner, repo, id, gitea.EditIssueCommentOption{Body: body})
+		comment, resp, err := c.Issues.EditIssueComment(ctx, owner, repo, id, gitea.EditIssueCommentOption{Body: body})
+		if resp != nil && resp.Response != nil {
+			status = resp.StatusCode
+		}
+		return comment, resp, err
 	})
+	if status == http.StatusNoContent {
+		return Comment{}, s.timelineEvent(id, "edited")
+	}
 	return item, repositoryItemError(ctx, s.Client, s.Repository, err, "comment", strconv.FormatInt(id, 10))
 }
 
@@ -119,8 +133,16 @@ func (s Comments) UploadAttachment(ctx context.Context, id int64, name string, i
 
 // Delete removes a repository comment.
 func (s Comments) Delete(ctx context.Context, id int64) error {
+	status := 0
 	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
-		return c.Issues.DeleteIssueComment(ctx, owner, repo, id)
+		resp, err := c.Issues.DeleteIssueComment(ctx, owner, repo, id)
+		if resp != nil && resp.Response != nil {
+			status = resp.StatusCode
+		}
+		return resp, err
 	})
+	if status == http.StatusBadRequest {
+		return s.timelineEvent(id, "deleted")
+	}
 	return repositoryItemError(ctx, s.Client, s.Repository, err, "comment", strconv.FormatInt(id, 10))
 }

@@ -273,8 +273,10 @@ func TestCommentEditAndDeleteReachInlineReviewComments(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
 		switch r.Method + " " + r.URL.Path {
-		case "GET /api/v1/repos/alice/project/issues/comments/40":
-			w.WriteHeader(http.StatusNoContent) // Gitea's answer for inline review comments
+		case "GET /api/v1/repos/alice/project/issues/comments/40", "GET /api/v1/repos/alice/project/issues/comments/41", "PATCH /api/v1/repos/alice/project/issues/comments/41":
+			w.WriteHeader(http.StatusNoContent) // Gitea's answer for inline review comments and timeline events
+		case "DELETE /api/v1/repos/alice/project/issues/comments/41":
+			w.WriteHeader(http.StatusBadRequest)
 		case "PATCH /api/v1/repos/alice/project/issues/comments/40":
 			require.Equal(t, "Fixed", payloadField(t, r, "body"))
 			_, _ = w.Write([]byte(`{"id":40,"body":"Fixed"}`))
@@ -296,6 +298,8 @@ func TestCommentEditAndDeleteReachInlineReviewComments(t *testing.T) {
 	require.Contains(t, calls, "DELETE /api/v1/repos/alice/project/issues/comments/40")
 	// Viewing still explains why an inline review comment cannot be shown.
 	require.ErrorContains(t, run("view", "40"), "not a plain comment")
+	require.EqualError(t, run("edit", "41", "--body", "Fixed"), "comment 41 in alice/project is a timeline event, such as a label or title change, which cannot be edited")
+	require.EqualError(t, run("delete", "41", "--yes"), "comment 41 in alice/project is a timeline event, such as a label or title change, which cannot be deleted")
 }
 
 func TestCommentCreateAttachesFiles(t *testing.T) {

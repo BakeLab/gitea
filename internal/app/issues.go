@@ -332,6 +332,9 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 		if _, err := a.requireInput(cmd, &title, "title", "Title", nil); err != nil {
 			return err
 		}
+		if strings.TrimSpace(title) == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("issue title cannot be empty"))
+		}
 		if target.client == nil {
 			if target, err = a.resolve(cmd.Context(), true); err != nil {
 				return err
@@ -634,12 +637,9 @@ $ gt issue %[1]s 12 13 --comment %[2]q`, verb, commentExample), Annotations: map
 				// Gitea refuses the state change, so fail before the comment is left behind.
 				return current, fmt.Errorf("pull request %s is already merged; it cannot be reopened", refLabel(target.Repo, n, current.Title))
 			}
-			if comment != "" {
-				if _, err := comments.Create(cmd.Context(), n, comment); err != nil {
-					return current, itemError(err, target.Repo)
-				}
-			}
-			item, err := service.SetState(cmd.Context(), n, state)
+			item, err := withComment(cmd.Context(), comments, n, comment, func() (services.Issue, error) {
+				return service.SetState(cmd.Context(), n, state)
+			})
 			if err != nil {
 				return item, itemError(err, target.Repo)
 			}
@@ -651,6 +651,24 @@ $ gt issue %[1]s 12 13 --comment %[2]q`, verb, commentExample), Annotations: map
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", commentUsage)
 	cmd.ValidArgsFunction = a.completeIssues(completeState)
 	return cmd
+}
+
+// withComment leaves comment on discussion n before change, deleting it again when change fails
+// so that a note such as "Done in #14" does not stay on a discussion whose state did not change.
+func withComment[T any](ctx context.Context, comments services.Comments, n int64, comment string, change func() (T, error)) (T, error) {
+	if comment == "" {
+		return change()
+	}
+	posted, err := comments.Create(ctx, n, comment)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	item, err := change()
+	if err != nil && comments.Delete(ctx, posted.ID) != nil {
+		err = fmt.Errorf("%w; the comment was posted anyway: %s", err, posted.URL)
+	}
+	return item, err
 }
 
 // discussionNoun names an issue of kind in messages: "issue" or "pull request".
@@ -779,7 +797,24 @@ func (f *metadataFlags) validate(cmd *cobra.Command) error {
 	if err := requireNames("assignee", "; use --set-assignees= to clear", f.setAssignees, f.addAssignees, f.removeAssignees); err != nil {
 		return err
 	}
-	return requireNames("label", "; use --set-labels= to clear", f.setLabels, f.addLabels, f.removeLabels)
+	if err := requireNames("label", "; use --set-labels= to clear", f.setLabels, f.addLabels, f.removeLabels); err != nil {
+		return err
+	}
+	if err := refuseAddedAndRemoved("label", f.addLabels, f.removeLabels); err != nil {
+		return err
+	}
+	return refuseAddedAndRemoved("assignee", f.addAssignees, f.removeAssignees)
+}
+
+// refuseAddedAndRemoved rejects a name, ignoring case, that both --add-KIND and --remove-KIND
+// pass: the removal would win silently.
+func refuseAddedAndRemoved(kind string, add, remove []string) error {
+	for _, name := range add {
+		if i := slices.IndexFunc(remove, func(other string) bool { return strings.EqualFold(strings.TrimSpace(other), strings.TrimSpace(name)) }); i >= 0 {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--add-%s %q cannot be combined with --remove-%s %q", kind, name, kind, remove[i]))
+		}
+	}
+	return nil
 }
 
 // changed reports whether the flags edit anything; empty --add-*/--remove-* values do not.

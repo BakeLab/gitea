@@ -74,7 +74,7 @@ func (a *application) deployKeyAddCommand() *cobra.Command {
 	var title string
 	var allowWrite bool
 	cmd := &cobra.Command{
-		Use: "add <file>", Short: "Add a deploy key from a public key file or stdin", Args: argsExact(1), ValidArgsFunction: completeFiles,
+		Use: "add <file>", Short: "Add a deploy key from a public key file or stdin", Args: nonBlankArgs(cobra.ExactArgs(1), "file"), ValidArgsFunction: completeFiles,
 		Long: `Add an SSH public key as a deploy key of the repository; - reads it from stdin. The key can
 only read the repository unless --allow-write lets it push. The title defaults to the key's
 comment.`,

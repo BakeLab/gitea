@@ -70,6 +70,11 @@ func TestDownloadsPublishOnlyCompleteFiles(t *testing.T) {
 	info, err = os.Stat(private)
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "API responses stay private")
+	missing := filepath.Join(directory, "missing", "x.txt")
+	err = writeOutput(cmd, missing, func(w io.Writer) error { return nil })
+	require.ErrorIs(t, err, os.ErrNotExist)
+	require.True(t, strings.HasPrefix(err.Error(), "cannot write "+missing+": "), err.Error())
+	require.NotContains(t, err.Error(), ".gt-download")
 }
 
 func TestDownloadDestinations(t *testing.T) {

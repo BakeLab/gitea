@@ -168,7 +168,10 @@ func writeOutput(cmd *cobra.Command, output string, write func(io.Writer) error)
 func publish(cmd *cobra.Command, output string, private, replace bool, write func(io.Writer) error) error {
 	file, err := createTemp(filepath.Dir(output), private)
 	if err != nil {
-		return err
+		if pathErr, ok := errors.AsType[*os.PathError](err); ok {
+			err = pathErr.Err // names the temporary file, not output
+		}
+		return fmt.Errorf("cannot write %s: %w", output, err)
 	}
 	defer os.Remove(file.Name())
 	copyErr := write(file)

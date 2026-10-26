@@ -124,6 +124,9 @@ $ gt repo edit --allow-manual-merge`,
 			if err := requireNames("topic", "", addTopics, removeTopics); err != nil {
 				return err
 			}
+			if err := refuseAddedAndRemoved("topic", addTopics, removeTopics); err != nil {
+				return err
+			}
 			for _, topic := range addTopics {
 				if !validTopic.MatchString(strings.ToLower(topic)) {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid topic %q: use up to 35 letters, digits, - or ., starting with a letter or digit", topic))

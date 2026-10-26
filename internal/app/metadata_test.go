@@ -434,7 +434,7 @@ func TestMilestoneEditRefusesTheTitleOfAnotherMilestone(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
-	err := Execute(context.Background(), deps, []string{"milestone", "edit", "v1.0", "--title", "V2.0", "-R", "alice/project", "--no-input"})
+	err := Execute(context.Background(), deps, []string{"milestone", "edit", "v1.0", "--title", " V2.0", "-R", "alice/project", "--no-input"})
 	require.EqualError(t, err, `milestone "v2.0" already exists in alice/project`)
 	require.Empty(t, changes)
 	require.Equal(t, 1, listings, "one listing finds the milestone and checks the title")

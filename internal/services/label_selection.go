@@ -70,6 +70,9 @@ func (s Labels) CreateUnique(ctx context.Context, existing []Label, opts LabelOp
 // name of another label among existing, the labels of the scope, ignoring case, which
 // CreateUnique refuses too: names would no longer address either label.
 func (s Labels) EditUnique(ctx context.Context, existing []Label, current Label, opts LabelOptions) (Label, error) {
+	if opts.Name != nil {
+		opts.Name = new(strings.TrimSpace(*opts.Name)) // as label create stores it, so that the name keeps addressing the label
+	}
 	if opts.Name != nil && *opts.Name != current.Name {
 		for _, other := range existing {
 			if other.ID != current.ID && strings.EqualFold(other.Name, *opts.Name) {

@@ -85,18 +85,30 @@ func (f *commentFlags) registerAttachments(cmd *cobra.Command) {
 	cmd.Flags().StringArrayVar(&f.attachments, "attachment", nil, "`File` to attach to the comment (repeatable)")
 }
 
-// validate rejects conflicting or empty comment sources before any request.
-func (f commentFlags) validate(cmd *cobra.Command) error {
+// validateComment rejects conflicting, empty or missing comment sources before any request, reading
+// --body-file into f.body. A command that takes no comment text passes needsText false.
+func (a *application) validateComment(cmd *cobra.Command, f *commentFlags, needsText bool) error {
 	if err := validateBodySources(cmd); err != nil {
 		return err
 	}
-	if cmd.Flags().Changed("body") && strings.TrimSpace(f.body) == "" {
+	given := cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file")
+	if cmd.Flags().Changed("body-file") {
+		body, err := a.readBody(cmd, f.body, f.file)
+		if err != nil {
+			return err
+		}
+		f.body = body
+	}
+	switch {
+	case given && strings.TrimSpace(f.body) == "":
 		return clierr.Wrap(clierr.Usage, errors.New("comment body cannot be empty"))
+	case needsText && !given && !f.useEditor && !a.canPrompt():
+		return errMissingBody
 	}
 	return nil
 }
 
-// readComment returns the comment text: from --body or --body-file, else from the editor with
+// readComment returns the comment text: from --body or --body-file as validateComment read it, else from the editor with
 // --editor or when one is configured, else from a multi-line prompt. initial seeds the editor and
 // the prompt.
 func (a *application) readComment(cmd *cobra.Command, f commentFlags, initial string) (string, terminal.Draft, error) {
@@ -105,7 +117,7 @@ func (a *application) readComment(cmd *cobra.Command, f commentFlags, initial st
 	var err error
 	switch {
 	case cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file"):
-		body, err = a.readBody(cmd, f.body, f.file)
+		body = f.body
 	case f.useEditor:
 		draft, err = a.editDraft(cmd, initial)
 		body = draft.Body
@@ -304,9 +316,6 @@ $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[st
 				return clierr.Wrap(clierr.Usage, &argumentError{problem: "missing " + kind.noun() + " number", cmd: cmd})
 			}
 		}
-		if err := flags.validate(cmd); err != nil {
-			return err
-		}
 		if editLast && deleteLast {
 			return clierr.Wrap(clierr.Usage, errors.New("--edit-last cannot be combined with --delete-last"))
 		}
@@ -318,6 +327,9 @@ $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[st
 		}
 		if deleteLast && a.options.json != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("comment deletion does not return a resource; --json and --jq are not supported"))
+		}
+		if err := a.validateComment(cmd, &flags, !deleteLast); err != nil {
+			return err
 		}
 		t, n, err := a.discussionRef(cmd, args, kind)
 		if err != nil {
@@ -380,7 +392,7 @@ $ gt %[1]s comment list %[2]s --json id,author,body`, words.group, words.example
 	var createFlags commentFlags
 	create := &cobra.Command{Use: "create " + operand, Aliases: []string{"add"}, Short: "Add a comment to " + kind.article(), Example: fmt.Sprintf(`$ gt %[1]s comment create %[2]s --body "Looks good"
 $ gt %[1]s comment add %[2]s --editor`, words.group, words.example), Annotations: map[string]string{"gt.arguments": arguments}, Args: operandArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		if err := createFlags.validate(cmd); err != nil {
+		if err := a.validateComment(cmd, &createFlags, true); err != nil {
 			return err
 		}
 		t, n, err := a.discussionRef(cmd, args, kind)
@@ -396,7 +408,7 @@ $ gt %[1]s comment add %[2]s --editor`, words.group, words.example), Annotations
 	var editFlags commentFlags
 	edit := &cobra.Command{Use: "edit <comment-id>", Short: "Edit a comment", Long: "Replace the text of a comment. Without --body or --body-file, the editor or the prompt starts\nfrom the current text.", Example: fmt.Sprintf(`$ gt %[1]s comment edit 81 --body "Fixed in #15"
 $ gt %[1]s comment edit 81`, words.group), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if err := editFlags.validate(cmd); err != nil {
+		if err := a.validateComment(cmd, &editFlags, true); err != nil {
 			return err
 		}
 		t, comment, err := a.comment(cmd, args[0], kind, true)

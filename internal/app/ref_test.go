@@ -201,8 +201,10 @@ func TestResolveRefSelectsTheReferencedRepository(t *testing.T) {
 	require.Equal(t, []int64{1, 2, 3}, numbers)
 	require.Equal(t, "bob/tool", resolved.Repo)
 
-	_, _, err = a.resolveRefs(commandContext(), []string{"bob/tool#1", "alice/project#2"}, issueRef)
-	require.EqualError(t, err, "bob/tool#1 and alice/project#2 are in different repositories; run one command per repository")
+	for _, second := range []string{"alice/project#2", "alice/project#1"} {
+		_, _, err = a.resolveRefs(commandContext(), []string{"bob/tool#1", second}, issueRef)
+		require.EqualError(t, err, "bob/tool#1 and "+second+" are in different repositories; run one command per repository")
+	}
 	_, _, err = a.resolveRefs(commandContext(), []string{"1", "#1"}, issueRef)
 	require.EqualError(t, err, "#1 is selected more than once; supply unique numbers")
 	_, _, err = a.resolveRef(commandContext(), "feature", issueRef)

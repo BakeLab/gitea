@@ -171,15 +171,15 @@ func (a *application) resolveRefs(cmd *cobra.Command, raws []string, kind refKin
 		if err != nil {
 			return target{}, nil, err
 		}
+		if parsed.Repo != "" && selected.Repo != "" && !a.sameRepository(selected.Repo, parsed.Repo) {
+			return target{}, nil, clierr.Wrap(clierr.Usage, fmt.Errorf("%s and %s are in different repositories; run one command per repository", source, raw))
+		}
 		if slices.Contains(numbers[:i], parsed.Number) {
 			return target{}, nil, clierr.Wrap(clierr.Usage, fmt.Errorf("#%d is selected more than once; supply unique numbers", parsed.Number))
 		}
 		numbers[i] = parsed.Number
 		if parsed.Repo == "" {
 			continue
-		}
-		if selected.Repo != "" && !a.sameRepository(selected.Repo, parsed.Repo) {
-			return target{}, nil, clierr.Wrap(clierr.Usage, fmt.Errorf("%s and %s are in different repositories; run one command per repository", source, raw))
 		}
 		// A reference without an instance must not replace one that names it, whatever the order.
 		if selected.Repo == "" || a.namesInstance(parsed.Repo) {

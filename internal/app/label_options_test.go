@@ -138,6 +138,7 @@ func TestLabelsByName(t *testing.T) {
 		{[]string{"label", "edit", "nope", "-c", "000000"}, `label "nope" not found in alice/project`},
 		{[]string{"label", "edit", "bug"}, "nothing to edit"},
 		{[]string{"label", "delete", "bug"}, `confirmation required to delete label "bug" from alice/project; rerun with --yes`},
+		{[]string{"label", "delete", "bug", "Bug", "--yes"}, "label Bug is selected more than once"},
 		{[]string{"label", "create", "x", "-c", "red"}, "--color requires six hexadecimal digits"},
 	} {
 		require.ErrorContains(t, run(test.args...), test.want, test.args)
@@ -280,7 +281,7 @@ func TestLabelEditRefusesTheNameOfAnotherLabel(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
-	err := Execute(context.Background(), deps, []string{"label", "edit", "bug", "-R", "alice/project", "--name", "DEFECT"})
+	err := Execute(context.Background(), deps, []string{"label", "edit", "bug", "-R", "alice/project", "--name", " DEFECT "})
 	require.EqualError(t, err, `label "defect" already exists in alice/project`)
 	require.Empty(t, patches)
 	require.Equal(t, 1, listings, "one listing finds the label and checks the name")

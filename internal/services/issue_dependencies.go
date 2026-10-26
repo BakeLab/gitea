@@ -102,11 +102,13 @@ func (s Issues) SetBlockedBy(ctx context.Context, n int64, blocker IssueReferenc
 			switch {
 			case strings.Contains(message, "repository does not exist"):
 				return &NotFoundError{Kind: "repository", Key: blocker.Repository, Err: err}
+			case !strings.Contains(message, "index: "):
+				return s.dependencyRefusal(ctx, n, missing)
 			case !strings.Contains(message, fmt.Sprintf("index: %d]", blocker.Number)):
 				return missing
 			case blocker.Number == n && !strings.EqualFold(blocker.Repository, s.Repository):
 				// The index fits both issues; the edited one tells which is missing.
-				if _, viewErr := s.View(ctx, n); viewErr != nil {
+				if _, err := s.View(ctx, n); err != nil {
 					return missing
 				}
 			case blocker.Number == n:
@@ -116,4 +118,16 @@ func (s Issues) SetBlockedBy(ctx context.Context, n int64, blocker IssueReferenc
 		}
 	}
 	return Classify(err, "issue", name, "")
+}
+
+// dependencyRefusal explains the bare 404 that Gitea answers for a dependency change on issue n,
+// which also stands for dependencies being disabled or for missing write access to its issues.
+func (s Issues) dependencyRefusal(ctx context.Context, n int64, missing error) error {
+	if _, err := s.View(ctx, n); err != nil {
+		return missing
+	}
+	if repo, err := (Repositories{Client: s.Client}).get(ctx, s.Repository); err == nil && repo.InternalTracker != nil && !repo.InternalTracker.EnableIssueDependencies {
+		return &RefusedError{Text: "issue dependencies are disabled in " + s.Repository}
+	}
+	return &RefusedError{Text: fmt.Sprintf("changing the dependencies of issue #%d requires write access to the issues of %s", n, s.Repository)}
 }

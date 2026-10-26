@@ -83,6 +83,9 @@ func (s Milestones) CreateUnique(ctx context.Context, opts MilestoneOptions, upd
 // among existing, the milestones of the repository, ignoring case, which CreateUnique refuses too:
 // titles would no longer address either milestone.
 func (s Milestones) EditUnique(ctx context.Context, existing []Milestone, current Milestone, opts MilestoneOptions) (Milestone, error) {
+	if opts.Title != nil {
+		opts.Title = new(strings.TrimSpace(*opts.Title)) // as Gitea stores it
+	}
 	if opts.Title != nil && *opts.Title != current.Title {
 		for _, other := range existing {
 			if other.ID != current.ID && strings.EqualFold(other.Title, *opts.Title) {

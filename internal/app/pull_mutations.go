@@ -325,12 +325,10 @@ func (a *application) pullStateCommand(closing bool) *cobra.Command {
 		case item.State == state:
 			a.warn(cmd, "Pull request %s is already %s", ref, state)
 		default:
-			if comment != "" {
-				if _, err := (services.Comments{Client: t.client, Repository: t.Repo}).Create(cmd.Context(), n, comment); err != nil {
-					return err
-				}
-			}
-			if item, err = service.Edit(cmd.Context(), n, services.PullEdit{State: &state}); err != nil {
+			comments := services.Comments{Client: t.client, Repository: t.Repo}
+			if item, err = withComment(cmd.Context(), comments, n, comment, func() (services.Pull, error) {
+				return service.Edit(cmd.Context(), n, services.PullEdit{State: &state})
+			}); err != nil {
 				return err
 			}
 			a.done(cmd, "%s pull request %s", done, ref)

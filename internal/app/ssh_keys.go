@@ -168,7 +168,7 @@ func sshKeySource(source string) string {
 func (a *application) sshKeyCreateCommand() *cobra.Command {
 	var title string
 	cmd := &cobra.Command{
-		Use: "create [<file>]", Aliases: []string{"add"}, Short: "Add an SSH public key from a file or stdin", Args: usageArgs(cobra.MaximumNArgs(1)), ValidArgsFunction: completeFiles,
+		Use: "create [<file>]", Aliases: []string{"add"}, Short: "Add an SSH public key from a file or stdin", Args: nonBlankArgs(cobra.MaximumNArgs(1), "file"), ValidArgsFunction: completeFiles,
 		Long: `Add an SSH public key to your account. Without a file, or with -, the key is read from stdin.
 
 The title defaults to the key's comment, such as alice@laptop, or else to this computer's name.`,

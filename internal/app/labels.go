@@ -309,6 +309,11 @@ $ gt label delete wontfix duplicate --yes`, Annotations: map[string]string{"gt.t
 		if err != nil {
 			return err
 		}
+		for i, label := range found {
+			if slices.ContainsFunc(found[:i], func(other services.Label) bool { return other.ID == label.ID }) {
+				return clierr.Wrap(clierr.Usage, errors.New("label "+args[i]+" is selected more than once"))
+			}
+		}
 		names := make([]string, len(found))
 		for i, item := range found {
 			names[i] = strconv.Quote(item.Name)
@@ -337,7 +342,7 @@ func (a *application) labelImportCommand(scope labelScope) *cobra.Command {
 "#7057ff priority/high ;exclusive". gt label export writes this format, and Gitea's label
 templates use it. Blank lines and lines starting with "# " or "##" are comments; any other
 line must be a valid label. Existing labels are refused unless --force updates them.`, Example: `$ gt label import labels.txt
-$ gt label export --repo alice/old | gt label import - --repo alice/new`, Args: argsExact(1), ValidArgsFunction: completeFiles, RunE: func(cmd *cobra.Command, args []string) error {
+$ gt label export --repo alice/old | gt label import - --repo alice/new`, Args: nonBlankArgs(cobra.ExactArgs(1), "file"), ValidArgsFunction: completeFiles, RunE: func(cmd *cobra.Command, args []string) error {
 		return a.importLabels(cmd, scope, args[0], force)
 	}}
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Update labels that exist already")

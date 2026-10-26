@@ -427,6 +427,33 @@ func TestReopeningAMergedPullRequestLeavesNoComment(t *testing.T) {
 	require.Empty(t, writes)
 }
 
+func TestRefusedStateChangeRemovesItsComment(t *testing.T) {
+	var writes []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writes = append(writes, r.Method+" "+r.URL.Path)
+		}
+		switch r.Method + " " + r.URL.Path {
+		case "POST /api/v1/repos/alice/project/issues/5/comments":
+			_, _ = w.Write([]byte(`{"id":31}`))
+		case "PATCH /api/v1/repos/alice/project/issues/5", "PATCH /api/v1/repos/alice/project/pulls/5":
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = w.Write([]byte(`{"message":"cannot close this issue because it still has open dependencies"}`))
+		case "DELETE /api/v1/repos/alice/project/issues/comments/31":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			_, _ = w.Write([]byte(`{"number":5,"title":"Open one","state":"open"}`))
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	for _, args := range [][]string{{"issue", "close", "5"}, {"pr", "close", "5"}} {
+		writes = nil
+		require.Error(t, Execute(context.Background(), deps, append(args, "-R", "alice/project", "--no-input", "-c", "Done in #14")), args)
+		require.Equal(t, "DELETE /api/v1/repos/alice/project/issues/comments/31", writes[len(writes)-1], args)
+	}
+}
+
 func TestIssueEditAddsAndRemovesDependencies(t *testing.T) {
 	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -521,8 +548,15 @@ func TestIssueEditExplainsExistingAndMissingDependencies(t *testing.T) {
 		case "GET /api/v1/repos/alice/project/issues/17":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		case "POST /api/v1/repos/alice/project/issues/18/dependencies", "POST /api/v1/repos/alice/nodeps/issues/18/dependencies":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		case "GET /api/v1/repos/alice/project/issues/18", "GET /api/v1/repos/alice/nodeps/issues/18":
+			_, _ = w.Write([]byte(`{"number":18}`))
 		case "GET /api/v1/repos/alice/project":
 			_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
+		case "GET /api/v1/repos/alice/nodeps":
+			_, _ = w.Write([]byte(`{"full_name":"alice/nodeps","internal_tracker":{"enable_issue_dependencies":false}}`))
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -544,4 +578,9 @@ func TestIssueEditExplainsExistingAndMissingDependencies(t *testing.T) {
 	require.EqualError(t, err, "issue 16: issue bob/lib#16 not found")
 	err = Execute(context.Background(), deps, []string{"issue", "edit", "17", "-R", "alice/project", "--add-blocked-by", "bob/lib#17"})
 	require.EqualError(t, err, "issue 17: not found in alice/project")
+	// A bare 404 for an existing issue means no write access, or dependencies turned off.
+	err = Execute(context.Background(), deps, []string{"issue", "edit", "18", "-R", "alice/project", "--add-blocked-by", "1"})
+	require.EqualError(t, err, "issue 18: changing the dependencies of issue #18 requires write access to the issues of alice/project")
+	err = Execute(context.Background(), deps, []string{"issue", "edit", "18", "-R", "alice/nodeps", "--add-blocked-by", "1"})
+	require.EqualError(t, err, "issue 18: issue dependencies are disabled in alice/nodeps")
 }
