@@ -156,7 +156,11 @@ func (s Actions) WorkflowFile(ctx context.Context, workflow Workflow, ref string
 		if ref != "" && strings.Contains(api.Message, "[id: "+ref+",") {
 			return nil, &NotFoundError{Kind: "ref", Key: strconv.Quote(ref), Scope: s.Repository, Err: err}
 		}
-		return nil, &NotFoundError{Kind: "workflow file", Key: workflow.Path, Scope: s.Repository, Err: err}
+		scope := s.Repository
+		if ref != "" {
+			scope += " on " + ref
+		}
+		return nil, &NotFoundError{Kind: "workflow file", Key: workflow.Path, Scope: scope, Err: err}
 	}
 	if err != nil {
 		return nil, err

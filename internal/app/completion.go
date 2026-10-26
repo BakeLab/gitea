@@ -250,12 +250,12 @@ func (a *application) completeAliases(_ *cobra.Command, _ []string, toComplete s
 	return matching(describe(slices.Sorted(maps.Keys(aliases)), func(name string) (string, string) { return name, aliases[name] }), toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeConfig completes a setting name, then its value: the fixed values, the configured instances
+// completeConfig completes a setting that config set changes, then its value: the fixed values, the configured instances
 // for default_host, or the Git remotes for remote.
 func (a *application) completeConfig(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 	switch {
 	case len(args) == 0:
-		return matching(configKeys, toComplete), cobra.ShellCompDirectiveNoFileComp
+		return matching(settableKeys, toComplete), cobra.ShellCompDirectiveNoFileComp
 	case len(args) > 1:
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	case args[0] == "default_host":
@@ -612,6 +612,11 @@ func completionInstallHelp(root *cobra.Command) {
 	}
 	for _, shell := range completion.Commands() {
 		shell.Example = examples[shell.Name()]
+		shell.Args = argsExact(0)
+		if shell.Annotations == nil {
+			shell.Annotations = map[string]string{}
+		}
+		maps.Copy(shell.Annotations, textOutput("completion prints a shell script"))
 		if flag := shell.Flags().Lookup("no-descriptions"); flag != nil {
 			flag.Usage = "Disable completion descriptions"
 		}

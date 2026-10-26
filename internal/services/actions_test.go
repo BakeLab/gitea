@@ -328,6 +328,8 @@ func TestWorkflowFileTellsAMissingRefFromAMissingFile(t *testing.T) {
 	_, err := service.WorkflowFile(context.Background(), workflow, "gone")
 	require.EqualError(t, err, `ref "gone" not found in owner/repo`)
 	_, err = service.WorkflowFile(context.Background(), workflow, "main")
+	require.EqualError(t, err, "workflow file .gitea/workflows/ci.yml not found in owner/repo on main")
+	_, err = service.WorkflowFile(context.Background(), workflow, "")
 	require.EqualError(t, err, "workflow file .gitea/workflows/ci.yml not found in owner/repo")
 }
 

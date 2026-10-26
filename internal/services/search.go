@@ -134,5 +134,6 @@ func (s Issues) searchInstance(ctx context.Context, opts DiscussionSearchOptions
 		}
 	}
 	// TODO(sdk): ListIssueOption lacks the assigned, created, mentioned, review_requested and reviewed flags.
-	return rawPage[*gitea.Issue](ctx, s.Client, "repos/issues/search", query, opts.Limit, opts.Page)
+	page, err := rawPage[*gitea.Issue](ctx, s.Client, "repos/issues/search", query, opts.Limit, opts.Page)
+	return page, Classify(err, "", "", "")
 }

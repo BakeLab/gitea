@@ -70,6 +70,13 @@ func TestActionValueSetReadsValuesAndReportsStoredNames(t *testing.T) {
 			`{"name":"TOKEN","description":"","created_at":""}`, "",
 		},
 		{
+			"JSON of a one-line dotenv file is an array",
+			[]string{"secret", "set", "--env-file", "-", "--json", "name"},
+			"TOKEN=x\n",
+			[]string{`PUT actions/secrets/TOKEN {"data":"x","description":""}`},
+			`[{"name":"TOKEN"}]`, "",
+		},
+		{
 			"organization",
 			[]string{"secret", "set", "TOKEN", "-o", "acme", "-b", "x"},
 			"",
@@ -179,9 +186,9 @@ func TestActionValueDeleteConfirmsWithTheScope(t *testing.T) {
 }
 
 func TestParseEnvFileStripsQuotesBeforeAComment(t *testing.T) {
-	entries, err := parseEnvFile([]byte("A=\"s3cr3t\" # prod\nB='v' # c\nC=\"a # b\"\nD=plain # note\nE=\"x\\ny\"\nF=\"half\n"))
+	entries, err := parseEnvFile([]byte("A=\"s3cr3t\" # prod\nB='v' # c\nC=\"a # b\"\nD=plain # note\nE=\"x\\ny\"\nF=\"half\nG=tabbed\t# c\nH=a#b\n"))
 	require.NoError(t, err)
-	require.Equal(t, []envEntry{{"A", "s3cr3t"}, {"B", "v"}, {"C", "a # b"}, {"D", "plain"}, {"E", "x\ny"}, {"F", "\"half"}}, entries)
+	require.Equal(t, []envEntry{{"A", "s3cr3t"}, {"B", "v"}, {"C", "a # b"}, {"D", "plain"}, {"E", "x\ny"}, {"F", "\"half"}, {"G", "tabbed"}, {"H", "a#b"}}, entries)
 }
 
 func TestSecretSetChecksTheNameBeforeReadingTheValue(t *testing.T) {

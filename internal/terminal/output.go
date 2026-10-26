@@ -93,6 +93,9 @@ func (o JSONOutput) Write(w io.Writer, value any) error {
 			return nil
 		}
 		if err, ok := value.(error); ok {
+			if halt, ok := errors.AsType[*gojq.HaltError](err); ok && halt.Value() == nil {
+				return nil
+			}
 			return fmt.Errorf("evaluate --jq: %w", err)
 		}
 		if str, ok := value.(string); ok {

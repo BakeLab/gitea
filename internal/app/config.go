@@ -26,6 +26,8 @@ var (
 	accountKeys    = []string{"ssh_agent", "ssh_certificate_principal", "ssh_key", "ssh_key_fingerprint"}
 	// configKeys are every setting that config get reads, in alphabetical order.
 	configKeys = slices.Compact(slices.Sorted(slices.Values(slices.Concat(preferenceKeys, instanceKeys, accountKeys, []string{"version"}))))
+	// settableKeys are the settings that config set changes; version is fixed and gt auth switch changes user.
+	settableKeys = slices.DeleteFunc(slices.Clone(configKeys), func(key string) bool { return key == "version" || key == "user" })
 )
 
 // configValues lists the values of the settings that accept a fixed set.
@@ -240,11 +242,22 @@ ssh_certificate_principal, ssh_key_fingerprint.`}
 	})
 	var getSource bool
 	get := &cobra.Command{
-		Use: "get <key>", Short: "Print the value of a setting", Args: argsExact(1), ValidArgsFunction: a.completeConfig,
+		Use: "get <key>", Short: "Print the value of a setting", Args: argsExact(1),
+		ValidArgsFunction: firstArg(func(_ *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+			return matching(configKeys, toComplete), cobra.ShellCompDirectiveNoFileComp
+		}),
+		Annotations: map[string]string{"gt.jsonfields": "The requested key, such as editor."},
 		Example: `$ gt config get editor
 $ gt config get default_host --show-source
 $ gt config get ssh_key --host https://gitea.com --user alice`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.options.json != "*" {
+				for field := range strings.SplitSeq(a.options.json, ",") {
+					if field = strings.TrimSpace(field); field != "" && field != args[0] {
+						return clierr.Wrap(clierr.Usage, fmt.Errorf("--json field %s cannot be combined with key %s", field, args[0]))
+					}
+				}
+			}
 			snapshot, err := a.settings()
 			if err != nil {
 				return err

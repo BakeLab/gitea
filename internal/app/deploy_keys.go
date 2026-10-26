@@ -110,7 +110,7 @@ $ gt repo deploy-key add deploy.pub --title "Release bot" --allow-write`,
 
 func (a *application) deployKeyDeleteCommand() *cobra.Command {
 	return &cobra.Command{
-		Use: "delete <id>", Short: "Delete a deploy key", Args: argsExact(1), ValidArgsFunction: a.completeDeployKeys(),
+		Use: "delete <key-id>", Short: "Delete a deploy key", Args: argsExact(1), ValidArgsFunction: a.completeDeployKeys(),
 		Example: `$ gt repo deploy-key delete 4
 $ gt repo deploy-key delete 4 --yes`,
 		Annotations: map[string]string{"gt.text": "deploy key deletion does not return a resource", "gt.confirm": "true"},

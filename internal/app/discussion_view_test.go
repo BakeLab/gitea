@@ -60,6 +60,9 @@ func TestDiscussionViews(t *testing.T) {
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "view", "4", "-R", "alice/project"}))
 	require.Equal(t, "Fix #4\nMerged • alice merged into main from fix • about 12 hours ago • 0 comments\nReviewers: carol (Requested)\n\nNo description provided\n\nView this pull request on Gitea: https://example.org/p/4\n", out.String())
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "view", "4", "-R", "alice/project", "--json", "state,merged"}))
+	require.JSONEq(t, `{"state":"merged","merged":true}`, out.String())
 }
 
 func TestIssueViewDependencies(t *testing.T) {

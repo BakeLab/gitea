@@ -6,7 +6,9 @@ package app
 import (
 	"errors"
 	"io"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
@@ -21,7 +23,7 @@ func (a *application) manCommand() *cobra.Command {
 		Annotations: textOutput("man pages are troff"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Use built-ins only so personal aliases and settings cannot change the manual.
-			root := NewRoot(Dependencies{})
+			root := ManualRoot()
 			target, remaining, err := root.Find(args)
 			if err != nil || len(remaining) != 0 {
 				return clierr.Wrap(clierr.Usage, errors.New("unknown manual command; use gt help to list commands"))
@@ -34,7 +36,6 @@ func (a *application) manCommand() *cobra.Command {
 					if err := cmd.Context().Err(); err != nil {
 						return err
 					}
-					page.DisableAutoGenTag = true
 					// GenMan fills an empty Title from the command path by mutating the header, so each page needs its own.
 					header := &doc.GenManHeader{Section: "1", Date: &date, Source: "gitea-cli", Manual: "gitea-cli Manual"}
 					if err := doc.GenMan(page, header, writer); err != nil {
@@ -68,6 +69,33 @@ func ManualDate(getenv func(string) string) time.Time {
 		return time.Unix(seconds, 0).UTC()
 	}
 	return time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+}
+
+var manualPlaceholder = regexp.MustCompile(`<([A-Za-z])`)
+
+// ManualRoot returns the built-in command tree prepared for man pages. md2man drops a
+// <placeholder> as inline HTML, so it is escaped outside indented code blocks.
+func ManualRoot() *cobra.Command {
+	root := NewRoot(Dependencies{})
+	escape := func(text string) string {
+		lines := strings.Split(text, "\n")
+		for i, line := range lines {
+			if !strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, "    ") {
+				lines[i] = manualPlaceholder.ReplaceAllString(line, `\<$1`)
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+	var prepare func(*cobra.Command)
+	prepare = func(command *cobra.Command) {
+		command.DisableAutoGenTag = true
+		command.Use, command.Short, command.Long = escape(command.Use), escape(command.Short), escape(command.Long)
+		for _, child := range command.Commands() {
+			prepare(child)
+		}
+	}
+	prepare(root)
+	return root
 }
 
 // ManualCommands lists the subcommands that get a page in the manual: the available commands,

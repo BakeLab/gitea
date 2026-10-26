@@ -87,7 +87,7 @@ $ gt workflow view ci --web`,
 		Annotations: map[string]string{"gt.arguments": workflowArguments},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if ref != "" && !showYAML {
-				return clierr.Wrap(clierr.Usage, errors.New("--ref selects the version that --yaml prints"))
+				return clierr.Wrap(clierr.Usage, errors.New("--ref requires --yaml"))
 			}
 			if showYAML && (web || a.options.json != "") {
 				return clierr.Wrap(clierr.Usage, errors.New("--yaml cannot be combined with --web, --json or --jq"))
@@ -135,7 +135,7 @@ func (a *application) renderWorkflow(t target, workflow services.Workflow, runs 
 		rows[i] = runRow(a.deps.Now())(run)
 	}
 	if !d.TTY {
-		fields := []terminal.Field{{Label: "File", Value: workflow.ID}, {Label: "Path", Value: workflow.Path}, {Label: "State", Value: workflow.State}}
+		fields := []terminal.Field{{Label: "File", Value: workflow.ID}, {Label: "Path", Value: workflow.Path}, {Label: "State", Value: workflowState(workflow).Text}}
 		return terminal.View{Title: workflow.Name, Fields: fields, URL: workflow.URL, Body: terminal.Table(runColumns, rows, d)}.Render(d)
 	}
 	muted := func(text string) string { return terminal.Cell{Text: text, Muted: true}.Render(d) }
@@ -192,6 +192,11 @@ $ gt workflow run nightly --follow`,
 			}
 			if interval <= 0 || timeout <= 0 {
 				return clierr.Wrap(clierr.Usage, errors.New("--interval and --timeout must be positive"))
+			}
+			for _, name := range []string{"interval", "timeout"} {
+				if !follow && cmd.Flags().Changed(name) {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s requires --follow", name))
+				}
 			}
 			values, err := inputValues(fields)
 			if err != nil {
@@ -403,9 +408,9 @@ func inputValue(input services.WorkflowInput, value string) (string, error) {
 // text otherwise, where an empty answer keeps the default and a required one without a default
 // is marked "(required)".
 func (a *application) askInput(cmd *cobra.Command, input services.WorkflowInput) (string, error) {
-	title := input.Name
+	title := terminal.SafeLine(input.Name)
 	if input.Description != "" {
-		title += " — " + input.Description
+		title += " — " + terminal.SafeLine(input.Description)
 	}
 	switch chooser, ok := a.deps.Prompter.(terminal.Chooser); {
 	case input.Type == "choice" && ok && len(input.Options) > 0:
@@ -419,7 +424,7 @@ func (a *application) askInput(cmd *cobra.Command, input services.WorkflowInput)
 		return strconv.FormatBool(yes), err
 	}
 	if input.Default != "" {
-		title += " (default " + input.Default + ")"
+		title += " (default " + terminal.SafeLine(input.Default) + ")"
 	} else if input.Required {
 		title += " (required)"
 	}
@@ -430,8 +435,10 @@ func (a *application) askInput(cmd *cobra.Command, input services.WorkflowInput)
 			}
 			return nil
 		}
-		_, err := inputValue(input, answer)
-		return err
+		if _, err := inputValue(input, answer); err != nil {
+			return errors.New(terminal.SafeLine(err.Error())) // shown inline by the form
+		}
+		return nil
 	}
 	answer, err := a.deps.Prompter.Ask(cmd.Context(), title, validate)
 	if err != nil {

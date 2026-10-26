@@ -52,6 +52,11 @@ $ gt run logs 34 --output logs.zip`,
 			if interval <= 0 || timeout <= 0 {
 				return clierr.Wrap(clierr.Usage, errors.New("--interval and --timeout must be positive"))
 			}
+			for _, name := range []string{"interval", "timeout"} {
+				if !follow && cmd.Flags().Changed(name) {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s requires --follow", name))
+				}
+			}
 			download := archive.output != "" || archive.dir != ""
 			conflicting := ""
 			switch {
@@ -247,6 +252,10 @@ func (a *application) followJobLogs(ctx context.Context, cmd *cobra.Command, ser
 	defer func() { err = cmp.Or(err, terminal.ResetSGR(out)) }()
 	for _, job := range jobs {
 		label := fmt.Sprintf("%s (job %d)", terminal.SafeLine(job.Name), job.ID)
+		if !job.Started() && job.Completed() {
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s: %s\n", label, unstarted(job))
+			continue
+		}
 		if job.Started() {
 			fmt.Fprintln(cmd.ErrOrStderr(), label)
 		} else {

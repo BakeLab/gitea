@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -48,7 +49,8 @@ A number opens that issue or pull request, and a hexadecimal SHA of at least 7 c
 commit. Anything else is a path, opened on the default branch unless --branch or --commit selects
 another; write ./NAME for a path that looks like a number or SHA. In a clone, a path is relative
 to the current directory, otherwise to the repository root. Append :LINE or :START-END to a file
-path to select lines.`,
+path to select lines. A value after --commit and a space is the commit when it is a SHA, or a
+revision of the clone, such as a branch, tag or HEAD~1, that is not also a local path.`,
 		Example: `$ gt browse
 $ gt browse 217
 $ gt browse internal/app/app.go:42 --branch develop
@@ -59,11 +61,11 @@ $ gt browse --releases -R alice/project
 $ gt browse --no-browser docs/README.md`,
 		Annotations: textOutput("browse opens a web page"),
 		Args: func(cmd *cobra.Command, args []string) error {
-			_, args = spacedCommit(cmd, commit, args)
+			_, args = a.spacedCommit(cmd, commit, args)
 			return nonBlankArgs(cobra.MaximumNArgs(1), "number, path or commit SHA")(cmd, args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			commit, args = spacedCommit(cmd, commit, args)
+			commit, args = a.spacedCommit(cmd, commit, args)
 			arg := ""
 			if len(args) > 0 {
 				arg = args[0]
@@ -186,10 +188,20 @@ $ gt browse --no-browser docs/README.md`,
 	return command
 }
 
-// spacedCommit takes the SHA of "--commit SHA" from args, where the optional value of --commit
-// leaves it.
-func spacedCommit(cmd *cobra.Command, commit string, args []string) (string, []string) {
-	if flag := cmd.Flags().Lookup("commit"); flag.Changed && commit == flag.NoOptDefVal && len(args) > 0 && commitSHA.MatchString(args[0]) {
+// spacedCommit takes the commit of "--commit SHA" or "--commit REF" from args, where the optional
+// value of --commit leaves it. A REF is one of the clone that is not also a path.
+func (a *application) spacedCommit(cmd *cobra.Command, commit string, args []string) (string, []string) {
+	flag := cmd.Flags().Lookup("commit")
+	if !flag.Changed || commit != flag.NoOptDefVal || len(args) == 0 {
+		return commit, args
+	}
+	if commitSHA.MatchString(args[0]) {
+		return args[0], args[1:]
+	}
+	if _, err := os.Lstat(filepath.Join(a.options.cwd, args[0])); !errors.Is(err, os.ErrNotExist) || issueNumber.MatchString(args[0]) {
+		return commit, args
+	}
+	if sha, err := a.gitProbe().Output(cmd.Context(), a.options.cwd, false, "rev-parse", "--verify", "--quiet", args[0]+"^{commit}"); err == nil && sha != "" {
 		return args[0], args[1:]
 	}
 	return commit, args

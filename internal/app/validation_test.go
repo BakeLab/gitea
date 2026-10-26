@@ -69,6 +69,9 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"browse", "77507cd", "--commit=1234abc"}, "--commit cannot be combined with a commit SHA"},
 		{[]string{"browse", "docs", "--settings"}, "--settings cannot be combined with a path"},
 		{[]string{"browse", "--branch="}, "invalid branch name"},
+		{[]string{"completion", "bash", "--json"}, "completion prints a shell script; --json is not supported"},
+		{[]string{"completion", "zsh", "--jq", "."}, "completion prints a shell script; --jq is not supported"},
+		{[]string{"completion", "fish", "extra"}, `unexpected argument "extra"`},
 		{[]string{"config", "set", "prompt", "invalid"}, "prompt must be enabled or disabled"},
 		{[]string{"doctor", "--json=secret"}, "unknown JSON field \"secret\""},
 		{[]string{"issue", "attachment", "download", "1", "1", "--json"}, "attachment downloads are binary"},
@@ -224,6 +227,7 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"pr", "review", "delete", "1", "2", "--json"}, "review deletion does not return a resource"},
 		{[]string{"pr", "status", "--limit=101"}, `"--limit" flag: must be 1..100`},
 		{[]string{"pr", "status", "--json=title"}, "unknown JSON field \"title\""},
+		{[]string{"repo", "deploy-key", "delete"}, "missing key ID"},
 		{[]string{"release", "view", ""}, "tag cannot be empty"},
 		{[]string{"release", "download", ""}, "tag cannot be empty"},
 		{[]string{"release", "delete", "", "-y"}, "tag cannot be empty"},
@@ -290,6 +294,8 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"run", "download", "1", "--clobber", "--skip-existing"}, "--clobber cannot be combined with --skip-existing"},
 		{[]string{"run", "watch", "1", "--expect-head", "main"}, "--expect-head requires a commit SHA, or a revision of the local clone"},
 		{[]string{"run", "logs", "1", "--tail", "0"}, "--tail must be positive"},
+		{[]string{"run", "logs", "1", "--interval", "1s"}, "--interval requires --follow"},
+		{[]string{"run", "logs", "1", "--timeout", "1m"}, "--timeout requires --follow"},
 		{[]string{"run", "logs", "1", "--tail", "5", "--output", "logs.zip"}, "--output and --dir download the whole run and cannot be combined with --job, --failed, --follow or --tail"},
 		{[]string{"run", "list", "--since=-1h"}, "invalid --since: relative duration cannot be negative"},
 		{[]string{"run", "list", "--until="}, "invalid --until: use a date, RFC3339 timestamp, or duration such as 24h"},
@@ -369,7 +375,9 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"wiki", "edit", "Home", "--body="}, "wiki content cannot be empty"},
 		{[]string{"wiki", "revisions", "Home", "--page", "0"}, `"--page" flag: must be a positive integer`},
 		{[]string{"workflow", "run", "ci.yml", "-r", "main", "-f", "a=1", "-f", "a=2"}, "input a is given more than once"},
+		{[]string{"workflow", "run", "ci.yml", "--interval", "1s"}, "--interval requires --follow"},
 		{[]string{"workflow", "view", ""}, "workflow cannot be empty"},
+		{[]string{"workflow", "view", "ci", "--ref", "main"}, "--ref requires --yaml"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			requireUsageBeforeRequests(t, tc.want, tc.args...)

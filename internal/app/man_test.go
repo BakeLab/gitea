@@ -52,6 +52,9 @@ func TestManIncludesFullCommandTree(t *testing.T) {
 	}
 	require.Contains(t, manual, `.TH "GT-PR-CHECKOUT" "1" "Jan 2026"`)
 	require.NotContains(t, manual, "gt-auth-git-credential")
+	require.Contains(t, manual, `\fBgt config get <key> [flags]\fP`)
+	require.Contains(t, manual, "first (git push <remote> <tag>).")
+	require.Contains(t, manual, "source <(gt completion zsh)")
 	first := manual
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"man"}))

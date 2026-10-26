@@ -42,9 +42,10 @@ func contentsOf(content string) string {
 
 func TestWorkflowListAndView(t *testing.T) {
 	server, _ := actionsAPI(t, map[string]string{
-		"GET actions/workflows":                workflowsFixture,
-		"GET actions/workflows/ci.yml/runs":    `{"total_count":1,"workflow_runs":[` + queuedRunFixture + `]}`,
-		"GET contents/.gitea/workflows/ci.yml": contentsOf(ciWorkflowFile),
+		"GET actions/workflows":                   workflowsFixture,
+		"GET actions/workflows/ci.yml/runs":       `{"total_count":1,"workflow_runs":[` + queuedRunFixture + `]}`,
+		"GET actions/workflows/nightly.yaml/runs": `{"total_count":0,"workflow_runs":[]}`,
+		"GET contents/.gitea/workflows/ci.yml":    contentsOf(ciWorkflowFile),
 	})
 	for _, tc := range []struct {
 		name string
@@ -67,6 +68,7 @@ View this workflow on Gitea: https://gitea.test/alice/project/src/branch/main/.g
 `},
 		{"view the file", false, []string{"view", ".gitea/workflows/ci.yml", "--yaml"}, ciWorkflowFile},
 		{"view as JSON", false, []string{"view", "CI", "--json", "id,state"}, `{"id":"ci.yml","state":"active"}`},
+		{"view disabled piped", false, []string{"view", "nightly"}, "title:\tNightly\nfile:\tnightly.yaml\npath:\t.gitea/workflows/nightly.yaml\nstate:\tdisabled\n--\n\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, out, _ := actionsDeps(t, server.URL, tc.tty)
@@ -176,6 +178,28 @@ func TestWorkflowRunDispatchesOnTheDefaultBranch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWorkflowRunPromptsShowInputsFromTheWorkflowSafely(t *testing.T) {
+	server, _ := actionsAPI(t, map[string]string{
+		"GET actions/workflows": workflowsFixture,
+		"GET contents/.gitea/workflows/ci.yml": contentsOf(`on:
+  workflow_dispatch:
+    inputs:
+      pick: {type: choice, description: "P\e]52;c;SGk=\a", options: [a]}
+      flag: {type: boolean, description: "B\e[2J"}
+      "n\e[31mum": {type: number, description: "T\rOVR\u202e", default: "D\e[31m"}
+jobs: {}
+`),
+	})
+	prompter := &dispatchingPrompter{choosingPrompter: choosingPrompter{scriptedPrompter: scriptedPrompter{inputs: map[string]string{"n[31mum — TOVR (default D[31m)": "x"}}}}
+	deps, _, _ := actionsDeps(t, server.URL, true)
+	deps.Prompter = prompter
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	err := Execute(context.Background(), deps, []string{"workflow", "run", "ci.yml", "-R", "alice/project", "--ref", "main"})
+	require.EqualError(t, err, `invalid value "x" for input n[31mum: use a number`)
+	require.Equal(t, []string{"pick — P]52;c;SGk="}, prompter.titles)
+	require.Equal(t, []string{"flag — B[2J", "n[31mum — TOVR (default D[31m)"}, prompter.asked)
 }
 
 func TestWorkflowRunNeedsTheCheckedOutBranchOnTheServer(t *testing.T) {

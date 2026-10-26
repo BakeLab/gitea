@@ -97,11 +97,15 @@ func pullFrom(pull *gitea.PullRequest) Pull {
 		base = *pull.Base
 	}
 	headBranch, remoteDeleted := pullHeadBranch(pull.Index, head.Ref, head.Name)
+	state := string(pull.State)
+	if pull.HasMerged {
+		state = "merged"
+	}
 	result := Pull{
 		Author: login(pull.Poster), CreatedAt: timestamp(deref(pull.Created)), UpdatedAt: timestamp(deref(pull.Updated)),
 		Assignees: convertAll(pull.Assignees, login), Milestone: issueMilestoneFrom(pull.Milestone), Labels: convertAll(pull.Labels, labelFrom),
 		Deadline: optionalTimestamp(pull.Deadline), ID: pull.ID, Number: pull.Index, Title: pull.Title, Body: pull.Body,
-		URL: pull.HTMLURL, State: string(pull.State), Merged: pull.HasMerged, MergedAt: optionalTimestamp(pull.Merged), MergedBy: login(pull.MergedBy),
+		URL: pull.HTMLURL, State: state, Merged: pull.HasMerged, MergedAt: optionalTimestamp(pull.Merged), MergedBy: login(pull.MergedBy),
 		MergeCommitSHA: pull.MergedCommitID, MergeBase: pull.MergeBase, Mergeable: pull.Mergeable, Draft: pull.Draft, AllowMaintainerEdit: pull.AllowMaintainerEdit,
 		Base: base.Ref, Head: headBranch, HeadSHA: head.Sha, HeadRemoteDeleted: remoteDeleted,
 		Reviewers: convertAll(pull.RequestedReviewers, login), Reviews: []Review{}, Comments: int64(pull.Comments),

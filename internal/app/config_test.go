@@ -217,6 +217,7 @@ func TestConfigNamesValidSettings(t *testing.T) {
 		{[]string{"config", "set", "aliases", "x"}, "aliases are managed with gt alias; list them with gt alias list"},
 		{[]string{"config", "set", "hyperlinks", "off"}, "hyperlinks must be auto, always, or never"},
 		{[]string{"config", "set", "markdown", "never"}, "markdown must be auto or raw"},
+		{[]string{"config", "get", "editor", "--json", "editor,pager"}, "--json field pager cannot be combined with key editor"},
 	} {
 		t.Run(strings.Join(tc.args[1:], " "), func(t *testing.T) {
 			err := Execute(context.Background(), deps, tc.args)

@@ -148,6 +148,9 @@ func TestRunLogsContinuePastJobsThatHaveNotStarted(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--no-input"}))
 	require.Equal(t, "test output\n", out.String())
 	require.Equal(t, "lint (job 8): never started (skipped)\nbuild (job 9): not started yet\ntest (job 10)\ndeploy (job 11): not started yet\n", diagnostics.String())
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--no-input", "--job", "lint", "--follow", "-i", "1ms"}))
+	require.Equal(t, "lint (job 8): never started (skipped)\n", diagnostics.String())
 }
 
 func TestRunLogsAndRerunSelectTheJobOfAJobURL(t *testing.T) {

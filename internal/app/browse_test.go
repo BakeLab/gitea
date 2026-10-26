@@ -119,6 +119,7 @@ func TestBrowsePathsAndCommitsOfTheClone(t *testing.T) {
 	run("remote", "add", "origin", "https://gitea.example.test/alice/project.git")
 	run("commit", "--quiet", "--allow-empty", "--message=x")
 	head := run("rev-parse", "HEAD")
+	run("branch", "trunk")
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "docs"), 0o755))
 	deps, out, _ := testDeps(t)
 	deps.Git = git.System{}
@@ -126,6 +127,8 @@ func TestBrowsePathsAndCommitsOfTheClone(t *testing.T) {
 	for args, want := range map[string]string{
 		"--commit guide.md:2":       "/src/commit/" + head + "/docs/guide.md?display=source#L2",
 		"--commit=HEAD /":           "/src/commit/" + head,
+		"--commit trunk":            "/src/commit/" + head,
+		"-c trunk guide.md":         "/src/commit/" + head + "/docs/guide.md",
 		"-b main ../go.mod":         "/src/branch/main/go.mod",
 		"-R alice/project --commit": "/src/commit/" + head,
 	} {

@@ -69,3 +69,14 @@ func TestDiscussionSearchScopeAndSelfFilters(t *testing.T) {
 		})
 	}
 }
+
+func TestInstanceSearchNamesAnUnknownUser(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusBadRequest} {
+		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(`{"message":"user does not exist [uid: 0, name: ghost]"}`))
+		}))
+		_, err := Issues{Client: client}.Search(context.Background(), DiscussionSearchOptions{Author: "ghost", State: "open", Limit: 30, Page: 1})
+		require.EqualError(t, err, `user "ghost" not found`, "HTTP %d", status)
+	}
+}

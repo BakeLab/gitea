@@ -175,6 +175,9 @@ func (a *application) runAPI(cmd *cobra.Command, args []string, f *apiFlags) err
 	if f.silent && a.options.jq != "" {
 		return usage(errors.New("--silent cannot be combined with --jq"))
 	}
+	if f.silent && f.output != "" && f.output != "-" {
+		return usage(errors.New("--silent cannot be combined with --output-file"))
+	}
 	headers, err := apiHeaders(f.headerValues)
 	if err != nil {
 		return usage(err)

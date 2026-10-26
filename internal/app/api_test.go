@@ -269,6 +269,9 @@ func TestAPIFiltersAndFormatsJSONResponses(t *testing.T) {
 		})
 	}
 	requireUsageBeforeRequests(t, "--silent cannot be combined with --jq", "api", "version", "--silent", "--jq", ".")
+	requireUsageBeforeRequests(t, "--silent cannot be combined with --output-file", "api", "version", "--silent", "--output-file", filepath.Join(t.TempDir(), "out"))
+	missing := filepath.Join(t.TempDir(), "missing")
+	requireUsageBeforeRequests(t, missing+" is not an existing directory", "api", "version", "--output-file", filepath.Join(missing, "out"))
 	requireUsageBeforeRequests(t, "api returns raw responses; --json is not supported", "api", "version", "--json")
 	requireUsageBeforeRequests(t, `invalid HTTP method "FOO"`, "api", "version", "-X", "foo")
 	requireUsageBeforeRequests(t, `invalid HTTP method ""`, "api", "version", "-X", "")

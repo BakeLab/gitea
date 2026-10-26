@@ -66,8 +66,9 @@ func generate(output string) error {
 	}
 	// Date the pages like gt man; make docs sets SOURCE_DATE_EPOCH to the last commit.
 	date := app.ManualDate(os.Getenv)
-	header := &doc.GenManHeader{Title: "GT", Section: "1", Date: &date, Source: "gitea-cli", Manual: "gitea-cli Manual"}
-	if err := doc.GenManTree(root, header, filepath.Join(output, "man")); err != nil {
+	manual := app.ManualRoot()
+	header := &doc.GenManHeader{Section: "1", Date: &date, Source: "gitea-cli", Manual: "gitea-cli Manual"}
+	if err := doc.GenManTree(manual, header, filepath.Join(output, "man")); err != nil {
 		return err
 	}
 	// Cobra skips the hidden help topics (environment, exit-codes, formatting); give them pages too.
@@ -84,7 +85,11 @@ func generate(output string) error {
 			return err
 		}
 		topicHeader := &doc.GenManHeader{Title: "GT-" + strings.ToUpper(topic.Name()), Section: "1", Date: &date, Source: "gitea-cli", Manual: "gitea-cli Manual"}
-		if err := writeFile(filepath.Join(output, "man", "gt-"+topic.Name()+".1"), func(w io.Writer) error { return doc.GenMan(topic, topicHeader, w) }); err != nil {
+		manualTopic, _, err := manual.Find([]string{topic.Name()})
+		if err != nil {
+			return err
+		}
+		if err := writeFile(filepath.Join(output, "man", "gt-"+topic.Name()+".1"), func(w io.Writer) error { return doc.GenMan(manualTopic, topicHeader, w) }); err != nil {
 			return err
 		}
 	}

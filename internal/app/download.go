@@ -254,6 +254,9 @@ func validateDownloadDestination(output string) error {
 	if isDirectory(output) {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is a directory; pass a file path inside it", output))
 	}
+	if dir := filepath.Dir(output); !isDirectory(dir) {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is not an existing directory", dir))
+	}
 	if _, err := os.Lstat(output); err == nil {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s already exists", output))
 	} else if !errors.Is(err, os.ErrNotExist) {

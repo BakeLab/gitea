@@ -258,7 +258,6 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 			for _, entry := range entries {
 				given[services.ActionValueName(entry.name)] = entry.name
 			}
-			label := func(entry envEntry) string { return entry.name }
 			report := func(name string) string {
 				text := fmt.Sprintf("Set Actions %s %s for %s", kind, name, selected)
 				if given[name] != name {
@@ -268,7 +267,7 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 			}
 			if secret {
 				service := services.ActionSecrets{Client: t.client, Scope: selected}
-				return batchDone(a, cmd, entries, label, func(entry envEntry) (services.ActionSecret, error) {
+				return setActionValues(a, cmd, len(args), entries, func(entry envEntry) (services.ActionSecret, error) {
 					return service.Set(cmd.Context(), entry.name, entry.value, description)
 				}, func(item services.ActionSecret) string { return report(item.Name) })
 			}
@@ -277,7 +276,7 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 			if cmd.Flags().Changed("description") {
 				newDescription = &description
 			}
-			return batchDone(a, cmd, entries, label, func(entry envEntry) (services.ActionVariable, error) {
+			return setActionValues(a, cmd, len(args), entries, func(entry envEntry) (services.ActionVariable, error) {
 				return service.Set(cmd.Context(), entry.name, entry.value, newDescription)
 			}, func(item services.ActionVariable) string { return report(item.Name) })
 		},
@@ -289,6 +288,13 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 	scope.register(a, cmd, kind, true)
 	cmd.ValidArgsFunction = a.completeActionValues(secret, &scope)
 	return cmd
+}
+
+// setActionValues sets each entry like batchDone. Its JSON is an object only for a name given
+// as an argument, so that --env-file prints an array however many lines the file has.
+func setActionValues[T any](a *application, cmd *cobra.Command, names int, entries []envEntry, run func(envEntry) (T, error), report func(T) string) error {
+	results, failures := applyBatch(cmd, entries, func(entry envEntry) string { return entry.name }, run, func(item T) { a.done(cmd, "%s", report(item)) })
+	return errors.Join(append(failures, writeBatchJSON(a, cmd, names, results))...)
 }
 
 // actionValue returns the value to set: --body, --body-file, standard input when it is not a
@@ -349,7 +355,12 @@ func parseEnvFile(data []byte) ([]envEntry, error) {
 				continue
 			}
 		}
-		value, _, _ = strings.Cut(value, " #")
+		for i := 1; i < len(value); i++ {
+			if value[i] == '#' && (value[i-1] == ' ' || value[i-1] == '\t') {
+				value = strings.TrimSpace(value[:i])
+				break
+			}
+		}
 		entries = append(entries, envEntry{name, value})
 	}
 	if err := scanner.Err(); err != nil {

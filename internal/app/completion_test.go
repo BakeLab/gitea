@@ -205,11 +205,21 @@ func TestOfflineCompletions(t *testing.T) {
 	}{
 		{a.completeConfig, []string{"default_host"}, "", []string{"https://gitea.example.com\talice, bob"}},
 		{a.completeConfig, []string{"color", "auto"}, "", []string{}},
+		{a.completeConfig, nil, "v", []string{}},
+		{a.completeConfig, nil, "us", []string{}},
 		{a.completeLocalBranches, nil, "f", []string{"feature/login\tlocal branch"}},
 	} {
 		values, _ := tc.complete(cmd, tc.args, tc.prefix)
 		require.Equal(t, tc.want, append([]string{}, values...), "%v %q", tc.args, tc.prefix)
 	}
+}
+
+func TestConfigGetCompletesOnlyTheKey(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	values, _ := complete(t, deps, out, "config", "get", "v")
+	require.Equal(t, []string{"version"}, values)
+	values, _ = complete(t, deps, out, "config", "get", "color", "")
+	require.Empty(t, values)
 }
 
 func TestLocalBranchCompletionIgnoresATagWithTheSameName(t *testing.T) {
