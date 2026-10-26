@@ -191,6 +191,7 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"pr", "create", "--agit", "--topic", "main", "--base", "main", "--title", "x", "--no-input"}, "the AGit topic main must differ from the base branch"},
 		{[]string{"pr", "checks", "1", "--interval", "1s"}, "--interval requires --watch"},
 		{[]string{"pr", "checks", "1", "--timeout", "1m"}, "--timeout requires --watch"},
+		{[]string{"pr", "checks", "1", "--web", "--watch"}, "--watch cannot be combined with --web"},
 		{[]string{"pr", "create", "--agit", "--web", "--title", "x", "--no-input"}, "--web cannot be combined with --agit"},
 		{[]string{"pr", "create", "--web", "--label", "bug", "--head", "feature"}, "--label cannot be combined with --web; the browser only receives --head, --base"},
 		{[]string{"pr", "create", "--reviewer", "bob, "}, "reviewer names cannot be empty"},

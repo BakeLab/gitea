@@ -305,6 +305,10 @@ func TestReviewLifecycleEditorRejectsEmptyRequiredText(t *testing.T) {
 		t.Run(verb, func(t *testing.T) {
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				require.Equal(t, http.MethodGet, r.Method)
+				if verb == "submit" && strings.HasSuffix(r.URL.Path, "/reviews/7") {
+					_, _ = w.Write([]byte(`{"id":7,"body":"Saved draft","state":"PENDING","user":{"login":"alice"}}`))
+					return
+				}
 				_, _ = w.Write([]byte(`{"id":7,"body":"Saved draft","state":"APPROVED","user":{"login":"bob"}}`))
 			}))
 			defer server.Close()

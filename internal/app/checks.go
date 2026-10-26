@@ -27,6 +27,9 @@ the instance of up to 5 minutes.`, Annotations: pullArgumentsAnnotation(nil), Ar
 		if interval <= 0 || timeout <= 0 {
 			return clierr.Wrap(clierr.Usage, errors.New("--interval and --timeout must be positive"))
 		}
+		if web && watch {
+			return clierr.Wrap(clierr.Usage, errors.New("--watch cannot be combined with --web"))
+		}
 		for _, name := range []string{"interval", "timeout"} {
 			if !watch && cmd.Flags().Changed(name) {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s requires --watch", name))

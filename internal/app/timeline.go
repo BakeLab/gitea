@@ -47,7 +47,7 @@ $ gt %[1]s timeline %[2]s --json type,author,created_at`, words.group, words.exa
 				Row: func(event services.TimelineEvent) []terminal.Cell {
 					return []terminal.Cell{{Time: terminal.ParseTime(event.CreatedAt)}, {Text: event.Author, Bold: true}, {Text: timelineText(event, t.Repo), Link: event.URL}}
 				},
-				Empty: "no activity on " + ref, Context: "activity on " + ref,
+				Empty: "no activity on " + ref, Context: "events on " + ref,
 			}, servicePage(result, page))
 		},
 	}
@@ -74,8 +74,11 @@ func timelineText(event services.TimelineEvent, repo string) string {
 		}
 		return fmt.Sprintf("removed label %q", text(event.Label))
 	case "milestone":
-		if event.Milestone == nil {
-			return fmt.Sprintf("removed milestone %q", text(event.OldMilestone))
+		switch {
+		case event.Milestone == nil && event.OldMilestone == nil:
+			return "changed the milestone" // Gitea forgets a deleted milestone
+		case event.Milestone == nil:
+			return fmt.Sprintf("removed milestone %q", *event.OldMilestone)
 		}
 		return fmt.Sprintf("set milestone %q", *event.Milestone)
 	case "change_title":
@@ -97,13 +100,17 @@ func timelineText(event services.TimelineEvent, repo string) string {
 		}
 		return "assigned " + *event.Assignee
 	case "review_request":
+		reviewer := text(event.Assignee)
+		if event.AssigneeTeam != nil {
+			reviewer = "team " + *event.AssigneeTeam
+		}
 		switch {
-		case event.Assignee == nil:
+		case reviewer == "":
 			return "changed the review requests"
 		case event.RemovedAssignee != nil && *event.RemovedAssignee:
-			return "removed the review request for " + *event.Assignee
+			return "removed the review request for " + reviewer
 		}
-		return "requested a review from " + *event.Assignee
+		return "requested a review from " + reviewer
 	case "added_deadline":
 		return "set the due date to " + text(event.Deadline)
 	case "modified_deadline":

@@ -32,15 +32,30 @@ func parseDeadline(value string) (*time.Time, error) {
 		return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid --deadline %q: the order of day and month is ambiguous; use YYYY-MM-DD", value))
 	}
 	date, err := dateparse.ParseAny(value)
-	_, numericError := strconv.ParseInt(value, 10, 64)
-	if numericError == nil {
-		date = date.UTC()
+	if n, numericError := strconv.ParseInt(value, 10, 64); numericError == nil {
+		date, err = unixTime(n)
 	}
 	if err != nil || date.IsZero() || date.Unix() == 0 || date.Year() < 1 || date.Year() > 9999 {
 		return nil, clierr.Wrap(clierr.Usage, errors.New("invalid --deadline; use YYYY-MM-DD, RFC3339 or a Unix timestamp"))
 	}
 	date = endOfDay(date)
 	return &date, nil
+}
+
+// unixTime reads n as a Unix timestamp in seconds, or by its size in milli-, micro- or
+// nanoseconds. A number below 10⁸ is refused, as more likely a mistyped date than one in 1970.
+func unixTime(n int64) (time.Time, error) {
+	switch {
+	case n < 1e8:
+		return time.Time{}, errors.New("timestamp too small")
+	case n < 1e12:
+		return time.Unix(n, 0).UTC(), nil
+	case n < 1e15:
+		return time.UnixMilli(n).UTC(), nil
+	case n < 1e18:
+		return time.UnixMicro(n).UTC(), nil
+	}
+	return time.Unix(0, n).UTC(), nil
 }
 
 // endOfDay is the last second, in UTC, of the calendar day of date in its own location.

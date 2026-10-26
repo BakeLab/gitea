@@ -33,7 +33,10 @@ func TestTimelineListsWhatHappenedOldestFirst(t *testing.T) {
 				{"id":10,"type":"review_request","assignee":{"login":"dave"},"removed_assignee":true,"user":{"login":"bob"},"created_at":"2026-01-06T00:00:00Z"},
 				{"id":11,"type":"added_deadline","body":"2026-12-01","user":{"login":"bob"},"created_at":"2026-01-07T00:00:00Z"},
 				{"id":12,"type":"modified_deadline","body":"2027-01-01|2026-12-01","user":{"login":"bob"},"created_at":"2026-01-07T00:00:00Z"},
-				{"id":13,"type":"removed_deadline","body":"2027-01-01","user":{"login":"bob"},"created_at":"2026-01-07T00:00:00Z"}]`)
+				{"id":13,"type":"removed_deadline","body":"2027-01-01","user":{"login":"bob"},"created_at":"2026-01-07T00:00:00Z"},
+				{"id":14,"type":"review_request","assignee_team":{"name":"devs"},"removed_assignee":false,"user":{"login":"bob"},"created_at":"2026-01-08T00:00:00Z"},
+				{"id":15,"type":"review_request","assignee_team":{"name":"devs"},"removed_assignee":true,"user":{"login":"bob"},"created_at":"2026-01-08T00:00:00Z"},
+				{"id":16,"type":"milestone","milestone":null,"old_milestone":null,"user":{"login":"bob"},"created_at":"2026-01-09T00:00:00Z"}]`)
 		default:
 			t.Errorf("unexpected %s", r.URL.Path)
 		}
@@ -46,7 +49,9 @@ func TestTimelineListsWhatHappenedOldestFirst(t *testing.T) {
 		"2026-01-05T00:00:00Z\tbob\tadded dependency #4\n2026-01-05T00:00:00Z\tbob\tremoved dependency alice/other#9\n"+
 		"2026-01-06T00:00:00Z\tbob\trequested a review from dave\n2026-01-06T00:00:00Z\tbob\tremoved the review request for dave\n"+
 		"2026-01-07T00:00:00Z\tbob\tset the due date to 2026-12-01\n2026-01-07T00:00:00Z\tbob\tchanged the due date from 2026-12-01 to 2027-01-01\n"+
-		"2026-01-07T00:00:00Z\tbob\tremoved the due date 2027-01-01\n", out.String())
+		"2026-01-07T00:00:00Z\tbob\tremoved the due date 2027-01-01\n"+
+		"2026-01-08T00:00:00Z\tbob\trequested a review from team devs\n2026-01-08T00:00:00Z\tbob\tremoved the review request for team devs\n"+
+		"2026-01-09T00:00:00Z\tbob\tchanged the milestone\n", out.String())
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project", "--json", "type,label", "--jq", ".[0]"}))
 	require.JSONEq(t, `{"type":"label","label":"bug"}`, out.String())
@@ -55,11 +60,11 @@ func TestTimelineListsWhatHappenedOldestFirst(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project", "--json", "--jq", ".[:3]"}))
 	require.JSONEq(t, `[
 		{"id":1,"type":"label","author":"bob","url":"","created_at":"2026-01-01T00:00:00Z","body":null,"label":"bug","label_added":true,
-		 "milestone":null,"old_milestone":null,"old_title":null,"new_title":null,"assignee":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null},
+		 "milestone":null,"old_milestone":null,"old_title":null,"new_title":null,"assignee":null,"assignee_team":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null},
 		{"id":2,"type":"change_title","author":"bob","url":"","created_at":"2026-01-02T00:00:00Z","body":null,"label":null,"label_added":null,
-		 "milestone":null,"old_milestone":null,"old_title":"crash","new_title":"Crash","assignee":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null},
+		 "milestone":null,"old_milestone":null,"old_title":"crash","new_title":"Crash","assignee":null,"assignee_team":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null},
 		{"id":3,"type":"comment","author":"alice","url":"","created_at":"2026-01-03T00:00:00Z","body":"Fixed in main\nThanks","label":null,"label_added":null,
-		 "milestone":null,"old_milestone":null,"old_title":null,"new_title":null,"assignee":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null}]`, out.String())
+		 "milestone":null,"old_milestone":null,"old_title":null,"new_title":null,"assignee":null,"assignee_team":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null}]`, out.String())
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project", "--json", "assignee,removed_assignee,dependent_issue", "--jq", ".[5:9]"}))
 	require.JSONEq(t, `[{"assignee":"carol","removed_assignee":true,"dependent_issue":null},
@@ -67,11 +72,17 @@ func TestTimelineListsWhatHappenedOldestFirst(t *testing.T) {
 		{"assignee":null,"removed_assignee":null,"dependent_issue":"alice/other#9"},
 		{"assignee":"dave","removed_assignee":false,"dependent_issue":null}]`, out.String())
 	out.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project", "--json", "body,deadline,old_deadline", "--jq", ".[10:]"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project", "--json", "body,deadline,old_deadline", "--jq", ".[10:13]"}))
 	require.JSONEq(t, `[{"body":null,"deadline":"2026-12-01","old_deadline":null},
 		{"body":null,"deadline":"2027-01-01","old_deadline":"2026-12-01"},
 		{"body":null,"deadline":null,"old_deadline":"2027-01-01"}]`, out.String())
-	require.ErrorContains(t, Execute(context.Background(), deps, []string{"pr", "timeline", "3", "-R", "alice/project"}), "is an issue, not a pull request")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project", "--json", "assignee,assignee_team,removed_assignee", "--jq", ".[13:15]"}))
+	require.JSONEq(t, `[{"assignee":null,"assignee_team":"devs","removed_assignee":false},{"assignee":null,"assignee_team":"devs","removed_assignee":true}]`, out.String())
+	out.Reset()
+	plainTTY(t, &deps, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project"}))
+	require.Contains(t, out.String(), "Showing 16 of 16 events on alice/project#3\n")
 }
 
 func TestPullTimelineSelectsThePullRequestLikeOtherPullCommands(t *testing.T) {

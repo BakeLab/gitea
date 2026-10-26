@@ -33,8 +33,10 @@ type TimelineEvent struct {
 	OldTitle     *string `json:"old_title"`
 	NewTitle     *string `json:"new_title"`
 	// Assignee is the user an "assignees" event assigned, or the user a "review_request" event
-	// asked for a review; RemovedAssignee tells that it unassigned them or withdrew the request.
+	// asked for a review, and AssigneeTeam the team such an event asked; RemovedAssignee tells
+	// that it unassigned them or withdrew the request.
 	Assignee        *string `json:"assignee"`
+	AssigneeTeam    *string `json:"assignee_team"`
 	RemovedAssignee *bool   `json:"removed_assignee"`
 	// DependentIssue is the issue a dependency event added or removed, as OWNER/REPO#NUMBER.
 	DependentIssue *string `json:"dependent_issue"`
@@ -45,10 +47,11 @@ type TimelineEvent struct {
 }
 
 // timelineComment is a timeline event as Gitea sends it.
-// TODO(sdk): TimelineComment lacks assignee, removed_assignee and dependent_issue.
+// TODO(sdk): TimelineComment lacks assignee, assignee_team, removed_assignee and dependent_issue.
 type timelineComment struct {
 	gitea.TimelineComment
 	Assignee        *gitea.User  `json:"assignee"`
+	AssigneeTeam    *gitea.Team  `json:"assignee_team"`
 	RemovedAssignee bool         `json:"removed_assignee"`
 	DependentIssue  *gitea.Issue `json:"dependent_issue"`
 }
@@ -81,6 +84,9 @@ func timelineEventFrom(full *timelineComment) TimelineEvent {
 	if full.Assignee != nil {
 		assignee := login(full.Assignee)
 		result.Assignee, result.RemovedAssignee = &assignee, &full.RemovedAssignee
+	}
+	if full.AssigneeTeam != nil {
+		result.AssigneeTeam, result.RemovedAssignee = &full.AssigneeTeam.Name, &full.RemovedAssignee
 	}
 	if issue := full.DependentIssue; issue != nil && issue.Repository != nil {
 		dependent := issue.Repository.FullName + "#" + strconv.FormatInt(issue.Index, 10)

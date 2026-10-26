@@ -52,6 +52,8 @@ func argumentsAnnotation(annotations map[string]string, text string) map[string]
 
 type reviewType struct {
 	approve, requestChanges, comment, pending bool
+	// pendingFlag tells whether the command registered --pending.
+	pendingFlag bool
 }
 
 // register adds -a, -r, -c, --pending when pending is set, to cmd.
@@ -60,6 +62,7 @@ func (r *reviewType) register(cmd *cobra.Command, pending bool) {
 	flags.BoolVarP(&r.approve, "approve", "a", false, "Approve the pull request")
 	flags.BoolVarP(&r.requestChanges, "request-changes", "r", false, "Request changes (requires a body)")
 	flags.BoolVarP(&r.comment, "comment", "c", false, "Comment without approving (requires a body or inline comments, which can be those of the pending review it publishes; an empty --body clears that review's body when it has inline comments, and is refused otherwise)")
+	r.pendingFlag = pending
 	if pending {
 		flags.BoolVar(&r.pending, "pending", false, "Save the review as pending, to submit later with gt pr review submit")
 	}
@@ -78,6 +81,9 @@ func (r reviewType) state() (string, error) {
 		return "", nil
 	case 1:
 		return states[0], nil
+	}
+	if r.pendingFlag {
+		return "", clierr.Wrap(clierr.Usage, errors.New("choose one review type: --approve, --request-changes, --comment or --pending"))
 	}
 	return "", clierr.Wrap(clierr.Usage, errors.New("choose one review type: --approve, --request-changes or --comment"))
 }
@@ -621,6 +627,14 @@ func reviewStateCell(item services.Review) terminal.Cell {
 	return cell
 }
 
+// pipedReviewState is the state of a review where piped output shows no badge: "APPROVED (dismissed)".
+func pipedReviewState(item services.Review) string {
+	if item.Dismissed {
+		return item.State + " (dismissed)"
+	}
+	return item.State
+}
+
 // reviewPossessive names a review by its author and state in feedback: "bob's approval".
 func reviewPossessive(item services.Review) string {
 	noun := "review"
@@ -697,7 +711,7 @@ func (a *application) pullReviewViewCommand() *cobra.Command {
 				Title: fmt.Sprintf("Review on %s#%d", t.Repo, n), ID: strconv.FormatInt(item.ID, 10), Badges: []terminal.Cell{reviewStateCell(item)}, Meta: meta,
 				Fields: []terminal.Field{
 					{Label: "Reviewer", Value: item.Reviewer(), PipedOnly: true},
-					{Label: "State", Value: item.State, PipedOnly: true},
+					{Label: "State", Value: pipedReviewState(item), PipedOnly: true},
 					{Label: "Inline comments", Value: strconv.Itoa(item.CommentsCount)},
 					{Label: "Commit", Value: item.Commit},
 				},

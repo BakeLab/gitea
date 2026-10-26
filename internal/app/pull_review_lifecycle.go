@@ -61,17 +61,25 @@ func (a *application) pullReviewSubmitCommand() *cobra.Command {
 			return err
 		}
 		service := services.Reviews{Client: t.client, Repository: t.Repo}
-		if id == 0 {
+		explicit := id != 0
+		if !explicit {
 			if id, err = a.pendingReview(cmd, service, t, n, state); err != nil {
 				return err
 			}
 		}
 		// pending is the review as it was, read when a body replaces its own, to check and report that.
 		var pending *services.Review
-		if useEditor || supplied != nil || state == "REQUEST_CHANGES" {
+		if explicit || useEditor || supplied != nil || state == "REQUEST_CHANGES" {
 			current, err := service.View(cmd.Context(), n, id)
 			if err != nil {
 				return err
+			}
+			// Gitea answers the submission of another account's or a submitted review with a bare 500.
+			if explicit && current.State != "PENDING" {
+				return fmt.Errorf("review %d on %s#%d is not pending; only a pending review can be submitted", id, t.Repo, n)
+			}
+			if explicit && !strings.EqualFold(current.Author, t.login()) {
+				return fmt.Errorf("review %d is %s's pending review; you can only submit your own", id, current.Reviewer())
 			}
 			switch {
 			case useEditor:
@@ -85,7 +93,7 @@ func (a *application) pullReviewSubmitCommand() *cobra.Command {
 				}
 			case supplied != nil:
 				pending = &current
-			default:
+			case state == "REQUEST_CHANGES":
 				supplied = &current.Body
 			}
 		}
@@ -223,6 +231,9 @@ func (a *application) pullReviewDismissCommand(dismiss bool) *cobra.Command {
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("only approvals and change requests can be dismissed; %s is not one", subject))
 		case !dismiss && !current.Dismissed:
 			a.warn(cmd, "%s is not dismissed", subject)
+			return a.jsonResult(cmd, current)
+		case dismiss && current.Dismissed:
+			a.warn(cmd, "%s is already dismissed", subject)
 			return a.jsonResult(cmd, current)
 		}
 		if dismiss && !collected {

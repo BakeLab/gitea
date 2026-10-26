@@ -4,6 +4,7 @@
 package app
 
 import (
+	"slices"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -33,15 +34,41 @@ func (a *application) pullReviewRequestCommand(add bool) *cobra.Command {
 			return err
 		}
 		t.expandMeAll(input.Users)
-		item, err := (services.Reviews{Client: t.client, Repository: t.Repo}).ChangeRequests(cmd.Context(), n, changes)
+		if err := changes.Validate(); err != nil {
+			return clierr.Wrap(clierr.Usage, err)
+		}
+		service := services.Reviews{Client: t.client, Repository: t.Repo}
+		reviews, err := service.All(cmd.Context(), n)
 		if err != nil {
 			return err
 		}
-		names := append([]string{}, input.Users...)
-		for _, team := range input.Teams {
-			names = append(names, "team "+team)
+		item, err := service.ChangeRequests(cmd.Context(), n, changes)
+		if err != nil {
+			return err
 		}
-		a.done(cmd, "%s %s on %s", verb, strings.Join(names, ", "), refLabel(t.Repo, item.Number, item.Title))
+		ref := refLabel(t.Repo, item.Number, item.Title)
+		users, teams := services.RequestedReviewers(reviews)
+		var changed []string
+		for _, group := range []struct {
+			names, held []string
+			prefix      string
+		}{{input.Users, users, ""}, {input.Teams, teams, "team "}} {
+			for _, name := range group.names {
+				email := strings.Contains(name, "@") // the reviews name users by login only
+				held := !email && slices.ContainsFunc(group.held, func(h string) bool { return strings.EqualFold(h, name) })
+				switch {
+				case add && held:
+					a.warn(cmd, "%s%s already has a review request on %s", group.prefix, name, ref)
+				case !add && !held && !email:
+					a.warn(cmd, "%s%s has no review request on %s", group.prefix, name, ref)
+				default:
+					changed = append(changed, group.prefix+name)
+				}
+			}
+		}
+		if len(changed) > 0 {
+			a.done(cmd, "%s %s on %s", verb, strings.Join(changed, ", "), ref)
+		}
 		return a.pullResult(cmd, t, item)
 	}}
 	cmd.Flags().StringSliceVarP(&input.Users, "reviewer", "r", nil, "Reviewer usernames or email addresses; @me for yourself")

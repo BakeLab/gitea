@@ -229,7 +229,7 @@ func pullReviewComments(cmd *cobra.Command, t target, n int64, reviews []service
 			heading += " (dismissed)"
 		}
 		result = append(result, discussionComment{
-			author: review.Author, createdAt: review.SubmittedAt, body: review.Body, heading: heading, meta: [2]string{"review", review.State},
+			author: review.Author, createdAt: review.SubmittedAt, body: review.Body, heading: heading, meta: [2]string{"review", pipedReviewState(review)},
 		})
 	}
 	inline, err := (services.Reviews{Client: t.client, Repository: t.Repo}).Inline(cmd.Context(), n, reviews)

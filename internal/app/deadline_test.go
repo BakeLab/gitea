@@ -23,6 +23,7 @@ func TestDeadlineInputAndExplicitClearing(t *testing.T) {
 			{"Jan 15 2028", `{"due_date":"2028-01-15T23:59:59Z"}`},
 			{"1704067200000", `{"due_date":"2024-01-01T23:59:59Z"}`},
 			{"1704067200", `{"due_date":"2024-01-01T23:59:59Z"}`},
+			{"999999999", `{"due_date":"2001-09-09T23:59:59Z"}`},
 			{"", `{"unset_due_date":true}`},
 		} {
 			t.Run(family+"/"+tc.value, func(t *testing.T) {
@@ -60,7 +61,7 @@ func TestAmbiguousNumericDeadlinesAreRejected(t *testing.T) {
 }
 
 func TestInvalidDeadlineBeforeInputCollectionOrNetwork(t *testing.T) {
-	for _, value := range []string{"bad", "2026-02-30", "0", "not-a-timestamp", "999999999999999999999999999999999999"} {
+	for _, value := range []string{"bad", "2026-02-30", "0", "1234", "20270101", "not-a-timestamp", "999999999999999999999999999999999999"} {
 		for _, command := range [][]string{{"issue", "edit", "1"}, {"pr", "edit", "1", "--add-reviewer=alice"}, {"issue", "create"}, {"pr", "create"}} {
 			requireUsageBeforeRequests(t, "invalid --deadline", append(command, "--deadline="+value)...)
 		}

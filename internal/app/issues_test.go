@@ -453,7 +453,7 @@ func TestNameFlagsAreTrimmed(t *testing.T) {
 			_, _ = w.Write([]byte(`{"full_name":"owner/repo","permissions":{"push":true}}`))
 		case r.URL.Path == "/api/v1/repos/owner/repo/labels" && r.URL.Query().Get("page") == "1":
 			_, _ = w.Write([]byte(`[{"id":2,"name":"bug"}]`))
-		case r.URL.Path == "/api/v1/repos/owner/repo/labels":
+		case r.URL.Path == "/api/v1/repos/owner/repo/labels", r.URL.Path == "/api/v1/repos/owner/repo/pulls/1/reviews":
 			_, _ = w.Write([]byte(`[]`))
 		case r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"number":1,"assignees":[{"login":"carol"}]}`))

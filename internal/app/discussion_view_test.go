@@ -128,7 +128,7 @@ func TestPullViewCommentsIncludeReviews(t *testing.T) {
 		case "/api/v1/repos/alice/project/pulls/4/reviews":
 			writeFirstPage(w, r, `[
 				{"id":1,"body":"Please rename","state":"REQUEST_CHANGES","user":{"login":"alice"},"submitted_at":"2026-01-01T12:00:00Z","comments_count":1},
-				{"id":2,"body":"","state":"APPROVED","user":{"login":"dave"},"submitted_at":"2026-01-03T00:00:00Z"},
+				{"id":2,"body":"","state":"APPROVED","dismissed":true,"user":{"login":"dave"},"submitted_at":"2026-01-03T00:00:00Z"},
 				{"id":3,"body":"Draft","state":"PENDING","user":{"login":"erin"},"submitted_at":"2026-01-03T00:00:00Z"},
 				{"id":4,"body":"Great","state":"APPROVED","user":{"login":"alice"},"submitted_at":"2026-01-03T06:00:00Z"}
 			]`)
@@ -145,20 +145,20 @@ func TestPullViewCommentsIncludeReviews(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	deps.Now = func() time.Time { return time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC) }
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "view", "4", "-R", "alice/project", "--comments"}))
-	require.Equal(t, "title:\tFix\nstate:\topen\nauthor:\tbob\nbase:\tmain\nhead:\tfix\nlabels:\t\nassignees:\t\nreviewers:\talice (Approved), dave (Approved)\nmilestone:\t\nchecks:\t\nmergeable:\tyes\ncomments:\t1\nnumber:\t4\nurl:\thttps://example.org/p/4\n--\n\n"+
+	require.Equal(t, "title:\tFix\nstate:\topen\nauthor:\tbob\nbase:\tmain\nhead:\tfix\nlabels:\t\nassignees:\t\nreviewers:\talice (Approved), dave (Approved (dismissed))\nmilestone:\t\nchecks:\t\nmergeable:\tyes\ncomments:\t1\nnumber:\t4\nurl:\thttps://example.org/p/4\n--\n\n"+
 		"--\nauthor:\talice\ncreated_at:\t2026-01-01T12:00:00Z\nreview:\tREQUEST_CHANGES\n--\nPlease rename\n"+
 		"--\nauthor:\talice\ncreated_at:\t2026-01-01T12:00:00Z\nid:\t9\npath:\tmain.go:12\n--\nTypo here\n"+
 		"--\nauthor:\tcarol\ncreated_at:\t2026-01-02T00:00:00Z\n--\nLooks close\n"+
-		"--\nauthor:\tdave\ncreated_at:\t2026-01-03T00:00:00Z\nreview:\tAPPROVED\n--\n\n"+
+		"--\nauthor:\tdave\ncreated_at:\t2026-01-03T00:00:00Z\nreview:\tAPPROVED (dismissed)\n--\n\n"+
 		"--\nauthor:\talice\ncreated_at:\t2026-01-03T06:00:00Z\nreview:\tAPPROVED\n--\nGreat\n", out.String())
 	out.Reset()
 	plainTTY(t, &deps, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "view", "4", "-R", "alice/project", "--comments"}))
-	require.Equal(t, "Fix #4\nOpen • bob wants to merge into main from fix • about 3 days ago • 1 comment\nReviewers: alice (Approved), dave (Approved)\nMergeable: yes\n\nNo description provided\n\n"+
+	require.Equal(t, "Fix #4\nOpen • bob wants to merge into main from fix • about 3 days ago • 1 comment\nReviewers: alice (Approved), dave (Approved (dismissed))\nMergeable: yes\n\nNo description provided\n\n"+
 		"alice requested changes • about 2 days ago\nPlease rename\n\n"+
 		"alice commented on main.go:12 • about 2 days ago\nTypo here\n\n"+
 		"carol • about 2 days ago\nLooks close\n\n"+
-		"dave approved these changes • about 1 day ago\n\n"+
+		"dave approved these changes (dismissed) • about 1 day ago\n\n"+
 		"alice approved these changes • about 18 hours ago\nGreat\n\n"+
 		"View this pull request on Gitea: https://example.org/p/4\n", out.String())
 }

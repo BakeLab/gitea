@@ -151,7 +151,7 @@ func TestReviewAsksBeforeFoldingAPendingReview(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews" && r.URL.Query().Get("page") > "1":
 			_, _ = w.Write([]byte(`[]`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
-			_, _ = w.Write([]byte(`[{"id":9,"state":"PENDING","body":"Draft notes","comments_count":1,"user":{"login":"alice"}}]`))
+			_, _ = w.Write([]byte(`[{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes","comments_count":1,"user":{"login":"alice"}}]`))
 		case r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(pullJSON("bob")))
 		default:
@@ -182,7 +182,7 @@ func TestReviewKeepsThePendingBodyWithoutANewOne(t *testing.T) {
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews" && r.URL.Query().Get("page") > "1":
 					_, _ = w.Write([]byte(`[]`))
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
-					_, _ = w.Write([]byte(`[{"id":9,"state":"PENDING","body":"Draft notes","user":{"login":"alice"}}]`))
+					_, _ = w.Write([]byte(`[{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes","user":{"login":"alice"}}]`))
 				case r.Method == http.MethodGet:
 					_, _ = w.Write([]byte(pullJSON("bob")))
 				default:
@@ -219,7 +219,7 @@ func TestCommentNeedsNoBodyToPublishAPendingReview(t *testing.T) {
 	for _, mode := range []string{"flags", "editor", "form", "no pending review"} {
 		t.Run(mode, func(t *testing.T) {
 			var events, bodies []any
-			pending := `[{"id":9,"state":"PENDING","body":"Draft notes","comments_count":1,"user":{"login":"alice"}}]`
+			pending := `[{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes","comments_count":1,"user":{"login":"alice"}}]`
 			if mode == "no pending review" {
 				pending = `[]`
 			}
@@ -332,9 +332,9 @@ func TestCommentWithAnEmptyBodyPublishesAPendingReviewWithInlineComments(t *test
 		name, pending string
 		want          string
 	}{
-		{"inline comments", `[{"id":9,"state":"PENDING","body":"Draft notes","comments_count":1,"user":{"login":"alice"}}]`, ""},
+		{"inline comments", `[{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes","comments_count":1,"user":{"login":"alice"}}]`, ""},
 		// The empty body replaces the pending one, which leaves nothing to publish.
-		{"only a body", `[{"id":9,"state":"PENDING","body":"Draft notes","user":{"login":"alice"}}]`, `-b "" would clear the body of pending review 9 and leave it empty; leave out --body to keep its body`},
+		{"only a body", `[{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes","user":{"login":"alice"}}]`, `-b "" would clear the body of pending review 9 and leave it empty; leave out --body to keep its body`},
 		{"no pending review", `[]`, "a comment needs a body; pass --body, --body-file or --editor"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -374,7 +374,7 @@ func TestReviewWarnsWhenItReplacesThePendingBody(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews" && r.URL.Query().Get("page") > "1":
 			_, _ = w.Write([]byte(`[]`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
-			_, _ = w.Write([]byte(`[{"id":9,"state":"PENDING","body":"Draft notes","user":{"login":"alice"}}]`))
+			_, _ = w.Write([]byte(`[{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes","user":{"login":"alice"}}]`))
 		case r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(pullJSON("bob")))
 		default:
@@ -519,6 +519,8 @@ func TestReviewUsageErrors(t *testing.T) {
 		{[]string{"pr", "review", "13", "--body", "x"}, "choose a review type"},
 		{[]string{"pr", "review", "13", "-a", "-c"}, "choose one review type"},
 		{[]string{"pr", "review", "13", "--approve", "--comment"}, "choose one review type"},
+		{[]string{"pr", "review", "13", "--pending", "-a"}, "choose one review type: --approve, --request-changes, --comment or --pending"},
+		{[]string{"pr", "review", "submit", "13", "-a", "-c"}, "choose one review type: --approve, --request-changes or --comment"},
 		{[]string{"pr", "review", "approve", "13"}, `unknown review command "approve"; to approve run: gt pr review 13 --approve (see gt pr review --help)`},
 		{[]string{"pr", "review", "reject"}, `to request changes run: gt pr review <number> --request-changes`},
 		{[]string{"pr", "review", "lst", "13"}, `unknown command "lst" for "gt pr review"; did you mean list?`},
@@ -600,12 +602,37 @@ func TestReviewSubmitFindsThePendingReview(t *testing.T) {
 	}
 }
 
+func TestReviewSubmitRefusesAReviewItCannotSubmit(t *testing.T) {
+	for _, tc := range []struct{ review, want string }{
+		{`{"id":9,"state":"PENDING","user":{"login":"bob"}}`, "review 9 is bob's pending review; you can only submit your own"},
+		{`{"id":9,"state":"COMMENT","user":{"login":"alice"}}`, "review 9 on alice/x#13 is not pending; only a pending review can be submitted"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, http.MethodGet, r.Method, "no review may be submitted")
+				switch r.URL.Path {
+				case "/api/v1/repos/alice/x/pulls/13":
+					_, _ = w.Write([]byte(pullJSON("bob")))
+				case "/api/v1/repos/alice/x/pulls/13/reviews/9":
+					_, _ = w.Write([]byte(tc.review))
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL)
+				}
+			}))
+			defer server.Close()
+			deps, _, _ := serverDeps(t, server.URL)
+			err := Execute(context.Background(), deps, []string{"pr", "review", "submit", "13", "9", "-R", "alice/x", "--comment"})
+			require.EqualError(t, err, tc.want)
+		})
+	}
+}
+
 func TestReviewSubmitCommentWithAnEmptyBody(t *testing.T) {
 	for _, tc := range []struct {
 		name, review, want string
 	}{
-		{"only a body", `{"id":9,"state":"PENDING","body":"Draft notes"}`, `-b "" would clear the body of pending review 9 and leave it empty; leave out --body to keep its body`},
-		{"inline comments", `{"id":9,"state":"PENDING","body":"Draft notes","comments_count":1}`, ""},
+		{"only a body", `{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes"}`, `-b "" would clear the body of pending review 9 and leave it empty; leave out --body to keep its body`},
+		{"inline comments", `{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes","comments_count":1}`, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var posts []string
@@ -657,7 +684,7 @@ func TestReviewSubmitCommentRefusesABlankBodyThatClearsAPendingReview(t *testing
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13":
 					_, _ = w.Write([]byte(pullJSON("bob")))
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews/9":
-					_, _ = w.Write([]byte(`{"id":9,"state":"PENDING","body":"Draft notes"}`))
+					_, _ = w.Write([]byte(`{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes"}`))
 				default:
 					t.Errorf("unexpected %s %s", r.Method, r.URL)
 				}
@@ -680,7 +707,7 @@ func TestCommentWithABlankBodyNamesItBlank(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/x/pulls/13/reviews":
-			writeFirstPage(w, r, `[{"id":9,"state":"PENDING","body":"Draft notes","user":{"login":"alice"}}]`)
+			writeFirstPage(w, r, `[{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes","user":{"login":"alice"}}]`)
 		case r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(pullJSON("bob")))
 		default:
@@ -712,6 +739,17 @@ ID  REVIEWER  STATE                 SUBMITTED          COMMENTS  BODY
 5   alice     Commented             about 2 hours ago  0         Self note
 6   bob       Approved (dismissed)  about 1 hour ago   2
 `, out.String())
+}
+
+func TestReviewViewPipedNamesADismissal(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/repos/alice/x/pulls/13/reviews/6", r.URL.Path)
+		_, _ = w.Write([]byte(`{"id":6,"state":"APPROVED","dismissed":true,"user":{"login":"bob"}}`))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "view", "13", "6", "-R", "alice/x"}))
+	require.Contains(t, out.String(), "state:\tAPPROVED (dismissed)\n")
 }
 
 func TestReviewCommentsFileValidatedBeforeRequests(t *testing.T) {
@@ -796,6 +834,17 @@ func TestReviewDismissChecksTheReviewStateFirst(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "undismiss", "1", "2", "-R", "owner/repo"}))
 	require.Contains(t, diagnostics.String(), "is not dismissed")
 	require.Zero(t, mutations)
+}
+
+func TestReviewDismissLeavesADismissedReview(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method, "a dismissed review is not dismissed again")
+		_, _ = w.Write([]byte(`{"id":2,"state":"APPROVED","dismissed":true,"user":{"login":"bob"}}`))
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "dismiss", "1", "2", "-R", "owner/repo", "--body", "Reason", "--yes"}))
+	require.Contains(t, diagnostics.String(), "bob's approval on owner/repo#1 is already dismissed")
 }
 
 func TestReviewDismissOpensNoEditorForAnUndismissableReview(t *testing.T) {
