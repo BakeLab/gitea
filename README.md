@@ -62,7 +62,11 @@ There are different ways to get `gt`:
    brew install gitea-cli
    ```
 
-5. Install from source: [see *Compilation*](#compilation)
+5. Linux packages: download the `.deb`, `.rpm`, `.apk` or Arch `.pkg.tar.zst` for your system from the
+   [release](https://gitea.com/gitea/cli/releases) and install it with your package manager, for example
+   `sudo apt install ./gitea-cli_<version>_amd64.deb`. They include the man pages and shell completions.
+
+6. Install from source: [see *Compilation*](#compilation)
 
 ### Log in to Gitea from gt
 
