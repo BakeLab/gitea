@@ -78,7 +78,16 @@ func newBackportServer(t *testing.T) *backportServer {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project":
 			fmt.Fprint(w, `{"full_name":"alice/project","default_branch":"main","has_pull_requests":true,"permissions":{"push":true}}`)
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/repos/alice/project/branches/"):
-			fmt.Fprintf(w, `{"name":%q}`, strings.TrimPrefix(r.URL.Path, "/api/v1/repos/alice/project/branches/"))
+			name := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/alice/project/branches/")
+			if _, err := (git.System{}).Output(context.Background(), bare, false, "rev-parse", "--verify", "--quiet", "refs/heads/"+name); err != nil {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			fmt.Fprintf(w, `{"name":%q}`, name)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/milestones":
+			writeFirstPage(w, r, `[{"id":9,"title":"1.3.0"}]`)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/repos/alice/project/milestones/"):
+			w.WriteHeader(http.StatusNotFound)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls" && s.failCreates > 0:
 			s.failCreates--
 			w.WriteHeader(http.StatusInternalServerError)
@@ -180,6 +189,14 @@ func TestPullBackportConflicts(t *testing.T) {
 		require.Equal(t, "work", s.git(s.work, "branch", "--show-current"))
 		require.Empty(t, s.git(s.work, "branch", "--list", "backport-7-release-v1"))
 	})
+	t.Run("a target that already has it does not stop the others", func(t *testing.T) {
+		s := newBackportServer(t)
+		s.git(s.pusher, "push", "--quiet", "origin", "main:release/v1")
+		_, _, err := s.run("pr", "backport", "7", "--to", "release/v1", "--to", "release/v2", "--yes")
+		require.EqualError(t, err, "pull request #7 is already on release/v1")
+		require.Len(t, s.created, 1)
+		require.Equal(t, "release/v2", s.created[0]["base"])
+	})
 	t.Run("kept, resolved and continued", func(t *testing.T) {
 		s := conflicting(t)
 		_, _, err := s.run("pr", "backport", "7", "--to", "release/v1", "--keep", "--yes")
@@ -203,6 +220,29 @@ func TestPullBackportConflicts(t *testing.T) {
 	})
 }
 
+// What would fail only when pushing or opening the pull request fails before the branch exists,
+// so that rerunning as the error says works.
+func TestPullBackportChecksBeforeCherryPicking(t *testing.T) {
+	s := newBackportServer(t)
+	s.git(s.pusher, "push", "--quiet", "origin", "HEAD~1:refs/heads/backport-7-release-v2")
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--to", "release/v1"}, "pr backport requires --yes without a terminal"},
+		{[]string{"--to", "release/v1", "--milestone", "nosuch", "--yes"}, `milestone "nosuch" not found`},
+		{[]string{"--to", "release/v2", "--yes"}, "branch backport-7-release-v2 already exists in alice/project; choose another with --branch"},
+	} {
+		_, _, err := s.run(append([]string{"pr", "backport", "7"}, tc.args...)...)
+		require.ErrorContains(t, err, tc.want)
+		require.Empty(t, s.git(s.work, "branch", "--list", "backport-*"), tc.args)
+	}
+	require.Empty(t, s.created)
+	_, _, err := s.run("pr", "backport", "7", "--to", "release/v1", "--milestone", "1.3.0", "--yes")
+	require.NoError(t, err)
+	require.Equal(t, float64(9), s.created[0]["milestone"])
+}
+
 func TestPullBackportRefusesAnOpenPullRequest(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/repos/alice/project/pulls/7", r.URL.Path)
@@ -213,7 +253,7 @@ func TestPullBackportRefusesAnOpenPullRequest(t *testing.T) {
 	deps.Git = &fakeGit{results: map[string]string{
 		"rev-parse --is-inside-work-tree": "true", "remote": "origin", "remote get-url origin": server.URL + "/alice/project.git",
 	}}
-	err := Execute(context.Background(), deps, []string{"pr", "backport", "7", "--to", "release/v1", "--repo", "alice/project"})
+	err := Execute(context.Background(), deps, []string{"pr", "backport", "7", "--to", "release/v1", "--repo", "alice/project", "--yes"})
 	require.ErrorContains(t, err, "pull request #7 is not merged")
 }
 

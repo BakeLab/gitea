@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -19,6 +20,7 @@ const (
 	backportTargetKey = "gitea-cli-backport-target"
 	backportOntoKey   = "gitea-cli-backport-onto"
 	backportFromKey   = "gitea-cli-backport-from"
+	backportPickedKey = "gitea-cli-backport-picked"
 )
 
 // BackportOptions selects a merged pull request, the branch to backport it to and the new local
@@ -67,6 +69,13 @@ func (e *BackportConflict) Error() string {
 	return fmt.Sprintf("cherry-picking to %s conflicts%s; nothing was changed. Run again with --keep to resolve the conflicts yourself", e.Target, files)
 }
 
+// BackportSkipped reports a target that cannot take the backport, such as one that already has
+// it; the clone is left as it was, so that other targets can still be tried.
+type BackportSkipped struct{ Err error }
+
+func (e *BackportSkipped) Error() string { return e.Err.Error() }
+func (e *BackportSkipped) Unwrap() error { return e.Err }
+
 // Backport cherry-picks the commits a merged pull request left on its base branch onto a new branch
 // started from the remote's target branch, with -x, and switches back to the branch it ran on. A
 // merge commit contributes the commits it merged; a commit without merge parents contributes itself
@@ -99,7 +108,7 @@ func Backport(ctx context.Context, runner Runner, opts BackportOptions) (Backpor
 	if existing, err := optional(run("rev-parse", "--verify", "--quiet", "refs/heads/"+opts.Branch)); err != nil {
 		return BackportResult{}, err
 	} else if existing != "" {
-		return BackportResult{}, fmt.Errorf("branch %q already exists; choose another with --branch, or finish its backport with gt pr backport --continue", opts.Branch)
+		return BackportResult{}, &BackportSkipped{fmt.Errorf("branch %q already exists; choose another with --branch, or finish its backport with gt pr backport --continue", opts.Branch)}
 	}
 	fetch := func(ref string) (string, error) {
 		args := append(append([]string{}, opts.CredentialArgs...), "fetch", "--quiet", "--no-tags", "--", opts.Remote, ref)
@@ -110,7 +119,7 @@ func Backport(ctx context.Context, runner Runner, opts BackportOptions) (Backpor
 	}
 	onto, err := fetch("refs/heads/" + opts.Target)
 	if err != nil {
-		return BackportResult{}, fmt.Errorf("could not fetch the target branch %s from %s: %w", opts.Target, opts.Remote, err)
+		return BackportResult{}, &BackportSkipped{fmt.Errorf("could not fetch the target branch %s from %s: %w", opts.Target, opts.Remote, err)}
 	}
 	base, err := fetch("refs/heads/" + opts.Base)
 	if err != nil {
@@ -128,7 +137,7 @@ func Backport(ctx context.Context, runner Runner, opts BackportOptions) (Backpor
 		return BackportResult{}, err
 	}
 	if _, err := run("merge-base", "--is-ancestor", picks[len(picks)-1], onto); err == nil {
-		return BackportResult{}, fmt.Errorf("pull request #%d is already on %s", opts.Number, opts.Target)
+		return BackportResult{}, &BackportSkipped{fmt.Errorf("pull request #%d is already on %s", opts.Number, opts.Target)}
 	}
 	from, err := CurrentBranch(ctx, runner, opts.Directory)
 	if err != nil {
@@ -146,17 +155,23 @@ func Backport(ctx context.Context, runner Runner, opts BackportOptions) (Backpor
 	}
 	for key, value := range map[string]string{
 		backportNumberKey: strconv.FormatInt(opts.Number, 10), backportTargetKey: opts.Target,
-		backportOntoKey: onto, backportFromKey: from, pullBaseRemoteKey: opts.Remote,
+		backportOntoKey: onto, backportFromKey: from, backportPickedKey: strings.Join(picks, " "), pullBaseRemoteKey: opts.Remote,
 	} {
 		if _, err := run("config", "branch."+opts.Branch+"."+key, value); err != nil {
 			undo()
 			return BackportResult{}, err
 		}
 	}
-	if _, err := run(append([]string{"cherry-pick", "-x", "--allow-empty"}, picks...)...); err != nil {
+	_, err = run(append([]string{"cherry-pick", "-x", "--allow-empty"}, picks...)...)
+	for err != nil {
 		if picking, _ := cherryPickInProgress(run); !picking {
 			undo()
 			return BackportResult{}, fmt.Errorf("could not cherry-pick to %s: %w", opts.Target, err)
+		}
+		// A commit whose changes the target already has stops the cherry-pick without conflicts.
+		if emptyPick(run) {
+			_, err = run("cherry-pick", "--skip")
+			continue
 		}
 		conflict := &BackportConflict{Target: opts.Target, Branch: opts.Branch, Kept: opts.Keep}
 		if files, err := run("diff", "--name-only", "--diff-filter=U"); err == nil && files != "" {
@@ -167,7 +182,20 @@ func Backport(ctx context.Context, runner Runner, opts BackportOptions) (Backpor
 		}
 		return BackportResult{}, conflict
 	}
+	if added, err := run("rev-list", "--max-count=1", onto+"..refs/heads/"+opts.Branch); err == nil && added == "" {
+		undo()
+		return BackportResult{}, &BackportSkipped{fmt.Errorf("the changes of pull request #%d are already on %s", opts.Number, opts.Target)}
+	}
 	return finishBackport(run, opts.Branch, BackportResult{Target: opts.Target, Branch: opts.Branch, Picked: picks, Number: opts.Number}, onto, from)
+}
+
+// emptyPick reports whether the stopped cherry-pick has no conflicts and nothing to commit.
+func emptyPick(run func(...string) (string, error)) bool {
+	if files, err := run("diff", "--name-only", "--diff-filter=U"); err != nil || files != "" {
+		return false
+	}
+	_, err := run("diff", "--cached", "--quiet", "HEAD")
+	return err == nil
 }
 
 // ContinueBackport finishes the backport whose conflicts were resolved on the checked-out branch:
@@ -191,13 +219,13 @@ func ContinueBackport(ctx context.Context, runner Runner, dir string) (BackportR
 	if err := refuseCherryPickInProgress(run); err != nil {
 		return BackportResult{}, err
 	}
-	return finishBackport(run, branch, BackportResult{Target: target, Branch: branch, Number: number}, onto, from)
+	return finishBackport(run, branch, BackportResult{Target: target, Branch: branch, Picked: strings.Fields(get(backportPickedKey)), Number: number}, onto, from)
 }
 
 // RecordBackportPull records the pull request a backport branch opened, so that pr commands on the
 // branch select it, and forgets the backport state.
 func RecordBackportPull(ctx context.Context, runner Runner, dir, branch string, number int64) error {
-	for _, key := range []string{backportNumberKey, backportTargetKey, backportOntoKey, backportFromKey} {
+	for _, key := range []string{backportNumberKey, backportTargetKey, backportOntoKey, backportFromKey, backportPickedKey} {
 		_, _ = runner.Output(ctx, dir, false, "config", "--unset", "branch."+branch+"."+key)
 	}
 	_, err := runner.Output(ctx, dir, false, "config", "branch."+branch+"."+pullNumberKey, strconv.FormatInt(number, 10))
@@ -243,16 +271,27 @@ func landedCommits(run func(...string) (string, error), merge, mergeBase, head s
 		return []string{merge}, nil
 	}
 	landed, err := authoredCommits(run, "--first-parent", fmt.Sprintf("--max-count=%d", len(pulled)), merge)
-	if err != nil || len(landed) != len(pulled) {
+	if err != nil {
 		return []string{merge}, nil
 	}
-	commits := make([]string, len(landed))
-	for i := range landed {
-		if landed[i][1] != pulled[i][1] {
-			return []string{merge}, nil
+	// A rebase drops the commits whose changes the base branch already has, so the run can lack
+	// some of the pull request's commits.
+	var commits []string
+	next := len(pulled) - 1
+	for i := len(landed) - 1; i >= 0; i-- {
+		for next >= 0 && pulled[next][1] != landed[i][1] {
+			next--
 		}
-		commits[i] = landed[i][0]
+		if next < 0 {
+			break
+		}
+		commits = append(commits, landed[i][0])
+		next--
 	}
+	if len(commits) == 0 {
+		return []string{merge}, nil
+	}
+	slices.Reverse(commits)
 	return commits, nil
 }
 

@@ -245,7 +245,7 @@ func (a *application) forkRemote(ctx context.Context, t target, base *pullBase) 
 // fork the account can push to is used instead.
 func (a *application) forkForPush(cmd *cobra.Command, t target, branch string) (remote, owner string, err error) {
 	if !a.canPrompt() {
-		return "", "", fmt.Errorf("you cannot push to %s; fork it with gt repo fork --remote, then rerun gt pr create", t.Repo)
+		return "", "", fmt.Errorf("you cannot push to %s; fork it with gt repo fork --remote and retry", t.Repo)
 	}
 	ctx := cmd.Context()
 	names, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote")
@@ -269,7 +269,7 @@ func (a *application) forkForPush(cmd *cobra.Command, t target, branch string) (
 		}
 	}
 	if remote == "" {
-		return "", "", fmt.Errorf("you cannot push to %s, and Git remotes fork and %s point elsewhere; add a remote of your fork with gt repo fork --remote --remote-name NAME, then rerun gt pr create", t.Repo, t.login())
+		return "", "", fmt.Errorf("you cannot push to %s, and Git remotes fork and %s point elsewhere; add a remote of your fork with gt repo fork --remote --remote-name NAME and retry", t.Repo, t.login())
 	}
 	question := fmt.Sprintf("You cannot push to %s. Fork it and push branch %s to the fork?", t.Repo, branch)
 	if existing != "" {

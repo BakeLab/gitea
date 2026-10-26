@@ -320,8 +320,8 @@ func TestPullCreateGoesThroughAForkWithoutPushAccessToTheBase(t *testing.T) {
 		{name: "fork remote", remotes: "origin fork", want: "alice:feature"},
 		{name: "fork on a terminal", tty: true, forks: true, want: "alice:feature"},
 		{name: "fork remote elsewhere", remotes: "origin fork", forkRepo: "bob/other", pushRemote: "alice", tty: true, forks: true, want: "alice:feature"},
-		{name: "fork remotes elsewhere", remotes: "origin fork alice", forkRepo: "bob/other", tty: true, err: "you cannot push to acme/project, and Git remotes fork and alice point elsewhere; add a remote of your fork with gt repo fork --remote --remote-name NAME, then rerun gt pr create"},
-		{name: "no fork without a terminal", err: "you cannot push to acme/project; fork it with gt repo fork --remote, then rerun gt pr create"},
+		{name: "fork remotes elsewhere", remotes: "origin fork alice", forkRepo: "bob/other", tty: true, err: "you cannot push to acme/project, and Git remotes fork and alice point elsewhere; add a remote of your fork with gt repo fork --remote --remote-name NAME and retry"},
+		{name: "no fork without a terminal", err: "you cannot push to acme/project; fork it with gt repo fork --remote and retry"},
 		{name: "missing base", tty: true, err: `branch "main" not found in acme/project`},
 	} {
 		t.Run(test.name, func(t *testing.T) {

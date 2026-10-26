@@ -35,9 +35,11 @@ A merge commit backports the commits it merged, a rebase or fast-forward merge i
 squash merge the squashed commit; cherry-picks use -x. The new branch is backport-NUMBER-BRANCH,
 started from the --to branch of the base repository's remote, and gt switches back to the branch
 it ran on afterwards. Like gt pr create, it pushes to your fork when you cannot push to the
-repository, after a confirmation; without a terminal, pass --yes.
+repository; a fork it has to create first is offered only on a terminal, so elsewhere run gt repo
+fork --remote first. Pushing asks for a confirmation; without a terminal, pass --yes.
 
-A cherry-pick that conflicts is undone, and other --to branches are still tried. With --keep, gt
+A cherry-pick that conflicts is undone, and other --to branches are still tried, as they are
+after a --to branch that already has the pull request's changes. With --keep, gt
 stops on the backport branch instead: resolve the conflicts, git add them and run git cherry-pick
 --continue, then run gt pr backport --continue on that branch to push it and open the pull
 request.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
@@ -78,6 +80,10 @@ request.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": 
 		}
 		if !a.insideClone(cmd.Context()) {
 			return clierr.Wrap(clierr.Usage, errors.New("pr backport must run inside a Git clone"))
+		}
+		// The backport branch is pushed after a confirmation, which fails only once it exists.
+		if !a.options.yes && !a.canPrompt() {
+			return clierr.Wrap(clierr.Usage, errors.New("pr backport requires --yes without a terminal"))
 		}
 		if resume {
 			return a.continueBackport(cmd, milestone)
@@ -123,6 +129,10 @@ func (a *application) runBackport(cmd *cobra.Command, args, targets []string, br
 	if !pull.Merged || pull.MergeCommitSHA == nil || *pull.MergeCommitSHA == "" {
 		return fmt.Errorf("pull request #%d is not merged; only merged pull requests can be backported", n)
 	}
+	milestoneID, err := backportMilestone(cmd, t, milestone)
+	if err != nil {
+		return err
+	}
 	credentials, err := a.remoteCredentials(ctx, t, remote)
 	if err != nil {
 		return err
@@ -134,18 +144,26 @@ func (a *application) runBackport(cmd *cobra.Command, args, targets []string, br
 		if name == "" {
 			name = fmt.Sprintf("backport-%d-%s", n, strings.ReplaceAll(to, "/", "-"))
 		}
+		// Pushing over a leftover branch of that name would fail, however often it is retried.
+		if _, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "--quiet", "refs/heads/"+name); err != nil {
+			if _, err := (services.Branches{Client: t.client}).View(ctx, t.Repo, name); err == nil {
+				failures = append(failures, fmt.Errorf("branch %s already exists in %s; choose another with --branch", name, t.Repo))
+				continue
+			}
+		}
 		result, err := git.Backport(ctx, a.deps.Git, git.BackportOptions{
 			CredentialArgs: credentials, Directory: a.options.cwd, Remote: remote, Prompt: a.policy(snapshot).CanPrompt(a.deps.Streams),
 			Number: n, Base: pull.Base, MergeCommit: *pull.MergeCommitSHA, MergeBase: pull.MergeBase, Target: to, Branch: name, Keep: keep,
 		})
-		if conflict, ok := errors.AsType[*git.BackportConflict](err); ok && !conflict.Kept {
+		conflict, conflicted := errors.AsType[*git.BackportConflict](err)
+		if _, skipped := errors.AsType[*git.BackportSkipped](err); skipped || conflicted && !conflict.Kept {
 			failures = append(failures, err)
 			continue
 		}
 		if err != nil {
 			return errors.Join(append(failures, err, a.reportBackports(cmd, outputs))...)
 		}
-		output, err := a.openBackportPull(cmd, t, snapshot, pull, result, milestone)
+		output, err := a.openBackportPull(cmd, t, snapshot, pull, result, milestoneID)
 		if err != nil {
 			return errors.Join(append(failures, err, a.reportBackports(cmd, outputs))...)
 		}
@@ -155,11 +173,15 @@ func (a *application) runBackport(cmd *cobra.Command, args, targets []string, br
 }
 
 func (a *application) continueBackport(cmd *cobra.Command, milestone string) error {
-	result, err := git.ContinueBackport(cmd.Context(), a.deps.Git, a.options.cwd)
+	t, err := a.resolve(cmd.Context(), true)
 	if err != nil {
 		return err
 	}
-	t, err := a.resolve(cmd.Context(), true)
+	milestoneID, err := backportMilestone(cmd, t, milestone)
+	if err != nil {
+		return err
+	}
+	result, err := git.ContinueBackport(cmd.Context(), a.deps.Git, a.options.cwd)
 	if err != nil {
 		return err
 	}
@@ -171,15 +193,23 @@ func (a *application) continueBackport(cmd *cobra.Command, milestone string) err
 	if err != nil {
 		return err
 	}
-	output, err := a.openBackportPull(cmd, t, snapshot, pull, result, milestone)
+	output, err := a.openBackportPull(cmd, t, snapshot, pull, result, milestoneID)
 	if err != nil {
 		return err
 	}
 	return a.reportBackports(cmd, []backportOutput{output})
 }
 
+// backportMilestone returns the ID of the milestone that backport pull requests get, or 0.
+func backportMilestone(cmd *cobra.Command, t target, milestone string) (int64, error) {
+	if milestone == "" || milestone == "0" {
+		return 0, nil
+	}
+	return milestoneID(cmd, t, milestone)
+}
+
 // openBackportPull pushes a backport branch and opens its pull request into the backport's target.
-func (a *application) openBackportPull(cmd *cobra.Command, t target, snapshot settings.Snapshot, pull services.Pull, result git.BackportResult, milestone string) (backportOutput, error) {
+func (a *application) openBackportPull(cmd *cobra.Command, t target, snapshot settings.Snapshot, pull services.Pull, result git.BackportResult, milestone int64) (backportOutput, error) {
 	ctx := cmd.Context()
 	options := services.PullOptions{Base: result.Target, Title: pull.Title, Body: fmt.Sprintf("Backport #%d by @%s", pull.Number, pull.Author)}
 	if suffix := fmt.Sprintf("(#%d)", pull.Number); !strings.HasSuffix(options.Title, suffix) {
@@ -193,12 +223,7 @@ func (a *application) openBackportPull(cmd *cobra.Command, t target, snapshot se
 			options.Labels = append(options.Labels, label.ID)
 		}
 	}
-	if milestone != "" && milestone != "0" {
-		var err error
-		if options.Milestone, err = milestoneID(cmd, t, milestone); err != nil {
-			return backportOutput{}, err
-		}
-	}
+	options.Milestone = milestone
 	allowEdits := true
 	options.AllowMaintainerEdit = &allowEdits
 	head, err := a.ensureHeadPublished(cmd, t, snapshot, result.Branch, &pullBase{branch: result.Target})

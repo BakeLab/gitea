@@ -5,6 +5,7 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -148,6 +149,31 @@ func TestBackportPicksWhatEachMergeStyleLanded(t *testing.T) {
 	}
 }
 
+// A rebase merge drops the pull request's commits whose changes the base branch already has.
+func TestLandedCommitsOfARebaseThatDroppedACommit(t *testing.T) {
+	log := func(commits ...string) string {
+		var b strings.Builder
+		for _, commit := range commits {
+			b.WriteString("commit " + commit + "\ngt <gt@example.invalid> 1 subject of " + strings.TrimPrefix(commit, "r") + "\n")
+		}
+		return strings.TrimSuffix(b.String(), "\n")
+	}
+	run := func(args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rev-list --parents --max-count=1 r3":
+			return "r3 r2", nil
+		case "rev-list --reverse --format=%an <%ae> %at %s --no-merges base..head":
+			return log("1", "2", "3"), nil
+		case "rev-list --reverse --format=%an <%ae> %at %s --first-parent --max-count=3 r3":
+			return log("hotfix", "r2", "r3"), nil
+		}
+		return "", fmt.Errorf("unexpected git %v", args)
+	}
+	commits, err := landedCommits(run, "r3", "base", "head")
+	require.NoError(t, err)
+	require.Equal(t, []string{"r2", "r3"}, commits)
+}
+
 func TestBackportWithoutMergeBaseTakesTheMergedCommitOnly(t *testing.T) {
 	f := newBackportFixture(t, "fast-forward")
 	opts := f.options()
@@ -194,7 +220,7 @@ func TestBackportUndoesAConflictUnlessKept(t *testing.T) {
 		f.git(f.work, "-c", "core.editor=true", "cherry-pick", "--continue")
 		result, err := ContinueBackport(context.Background(), f.runner, f.work)
 		require.NoError(t, err)
-		require.Equal(t, BackportResult{Target: "release/v1", Branch: "backport-7-release/v1", Number: 7, Commits: result.Commits}, result)
+		require.Equal(t, BackportResult{Target: "release/v1", Branch: "backport-7-release/v1", Picked: f.commits, Number: 7, Commits: result.Commits}, result)
 		require.Len(t, result.Commits, 1)
 		require.Equal(t, "work", f.git(f.work, "branch", "--show-current"))
 
@@ -202,8 +228,10 @@ func TestBackportUndoesAConflictUnlessKept(t *testing.T) {
 		config := ReadBranchConfig(context.Background(), f.runner, f.work, "backport-7-release/v1")
 		require.Equal(t, int64(12), config.PullNumber)
 		require.Equal(t, "origin", config.BaseRemote)
-		_, err = f.runner.Output(context.Background(), f.work, false, "config", "--get", "branch.backport-7-release/v1.gitea-cli-backport")
-		require.Error(t, err, "forgets the backport state")
+		for _, key := range []string{"gitea-cli-backport", "gitea-cli-backport-picked"} {
+			_, err = f.runner.Output(context.Background(), f.work, false, "config", "--get", "branch.backport-7-release/v1."+key)
+			require.Error(t, err, "forgets the backport state")
+		}
 	})
 }
 
@@ -227,6 +255,12 @@ func TestBackportRefusesWhatItCannotDo(t *testing.T) {
 			f.git(f.work, "fetch", "--quiet", "origin", "elsewhere")
 		}, "is not on the base branch main"},
 		{"already backported", func(_ *backportFixture, opts *BackportOptions) { opts.Target = "main" }, "pull request #7 is already on main"},
+		{"changes already on the target", func(f *backportFixture, _ *BackportOptions) {
+			f.git(f.pusher, "switch", "release/v1")
+			f.commit("one.txt", "one\n", "backport one")
+			f.commit("two.txt", "two\n", "backport two")
+			f.git(f.pusher, "push", "origin", "HEAD:release/v1")
+		}, "the changes of pull request #7 are already on release/v1"},
 		{"invalid branch", func(_ *backportFixture, opts *BackportOptions) { opts.Branch = "bad..name" }, `invalid branch name "bad..name"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -235,6 +269,9 @@ func TestBackportRefusesWhatItCannotDo(t *testing.T) {
 			tc.prepare(f, &opts)
 			_, err := f.backport(opts)
 			require.ErrorContains(t, err, tc.want)
+			if tc.name != "changed working tree" && tc.name != "invalid branch" && tc.name != "merge commit off the base branch" {
+				require.ErrorAs(t, err, new(*BackportSkipped))
+			}
 			if tc.name != "changed working tree" && tc.name != "existing branch" {
 				f.requireUntouched()
 			}
