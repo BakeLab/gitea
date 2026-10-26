@@ -251,11 +251,20 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		if cmd.Annotations[topicAnnotation] == "" {
 			cmd.GroupID = cmp.Or(rootGroups[cmd.Name()], "additional")
 		}
+		cmd.SuggestFor = teaCommands[cmd.Name()]
 	}
 	rejectUnknownSubcommands(root)
 	addVerbAliases(root)
 	completeDefaults(root)
 	return root, a
+}
+
+// teaCommands are the top-level commands of tea, which gt replaces, that gt suggests its own
+// command for.
+var teaCommands = map[string][]string{
+	"auth": {"login", "logins", "logout", "whoami"}, "browse": {"open"}, "issue": {"comment", "comments"},
+	"pr": {"pulls", "pull", "comment", "comments"}, "release": {"assets"}, "repo": {"clone"},
+	"run": {"actions"}, "workflow": {"actions"}, "webhook": {"hooks"},
 }
 
 // rootGroups places the core and Actions commands in their root help groups; every other

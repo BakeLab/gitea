@@ -84,6 +84,11 @@ You should now be logged in to your gitea instance from gt.
 
 Alternatively, `gt auth login --host https://your-instance --oauth` authorizes gt in your browser. OAuth may not be available on all Gitea deployments, and needs a browser on the machine running gt.
 
+### Coming from tea
+
+gt replaces tea. [Migrating from tea](docs/migrating-from-tea.md) maps tea's commands and flags
+to gt's.
+
 ### Shell completion
 
 If you installed from source or the package does not provide the completions with it you can add them yourself with `gt completion <shell>` command. Add the line for your shell to its startup file:

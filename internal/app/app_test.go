@@ -65,6 +65,9 @@ func TestCommandLineEdgeCases(t *testing.T) {
 	err = Execute(context.Background(), deps, []string{"isue"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.ErrorContains(t, err, "did you mean issue?")
+	err = Execute(context.Background(), deps, []string{"pulls"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.ErrorContains(t, err, "did you mean pr?")
 	// A help flag supplied as a flag value must not bypass validation.
 	err = Execute(context.Background(), deps, []string{"config", "list", "--jq", ".[", "--remote", "-h"})
 	require.ErrorContains(t, err, "invalid --jq expression")
