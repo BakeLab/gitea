@@ -47,13 +47,21 @@ const maxRedirects = 5
 // response, so a credential is never sent elsewhere and a POST that Go would turn into a GET is
 // not silently dropped.
 func (c *Client) checkRedirect(req *http.Request, via []*http.Request) error {
-	if len(via) > maxRedirects || req.Method != via[0].Method {
+	if len(via) > maxRedirects || req.Method != via[0].Method || req.Context().Value(noRedirectsKey{}) != nil {
 		return http.ErrUseLastResponse
 	}
 	if _, err := c.URL(req.URL.String()); err != nil {
 		return http.ErrUseLastResponse
 	}
 	return nil
+}
+
+type noRedirectsKey struct{}
+
+// WithoutRedirects returns a context under which API requests return a redirect rather than
+// follow it.
+func WithoutRedirects(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noRedirectsKey{}, true)
 }
 
 type capturedErrorKey struct{}

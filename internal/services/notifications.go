@@ -137,9 +137,19 @@ func (s Notifications) View(ctx context.Context, id int64) (Notification, error)
 	}
 	item := notificationFrom(thread)
 	if s.Repository != "" && !strings.EqualFold(item.Repository, s.Repository) {
-		return Notification{}, fmt.Errorf("notification %d belongs to %s, not selected repository %s", id, item.Repository, s.Repository)
+		return Notification{}, &ElsewhereError{ID: id, Repository: item.Repository, Selected: s.Repository}
 	}
 	return item, nil
+}
+
+// ElsewhereError reports a notification of another repository than the selected one.
+type ElsewhereError struct {
+	ID                   int64
+	Repository, Selected string
+}
+
+func (e *ElsewhereError) Error() string {
+	return fmt.Sprintf("notification %d belongs to %s, not selected repository %s", e.ID, e.Repository, e.Selected)
 }
 
 // LatestComment returns the latest comment on the subject of a notification, or nil without one.
@@ -184,6 +194,9 @@ func (s Notifications) MarkAll(ctx context.Context, status string, filters []str
 		}
 		return c.Notifications.MarkReadByRepo(ctx, owner, name, opts)
 	})
+	if err != nil && s.Repository != "" {
+		return nil, Classify(err, "repository", s.Repository, "")
+	}
 	if err != nil {
 		return nil, err
 	}

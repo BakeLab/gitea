@@ -65,3 +65,22 @@ func TestTimeListSelectsScopeAndFilters(t *testing.T) {
 		})
 	}
 }
+
+func TestTimeExplainsDisabledTimeTracking(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project/times" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"message":"time tracking disabled"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"timetracker is disabled"}`))
+	}))
+	service := Times{Client: client, Repository: "alice/project"}
+	_, issueErr := service.ListPage(context.Background(), TimeOptions{Issue: 1, Limit: 30, Page: 1})
+	_, repoErr := service.ListPage(context.Background(), TimeOptions{Limit: 30, Page: 1})
+	_, findErr := service.Find(context.Background(), 1, 13)
+	for _, err := range []error{issueErr, repoErr, findErr} {
+		require.EqualError(t, err, "time tracking is disabled in alice/project")
+	}
+}

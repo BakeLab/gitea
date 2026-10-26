@@ -84,6 +84,8 @@ func (s Times) ListPage(ctx context.Context, opts TimeOptions) (Page[TrackedTime
 	items := convertAll(records.Items, func(record *gitea.TrackedTime) TrackedTime { return trackedTimeFrom(record, s.Repository) })
 	switch {
 	case err == nil || opts.Mine:
+	case trackingOff(err):
+		err = s.trackingError()
 	case opts.Issue != 0:
 		err = s.issues().issueError(ctx, err, opts.Issue)
 	default:
@@ -94,6 +96,25 @@ func (s Times) ListPage(ctx context.Context, opts TimeOptions) (Page[TrackedTime
 
 func (s Times) issues() Issues {
 	return Issues{Client: s.Client, Repository: s.Repository}
+}
+
+// trackingOff reports whether err is Gitea refusing because time tracking is disabled, which it
+// answers with 404 on the records of an issue and with 400 elsewhere.
+func trackingOff(err error) bool {
+	apiErr, ok := errors.AsType[*transport.APIError](err)
+	return ok && (strings.Contains(apiErr.Message, "timetracker is disabled") || strings.Contains(apiErr.Message, "time tracking disabled"))
+}
+
+func (s Times) trackingError() error {
+	return fmt.Errorf("time tracking is disabled in %s", s.Repository)
+}
+
+// issueError explains the failure of a request about the time tracked on issue n.
+func (s Times) issueError(ctx context.Context, err error, n int64) error {
+	if trackingOff(err) {
+		return s.trackingError()
+	}
+	return s.issues().issueError(ctx, err, n)
 }
 
 // Find returns the tracked time record id on issue n.
@@ -118,7 +139,7 @@ func (s Times) Create(ctx context.Context, n, seconds int64) (TrackedTime, error
 		return c.Issues.AddTime(ctx, owner, repo, n, gitea.AddTimeOption{Time: seconds})
 	})
 	if err != nil {
-		return TrackedTime{}, s.issues().issueError(ctx, err, n)
+		return TrackedTime{}, s.issueError(ctx, err, n)
 	}
 	result := trackedTimeFrom(record, s.Repository)
 	result.IssueNumber = n
@@ -133,7 +154,7 @@ func (s Times) Delete(ctx context.Context, n, id int64) error {
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && strings.Contains(apiErr.Message, "tracked_time does not exist") {
 		return NotFound("tracked time", strconv.FormatInt(id, 10), fmt.Sprintf("%s#%d", s.Repository, n))
 	}
-	return s.issues().issueError(ctx, err, n)
+	return s.issueError(ctx, err, n)
 }
 
 // Reset removes the tracked time records of the caller on the selected issue, and reports whether
@@ -145,5 +166,5 @@ func (s Times) Reset(ctx context.Context, n int64) (bool, error) {
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && strings.Contains(apiErr.Message, "tracked_time does not exist") {
 		return false, nil
 	}
-	return err == nil, s.issues().issueError(ctx, err, n)
+	return err == nil, s.issueError(ctx, err, n)
 }

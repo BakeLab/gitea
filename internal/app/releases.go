@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -70,11 +71,17 @@ $ gt release list -R alice/project --json tag,title,draft`,
 			}
 			// Releases come newest first, so the first published one of the first page is the latest.
 			var latest int64
-			for _, item := range result.Items {
-				if page == 1 && !item.Draft && !item.Prerelease {
-					latest = item.ID
-					break
+			published := slices.IndexFunc(result.Items, func(item services.Release) bool { return !item.Draft && !item.Prerelease })
+			switch {
+			case published < 0 || a.options.json != "":
+			case page == 1:
+				latest = result.Items[published].ID
+			default:
+				item, err := (services.Releases{Client: target.client, Repository: target.Repo}).Latest(cmd.Context())
+				if err != nil && !services.IsNotFound(err) {
+					return err
 				}
+				latest = item.ID
 			}
 			spec := listSpec[services.Release]{
 				Columns: []terminal.Column{{Header: "Title", Flex: true}, {Header: "Type"}, {Header: "Tag"}, {Header: "Published"}, {Header: "URL", PipedOnly: true}},
@@ -546,6 +553,10 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 				if err != nil {
 					return item, releaseError(err, target.Repo)
 				}
+				opts := opts
+				if err := keepReleaseCommit(cmd.Context(), service, item, &opts); err != nil {
+					return item, err
+				}
 				return service.Edit(cmd.Context(), item.ID, opts)
 			}, func(item services.Release) string { return "Edited release " + item.Tag + " in " + target.Repo })
 		},
@@ -575,12 +586,36 @@ func (a *application) editReleasesInteractively(cmd *cobra.Command, target targe
 			a.warn(cmd, "No changes to release %s in %s", item.Tag, target.Repo)
 			return item, nil
 		}
+		if err := keepReleaseCommit(cmd.Context(), service, item, &opts); err != nil {
+			return item, err
+		}
 		if item, err = service.Edit(cmd.Context(), item.ID, opts); err == nil {
 			a.done(cmd, "Edited release %s in %s", item.Tag, target.Repo)
 		}
 		return item, err
 	}, nil)
 	return errors.Join(append(failures, writeBatchJSON(a, cmd, len(tags), results))...)
+}
+
+// keepReleaseCommit keeps a published release on its commit when opts renames its tag to one the
+// server lacks, which Gitea would otherwise create at the head of the release's target branch.
+func keepReleaseCommit(ctx context.Context, service services.Releases, item services.Release, opts *services.ReleaseOptions) error {
+	if opts.Tag == nil || *opts.Tag == item.Tag || opts.Target != nil || item.Draft {
+		return nil
+	}
+	exists, err := service.TagExists(ctx, *opts.Tag)
+	if err != nil || exists {
+		return err
+	}
+	sha, err := service.TagCommit(ctx, item.Tag)
+	if services.IsNotFound(err) {
+		return explain(err, "%s; pass --target to choose the commit of tag %s", err, *opts.Tag)
+	}
+	if err != nil {
+		return err
+	}
+	opts.Target = &sha
+	return nil
 }
 
 // changedReleaseFields sets only the fields that the edit form changed, so that an unchanged form

@@ -46,7 +46,7 @@ func TestInstanceScopeAndRedirect(t *testing.T) {
 	_, err := client.Do(context.Background(), http.MethodGet, "user", nil, nil)
 	require.Error(t, err)
 	require.False(t, leaked)
-	for _, endpoint := range []string{outside.URL + "/api/v1/user", strings.Replace(selected.URL, "http:", "https:", 1) + "/base/api/v1/user", selected.URL + "/api/v1/user", "../user", selected.URL + "/base/api/v1/../../other", "//other.example/api/v1/user"} {
+	for _, endpoint := range []string{outside.URL + "/api/v1/user", strings.Replace(selected.URL, "http:", "https:", 1) + "/base/api/v1/user", selected.URL + "/api/v1/user", "../user", selected.URL + "/base/api/v1/../../other", "//other.example/api/v1/user", "repos/a\\b", "repos/a%5C..%5Cb"} {
 		_, err := client.URL(endpoint)
 		require.Error(t, err, endpoint)
 	}
@@ -65,6 +65,9 @@ func TestURLPreservesEscapedSegments(t *testing.T) {
 	resolved, err := client.URL("repos/alice/project/releases/tags/release%2Fv1")
 	require.NoError(t, err)
 	require.Equal(t, "https://example.test/base%20path/api/v1/repos/alice/project/releases/tags/release%2Fv1", resolved)
+	resolved, err = client.URL("repos/alice/project/wiki/page/back%5Cslash")
+	require.NoError(t, err)
+	require.Equal(t, "https://example.test/base%20path/api/v1/repos/alice/project/wiki/page/back%5Cslash", resolved)
 }
 
 func TestAPIErrorIncludesOnlySanitizedServerMessage(t *testing.T) {

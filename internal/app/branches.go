@@ -360,6 +360,9 @@ $ gt branch protect --pattern 'release/*' --allow-push acme/release`,
 				}
 				protection := rule
 				protection.Rule = name
+				if pattern == "" {
+					protection.Rule = protectionRule(name)
+				}
 				created, err := service.Protect(cmd.Context(), target.Repo, protection)
 				if err != nil || created {
 					return name, err
@@ -396,6 +399,19 @@ $ gt branch protect --pattern 'release/*' --allow-push acme/release`,
 	return command
 }
 
+// protectionRule is the name of the protection rule of exactly branch, since Gitea reads rule
+// names as globs.
+func protectionRule(branch string) string {
+	var rule strings.Builder
+	for _, r := range branch {
+		if strings.ContainsRune(`*?[]{}\`, r) {
+			rule.WriteByte('\\')
+		}
+		rule.WriteRune(r)
+	}
+	return rule.String()
+}
+
 // protectionSummary describes a protection rule, as in "1 approval required, no direct pushes".
 func protectionSummary(rule services.Protection) string {
 	parts := []string{terminal.Plural(int(rule.RequiredApprovals), "approval") + " required"}
@@ -430,8 +446,15 @@ func (a *application) branchUnprotectCommand() *cobra.Command {
 			service := services.Branches{Client: target.client}
 			_, failures := applyBatch(cmd, args, func(name string) string { return "unprotect " + name }, func(name string) (string, error) {
 				removed, err := service.Unprotect(cmd.Context(), target.Repo, name)
+				if rule := protectionRule(name); err == nil && !removed && rule != name {
+					removed, err = service.Unprotect(cmd.Context(), target.Repo, rule)
+				}
 				if err == nil && !removed {
-					a.warn(cmd, "%s is not protected in %s", name, target.Repo)
+					if branch, err := service.View(cmd.Context(), target.Repo, name); err == nil && branch.Protected {
+						a.warn(cmd, "%s has no protection rule of its own in %s; a pattern rule still protects it", name, target.Repo)
+					} else {
+						a.warn(cmd, "%s is not protected in %s", name, target.Repo)
+					}
 					return "", nil
 				}
 				return name, err

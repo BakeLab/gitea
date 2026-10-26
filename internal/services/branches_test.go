@@ -152,3 +152,35 @@ func TestBranchProtectionIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, removed)
 }
+
+func TestBranchProtectNamesUnknownPushers(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		switch {
+		case body["push_whitelist_teams"] != nil:
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"team does not exist [org_id 14, team_id 0, name: nosuchteam]"}`))
+		default:
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"user does not exist [uid: 0, name: nosuchuser]"}`))
+		}
+	}))
+	service := Branches{Client: client}
+	ctx := context.Background()
+	_, err := service.Protect(ctx, "acme/project", Protection{Rule: "main", PushUsers: []string{"nosuchuser"}})
+	require.EqualError(t, err, `user "nosuchuser" not found`)
+	_, err = service.Protect(ctx, "acme/project", Protection{Rule: "main", PushTeams: []string{"nosuchteam"}})
+	require.EqualError(t, err, `team "nosuchteam" not found`)
+}
+
+func TestBranchCreateNamesTheProtectionThatRefusesIt(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"PushRejected Error: exit status 1 - remote: error: Not allowed to push to protected branch rel/one To /data/acme/project.git"}`))
+	}))
+	for _, source := range []string{"", "main"} {
+		_, err := (Branches{Client: client}).Create(context.Background(), "acme/project", "rel/one", source)
+		require.EqualError(t, err, "a protection rule of acme/project refuses to create branch rel/one", source)
+	}
+}

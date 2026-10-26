@@ -126,6 +126,9 @@ func TestTeamUnitLevelAppliesThePermissionToEveryUnit(t *testing.T) {
 	require.Equal(t, "read", team.UnitLevel("repo.ext_wiki"))
 	require.Equal(t, "write", Team{Permission: "none", Units: map[string]string{"repo.code": "write"}}.UnitLevel("repo.code"))
 	require.Equal(t, "none", Team{Permission: "none"}.UnitLevel("repo.code"))
+	require.Equal(t, "owner", Team{Permission: "owner", Units: map[string]string{"repo.code": "owner"}}.UnitLevel("repo.code"))
+	require.Equal(t, "admin", Team{Permission: "admin"}.UnitLevel("repo.pulls"))
+	require.Equal(t, "read", Team{Permission: "admin"}.UnitLevel("repo.ext_issues"))
 }
 
 func TestTeamAccessSummarizesUnits(t *testing.T) {

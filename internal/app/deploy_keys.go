@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
@@ -85,7 +84,7 @@ $ gt repo deploy-key add deploy.pub --title "Release bot" --allow-write`,
 			if err != nil {
 				return fmt.Errorf("read public key: %w", err)
 			}
-			_, comment, err := publicKey(data, args[0], cmd.CommandPath())
+			_, comment, content, err := publicKey(data, args[0], cmd.CommandPath())
 			if err != nil {
 				return err
 			}
@@ -96,7 +95,7 @@ $ gt repo deploy-key add deploy.pub --title "Release bot" --allow-write`,
 			if err != nil {
 				return err
 			}
-			created, err := (services.DeployKeys{Client: t.client, Repository: t.Repo}).Create(cmd.Context(), title, strings.TrimSpace(string(data)), !allowWrite)
+			created, err := (services.DeployKeys{Client: t.client, Repository: t.Repo}).Create(cmd.Context(), title, content, !allowWrite)
 			if err != nil {
 				return titleTaken(err, "deploy key", title)
 			}

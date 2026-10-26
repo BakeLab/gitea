@@ -18,7 +18,8 @@ import (
 func TestDeployKeysListAddAndDelete(t *testing.T) {
 	key, _ := testPublicKey(t, "ci@build")
 	file := filepath.Join(t.TempDir(), "ci.pub")
-	require.NoError(t, os.WriteFile(file, []byte(key+"\n"), 0o600))
+	// Gitea takes neither the comment lines nor the options of an authorized_keys file.
+	require.NoError(t, os.WriteFile(file, []byte("# build server\nno-pty "+key+"\n"), 0o600))
 	var requests []string
 	var created map[string]any
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -45,6 +46,7 @@ func TestDeployKeysListAddAndDelete(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "deploy-key", "add", file, "--title", "release", "--allow-write", "-R", "alice/project"}))
 	require.Equal(t, false, created["read_only"])
 	require.Equal(t, "release", created["title"])
+	require.Equal(t, key, created["key"])
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "deploy-key", "delete", "4", "--yes", "-R", "alice/project"}))
 	require.Contains(t, requests, "DELETE /api/v1/repos/alice/project/keys/4")
 	untitled := filepath.Join(t.TempDir(), "untitled.pub")

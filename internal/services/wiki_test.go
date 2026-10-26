@@ -109,6 +109,41 @@ func TestWikiListAndRevisionsMapCommits(t *testing.T) {
 	require.Equal(t, 2, revisions.Total)
 }
 
+func TestWikiListDoesNotPromiseAPageAfterAnEmptyWindow(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "1" {
+			w.Header().Set("Link", `<`+r.URL.Path+`?page=2>; rel="next"`)
+		}
+		writeFirstPage(w, r, `[{"title":"One"},{"title":"Two"}]`)
+	}))
+	pages, err := (Wiki{Client: client, Repository: "alice/project"}).ListPage(context.Background(), 2, 1)
+	require.NoError(t, err)
+	require.Equal(t, Page[WikiPage]{Items: []WikiPage{{Title: "One", listed: true}, {Title: "Two", listed: true}}, Total: 2, Counted: true}, pages)
+}
+
+func TestWikiTrimsTitlesLikeGitea(t *testing.T) {
+	var requests []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.EscapedPath())
+		title := map[string]string{"Home": "Home", "Draft": "Draft"}[path.Base(r.URL.Path)]
+		if title == "" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"title": title})
+	}))
+	service := Wiki{Client: client, Repository: "alice/project"}
+	page, err := service.View(context.Background(), " Home ")
+	require.NoError(t, err)
+	require.Equal(t, "Home", page.Title)
+	_, _, err = service.Edit(context.Background(), "Draft", WikiOptions{Title: "Home ", Body: "body"})
+	var conflict *ConflictError
+	require.ErrorAs(t, err, &conflict)
+	require.Equal(t, `"Home"`, conflict.Key)
+	const prefix = "GET /api/v1/repos/alice/project/wiki/page/"
+	require.Equal(t, []string{prefix + "Home", prefix + "Draft", prefix + "Home"}, requests)
+}
+
 func TestWikiCreateAndDelete(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
@@ -121,7 +156,7 @@ func TestWikiCreateAndDelete(t *testing.T) {
 		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, map[string]string{"title": "New", "content_base64": "Ym9keQ==", "message": "Add"}, body)
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"title":"New","content_base64":"Ym9keQ==","commit_count":1,"sidebar":"side","footer":"foot"}`))
+		_, _ = w.Write([]byte(`{"title":"New","content_base64":"Ym9keQ==","commit_count":1,"sidebar":"c2lkZQ==","footer":"Zm9vdA=="}`))
 	}))
 	service := Wiki{Client: client, Repository: "alice/project"}
 	page, err := service.Create(context.Background(), WikiOptions{Title: "New", Body: "body", Message: "Add"})
@@ -219,7 +254,7 @@ func TestWikiDeleteNamesAMissingPageOfAWikiNeverCreated(t *testing.T) {
 }
 
 func TestWikiAddressesTitlesWithReservedCharacters(t *testing.T) {
-	titles := []string{"C++", "a+b c", "Plain page", "A B-C", "dash-ed", "a/b", "ünïcode", "notes.md", "100%", "what?", "#1"}
+	titles := []string{"C++", "a+b c", "Plain page", "A B-C", "dash-ed", "a/b", "ünïcode", "notes.md", "100%", "what?", "#1", `back\slash`}
 	var requests []string
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Gitea reads the page path like a query value, so a "+" in it is a space.

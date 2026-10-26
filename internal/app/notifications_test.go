@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -44,6 +45,15 @@ const notificationThreads = `[
 	{"id":3,"unread":false,"pinned":true,"repository":{"full_name":"alice/project"},"updated_at":"2026-10-11T17:00:00Z",
 	 "subject":{"title":"Improve error messages","type":"Issue","state":"closed","html_url":"https://gitea.test/alice/project/issues/8","url":"https://gitea.test/api/v1/repos/alice/project/issues/8"}}
 ]`
+
+func TestNotificationListNamesItsFiltersWhenEmpty(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) }))
+	defer server.Close()
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	deps.Streams.OutTTY = true
+	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "list", "--type", "issue", "-R", "alice/project"}))
+	require.Contains(t, withoutANSI(out.String()+diagnostics.String()), "no unread or pinned notifications match your filters in alice/project")
+}
 
 func TestNotificationsListTheInboxByDefault(t *testing.T) {
 	var path atomic.Value
@@ -114,13 +124,15 @@ func TestNotificationWatchFailsWhenTheInstanceDoesNotAnswer(t *testing.T) {
 
 func TestNotificationMutationsReportWhatChanged(t *testing.T) {
 	var marks []string
+	pinned := false
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/notifications/threads/12":
 			marks = append(marks, r.URL.Query().Get("to-status"))
+			pinned = r.URL.Query().Get("to-status") == "pinned"
 			_, _ = w.Write([]byte(`{"id":12,"repository":{"full_name":"alice/project"},"subject":{"type":"Pull","url":"https://gitea.test/api/v1/repos/alice/project/issues/17"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/notifications/threads/12":
-			_, _ = w.Write([]byte(`{"id":12,"unread":true,"repository":{"full_name":"alice/project"},"subject":{"title":"Improve greeting","type":"Pull","state":"open","html_url":"https://gitea.test/alice/project/pulls/17","url":"https://gitea.test/api/v1/repos/alice/project/issues/17","latest_comment_url":"https://gitea.test/api/v1/repos/alice/project/issues/comments/9"}}`))
+			_, _ = fmt.Fprintf(w, `{"id":12,"unread":true,"pinned":%t,"repository":{"full_name":"alice/project"},"subject":{"title":"Improve greeting","type":"Pull","state":"open","html_url":"https://gitea.test/alice/project/pulls/17","url":"https://gitea.test/api/v1/repos/alice/project/issues/17","latest_comment_url":"https://gitea.test/api/v1/repos/alice/project/issues/comments/9"}}`, pinned)
 		case r.URL.Path == "/api/v1/repos/alice/project/issues/comments/9":
 			_, _ = w.Write([]byte(`{"id":9,"body":"Looks good to me","user":{"login":"bob"}}`))
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/notifications":
@@ -149,6 +161,9 @@ func TestNotificationMutationsReportWhatChanged(t *testing.T) {
 		require.Equal(t, tc.want, withoutANSI(diagnostics.String()), tc.args)
 	}
 	require.Equal(t, []string{"pinned", "read", "read", "all read"}, marks)
+	require.EqualError(t, Execute(context.Background(), deps, []string{"notification", "unpin", "12"}), "notification 12: not pinned")
+	require.Len(t, marks, 4, "unpinning a thread that is not pinned leaves it unread")
+	require.EqualError(t, Execute(context.Background(), deps, []string{"notification", "mark-read", "12", "-R", "bob/other"}), "notification 12: belongs to alice/project, not selected repository bob/other")
 	require.EqualError(t, Execute(context.Background(), deps, []string{"notification", "pin", "999"}), "notification 999: not found in your inbox")
 	prompt := &scriptedPrompter{accept: true}
 	deps.Prompter, deps.Streams.InTTY, deps.Streams.ErrTTY = prompt, true, true
@@ -175,6 +190,16 @@ func TestNotificationMarkAllNamesTheBeforeCutoff(t *testing.T) {
 	deps.Now = func() time.Time { return now }
 	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "mark-read", "--all", "--before=1h"}))
 	require.Contains(t, withoutANSI(diagnostics.String()), "No unread notifications updated before 2028-02-01 11:00 in your inbox")
+	deps, out, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "unpin", "--help"}))
+	require.Contains(t, out.String(), "(default [pinned])")
+}
+
+func TestNotificationMarkAllNamesAMissingRepository(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	require.EqualError(t, Execute(context.Background(), deps, []string{"notification", "mark-read", "--all", "-R", "alice/missing"}), "repository alice/missing not found")
 }
 
 func TestNotificationViewSurvivesARefusedMark(t *testing.T) {

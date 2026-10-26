@@ -361,6 +361,10 @@ $ gt team create acme ops --permission admin --all-repositories`,
 		ValidArgsFunction: firstArg(a.completeOrgs()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			org, name, scoped := strings.Cut(args[0], "/")
+			org, err := organizationName(org)
+			if err != nil {
+				return err
+			}
 			names := 0
 			for _, given := range []bool{scoped, len(args) > 1, cmd.Flags().Changed("name")} {
 				if given {

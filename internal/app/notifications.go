@@ -73,9 +73,6 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 				if !all && (cmd.Flags().Changed("status") || cmd.Flags().Changed("before")) {
 					return clierr.Wrap(clierr.Usage, errors.New("--status and --before require --all"))
 				}
-				if !cmd.Flags().Changed("status") {
-					filters = []string{mark.filter}
-				}
 				var until time.Time
 				if cmd.Flags().Changed("before") {
 					parsed, err := parseRunTime(before, a.deps.Now())
@@ -90,10 +87,13 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 				}
 				if !all {
 					return batchDone(a, cmd, ids, func(id int64) string { return fmt.Sprintf("notification %d", id) }, func(id int64) (services.Notification, error) {
-						item, err := s.Mark(cmd.Context(), id, mark.status)
+						item, err := markNotification(cmd.Context(), s, id, mark.verb, mark.status)
 						// The batch names the notification already.
 						if services.IsNotFound(err) {
 							return item, explain(err, "not found %s", s.where)
+						}
+						if elsewhere, ok := errors.AsType[*services.ElsewhereError](err); ok {
+							return item, explain(err, "belongs to %s, not selected repository %s", elsewhere.Repository, elsewhere.Selected)
 						}
 						return item, err
 					}, func(item services.Notification) string { return fmt.Sprintf(mark.done, notificationLabel(item)) })
@@ -124,7 +124,7 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 			},
 		}
 		command.Flags().BoolVar(&all, "all", false, "Apply to every notification that matches --status in the scope")
-		command.Flags().StringSliceVar(&filters, "status", nil, "With --all, the statuses to change: unread, read, pinned")
+		command.Flags().StringSliceVar(&filters, "status", []string{mark.filter}, "With --all, the statuses to change: unread, read, pinned")
 		enumValues(command, "status", "unread", "read", "pinned")
 		command.Flags().StringVar(&before, "before", "", "With --all, only notifications updated before a date, timestamp, or duration such as 1h")
 		group.AddCommand(command)
@@ -178,8 +178,12 @@ $ gt notification list --type pull --since 24h`,
 				return err
 			}
 			what := notificationsWith(opts.Statuses) + " " + s.where
+			empty := "no " + what
+			if cmd.Flags().Changed("type") || cmd.Flags().Changed("since") || cmd.Flags().Changed("before") {
+				empty = "no " + notificationsWith(opts.Statuses) + " match your filters " + s.where
+			}
 			return writeTable(a, cmd, page.Items, listSpec[services.Notification]{
-				Columns: notificationColumns, Row: notificationRow, Empty: "no " + what, Context: what,
+				Columns: notificationColumns, Row: notificationRow, Empty: empty, Context: what,
 			}, servicePage(page, opts.Page))
 		},
 	}
@@ -331,6 +335,21 @@ func notificationSubject(item services.Notification) string {
 		return item.Title
 	}
 	return fmt.Sprintf("#%d %s", item.Number, item.Title)
+}
+
+// markNotification changes the status of notification id as verb does.
+func markNotification(ctx context.Context, s notificationScope, id int64, verb, status string) (services.Notification, error) {
+	// Gitea unpins by marking read, which would also mark a thread read that was not pinned.
+	if verb == "unpin" {
+		item, err := s.View(ctx, id)
+		if err != nil {
+			return item, err
+		}
+		if !item.Pinned {
+			return item, errors.New("not pinned")
+		}
+	}
+	return s.Mark(ctx, id, status)
 }
 
 // notificationsWith names the notifications with one of statuses: "unread or pinned notifications",

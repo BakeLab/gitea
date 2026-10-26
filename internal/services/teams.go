@@ -91,8 +91,15 @@ func (t Team) EffectiveAccess() string {
 }
 
 // UnitLevel is the access the team has to unit: the higher of the unit's own level and the team
-// permission, which Gitea grants on every unit, capped at the levels the unit allows.
+// permission, which Gitea grants on every unit, capped at the levels the unit allows. An owner or
+// admin team has its permission on every unit but the external ones, which it can only read.
 func (t Team) UnitLevel(unit string) string {
+	if t.Permission == "owner" || t.Permission == "admin" {
+		if slices.Contains(ExternalTeamUnits, unit) {
+			return "read"
+		}
+		return t.Permission
+	}
 	levels := UnitAccess(unit)
 	level := "none"
 	for _, candidate := range []string{t.Units[unit], t.Permission} {

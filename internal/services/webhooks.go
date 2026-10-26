@@ -86,12 +86,21 @@ var WebhookEventGroups = map[string][]string{
 // narrowedEvents turns the events Gitea reports into events that select the same set when sent
 // back. Gitea reports a hook of the issue or pull request events alone as issues or pull_request,
 // but taking those names back enables their whole group, so they become issues_only and
-// pull_request_only unless every member of the group is there too.
+// pull_request_only unless every member of the group is there too. A hook of all events reports
+// pull_request_review by the events it delivers, which cannot be sent back.
 func narrowedEvents(events []string) []string {
-	narrowed := slices.Clone(events)
+	narrowed := make([]string, 0, len(events))
+	for _, event := range events {
+		if slices.Contains([]string{"pull_request_review_approved", "pull_request_review_rejected", "pull_request_review_comment"}, event) {
+			event = "pull_request_review"
+		}
+		if !slices.Contains(narrowed, event) {
+			narrowed = append(narrowed, event)
+		}
+	}
 	for head, members := range WebhookEventGroups {
 		index := slices.Index(narrowed, head)
-		if index >= 0 && slices.ContainsFunc(members, func(member string) bool { return !slices.Contains(events, member) }) {
+		if index >= 0 && slices.ContainsFunc(members, func(member string) bool { return !slices.Contains(narrowed, member) }) {
 			narrowed[index] = head + "_only"
 		}
 	}

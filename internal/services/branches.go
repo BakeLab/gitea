@@ -102,9 +102,12 @@ func (s Branches) RequireAll(ctx context.Context, repo string, branches []string
 
 // Create creates a branch from source, a branch, tag or commit, or from the default branch.
 func (s Branches) Create(ctx context.Context, repo, branch, source string) (Branch, error) {
-	// An existing branch is refused with HTTP 409 "The branch already exists"; a 404 can be the
-	// repository's.
+	// An existing branch is refused with HTTP 409 "The branch already exists", and one that a
+	// protection rule covers with a 500 that carries Git's output; a 404 can be the repository's.
 	exists := func(err error) error {
+		if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusInternalServerError && strings.Contains(apiErr.Message, "protected branch") {
+			return &RefusedError{Text: fmt.Sprintf("a protection rule of %s refuses to create branch %s", repo, branch), Err: err}
+		}
 		if IsNotFound(err) {
 			if repoErr := missingRepository(ctx, s.Client, repo); repoErr != nil {
 				return repoErr
@@ -223,8 +226,11 @@ func (s Branches) Protect(ctx context.Context, repo string, rule Protection) (bo
 	if IsNotFound(err) {
 		return false, Classify(err, "repository", repo, "")
 	}
-	if err != nil || created == nil {
-		return err == nil, err
+	if err != nil {
+		return false, Classify(err, "protection rule", strconv.Quote(rule.Rule), repo)
+	}
+	if created == nil {
+		return true, nil
 	}
 	return true, droppedPushers(repo, rule, created, false)
 }

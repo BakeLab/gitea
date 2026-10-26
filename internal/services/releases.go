@@ -146,6 +146,20 @@ func (s Releases) TagExists(ctx context.Context, tag string) (bool, error) {
 	return err == nil, err
 }
 
+// TagCommit returns the SHA of the commit that tag points at.
+func (s Releases) TagCommit(ctx context.Context, tag string) (string, error) {
+	item, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Tag, *gitea.Response, error) {
+		return c.Repositories.GetTag(ctx, owner, repo, tag)
+	})
+	if err != nil {
+		return "", Classify(err, "tag", tag, s.Repository)
+	}
+	if item.Commit == nil {
+		return "", NotFound("commit of tag", tag, s.Repository)
+	}
+	return item.Commit.SHA, nil
+}
+
 // Edit changes only supplied release fields; Gitea ignores empty text fields.
 func (s Releases) Edit(ctx context.Context, id int64, opts ReleaseOptions) (Release, error) {
 	if target := deref(opts.Target); target != "" {

@@ -66,6 +66,14 @@ func TestPipedReleaseViewShowsDraftAndPrerelease(t *testing.T) {
 
 func TestReleaseListShowsTypes(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/alice/project/releases/latest":
+			_, _ = w.Write([]byte(`{"id":1,"tag_name":"v0.1.0"}`))
+			return
+		case r.URL.Query().Get("page") == "3":
+			_, _ = w.Write([]byte(`[{"id":1,"tag_name":"v0.1.0","name":"First release","published_at":"2026-10-10T18:00:00Z"}]`))
+			return
+		}
 		_, _ = w.Write([]byte(`[
 			{"id":4,"tag_name":"v0.3.0","draft":true,"created_at":"2026-10-11T19:00:00Z"},
 			{"id":3,"tag_name":"v0.2.0-rc1","name":"v0.2.0 RC1","prerelease":true,"published_at":"2026-10-11T18:00:00Z"},
@@ -81,6 +89,9 @@ v0.3.0         Draft        v0.3.0      about 1 hour ago
 v0.2.0 RC1     Pre-release  v0.2.0-rc1  about 2 hours ago
 First release  Latest       v0.1.0      about 1 day ago
 `, out.String())
+	deps, out, _ = repoTTYDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "list", "-R", "alice/project", "-L", "1", "--page", "3"}))
+	require.Contains(t, out.String(), "First release  Latest  v0.1.0")
 }
 
 func TestReleaseDeleteSaysWhatHappenedToTheTag(t *testing.T) {
@@ -321,6 +332,36 @@ func TestReleaseEditWithoutFlagsStartsAFormFromTheRelease(t *testing.T) {
 	err := Execute(context.Background(), deps, []string{"release", "edit", "v1", "-R", "alice/project"})
 	require.ErrorContains(t, err, "release notes cannot be cleared")
 	require.Len(t, patches, 1)
+}
+
+func TestReleaseEditKeepsARenamedTagOnTheReleasedCommit(t *testing.T) {
+	var patches []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/releases/tags/v1":
+			_, _ = w.Write([]byte(`{"id":5,"tag_name":"v1","target_commitish":"main"}`))
+		case "GET /api/v1/repos/alice/project/tags/v1":
+			_, _ = w.Write([]byte(`{"name":"v1","commit":{"sha":"5105a61"}}`))
+		case "GET /api/v1/repos/alice/project/tags/v2":
+			_, _ = w.Write([]byte(`{"name":"v2","commit":{"sha":"b009388"}}`))
+		case "GET /api/v1/repos/alice/project/commits":
+			_, _ = w.Write([]byte(`[]`))
+		case "PATCH /api/v1/repos/alice/project/releases/5":
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			patches = append(patches, string(body))
+			_, _ = w.Write([]byte(`{"id":5,"tag_name":"v1"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "edit", "v1", "--tag", "v1-again", "-R", "alice/project"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "edit", "v1", "--tag", "v2", "-R", "alice/project"}))
+	require.Len(t, patches, 2)
+	require.Contains(t, patches[0], `"target_commitish":"5105a61"`)
+	require.Contains(t, patches[1], `"target_commitish":""`, "an existing tag keeps its commit")
 }
 
 func TestReleaseUploadsRefuseFilesWithTheSameName(t *testing.T) {

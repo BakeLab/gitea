@@ -77,12 +77,14 @@ func wikiPageFrom(title, url string, lastCommit *gitea.WikiCommit) WikiPage {
 }
 
 func wikiContentFrom(page *gitea.WikiPage) (WikiPage, error) {
-	body, err := base64.StdEncoding.DecodeString(page.ContentBase64)
-	if err != nil {
+	body, bodyErr := base64.StdEncoding.DecodeString(page.ContentBase64)
+	sidebar, sidebarErr := base64.StdEncoding.DecodeString(page.Sidebar)
+	footer, footerErr := base64.StdEncoding.DecodeString(page.Footer)
+	if err := errors.Join(bodyErr, sidebarErr, footerErr); err != nil {
 		return WikiPage{}, fmt.Errorf("decode wiki content: %w", err)
 	}
 	result := wikiPageFrom(page.Title, page.HTMLURL, page.LastCommit)
-	result.Body, result.CommitCount, result.Sidebar, result.Footer = string(body), page.CommitCount, page.Sidebar, page.Footer
+	result.Body, result.CommitCount, result.Sidebar, result.Footer = string(body), page.CommitCount, string(sidebar), string(footer)
 	return result, nil
 }
 
@@ -115,7 +117,7 @@ func (s Wiki) ListPage(ctx context.Context, limit, page int) (Page[WikiPage], er
 	if limit < 1 || page < 1 {
 		return Page[WikiPage]{}, fmt.Errorf("limit and page must be positive")
 	}
-	all, wanted := []WikiPage{}, page*limit
+	all, wanted := []WikiPage{}, page*limit+1
 	for window := 1; ; window++ {
 		if window > maxListPages {
 			return Page[WikiPage]{}, fmt.Errorf("listing exceeded %d pages", maxListPages)
@@ -229,6 +231,7 @@ func atPage[T any](name string, op func(path string) (T, error)) (T, error) {
 
 // lookup is View without the check for a disabled wiki.
 func (s Wiki) lookup(ctx context.Context, name string) (WikiPage, error) {
+	name = strings.TrimSpace(name)
 	item, err := atPage(name, func(path string) (WikiPage, error) {
 		return s.pageAt(ctx, http.MethodGet, path, nil)
 	})
@@ -255,6 +258,7 @@ func (s Wiki) Create(ctx context.Context, opts WikiOptions) (WikiPage, error) {
 // changed. Gitea's edit creates a page that does not exist and overwrites one the new title
 // names, so both are checked first.
 func (s Wiki) Edit(ctx context.Context, name string, opts WikiOptions) (WikiPage, bool, error) {
+	name, opts.Title = strings.TrimSpace(name), strings.TrimSpace(opts.Title)
 	current, err := s.View(ctx, name)
 	if err != nil {
 		return WikiPage{}, false, err
@@ -278,6 +282,7 @@ func (s Wiki) Edit(ctx context.Context, name string, opts WikiOptions) (WikiPage
 
 // Delete removes a named wiki page.
 func (s Wiki) Delete(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
 	_, err := atPage(name, func(path string) (struct{}, error) {
 		endpoint, err := s.wikiEndpoint("page", path)
 		if err != nil {
@@ -302,6 +307,7 @@ const wikiRevisionPageSize = 50
 
 // Revisions returns one server-paginated page of wiki commits and the total the server counted.
 func (s Wiki) Revisions(ctx context.Context, name string, page int) (Page[WikiRevision], error) {
+	name = strings.TrimSpace(name)
 	revisions, err := atPage(name, func(path string) (*gitea.WikiCommitList, error) {
 		endpoint, err := s.wikiEndpoint("revisions", path)
 		if err != nil {

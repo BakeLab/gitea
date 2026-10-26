@@ -318,6 +318,7 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"team", "create", "org", "--name", "Developers", "--unit", "repo.ext_wiki=write"}, "--unit repo.ext_wiki=write: access must be none, read"},
 		{[]string{"team", "create", "org/Developers", "--name", "Developers"}, "supply the team name once"},
 		{[]string{"team", "create", "", "x"}, "organization name cannot be empty"},
+		{[]string{"team", "create", "/foo"}, "organization name cannot be empty"},
 		{[]string{"team", "member", "add", "acme/core", "alice", " "}, "username cannot be empty"},
 		{[]string{"team", "create", "org", "--name", "Developers", "--unit", "repo.code=write", "--permission", "admin"}, "--unit cannot restrict administrator access"},
 		{[]string{"team", "edit", "1"}, "supply team fields to edit"},

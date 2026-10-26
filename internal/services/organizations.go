@@ -428,8 +428,8 @@ func (s Organizations) IsPublicMember(ctx context.Context, name, username string
 // check runs a membership check that answers no with a 404. Given a username, it fails with a
 // *NotFoundError when that user does not exist.
 func (s Organizations) check(ctx context.Context, username string, op func(context.Context, *gitea.Client) (*gitea.Response, error)) (bool, error) {
-	err := do(ctx, s.Client, op)
-	// Gitea redirects callers who are not members, and gt does not follow the redirect.
+	// Gitea redirects callers who are not members to the public membership check.
+	err := do(transport.WithoutRedirects(ctx), s.Client, op)
 	if failure, ok := errors.AsType[*transport.APIError](err); ok && failure.Status == http.StatusSeeOther {
 		return false, &transport.APIError{Status: http.StatusForbidden, Method: failure.Method, Endpoint: failure.Endpoint, Message: "only organization members can check memberships"}
 	}

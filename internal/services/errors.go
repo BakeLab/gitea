@@ -193,6 +193,8 @@ var (
 	// unknownUser finds the name in Gitea's "user does not exist [uid: 0, name: nobody]" and in
 	// "user redirect does not exist [name: nobody]", which it answers for an unknown account name.
 	unknownUser = regexp.MustCompile(`user (?:redirect )?does not exist \[(?:uid: \d+, )?name: ([^\]]+)\]`)
+	// unknownTeam finds the name in Gitea's "team does not exist [org_id 3, team_id 0, name: ops]".
+	unknownTeam = regexp.MustCompile(`team does not exist \[[^\]]*name: ([^\]]+)\]`)
 	// pullTargets finds the branches in "pull request already exists for these targets [... head_branch: x, base_branch: y]".
 	pullTargets = regexp.MustCompile(`head_branch: ([^,\]]+), base_branch: ([^,\]]+)`)
 	// missingBranch finds the branch in the 404 messages `ref "x" does not exist` (create pull
@@ -212,6 +214,9 @@ func Classify(err error, kind, key, scope string) error {
 	}
 	if match := unknownUser.FindStringSubmatch(apiErr.Message); match != nil {
 		return &NotFoundError{Kind: "user", Key: strconv.Quote(match[1]), Err: err}
+	}
+	if match := unknownTeam.FindStringSubmatch(apiErr.Message); match != nil {
+		return &NotFoundError{Kind: "team", Key: strconv.Quote(match[1]), Err: err}
 	}
 	if reason := refusal(apiErr); reason != "" {
 		conflict := &ConflictError{Reason: reason, Kind: kind, Key: key, Scope: scope, Err: err}

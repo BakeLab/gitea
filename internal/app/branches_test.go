@@ -93,6 +93,36 @@ func TestBranchProtectChecksTheBranchAndIsIdempotent(t *testing.T) {
 	require.Equal(t, "! dev is not protected in alice/x\n", diagnostics.String())
 }
 
+func TestBranchProtectionOfANameWithGlobCharacters(t *testing.T) {
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.EscapedPath())
+		switch r.Method + " " + r.URL.EscapedPath() {
+		case "GET /api/v1/repos/alice/x/branches/x%7By%7D":
+			_, _ = w.Write([]byte(`{"name":"x{y}"}`))
+		case "GET /api/v1/repos/alice/x/branches/release/1":
+			_, _ = w.Write([]byte(`{"name":"release/1","protected":true}`))
+		case "POST /api/v1/repos/alice/x/branch_protections":
+			requirePayload(t, `{"rule_name":"x\\{y\\}","required_approvals":1,"enable_push":false,"enable_push_whitelist":false,"enable_status_check":false,"block_on_rejected_reviews":false,"dismiss_stale_approvals":false}`, r.Body)
+			_, _ = w.Write([]byte(`{"rule_name":"x\\{y\\}"}`))
+		case "DELETE /api/v1/repos/alice/x/branch_protections/x%5C%7By%5C%7D":
+			w.WriteHeader(http.StatusNoContent)
+		case "GET /api/v1/repos/alice/x":
+			_, _ = w.Write([]byte(`{"full_name":"alice/x"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, diagnostics := repoTTYDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "protect", "x{y}", "-R", "alice/x"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "unprotect", "x{y}", "release/1", "-R", "alice/x", "--yes"}))
+	require.Contains(t, requests, "DELETE /api/v1/repos/alice/x/branch_protections/x%5C%7By%5C%7D")
+	require.Equal(t, "✓ Protected x{y} in alice/x (1 approval required, no direct pushes)\n"+
+		"✓ Unprotected x{y} in alice/x\n"+
+		"! release/1 has no protection rule of its own in alice/x; a pattern rule still protects it\n", diagnostics.String())
+}
+
 func TestBranchCreateFromATag(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requirePayload(t, `{"new_branch_name":"hotfix","old_ref_name":"v1.0.0"}`, r.Body)

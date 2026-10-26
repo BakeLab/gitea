@@ -111,23 +111,29 @@ $ gt ssh-key view 2 --jq .key`,
 }
 
 // publicKey reads one SSH public key from data, which came from source, and returns it with its
-// comment. It recognizes a private key and points to its public half, to add with command.
-func publicKey(data []byte, source, command string) (ssh.PublicKey, string, error) {
+// comment and the content to send Gitea, which takes neither the options nor the comment lines of
+// an authorized_keys file. It recognizes a private key and points to its public half, to add with
+// command.
+func publicKey(data []byte, source, command string) (ssh.PublicKey, string, string, error) {
 	if bytes.Contains(data, []byte("PRIVATE KEY-----")) {
 		hint := "pipe the public key (.pub) instead"
 		if source != "-" {
 			hint = "add its public key instead: " + command + " " + source + ".pub"
 		}
-		return nil, "", clierr.Wrap(clierr.Usage, fmt.Errorf("%s holds a private key; %s", sshKeySource(source), hint))
+		return nil, "", "", clierr.Wrap(clierr.Usage, fmt.Errorf("%s holds a private key; %s", sshKeySource(source), hint))
 	}
 	key, comment, _, rest, err := ssh.ParseAuthorizedKey(data)
 	if err != nil || len(bytes.TrimSpace(rest)) != 0 {
 		if key, comment, ok := parseSSH2PublicKey(data); ok {
-			return key, comment, nil
+			return key, comment, strings.TrimSpace(string(data)), nil
 		}
-		return nil, "", clierr.Wrap(clierr.Usage, fmt.Errorf("%s must hold exactly one valid SSH public key", sshKeySource(source)))
+		return nil, "", "", clierr.Wrap(clierr.Usage, fmt.Errorf("%s must hold exactly one valid SSH public key", sshKeySource(source)))
 	}
-	return key, comment, nil
+	content := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+	if comment != "" {
+		content += " " + comment
+	}
+	return key, comment, content, nil
 }
 
 // parseSSH2PublicKey reads the RFC 4716 format of PuTTYgen and ssh-keygen -e, which Gitea accepts
@@ -187,7 +193,7 @@ $ cat key.pub | gt ssh-key add`,
 			if err != nil {
 				return fmt.Errorf("read public key: %w", err)
 			}
-			key, comment, err := publicKey(data, source, cmd.CommandPath())
+			key, comment, content, err := publicKey(data, source, cmd.CommandPath())
 			if err != nil {
 				return err
 			}
@@ -200,7 +206,7 @@ $ cat key.pub | gt ssh-key add`,
 				return err
 			}
 			service := services.SSHKeys{Client: target.client}
-			created, err := service.Create(cmd.Context(), title, strings.TrimSpace(string(data)))
+			created, err := service.Create(cmd.Context(), title, content)
 			if err != nil {
 				return a.registeredKey(cmd.Context(), service, key, titleTaken(err, "SSH key", title))
 			}

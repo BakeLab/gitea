@@ -631,7 +631,7 @@ func (b cancelOnClose) Close() error {
 }
 
 // scoped parses raw for this instance, rejecting userinfo, fragments, dot
-// segments, and backslashes. kind names the reference in error messages.
+// segments, and unescaped backslashes. kind names the reference in error messages.
 func (c *Client) scoped(raw, kind string) (*url.URL, *url.URL, error) {
 	base, err := url.Parse(c.BaseURL)
 	if err != nil {
@@ -641,12 +641,12 @@ func (c *Client) scoped(raw, kind string) (*url.URL, *url.URL, error) {
 	if err != nil || u.User != nil || u.Fragment != "" {
 		return nil, nil, errors.New("invalid " + kind)
 	}
-	for segment := range strings.SplitSeq(u.Path, "/") {
+	for segment := range strings.FieldsFuncSeq(u.Path, func(r rune) bool { return r == '/' || r == '\\' }) {
 		if segment == ".." || segment == "." {
 			return nil, nil, errors.New(kind + " cannot contain path traversal")
 		}
 	}
-	if strings.Contains(u.Path, "\\") {
+	if strings.Contains(u.RawPath, "\\") { // RawPath is set only when raw differs from escape(Path), which escapes backslashes
 		return nil, nil, errors.New(kind + " cannot contain backslashes")
 	}
 	return base, u, nil

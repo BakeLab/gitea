@@ -114,7 +114,7 @@ func TestOrganizationMembershipChecksReportWhatGiteaRefuses(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/orgs/acme/members/bob":
-			http.Redirect(w, r, "/org/acme/public_members", http.StatusSeeOther)
+			http.Redirect(w, r, "/api/v1/orgs/acme/public_members/bob", http.StatusSeeOther)
 		case "/api/v1/orgs/acme/members/bbo":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"user does not exist [uid: 0, name: bbo]"}`))
