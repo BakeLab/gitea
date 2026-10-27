@@ -21,6 +21,7 @@ import (
 
 	"gitea.dev/cli/internal/app"
 	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
 	"gitea.dev/cli/internal/transport"
@@ -122,14 +123,14 @@ func TestRunReportsDeclinedConfirmationsAndExplainedFailures(t *testing.T) {
 		Streams: terminal.Streams{In: &bytes.Buffer{}, Out: &bytes.Buffer{}, ErrOut: &stderr, InTTY: true, ErrTTY: true},
 		Getenv:  func(string) string { return "" },
 	}
-	require.Equal(t, 3, run(context.Background(), deps, []string{"auth", "logout"}))
+	require.Equal(t, 3, run(context.Background(), deps, []string{"auth", "logout"}, app.Execute))
 	require.Equal(t, "Canceled.\n", stderr.String())
 
 	stderr.Reset()
 	deps.Getenv = func(key string) string {
 		return map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL}[key]
 	}
-	require.Equal(t, 1, run(context.Background(), deps, []string{"issue", "view", "9", "-R", "alice/project", "--no-input"}))
+	require.Equal(t, 1, run(context.Background(), deps, []string{"issue", "view", "9", "-R", "alice/project", "--no-input"}, app.Execute))
 	require.Equal(t, "Error: issue #9 not found in alice/project\n", stderr.String())
 }
 
@@ -163,7 +164,7 @@ func TestRunReportsWhereADeclinedReviewWasSaved(t *testing.T) {
 			return map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL}[key]
 		},
 	}
-	require.Equal(t, 3, run(context.Background(), deps, []string{"pr", "review", "3", "-R", "alice/project"}))
+	require.Equal(t, 3, run(context.Background(), deps, []string{"pr", "review", "3", "-R", "alice/project"}, app.Execute))
 	files, err := filepath.Glob(filepath.Join(tmp, "gt-draft-*.md"))
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -227,8 +228,18 @@ func TestRunDropsTerminalControlsFromErrors(t *testing.T) {
 			return map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL}[key]
 		},
 	}
-	require.Equal(t, 2, run(context.Background(), deps, []string{"workflow", "run", "ci.yml", "--ref", "main", "-R", "alice/project", "--no-input"}))
+	require.Equal(t, 2, run(context.Background(), deps, []string{"workflow", "run", "ci.yml", "--ref", "main", "-R", "alice/project", "--no-input"}, app.Execute))
 	require.Contains(t, stderr.String(), "missing required input target for CI")
 	require.NotContains(t, stderr.String(), "\x1b")
 	require.NotContains(t, stderr.String(), "\x07")
+}
+
+func TestRunKeepsTheExitCodeOfAnInterruptedExtension(t *testing.T) {
+	var stderr bytes.Buffer
+	deps := app.Dependencies{Streams: terminal.Streams{ErrOut: &stderr}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.Equal(t, 7, run(ctx, deps, nil, func(context.Context, app.Dependencies, []string) error { return clierr.Quiet(7) }))
+	require.Empty(t, stderr.String())
+	require.Equal(t, clierr.Interrupted, run(ctx, deps, nil, func(context.Context, app.Dependencies, []string) error { return errors.New("read failed") }))
 }

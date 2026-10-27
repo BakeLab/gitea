@@ -8,8 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	"gitea.dev/cli/internal/transport"
 )
@@ -68,4 +70,19 @@ func decodeError(ctx context.Context, resp *http.Response, err error) error {
 		return errInvalidJSON
 	}
 	return transport.ResponseError(ctx, resp, err)
+}
+
+// AssetDigest returns the SHA-256 the instance recorded for a release asset when it was uploaded,
+// or "" when it recorded none, as older instances and older assets do.
+// TODO(sdk): Attachment lacks sha256 (https://github.com/go-gitea/gitea/pull/39954).
+func (s Releases) AssetDigest(ctx context.Context, release, asset int64) (string, error) {
+	owner, repo, err := splitRepository(s.Repository)
+	if err != nil {
+		return "", err
+	}
+	var attachment struct {
+		SHA256 string `json:"sha256"`
+	}
+	err = getJSON(ctx, s.Client, fmt.Sprintf("repos/%s/%s/releases/%d/assets/%d", url.PathEscape(owner), url.PathEscape(repo), release, asset), &attachment)
+	return attachment.SHA256, Classify(err, "release asset", fmt.Sprint(asset), s.Repository)
 }

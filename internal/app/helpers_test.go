@@ -44,6 +44,8 @@ func testDeps(t *testing.T) (Dependencies, *bytes.Buffer, *bytes.Buffer) {
 		Streams:     terminal.Streams{In: &bytes.Buffer{}, Out: out, ErrOut: diagnostics},
 		Getenv:      envFunc(nil),
 		Client:      transport.New,
+		DataDir:     t.TempDir(),
+		Environ:     func() []string { return nil },
 	}, out, diagnostics
 }
 

@@ -21,7 +21,7 @@ import (
 
 // Settings that gt config reads and writes, by where they are stored.
 var (
-	preferenceKeys = []string{"browser", "color", "default_host", "editor", "git_protocol", "http_timeout", "hyperlinks", "markdown", "pager", "prompt", "remote"}
+	preferenceKeys = []string{"browser", "color", "default_host", "editor", "extension_hosts", "extension_owners", "extensions", "git_protocol", "http_timeout", "hyperlinks", "markdown", "pager", "prompt", "remote"}
 	instanceKeys   = []string{"client_cert", "client_key", "git_protocol", "headers", "insecure", "oauth_client_id", "ssh_host", "user"}
 	accountKeys    = []string{"ssh_agent", "ssh_certificate_principal", "ssh_key", "ssh_key_fingerprint"}
 	// configKeys are every setting that config get reads, in alphabetical order.
@@ -32,6 +32,7 @@ var (
 var configValues = map[string][]string{
 	"git_protocol": {"https", "ssh"},
 	"prompt":       {"enabled", "disabled"},
+	"extensions":   {"enabled", "disabled"},
 	"color":        {"auto", "always", "never"},
 	"hyperlinks":   {"auto", "always", "never"},
 	"markdown":     {"auto", "raw"},
@@ -110,6 +111,10 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 		preferences.Browser = value
 		sources["browser"] = "BROWSER"
 	}
+	if a.deps.Getenv("GITEA_CLI_NO_EXTENSIONS") != "" {
+		preferences.Extensions = "disabled"
+		sources["extensions"] = "GITEA_CLI_NO_EXTENSIONS"
+	}
 	return preferences, sources, nil
 }
 
@@ -139,6 +144,12 @@ func (a *application) settingValues(snapshot settings.Snapshot) (map[string]any,
 	if err != nil {
 		return nil, nil, err
 	}
+	// Only extensions read the system policy, so a broken one cannot break other commands.
+	if policy, err := settings.LoadPolicy(a.deps.PolicyFile); err != nil {
+		return nil, nil, err
+	} else if policy.Extensions == "disabled" {
+		preferences.Extensions, sources["extensions"] = "disabled", "policy "+policy.Path
+	}
 	values := map[string]any{
 		"version": preferences.Version, "default_host": preferences.DefaultHost,
 		"git_protocol": preferences.GitProtocol, "editor": preferences.Editor,
@@ -146,6 +157,8 @@ func (a *application) settingValues(snapshot settings.Snapshot) (map[string]any,
 		"browser": preferences.Browser, "color": preferences.Color,
 		"hyperlinks": preferences.Hyperlinks, "markdown": preferences.Markdown,
 		"remote": preferences.Remote, "http_timeout": preferences.HTTPTimeout,
+		"extensions": preferences.Extensions, "extension_hosts": nonNil(preferences.ExtensionHosts),
+		"extension_owners": nonNil(preferences.ExtensionOwners),
 	}
 	host, configured := snapshot.Hosts.Hosts[preferences.DefaultHost]
 	if !configured {
@@ -210,7 +223,8 @@ both files. Environment variables that override settings are listed in gt help e
 
 Preferences: default_host, git_protocol, editor, prompt (enabled or disabled), pager,
 browser (never disables opening), color, hyperlinks and markdown (auto or raw), remote,
-http_timeout and aliases (see gt alias).
+http_timeout, extensions (enabled or disabled), extension_hosts, extension_owners and aliases
+(see gt alias).
 Instance settings (--host <url>): user, ssh_host, insecure, git_protocol, oauth_client_id,
 headers, client_cert and client_key.
 Account settings (--host <url> --user <name>): ssh_key, ssh_agent,
@@ -311,6 +325,10 @@ Preferences:
                   keeps moving and migrations are not cut off. The wait for an answer starts
                   once an upload has reached the instance's machine, so an instance that reads
                   uploads slowly from its connection needs a longer timeout
+  extensions      enabled or disabled; disabled refuses to install or run extensions
+  extension_hosts, extension_owners
+                  comma-separated instance URLs, or HOST/OWNER such as
+                  https://gitea.com/gitea, that extensions may come from; empty allows any
 
 Instance settings: user (active account), ssh_host, insecure, git_protocol, oauth_client_id,
 and headers: "Name: value" adds a header to every API request to the instance, such as an
@@ -359,6 +377,9 @@ $ gt config set ssh_key ~/.ssh/id_ed25519 --host https://example.com --user alic
 // settingText is a setting value as text: headers as the "Name: value" pairs config set takes, in
 // name order, rather than Go's map syntax.
 func settingText(value any) string {
+	if list, ok := value.([]string); ok {
+		return strings.Join(list, ",")
+	}
 	headers, ok := value.(map[string]string)
 	if !ok {
 		return fmt.Sprint(value)
@@ -446,6 +467,23 @@ func (a *application) setPreference(key, value string) (string, error) {
 			p.Remote = value
 		case "http_timeout":
 			p.HTTPTimeout = value
+		case "extensions":
+			p.Extensions = value
+		case "extension_hosts":
+			hosts, err := settingList(value, settings.NormalizeHost)
+			if err != nil {
+				return err
+			}
+			p.ExtensionHosts, value = hosts, strings.Join(hosts, ",")
+		case "extension_owners":
+			owners, err := settingList(value, func(entry string) (string, error) {
+				host, owner, err := settings.ParseExtensionOwner(entry)
+				return host + "/" + owner, err
+			})
+			if err != nil {
+				return err
+			}
+			p.ExtensionOwners, value = owners, strings.Join(owners, ",")
 		case "user":
 			return clierr.Wrap(clierr.Usage, errors.New("the active account changes with gt auth switch"))
 		default:
@@ -456,6 +494,33 @@ func (a *application) setPreference(key, value string) (string, error) {
 		}
 		return clierr.Wrap(clierr.Usage, s.Validate())
 	})
+}
+
+// nonNil returns list, or an empty list for nil, so JSON shows [] for a setting without entries.
+func nonNil(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
+}
+
+// settingList splits the comma-separated value of a list setting and normalizes each entry; an
+// empty value clears the list.
+func settingList(value string, normalize func(string) (string, error)) ([]string, error) {
+	var list []string
+	for entry := range strings.SplitSeq(value, ",") {
+		if entry = strings.TrimSpace(entry); entry == "" {
+			continue
+		}
+		normalized, err := normalize(entry)
+		if err != nil {
+			return nil, clierr.Wrap(clierr.Usage, err)
+		}
+		if !slices.Contains(list, normalized) {
+			list = append(list, normalized)
+		}
+	}
+	return list, nil
 }
 
 // setInstanceSetting changes a setting of the --host instance in hosts.yml, or with --user one of its

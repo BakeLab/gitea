@@ -358,7 +358,7 @@ func TestHelpTopicsAndUnknownTopics(t *testing.T) {
 		require.Empty(t, out.String(), args)
 	}
 	values, _ := complete(t, deps, out, "help", "e")
-	require.Equal(t, []string{"environment\tEnvironment variables and global flags", "exit-codes\tExit codes used by gt"}, values)
+	require.Equal(t, []string{"environment\tEnvironment variables and global flags", "exit-codes\tExit codes used by gt", "extension\tManage gt extensions", "extensions\tHow gt runs extensions, and what they may do"}, values)
 	values, _ = complete(t, deps, out, "help", "issue", "l")
 	require.Equal(t, []string{"list\tList issues in a repository"}, values)
 }

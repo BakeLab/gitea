@@ -27,7 +27,7 @@ func validate(name, expansion string, builtins map[string]bool) error {
 		return fmt.Errorf("invalid alias name %q", name)
 	}
 	if builtins[name] {
-		return fmt.Errorf("alias %q collides with a built-in command", name)
+		return fmt.Errorf("alias %q collides with a built-in command or an extension", name)
 	}
 	words, err := shellquote.Split(expansion)
 	if err != nil {

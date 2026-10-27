@@ -31,6 +31,9 @@ const (
 	topicAnnotation = "gt.topic"
 	// globalFlagsLine names the global flags that every help page leaves out of its flag lists.
 	globalFlagsLine = "Global flags: --host, --user, --sudo, --no-input, --interactive, --debug (see gt help environment)"
+	// extensionFlagsLine replaces globalFlagsLine for commands that run an extension, which take
+	// only the global flags of extensionFlags.
+	extensionFlagsLine = "Global flags: --host, --user; global flags go before the extension's name (see gt help extensions)"
 )
 
 // noRepoCommands are command paths, with their subcommands, that never select a repository, so their
@@ -77,7 +80,11 @@ func (a *application) writeHelp(cmd *cobra.Command, _ []string) {
 	} else {
 		local, inherited := helpFlags(cmd)
 		section("FLAGS", local)
-		section("INHERITED FLAGS", inherited+"\n\n"+globalFlagsLine)
+		globals := globalFlagsLine
+		if runsExtension(cmd) {
+			globals = extensionFlagsLine
+		}
+		section("INHERITED FLAGS", inherited+"\n\n"+globals)
 	}
 	section("ARGUMENTS", cmd.Annotations["gt.arguments"])
 	if outputsJSON(cmd) {
@@ -172,7 +179,7 @@ func helpFlags(cmd *cobra.Command) (local, inherited string) {
 	// A command's own --remote, as in repo fork, hides the global flag of that name.
 	// repo clone takes its repository as an argument only, so --repo and --remote do nothing there.
 	selects := repo && path != "gt repo clone"
-	shown := map[string]bool{"repo": selects, "remote": selects && cmd.LocalFlags().Lookup("remote") == nil, "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd) || cmd.Annotations["gt.rawjson"] != "", "yes": cmd.Annotations["gt.confirm"] != ""}
+	shown := map[string]bool{"repo": selects, "remote": selects && cmd.LocalFlags().Lookup("remote") == nil && !runsExtension(cmd), "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd) || cmd.Annotations["gt.rawjson"] != "", "yes": cmd.Annotations["gt.confirm"] != ""}
 	var shared []*pflag.Flag
 	for _, name := range []string{"repo", "remote", "cwd", "json", "jq", "yes"} {
 		if shown[name] {
@@ -183,6 +190,11 @@ func helpFlags(cmd *cobra.Command) (local, inherited string) {
 		shared = append(shared, help)
 	}
 	return flagUsages(own), flagUsages(shared)
+}
+
+// runsExtension reports whether cmd runs an extension.
+func runsExtension(cmd *cobra.Command) bool {
+	return cmd.Annotations["gt.extension"] == "true" || cmd.CommandPath() == "gt extension exec"
 }
 
 // outputsJSON reports whether the --json flag applies to cmd.
@@ -317,6 +329,8 @@ Environment variables:
   GITEA_CLI_PAGER                     pager, overriding config.yml
   GITEA_CLI_COLOR                     color preference: auto, always or never
   GITEA_CLI_HTTP_TIMEOUT              longest wait for an answer, overriding config.yml
+  GITEA_CLI_DATA_DIR                  data directory; installed extensions are in its extensions/
+  GITEA_CLI_NO_EXTENSIONS             when set, turns extensions off
   NO_COLOR                            disables automatic color when set, even with CLICOLOR_FORCE
   CLICOLOR_FORCE                      unless empty or 0, colors stderr, even when redirected, and
                                       a terminal stdout despite CLICOLOR=0 or TERM=dumb
@@ -342,7 +356,54 @@ Preferences in config.yml are described in gt config --help.`},
   8    gt pr checks: some checks are still pending
   130  interrupted with Ctrl-C, also at a prompt
 
-A command may document further codes in its help.`},
+A command may document further codes in its help; an extension exits with its own code.`},
+		{Use: "extensions", Short: "How gt runs extensions, and what they may do", Long: `An extension is an executable named gt-NAME, or gh-NAME for a GitHub CLI extension, that
+gt extension install puts in the extensions directory of $GITEA_CLI_DATA_DIR, or of gitea-cli
+under the XDG data directory, and gt NAME runs. Built-in commands always win over an extension.
+
+Installing: gt installs the release asset NAME-OS-ARCH or REPO-OS-ARCH (.exe on Windows) of the
+latest release, else one whose name ends in OS-ARCH, or else clones the repository, which must
+hold an executable gt-NAME at its root. It checks an asset against the SHA-256 the instance
+recorded at upload, else against the release's checksums.txt, in sha256sum format; without
+either it asks with a default of no, or installs with --yes. An optional gt-extension.yml in
+the repository declares:
+
+  description      what the extension does, shown in gt help
+  min_gt_version   the oldest gt that runs it
+  platforms        such as linux/amd64 or darwin; none means every platform
+  credentials      true when it needs your Gitea token
+  completion       cobra, when it answers Cobra's __complete protocol for shell completion
+
+Running: gt checks the executable against the SHA-256 recorded at install and refuses one that
+changed. The extension inherits gt's terminal and environment, except for GITEA_TOKEN,
+GITEA_INSTANCE_*, GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN, GITHUB_ENTERPRISE_TOKEN and
+GH_HOST. It gets:
+
+  GITEA_CLI_EXTENSION          its name
+  GITEA_CLI_EXECUTABLE         the path of gt, to call gt commands such as gt api
+  GITEA_CLI_HOST, _REPO, _USER  from --host, --repo and --user before its name
+  GITEA_TOKEN, GITEA_INSTANCE_URL  your token and its instance, only when you allowed it at
+                                   install; gh extensions also get GH_HOST and GH_TOKEN
+
+gt itself refuses your stored credentials to an extension that was not given them. This is
+hygiene, not a sandbox: an extension runs with your privileges, can read gt's configuration
+directory, and can change its own files and manifest. The digest check notices a corrupted or
+replaced executable, not a deliberate change: for a script extension it covers the gt-NAME
+script, not other files of its clone. Install extensions only from sources you trust.
+
+Upgrading: gt extension upgrade shows the old and new version and digest first, refuses a
+repository that was transferred or recreated and a release tag whose asset changed, and never
+upgrades in the background.
+
+Compatibility: GitHub CLI extensions that only use gh api and the REST endpoints Gitea shares
+with GitHub can work; those that use GraphQL or other GitHub-only features do not. With
+--compat-gh, an extension's gh calls reach gt, which answers gh api, gh auth token and
+gh repo view, whose --json takes gt's fields, such as full_name, not gh's.
+
+Policy: extensions (enabled or disabled), extension_hosts and extension_owners in config.yml
+restrict extensions for you. An administrator sets the same, and extension_credentials: denied,
+in /etc/gitea-cli/policy.yml (%ProgramData%\gitea-cli\policy.yml on Windows), which you
+cannot loosen.`},
 		{Use: "formatting", Short: "JSON output with --json and --jq", Long: `gt prints text for people by default. Scripts should use JSON: the columns and
 wording of text output may change between releases.
 

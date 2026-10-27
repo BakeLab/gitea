@@ -207,7 +207,7 @@ func TestConfigNamesValidSettings(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"config", "get", "nope"}, `unknown setting "nope"; settings: browser, client_cert, client_key, color, default_host, editor, git_protocol, headers, http_timeout, hyperlinks, insecure, markdown,`},
+		{[]string{"config", "get", "nope"}, `unknown setting "nope"; settings: browser, client_cert, client_key, color, default_host, editor, extension_hosts, extension_owners, extensions, git_protocol, headers, http_timeout, hyperlinks, insecure, markdown,`},
 		{[]string{"config", "get", "user"}, "user is an instance setting; select a configured instance with --host URL"},
 		{[]string{"config", "get", "ssh_host", "--host", "gitea.example.com"}, "instance https://gitea.example.com is not configured; run gt auth login --host https://gitea.example.com"},
 		{[]string{"config", "get", "ssh_key"}, "ssh_key is an account setting; select the account with --host URL --user NAME"},
@@ -374,4 +374,21 @@ func TestConfigGetShowsTheEnvironmentOverridesOfTheTokenInstance(t *testing.T) {
 	configureHost(t, deps, "https://example.org", settings.Host{SSHHost: "git.example.org:2222"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "ssh_host", "--show-source", "--json"}))
 	require.JSONEq(t, `{"ssh_host":{"value":"git.example.org:2222","source":"GITEA_INSTANCE_SSH_HOST"}}`, out.String(), "the variable is the source even when ssh_host agrees")
+}
+
+func TestConfigSetsExtensionAllowlists(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "extension_hosts", "HTTPS://Gitea.com/, https://example.com:443"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "extension_owners", "https://gitea.com/gitea"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "extension_hosts"}))
+	require.Equal(t, "https://gitea.com,https://example.com\n", out.String())
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "list", "--json", "extension_hosts,extension_owners,extensions"}))
+	require.JSONEq(t, `{"extension_hosts":["https://gitea.com","https://example.com"],"extension_owners":["https://gitea.com/gitea"],"extensions":"enabled"}`, out.String())
+	require.Error(t, Execute(context.Background(), deps, []string{"config", "set", "extension_owners", "gitea"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "extension_hosts", ""}))
+	out.Reset()
+	deps.Getenv = envFunc(map[string]string{"GITEA_CLI_NO_EXTENSIONS": "1"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "extensions", "--show-source"}))
+	require.Equal(t, "disabled\tGITEA_CLI_NO_EXTENSIONS\n", out.String())
 }

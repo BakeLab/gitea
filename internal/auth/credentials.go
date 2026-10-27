@@ -53,6 +53,8 @@ var errNoKeyring = errors.New("keyring storage unavailable")
 type Store struct {
 	Dir     string
 	Keyring Keyring
+	// Denied, when set, is returned instead of any stored credential.
+	Denied error
 }
 
 // Identity builds a stable, opaque key from an instance URL and account.
@@ -67,6 +69,9 @@ func (s *Store) filename(instance, user string) string {
 
 // Load returns a credential without exposing storage contents in errors.
 func (s *Store) Load(instance, user, backend string) (Credential, error) {
+	if s.Denied != nil {
+		return Credential{}, s.Denied
+	}
 	var data []byte
 	var err error
 	switch backend {

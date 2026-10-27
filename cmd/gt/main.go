@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"gitea.dev/cli/internal/app"
@@ -26,7 +28,12 @@ func main() {
 		stop()
 	}()
 	deps := app.System()
-	code := run(ctx, deps, os.Args[1:])
+	execute := app.Execute
+	// Extensions installed with --compat-gh call gt through a gh link.
+	if strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe") == "gh" {
+		execute = app.ExecuteGH
+	}
+	code := run(ctx, deps, os.Args[1:], execute)
 	stop()
 	deps.Streams.Restore()
 	os.Exit(code)
@@ -34,9 +41,10 @@ func main() {
 
 // run executes gt, reports a failure on stderr and returns the exit code. An interrupt exits
 // silently, and a declined confirmation prints only "Canceled.".
-func run(ctx context.Context, deps app.Dependencies, args []string) int {
-	err := app.Execute(ctx, deps, args)
-	if err != nil && ctx.Err() != nil {
+func run(ctx context.Context, deps app.Dependencies, args []string, execute func(context.Context, app.Dependencies, []string) error) int {
+	err := execute(ctx, deps, args)
+	// An extension that handled Ctrl-C reported its outcome with its own exit code.
+	if err != nil && ctx.Err() != nil && !clierr.IsQuiet(err) {
 		// Whatever failed after Ctrl-C or SIGTERM failed because of it; the user knows why.
 		err = clierr.Wrap(clierr.Interrupted, err)
 	}

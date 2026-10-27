@@ -59,6 +59,11 @@ type Preferences struct {
 	Remote      string            `yaml:"remote,omitempty" json:"remote"`
 	HTTPTimeout string            `yaml:"http_timeout,omitempty" json:"http_timeout"`
 	Aliases     map[string]string `yaml:"aliases,omitempty" json:"aliases"`
+	// Extensions is enabled or disabled; ExtensionHosts and ExtensionOwners, when set, are the only
+	// instances and HOST/OWNER accounts extensions are installed and run from.
+	Extensions      string   `yaml:"extensions,omitempty" json:"extensions"`
+	ExtensionHosts  []string `yaml:"extension_hosts,omitempty" json:"extension_hosts"`
+	ExtensionOwners []string `yaml:"extension_owners,omitempty" json:"extension_owners"`
 }
 
 // Account contains account-specific authentication metadata, never token values.
@@ -119,6 +124,14 @@ type Store struct {
 // snapshot they loaded earlier may be stale.
 func (s *Store) Generation() uint64 { return s.generation.Load() }
 
+// DataDir returns dir, or else the platform data directory, where gt keeps installed extensions.
+func DataDir(dir string) string {
+	if dir == "" {
+		dir = filepath.Join(xdg.DataHome, "gitea-cli")
+	}
+	return dir
+}
+
 // New selects an explicit directory or the platform configuration directory.
 func New(dir string) *Store {
 	if dir == "" {
@@ -129,7 +142,7 @@ func New(dir string) *Store {
 
 // Defaults returns a fresh preferences value with built-in settings.
 func Defaults() Preferences {
-	return Preferences{Version: Version, GitProtocol: "https", Prompt: "enabled", Color: "auto", Hyperlinks: "auto", Markdown: "auto", HTTPTimeout: "2m", Aliases: map[string]string{}}
+	return Preferences{Version: Version, GitProtocol: "https", Prompt: "enabled", Color: "auto", Hyperlinks: "auto", Markdown: "auto", HTTPTimeout: "2m", Aliases: map[string]string{}, Extensions: "enabled"}
 }
 
 // stored omits built-in defaults so that only explicit settings are persisted.
@@ -152,6 +165,9 @@ func (p Preferences) stored() Preferences {
 	}
 	if p.HTTPTimeout == defaults.HTTPTimeout {
 		p.HTTPTimeout = ""
+	}
+	if p.Extensions == defaults.Extensions {
+		p.Extensions = ""
 	}
 	return p
 }
@@ -259,6 +275,12 @@ func (s Snapshot) Validate() error {
 		return errors.New("markdown must be auto or raw")
 	}
 	if _, err := ParseTimeout(p.HTTPTimeout); err != nil {
+		return err
+	}
+	if p.Extensions != "enabled" && p.Extensions != "disabled" {
+		return errors.New("extensions must be enabled or disabled")
+	}
+	if err := validateExtensionSources(p.ExtensionHosts, p.ExtensionOwners); err != nil {
 		return err
 	}
 	if p.DefaultHost != "" {

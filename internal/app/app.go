@@ -9,7 +9,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -21,6 +23,8 @@ import (
 	"gitea.dev/cli/internal/aliases"
 	"gitea.dev/cli/internal/auth"
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/extensions"
+	"gitea.dev/cli/internal/extensions/github"
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
@@ -55,6 +59,13 @@ type Dependencies struct {
 	Getenv        func(string) string
 	LookupEnv     func(string) (string, bool)
 	Client        func(string, string, bool) *transport.Client
+	// DataDir holds installed extensions; PolicyFile is the system policy, which may not exist.
+	DataDir    string
+	PolicyFile string
+	// Environ is the environment extensions inherit, without gt's secrets.
+	Environ      func() []string
+	RunExtension func(extensions.Command) (int, error)
+	GitHub       func() github.Client
 }
 
 // System connects the CLI to the current environment and terminal.
@@ -62,7 +73,7 @@ func System() Dependencies {
 	streams := terminal.System()
 	store := settings.New(os.Getenv("GITEA_CLI_CONFIG_DIR"))
 	prompter := &terminal.FormPrompter{Streams: streams}
-	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: streams.ErrOut}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, ReleaseForm: prompter, RepoForm: prompter, LabelForm: prompter, Getenv: os.Getenv, LookupEnv: os.LookupEnv, Client: transport.New}
+	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: streams.ErrOut}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, ReleaseForm: prompter, RepoForm: prompter, LabelForm: prompter, Getenv: os.Getenv, LookupEnv: os.LookupEnv, Client: transport.New, DataDir: settings.DataDir(os.Getenv("GITEA_CLI_DATA_DIR")), PolicyFile: settings.PolicyPath(), Environ: os.Environ, RunExtension: extensions.Run, GitHub: github.New}
 }
 
 type options struct {
@@ -113,6 +124,12 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now
+	}
+	if deps.Environ == nil {
+		deps.Environ = os.Environ
+	}
+	if deps.RunExtension == nil {
+		deps.RunExtension = extensions.Run
 	}
 	if deps.Git == nil {
 		deps.Git = git.System{In: deps.Streams.In, ErrOut: deps.Streams.ErrOut}
@@ -201,7 +218,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		}
 		return a.policy(snapshot).Validate(a.deps.Streams)
 	}
-	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.labelCommand(), a.milestoneCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.browseCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.packageCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false))
+	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.labelCommand(), a.milestoneCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.browseCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.packageCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false), a.extensionCommand())
 	root.AddCommand(a.manCommand())
 	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Example: "$ gt version", Args: argsExact(0), Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), version.Format())
@@ -220,6 +237,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		&cobra.Group{ID: "actions", Title: "Actions commands"},
 		&cobra.Group{ID: "additional", Title: "Additional commands"},
 		&cobra.Group{ID: "alias", Title: "Alias commands"},
+		&cobra.Group{ID: "extension", Title: "Extension commands"},
 	)
 	for _, cmd := range root.Commands() {
 		if cmd.Annotations[topicAnnotation] == "" {
@@ -362,11 +380,29 @@ func builtins(root *cobra.Command) map[string]bool {
 
 // Execute expands aliases and executes the fresh root without printing errors.
 func Execute(ctx context.Context, deps Dependencies, args []string) error {
+	if extension := deps.Getenv("GITEA_CLI_EXTENSION"); extension != "" && deps.Credentials != nil && !extensionGranted(deps, extension) {
+		// An extension without a credential grant must not get the stored ones through gt. It can
+		// unset the variable: this keeps honest extensions honest, it does not stop hostile ones.
+		source := "<repository>"
+		if installed, err := (extensions.Store{Dir: filepath.Join(deps.DataDir, "extensions")}).Lookup(extension); err == nil {
+			source = extensionOrigin(installed.Manifest)
+		}
+		denied := *deps.Credentials
+		denied.Denied = fmt.Errorf("extension %s was not given your credentials; allow them with gt extension install --force --allow-credentials %s", extension, source)
+		deps.Credentials = &denied
+	}
 	root, a := newRoot(deps)
 	// Broken settings or aliases must not prevent help or recovery commands.
 	snapshot, loadErr := deps.Settings.Load()
 	names := builtins(root)
 	if loadErr == nil {
+		// An extension runs before gt rewrites any of its arguments. An alias may expand to an
+		// extension, and cannot have the name of one.
+		names = maps.Clone(names)
+		maps.Copy(names, a.addExtensionCommands(root))
+		if ran, err := a.dispatchExtension(ctx, root, args, commandIndex(root, args)); ran {
+			return err
+		}
 		for name, expansion := range snapshot.Preferences.Aliases {
 			if aliases.Check(name, snapshot.Preferences.Aliases, names) == nil {
 				root.AddCommand(&cobra.Command{Use: name, Short: fmt.Sprintf("Alias for %q", expansion), GroupID: "alias", Annotations: map[string]string{"gt.alias": "true"}, RunE: func(*cobra.Command, []string) error {
@@ -398,6 +434,9 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 			expanded, err := aliases.Expand(args[commandAt:], snapshot.Preferences.Aliases, names)
 			if err != nil {
 				return clierr.Wrap(clierr.Usage, err)
+			}
+			if ran, err := a.dispatchExtension(ctx, root, slices.Concat(args[:commandAt], expanded), commandAt); ran {
+				return err
 			}
 			args = joinJSONFields(root, slices.Concat(args[:commandAt], expanded))
 		}

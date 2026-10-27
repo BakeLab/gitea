@@ -334,3 +334,19 @@ func TestReleaseDraftsRequireAnExistingTarget(t *testing.T) {
 	_, err = service.Edit(context.Background(), 7, ReleaseOptions{Draft: &no})
 	require.EqualError(t, err, `target "gone" not found in alice/project`)
 }
+
+func TestReleaseAssetDigest(t *testing.T) {
+	digest := ""
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/repos/alice/project/releases/1/assets/2", r.URL.Path)
+		_, _ = w.Write([]byte(`{"id":2,"name":"file.bin","sha256":"` + digest + `"}`))
+	}))
+	service := Releases{Client: client, Repository: "alice/project"}
+	got, err := service.AssetDigest(context.Background(), 1, 2)
+	require.NoError(t, err)
+	assert.Empty(t, got, "older instances and assets have no digest")
+	digest = strings.Repeat("a", 64)
+	got, err = service.AssetDigest(context.Background(), 1, 2)
+	require.NoError(t, err)
+	assert.Equal(t, digest, got)
+}

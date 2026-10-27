@@ -123,6 +123,8 @@ type targetRequest struct {
 	// offline authenticates without prompts, token refreshes or identity checks, as shell
 	// completion needs: an expired OAuth token or an encrypted SSH key fails instead.
 	offline bool
+	// refresh still refreshes an expiring OAuth token when offline.
+	refresh bool
 }
 
 func (a *application) resolveTarget(ctx context.Context, requireRepo, authenticate bool) (target, error) {
@@ -217,6 +219,9 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 		if !exists {
 			return t, clierr.Wrap(clierr.Authentication, t.accountError(t.User))
 		}
+		if account.Tokenless() && a.deps.Credentials.Denied != nil {
+			return t, clierr.Wrap(clierr.Authentication, a.deps.Credentials.Denied)
+		}
 		if account.Tokenless() {
 			var passphrase func() ([]byte, error)
 			if !req.offline {
@@ -231,7 +236,7 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 			t.client = client
 			return t, nil
 		}
-		credential, err := a.loadCredential(ctx, t, account, req.offline)
+		credential, err := a.loadCredential(ctx, t, account, req.offline && !req.refresh)
 		if err != nil {
 			return t, clierr.Wrap(clierr.Authentication, err)
 		}
