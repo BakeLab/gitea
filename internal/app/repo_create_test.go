@@ -216,7 +216,7 @@ func TestRepositoryCreatePublishesALocalRepository(t *testing.T) {
 	created := 0
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		created++
-		requirePayload(t, `{"name":"project"}`, r.Body)
+		requirePayload(t, `{"name":"project","object_format_name":"sha256"}`, r.Body)
 		_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","html_url":"https://gitea.test/alice/project","clone_url":"http://%s/alice/project.git","empty":true,"default_branch":"main"}`, r.Host)
 	}))
 	defer server.Close()
@@ -224,12 +224,12 @@ func TestRepositoryCreatePublishesALocalRepository(t *testing.T) {
 	dir := t.TempDir()
 	remote := server.URL + "/alice/project.git"
 	push := credentialCall(t, deps, server.URL, "alice", "push", "--quiet", "--set-upstream", "--", "origin", "HEAD")
-	head, branch := "rev-parse --verify --quiet HEAD^{commit}", "symbolic-ref --quiet HEAD"
-	runner := &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", head: "abc", branch: "refs/heads/trunk", "remote add -- origin " + remote: "", push: ""}}
+	head, branch, format := "rev-parse --verify --quiet HEAD^{commit}", "symbolic-ref --quiet HEAD", "rev-parse --show-object-format"
+	runner := &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", head: "abc", branch: "refs/heads/trunk", format: "sha256", "remote add -- origin " + remote: "", push: ""}}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "create", "project", "--public", "--source", dir, "--push"}))
-	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", head, branch, "remote add -- origin " + remote, push}, runner.calls)
-	require.Equal(t, []string{dir, dir, dir, dir, dir, dir}, runner.dirs)
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", head, branch, format, "remote add -- origin " + remote, push}, runner.calls)
+	require.Equal(t, []string{dir, dir, dir, dir, dir, dir, dir}, runner.dirs)
 	require.Equal(t, "✓ Created repository alice/project\n✓ Added Git remote origin for alice/project\n✓ Pushed the current branch to alice/project\n", diagnostics.String())
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "create", "project", "--source", dir, "--push", "--json=empty,default_branch"}))
@@ -241,6 +241,10 @@ func TestRepositoryCreatePublishesALocalRepository(t *testing.T) {
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.EqualError(t, err, "--remote-name requires a valid Git remote name")
 	require.Empty(t, runner.calls)
+	require.Zero(t, created)
+	err = Execute(context.Background(), deps, []string{"repo", "create", "project", "--source", dir, "--object-format", "sha1"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, "--object-format sha1 cannot be combined with --source "+dir+", a sha256 repository")
 	require.Zero(t, created)
 	// On a detached HEAD, nothing is created.
 	delete(runner.results, branch)

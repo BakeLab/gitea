@@ -44,8 +44,8 @@ func (a *application) repoCreateCommand() *cobra.Command {
 administrators can also create one for another user as USER/NAME.
 
 --auto-init adds a first commit with a README, .gitignore and license; --template copies another
-repository. --source adds the new repository as a remote of a local Git repository, and --push
-pushes its current branch there.
+repository. --source adds the new repository as a remote of a local Git repository, creating it
+with the same object format, and --push pushes its current branch there.
 
 On a terminal, without a name or flags, it asks for the owner, name, description and visibility,
 whether to add a README with a license and .gitignore templates, and whether to clone the new
@@ -130,6 +130,9 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 		}
 		var err error
 		if pushBranch, err = a.checkPublishSource(cmd.Context(), f.localSource, f.remote, f.push); err != nil {
+			return err
+		}
+		if err := a.matchObjectFormat(cmd.Context(), f.localSource, &f.opts.ObjectFormat); err != nil {
 			return err
 		}
 	}
@@ -358,6 +361,20 @@ func (a *application) checkPublishSource(ctx context.Context, dir, remote string
 		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("--push requires a checked-out branch in --source %s", dir))
 	}
 	return strings.TrimPrefix(branch, "refs/heads/"), nil
+}
+
+// matchObjectFormat sets format to the object format of the local repository in dir, since a
+// repository cannot be pushed to one with another format.
+func (a *application) matchObjectFormat(ctx context.Context, dir string, format *string) error {
+	local, err := a.gitProbe().Output(ctx, dir, false, "rev-parse", "--show-object-format")
+	if err != nil || (local != "sha1" && local != "sha256") { // Git before 2.25 cannot tell, and only has sha1 repositories
+		return nil
+	}
+	if *format != "" && *format != local {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("--object-format %s cannot be combined with --source %s, a %s repository", *format, dir, local))
+	}
+	*format = local
+	return nil
 }
 
 // publishRepository adds item as the remote of the local repository in dir and, with push,
