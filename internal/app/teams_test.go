@@ -58,13 +58,14 @@ func TestTeamDeleteNamesTheTeamAndProtectsTheOwnerTeam(t *testing.T) {
 }
 
 func TestTeamEditMergesUnitsIntoTheCurrentPolicy(t *testing.T) {
-	var sent []map[string]any
+	var sent []any
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/teams/5", r.URL.Path)
 		if r.Method == http.MethodPatch {
 			var body map[string]any
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			sent = append(sent, body)
+			require.Empty(t, body["permission"])
+			sent = append(sent, body["units_map"])
 		}
 		_, _ = w.Write([]byte(`{"id":5,"name":"devs","permission":"write","units_map":{"repo.code":"write","repo.issues":"write","repo.pulls":"write"}}`))
 	}))
@@ -72,9 +73,9 @@ func TestTeamEditMergesUnitsIntoTheCurrentPolicy(t *testing.T) {
 	deps, _, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"team", "edit", "5", "--unit", "repo.wiki=write", "--json"}))
 	require.NoError(t, Execute(context.Background(), deps, []string{"team", "edit", "5", "--unit", "repo.wiki=write", "--unit-replace", "--json"}))
-	require.Equal(t, []map[string]any{
-		{"units_map": map[string]any{"repo.code": "write", "repo.issues": "write", "repo.pulls": "write", "repo.wiki": "write"}},
-		{"units_map": map[string]any{"repo.wiki": "write"}},
+	require.Equal(t, []any{
+		map[string]any{"repo.code": "write", "repo.issues": "write", "repo.pulls": "write", "repo.wiki": "write"},
+		map[string]any{"repo.wiki": "write"},
 	}, sent)
 	err := Execute(context.Background(), deps, []string{"team", "edit", "5", "--unit-replace", "--name", "devs"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
@@ -244,10 +245,12 @@ func TestTeamPermissionSetsEveryUnit(t *testing.T) {
 	require.Equal(t, "devs", sent[0]["name"])
 	require.Equal(t, every("write"), sent[0]["units_map"])
 	// The permission goes first on its own, because Gitea 28 keeps an admin team admin otherwise.
-	require.Equal(t, map[string]any{"name": "devs", "permission": "read"}, sent[1])
+	require.Equal(t, "read", sent[1]["permission"])
+	require.Nil(t, sent[1]["units_map"])
 	wikiWrite := every("read")
 	wikiWrite["repo.wiki"] = "write"
-	require.Equal(t, map[string]any{"permission": "read", "units_map": wikiWrite}, sent[2])
+	require.Equal(t, "read", sent[2]["permission"])
+	require.Equal(t, wikiWrite, sent[2]["units_map"])
 }
 
 func TestTeamEditComparesTheEffectiveAccess(t *testing.T) {

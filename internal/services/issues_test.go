@@ -5,14 +5,12 @@ package services
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
-	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -105,8 +103,6 @@ func TestIssueTemplatesAcceptCheckboxOptionObjects(t *testing.T) {
 	templates, err := (Issues{Client: client, Repository: "alice/project"}).IssueTemplates(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []IssueTemplate{{Name: "Form", Form: true}}, templates)
-	var sdkTemplates []*gitea.IssueTemplate
-	require.Error(t, json.Unmarshal([]byte(body), &sdkTemplates), "remove the raw request once the SDK decodes checkbox options")
 }
 
 func TestIssueCreateInMissingRepositoryReportsTheRepository(t *testing.T) {

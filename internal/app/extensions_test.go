@@ -38,11 +38,12 @@ import (
 // fakeExtensionRepo serves the repository alice/gt-hello with a release of one asset built for
 // this platform.
 type fakeExtensionRepo struct {
-	mu        sync.Mutex
-	repoID    int64
-	tag       string
-	commit    string
-	asset     []byte
+	mu     sync.Mutex
+	repoID int64
+	tag    string
+	commit string
+	asset  []byte
+	// digest is the SHA-256 of asset, which checksums.txt lists unless checksums is set.
 	digest    string
 	checksums string
 	metadata  string
@@ -74,16 +75,20 @@ func (f *fakeExtensionRepo) handler(t *testing.T, base func() string) http.Handl
 			w.Header().Set("Content-Type", "application/json")
 			require.NoError(t, json.NewEncoder(w).Encode(v))
 		}
-		attachment := func(id int64, name, uuid, digest string, size int) map[string]any {
-			return map[string]any{"id": id, "name": name, "uuid": uuid, "size": size, "browser_download_url": base() + "/alice/gt-hello/releases/download/" + f.tag + "/" + name, "sha256": digest}
+		attachment := func(id int64, name, uuid string, size int) map[string]any {
+			return map[string]any{"id": id, "name": name, "uuid": uuid, "size": size, "browser_download_url": base() + "/alice/gt-hello/releases/download/" + f.tag + "/" + name}
+		}
+		checksums := f.checksums
+		if checksums == "" && f.digest != "" {
+			checksums = f.digest + "  " + f.assetName() + "\n"
 		}
 		release := func() map[string]any {
 			assets := []any{}
 			if !f.scriptOnly {
-				assets = append(assets, attachment(1, f.assetName(), "u1", "", len(f.asset)))
+				assets = append(assets, attachment(1, f.assetName(), "u1", len(f.asset)))
 			}
-			if f.checksums != "" {
-				assets = append(assets, attachment(2, "checksums.txt", "u2", "", len(f.checksums)))
+			if checksums != "" {
+				assets = append(assets, attachment(2, "checksums.txt", "u2", len(checksums)))
 			}
 			return map[string]any{"id": 10, "tag_name": f.tag, "assets": assets}
 		}
@@ -95,14 +100,14 @@ func (f *fakeExtensionRepo) handler(t *testing.T, base func() string) http.Handl
 		case strings.HasPrefix(path, repo+"/releases/tags/"):
 			w.WriteHeader(http.StatusNotFound)
 		case path == repo+"/releases/10/assets/1":
-			writeJSON(attachment(1, f.assetName(), "u1", f.digest, len(f.asset)))
+			writeJSON(attachment(1, f.assetName(), "u1", len(f.asset)))
 		case path == repo+"/releases/10/assets/2":
-			writeJSON(attachment(2, "checksums.txt", "u2", "", len(f.checksums)))
+			writeJSON(attachment(2, "checksums.txt", "u2", len(checksums)))
 		case path == "/attachments/u1":
 			f.downloads++
 			_, _ = w.Write(f.asset)
 		case path == "/attachments/u2":
-			_, _ = w.Write([]byte(f.checksums))
+			_, _ = w.Write([]byte(checksums))
 		case strings.HasPrefix(path, repo+"/git/commits/"):
 			writeJSON(map[string]any{"sha": f.commit})
 		case strings.HasPrefix(path, repo+"/raw/") && strings.HasSuffix(path, "/gt-extension.yml") && f.metadata != "":
@@ -165,7 +170,7 @@ func TestExtensionInstallRunAndRemove(t *testing.T) {
 	assert.Equal(t, "v1.0.0", extension.Tag)
 	assert.Equal(t, repo.commit, extension.Commit)
 	assert.Equal(t, repo.digest, extension.SHA256)
-	assert.Equal(t, "server", extension.DigestSource)
+	assert.Equal(t, "checksums.txt", extension.DigestSource)
 	assert.False(t, extension.Credentials)
 
 	// Global flags before the name become variables; everything after it passes unchanged.
@@ -210,22 +215,14 @@ func TestExtensionInstallRunAndRemove(t *testing.T) {
 func TestExtensionInstallVerifiesTheDownload(t *testing.T) {
 	repo := newFakeExtensionRepo("hello binary")
 	good := repo.digest
-	repo.digest = strings.Repeat("0", 64)
+	repo.checksums = strings.Repeat(" ", extensions.MaxChecksumsSize+1)
 	deps, _, _ := extensionDeps(t, repo, nil)
-	err := Execute(context.Background(), deps, []string{"extension", "install", "alice/gt-hello", "--yes"})
-	require.ErrorContains(t, err, "but the server lists "+repo.digest)
-	_, err = (extensions.Store{Dir: filepath.Join(deps.DataDir, "extensions")}).Lookup("hello")
-	require.ErrorIs(t, err, extensions.ErrNotInstalled)
-
-	repo.digest = "sha256:" + good
-	require.ErrorContains(t, Execute(context.Background(), deps, []string{"extension", "install", "alice/gt-hello", "--yes"}), "the source published an invalid digest")
-
-	// Without a digest from the server, checksums.txt decides.
-	repo.digest, repo.checksums = "", strings.Repeat(" ", extensions.MaxChecksumsSize+1)
 	require.ErrorContains(t, Execute(context.Background(), deps, []string{"extension", "install", "alice/gt-hello", "--yes"}), "checksums.txt of v1.0.0 is larger than")
 	repo.checksums = strings.Repeat("0", 64) + "  " + repo.assetName() + "\n"
-	err = Execute(context.Background(), deps, []string{"extension", "install", "alice/gt-hello", "--yes"})
+	err := Execute(context.Background(), deps, []string{"extension", "install", "alice/gt-hello", "--yes"})
 	require.ErrorContains(t, err, "but checksums.txt lists")
+	_, err = (extensions.Store{Dir: filepath.Join(deps.DataDir, "extensions")}).Lookup("hello")
+	require.ErrorIs(t, err, extensions.ErrNotInstalled)
 	repo.checksums = good + "  " + repo.assetName() + "\n"
 	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "install", "alice/gt-hello", "--yes"}))
 	assert.Equal(t, "checksums.txt", installedExtension(t, deps, "hello").DigestSource)
@@ -408,6 +405,7 @@ func TestExtensionMetadataIsChecked(t *testing.T) {
 func TestGitHubExtensionsAreReadAnonymously(t *testing.T) {
 	content := []byte("gh hello")
 	sum := sha256.Sum256(content)
+	digest := "sha256:not-hex"
 	name := "gh-hello-" + runtime.GOOS + "-" + runtime.GOARCH
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -419,7 +417,7 @@ func TestGitHubExtensionsAreReadAnonymously(t *testing.T) {
 		case "/repos/owner/gh-hello":
 			_, _ = fmt.Fprintf(w, `{"id":3,"name":"gh-hello","default_branch":"main","owner":{"login":"owner"}}`)
 		case "/repos/owner/gh-hello/releases/latest":
-			_, _ = fmt.Fprintf(w, `{"tag_name":"v1","assets":[{"name":%q,"size":%d,"browser_download_url":%q,"digest":"sha256:%x"}]}`, name, len(content), server.URL+"/download/"+name, sum)
+			_, _ = fmt.Fprintf(w, `{"tag_name":"v1","assets":[{"name":%q,"size":%d,"browser_download_url":%q,"digest":%q}]}`, name, len(content), server.URL+"/download/"+name, digest)
 		case "/repos/owner/gh-hello/commits/v1":
 			_, _ = w.Write([]byte(strings.Repeat("3", 40)))
 		case "/download/" + name:
@@ -434,7 +432,12 @@ func TestGitHubExtensionsAreReadAnonymously(t *testing.T) {
 	deps.GitHub = func() github.Client { return github.Client{API: server.URL, HTTP: server.Client()} }
 	runs := &extensionRun{}
 	deps.RunExtension = runs.run
-	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "install", "https://github.com/owner/gh-hello", "--yes"}))
+	install := []string{"extension", "install", "https://github.com/owner/gh-hello", "--yes"}
+	require.ErrorContains(t, Execute(context.Background(), deps, install), "the source published an invalid digest")
+	digest = "sha256:" + strings.Repeat("0", 64)
+	require.ErrorContains(t, Execute(context.Background(), deps, install), "but the server lists "+strings.Repeat("0", 64))
+	digest = fmt.Sprintf("sha256:%x", sum)
+	require.NoError(t, Execute(context.Background(), deps, install))
 	extension := installedExtension(t, deps, "hello")
 	assert.Equal(t, extensions.PrefixGH, extension.Prefix)
 	assert.Equal(t, github.Host, extension.Host)

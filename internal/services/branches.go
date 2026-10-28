@@ -118,26 +118,14 @@ func (s Branches) Create(ctx context.Context, repo, branch, source string) (Bran
 		}
 		return err
 	}
-	if source == "" {
-		item, err := repoConvert(ctx, s.Client, repo, branchFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Branch, *gitea.Response, error) {
-			return c.Repositories.CreateBranch(ctx, owner, name, gitea.CreateBranchOption{BranchName: branch})
-		})
-		return item, exists(err)
+	item, err := repoConvert(ctx, s.Client, repo, branchFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Branch, *gitea.Response, error) {
+		return c.Repositories.CreateBranch(ctx, owner, name, gitea.CreateBranchOption{BranchName: branch, OldRefName: source})
+	})
+	// Gitea answers an unknown source with a 500 instead of a 404.
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && source != "" && apiErr.Status == http.StatusInternalServerError && strings.Contains(apiErr.Message, "object does not exist") {
+		return Branch{}, &NotFoundError{Kind: "branch, tag or commit", Key: strconv.Quote(source), Scope: repo, Err: err}
 	}
-	if _, _, err := splitRepository(repo); err != nil {
-		return Branch{}, err
-	}
-	// TODO(sdk): CreateBranchOption lacks old_ref_name, which also accepts tags and commits.
-	var created gitea.Branch
-	payload := map[string]string{"new_branch_name": branch, "old_ref_name": source}
-	if err := sendJSON(ctx, s.Client, http.MethodPost, "repos/"+repo+"/branches", payload, &created); err != nil {
-		// Gitea answers an unknown source with a 500 instead of a 404.
-		if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusInternalServerError && strings.Contains(apiErr.Message, "object does not exist") {
-			return Branch{}, &NotFoundError{Kind: "branch, tag or commit", Key: strconv.Quote(source), Scope: repo, Err: err}
-		}
-		return Branch{}, exists(err)
-	}
-	return branchFrom(&created), nil
+	return item, exists(err)
 }
 
 // Rename renames a remote branch.

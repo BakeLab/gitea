@@ -13,28 +13,33 @@ import (
 )
 
 func TestTeamRepositoryPolicyPreservesUnitPermissions(t *testing.T) {
-	mutations := 0
-	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/teams/1", r.URL.Path)
-		if r.Method == http.MethodGet {
-			_, _ = w.Write([]byte(`{"id":1,"permission":"read","units_map":{"repo.code":"write","repo.issues":"read"}}`))
-			return
-		}
-		mutations++
-		body := requestJSON(t, r)
-		require.Equal(t, "read", body["permission"])
-		require.Equal(t, false, body["includes_all_repositories"])
-		require.Equal(t, map[string]any{"repo.code": "write", "repo.issues": "read"}, body["units_map"])
-		require.NotContains(t, body, "name")
-		require.NotContains(t, body, "description")
-		_, _ = w.Write([]byte(`{"id":1,"permission":"read","organization":{"username":"acme"}}`))
-	}))
-	service := Teams{Client: client}
-	allRepos := false
-	item, err := service.Edit(context.Background(), 1, TeamOptions{AllRepositories: &allRepos})
-	require.NoError(t, err)
-	require.Equal(t, "acme", item.Organization)
-	require.Equal(t, 1, mutations)
+	for _, permission := range []string{"read", "none"} {
+		mutations := 0
+		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, "/api/v1/teams/1", r.URL.Path)
+			if r.Method == http.MethodGet {
+				_, _ = w.Write([]byte(`{"id":1,"permission":"` + permission + `","units_map":{"repo.code":"write","repo.issues":"read"}}`))
+				return
+			}
+			mutations++
+			body := requestJSON(t, r)
+			if permission == "none" {
+				require.Empty(t, body["permission"], "Gitea reports none for a unit policy and refuses it in an edit")
+			} else {
+				require.Equal(t, permission, body["permission"])
+			}
+			require.Equal(t, false, body["includes_all_repositories"])
+			require.Equal(t, map[string]any{"repo.code": "write", "repo.issues": "read"}, body["units_map"])
+			require.Empty(t, body["name"], "an empty name keeps the current one")
+			require.Nil(t, body["description"])
+			_, _ = w.Write([]byte(`{"id":1,"permission":"read","organization":{"username":"acme"}}`))
+		}))
+		allRepos := false
+		item, err := (Teams{Client: client}).Edit(context.Background(), 1, TeamOptions{AllRepositories: &allRepos})
+		require.NoError(t, err, permission)
+		require.Equal(t, "acme", item.Organization)
+		require.Equal(t, 1, mutations)
+	}
 }
 
 func TestTeamEditMergesUnitsUnlessReplaced(t *testing.T) {
@@ -56,7 +61,7 @@ func TestTeamEditMergesUnitsUnlessReplaced(t *testing.T) {
 			}
 			body := requestJSON(t, r)
 			require.Equal(t, test.want, body["units_map"])
-			require.NotContains(t, body, "permission")
+			require.Empty(t, body["permission"], "an empty permission keeps the current one")
 			_, _ = w.Write([]byte(`{"id":5}`))
 		}))
 		_, err := (Teams{Client: client}).Edit(context.Background(), 5, TeamOptions{Units: map[string]string{"repo.wiki": "write"}, ReplaceUnits: test.replace})
@@ -198,6 +203,7 @@ func TestTeamEditSendsThePermissionBeforeTheUnits(t *testing.T) {
 	_, err := (Teams{Client: client}).Edit(context.Background(), 5, TeamOptions{Permission: &permission, Units: map[string]string{"repo.wiki": "read"}, ReplaceUnits: true})
 	require.NoError(t, err)
 	require.Len(t, bodies, 2)
-	require.Equal(t, map[string]any{"name": "devs", "permission": "write"}, bodies[0], "Gitea 28 keeps an admin team admin when one request sets both")
+	require.Equal(t, "write", bodies[0]["permission"])
+	require.Nil(t, bodies[0]["units_map"], "Gitea 28 keeps an admin team admin when one request sets both")
 	require.Equal(t, map[string]any{"repo.wiki": "read"}, bodies[1]["units_map"])
 }

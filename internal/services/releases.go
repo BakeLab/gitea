@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -94,18 +93,10 @@ func (s Releases) Latest(ctx context.Context) (Release, error) {
 }
 
 // Archive opens the source archive of the repository at ref; format is zip or tar.gz.
-// TODO(sdk): GetArchiveReader cannot follow the redirect to object storage that serves archives
-// directly.
 func (s Releases) Archive(ctx context.Context, ref, format string) (io.ReadCloser, error) {
-	owner, repo, err := splitRepository(s.Repository)
-	if err != nil {
-		return nil, err
-	}
-	segments := strings.Split(ref, "/")
-	for i, segment := range segments {
-		segments[i] = url.PathEscape(segment)
-	}
-	body, err := downloadAPI(ctx, s.Client, fmt.Sprintf("repos/%s/%s/archive/%s.%s", url.PathEscape(owner), url.PathEscape(repo), strings.Join(segments, "/"), url.PathEscape(format)))
+	body, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (io.ReadCloser, *gitea.Response, error) {
+		return c.Repositories.GetArchiveReader(ctx, owner, repo, ref, gitea.ArchiveType("."+format))
+	})
 	// Gitea answers "unrecognized repository reference" for a ref that does not exist.
 	return body, Classify(err, "ref", ref, s.Repository)
 }

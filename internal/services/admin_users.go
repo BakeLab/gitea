@@ -6,8 +6,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -174,14 +172,8 @@ func (s AdminUsers) Edit(ctx context.Context, username string, opts AdminUserOpt
 // Delete removes an account. Gitea refuses to delete users who own repositories or organizations
 // unless purge also deletes what they own.
 func (s AdminUsers) Delete(ctx context.Context, username string, purge bool) error {
-	var err error
-	if purge {
-		// TODO(sdk): DeleteUser needs a purge option.
-		err = sendJSON(ctx, s.Client, http.MethodDelete, "admin/users/"+url.PathEscape(username)+"?purge=true", nil, nil)
-	} else {
-		err = do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
-			return c.Admin.DeleteUser(ctx, username)
-		})
-	}
+	err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+		return c.Admin.DeleteUserWithOption(ctx, username, gitea.DeleteUserOption{Purge: purge})
+	})
 	return Classify(err, "user", strconv.Quote(username), "")
 }

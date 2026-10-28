@@ -5,9 +5,7 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"maps"
-	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -270,7 +268,9 @@ func (s Teams) Edit(ctx context.Context, id int64, opts TeamOptions) (Team, erro
 			if current.Permission == "owner" {
 				return Team{}, &CapabilityError{Feature: "owner-team repository policy editing", Reason: "owner teams already manage all organization repositories"}
 			}
-			opts.Permission = &current.Permission
+			if current.Permission != "none" { // a team with a unit policy has none, which the units carry
+				opts.Permission = &current.Permission
+			}
 		}
 		switch {
 		case opts.Units == nil:
@@ -288,24 +288,24 @@ func (s Teams) Edit(ctx context.Context, id int64, opts TeamOptions) (Team, erro
 	// Gitea 28 keeps an admin team admin when one request changes its permission and sets units_map,
 	// so change the permission alone first and then apply the units.
 	if changesPermission && opts.Units != nil {
-		first := TeamOptions{Name: opts.Name, Permission: opts.Permission}
-		if first.Name == nil {
-			current, err := s.View(ctx, id)
-			if err != nil {
-				return Team{}, err
-			}
-			first.Name = &current.Name
-		}
-		// TODO(sdk): EditTeamOption requires a name of at most 30 characters and a permission, and EditTeam should return the team.
-		if err := sendJSON(ctx, s.Client, http.MethodPatch, fmt.Sprintf("teams/%d", id), first, nil); err != nil {
+		if _, err := s.update(ctx, id, TeamOptions{Name: opts.Name, Permission: opts.Permission}); err != nil {
 			return Team{}, err
 		}
 	}
-	var team gitea.Team
-	if err := sendJSON(ctx, s.Client, http.MethodPatch, fmt.Sprintf("teams/%d", id), opts, &team); err != nil {
+	return s.update(ctx, id, opts)
+}
+
+func (s Teams) update(ctx context.Context, id int64, opts TeamOptions) (Team, error) {
+	team, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Team, *gitea.Response, error) {
+		return c.Organizations.UpdateTeam(ctx, id, gitea.EditTeamOption{
+			Name: deref(opts.Name), Description: opts.Description, Permission: gitea.AccessMode(deref(opts.Permission)),
+			CanCreateOrgRepo: opts.CanCreateRepo, IncludesAllRepositories: opts.AllRepositories, UnitsMap: opts.Units,
+		})
+	})
+	if err != nil {
 		return Team{}, err
 	}
-	return teamFrom(&team), nil
+	return teamFrom(team), nil
 }
 
 // Delete deletes a team and its associated access grants.

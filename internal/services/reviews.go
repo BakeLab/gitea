@@ -256,16 +256,6 @@ func (s Reviews) Submit(ctx context.Context, n, id int64, opts ReviewSubmitOptio
 		body = *opts.Body
 	}
 	option := gitea.SubmitPullReviewOptions{State: gitea.ReviewStateType(opts.Event), Body: body}
-	if option.State != gitea.ReviewStateApproved && strings.TrimSpace(body) == "" {
-		// TODO(sdk): SubmitPullReview requires a body unless the event is APPROVED, but Gitea accepts
-		// an empty body when the pending review has inline comments.
-		var review gitea.PullReview
-		endpoint := fmt.Sprintf("repos/%s/pulls/%d/reviews/%d", s.Repository, n, id)
-		if err := sendJSON(ctx, s.Client, http.MethodPost, endpoint, option, &review); err != nil {
-			return Review{}, s.closedPullError(ctx, n, err, "only comment reviews can be submitted")
-		}
-		return reviewFrom(&review), nil
-	}
 	item, err := repoConvert(ctx, s.Client, s.Repository, reviewFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullReview, *gitea.Response, error) {
 		return c.PullRequests.SubmitPullReview(ctx, owner, name, n, id, option)
 	})

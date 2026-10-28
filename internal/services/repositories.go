@@ -235,13 +235,6 @@ func (s Repositories) Create(ctx context.Context, org string, opts RepositoryOpt
 		Readme: opts.Readme, DefaultBranch: opts.DefaultBranch, TrustModel: gitea.TrustModel(opts.TrustModel),
 		ObjectFormatName: opts.ObjectFormat,
 	}
-	// TODO(sdk): CreateRepoOption.Validate counts the description in bytes, but Gitea allows 2048
-	// characters; a longer one is set by an edit once the repository exists.
-	description := opts.Description
-	later := len(description) > sdkDescriptionLimit
-	if later {
-		options.Description = ""
-	}
 	item, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Repository, *gitea.Response, error) {
 		if org != "" {
 			return c.Repositories.CreateOrgRepo(ctx, org, options)
@@ -256,15 +249,7 @@ func (s Repositories) Create(ctx context.Context, org string, opts RepositoryOpt
 	if err != nil {
 		return Repository{}, Classify(err, "repository", "", "")
 	}
-	created := repositoryFrom(item)
-	if later {
-		edited, err := s.Edit(ctx, created.FullName, RepositoryEdit{Description: &description})
-		if err != nil {
-			return created, fmt.Errorf("repository %s was created, but setting its description failed: %w", created.FullName, err)
-		}
-		return edited, nil
-	}
-	return created, nil
+	return repositoryFrom(item), nil
 }
 
 // createForUser creates a repository for owner, which is no organization, through the admin API:
@@ -286,9 +271,6 @@ func (s Repositories) createForUser(ctx context.Context, owner string, options g
 	// The repository cannot be missing before it exists: the organization is.
 	return nil, &NotFoundError{Kind: "organization", Key: strconv.Quote(owner), Err: orgErr}
 }
-
-// sdkDescriptionLimit is the length in bytes that the SDK accepts for a new repository's description.
-const sdkDescriptionLimit = 2048
 
 // Edit updates only explicitly supplied resource fields.
 func (s Repositories) Edit(ctx context.Context, repo string, opts RepositoryEdit) (Repository, error) {

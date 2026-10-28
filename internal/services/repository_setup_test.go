@@ -145,7 +145,7 @@ func TestRepositoryMigrationKeepsMessageWithoutCredentials(t *testing.T) {
 	require.ErrorContains(t, err, "repository already exists")
 }
 
-func TestRepositoryMigrateSendsADescriptionBeyondTheSDKByteLimit(t *testing.T) {
+func TestRepositoryMigrateSendsADescriptionOfManyBytes(t *testing.T) {
 	description := strings.Repeat("日", 800) // 2400 bytes, 800 characters
 	var methods []string
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -180,7 +180,7 @@ func TestRepositoryMigrateFromAForgeWithoutAToken(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "alice/imported", migrated.FullName)
 			require.Equal(t, test.opts.Service, sent["service"])
-			require.NotContains(t, sent, "auth_token")
+			require.Empty(t, sent["auth_token"])
 			if test.opts.AuthUser != "" {
 				require.Equal(t, test.opts.AuthUser, sent["auth_username"])
 			}

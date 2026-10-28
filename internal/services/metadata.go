@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -52,8 +51,6 @@ type Labels struct {
 	Repository, Organization string
 }
 
-func (s Labels) orgEndpoint() string { return "orgs/" + url.PathEscape(s.Organization) + "/labels" }
-
 // List returns scoped labels without merging unrelated organization labels.
 func (s Labels) List(ctx context.Context, limit, page int) ([]Label, error) {
 	labels, _, err := s.list(ctx, limit, page)
@@ -96,18 +93,6 @@ func (s Labels) All(ctx context.Context) ([]Label, error) {
 
 // Create creates one label.
 func (s Labels) Create(ctx context.Context, opts LabelOptions) (Label, error) {
-	if s.Organization != "" && opts.Archived != nil && *opts.Archived {
-		// TODO(sdk): CreateOrgLabelOption.IsArchived
-		var result Label
-		if err := sendJSON(ctx, s.Client, http.MethodPost, s.orgEndpoint(), opts, &result); err != nil {
-			return result, err
-		}
-		if !result.Archived {
-			// Gitea ignores is_archived when it creates an organization label.
-			return s.Edit(ctx, result.ID, LabelOptions{Archived: opts.Archived})
-		}
-		return result, nil
-	}
 	name, color, description := deref(opts.Name), deref(opts.Color), deref(opts.Description)
 	exclusive, archived := deref(opts.Exclusive), deref(opts.Archived)
 	label, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Label, *gitea.Response, error) {
@@ -127,21 +112,18 @@ func (s Labels) Create(ctx context.Context, opts LabelOptions) (Label, error) {
 	if err != nil {
 		return Label{}, err
 	}
+	if s.Organization != "" && archived && !label.IsArchived { // Gitea ignores is_archived when it creates an organization label
+		return s.Edit(ctx, label.ID, LabelOptions{Archived: opts.Archived})
+	}
 	return labelFrom(label), nil
 }
 
 // Edit updates only explicitly supplied fields.
 func (s Labels) Edit(ctx context.Context, id int64, opts LabelOptions) (Label, error) {
-	if s.Organization != "" && opts.Archived != nil {
-		// TODO(sdk): EditOrgLabelOption.IsArchived
-		var result Label
-		err := sendJSON(ctx, s.Client, http.MethodPatch, fmt.Sprintf("%s/%d", s.orgEndpoint(), id), opts, &result)
-		return result, err
-	}
 	label, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Label, *gitea.Response, error) {
 		if s.Organization != "" {
 			return c.Organizations.EditOrgLabel(ctx, s.Organization, id, gitea.EditOrgLabelOption{
-				Name: opts.Name, Color: opts.Color, Description: opts.Description, Exclusive: opts.Exclusive,
+				Name: opts.Name, Color: opts.Color, Description: opts.Description, Exclusive: opts.Exclusive, IsArchived: opts.Archived,
 			})
 		}
 		owner, repo, err := splitRepository(s.Repository)

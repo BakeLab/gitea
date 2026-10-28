@@ -7,9 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -212,21 +210,6 @@ func callPage[T any](ctx context.Context, client *transport.Client, limit, page 
 			return list(ctx, c, listOptions(limit, page))
 		})
 		return items, headerOf(resp), err
-	})
-}
-
-// rawPage is instancePage over a raw JSON collection endpoint; it sets limit and page on query.
-func rawPage[T any](ctx context.Context, client *transport.Client, endpoint string, query url.Values, limit, page int) (Page[T], error) {
-	query = maps.Clone(query)
-	if query == nil {
-		query = url.Values{}
-	}
-	return instancePage(ctx, client, limit, page, func(limit, page int) ([]T, http.Header, error) {
-		query.Set("limit", strconv.Itoa(limit))
-		query.Set("page", strconv.Itoa(page))
-		var response []T
-		headers, err := rawJSON(ctx, client, http.MethodGet, endpoint+"?"+query.Encode(), nil, &response)
-		return response, headers, err
 	})
 }
 

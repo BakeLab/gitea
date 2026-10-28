@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOrganizationLabelArchivingUsesRawRequests(t *testing.T) {
+func TestOrganizationLabelArchivingIsSentOnEdit(t *testing.T) {
 	var requests []string
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -36,9 +36,9 @@ func TestOrganizationLabelArchivingUsesRawRequests(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, requests, 4)
-	assert.Equal(t, `POST /api/v1/orgs/company/labels {"name":"bug","color":"ee0701","is_archived":true}`, requests[0])
+	assert.Equal(t, `POST /api/v1/orgs/company/labels {"name":"bug","color":"ee0701","description":"","exclusive":false}`, requests[0])
 	assert.NotContains(t, requests[1], "is_archived")
-	assert.Equal(t, `PATCH /api/v1/orgs/company/labels/5 {"is_archived":false}`, requests[2])
+	assert.Equal(t, `PATCH /api/v1/orgs/company/labels/5 {"name":null,"color":null,"description":null,"is_archived":false}`, requests[2])
 	assert.NotContains(t, requests[3], "is_archived")
 	assert.Contains(t, requests[3], `"name":"bug"`)
 }
@@ -92,5 +92,8 @@ func TestOrganizationArchivedLabelCreateFollowsUpWithPatch(t *testing.T) {
 	label, err := (Labels{Client: client, Organization: "company"}).Create(context.Background(), LabelOptions{Name: &name, Archived: &archived})
 	require.NoError(t, err)
 	require.True(t, label.Archived)
-	require.Equal(t, []string{`POST /api/v1/orgs/company/labels {"name":"bug","is_archived":true}`, `PATCH /api/v1/orgs/company/labels/5 {"is_archived":true}`}, requests)
+	require.Equal(t, []string{
+		`POST /api/v1/orgs/company/labels {"name":"bug","color":"","description":"","exclusive":false}`,
+		`PATCH /api/v1/orgs/company/labels/5 {"name":null,"color":null,"description":null,"is_archived":true}`,
+	}, requests)
 }

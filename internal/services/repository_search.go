@@ -70,27 +70,20 @@ func (s Repositories) ListPage(ctx context.Context, opts RepositoryListOptions) 
 		}
 	}
 	fetch := func(limit, page int) (Page[Repository], error) {
-		var window Page[*gitea.Repository]
-		var err error
-		if opts.Owner == "" && (opts.Starred || opts.Watched) {
-			// TODO(sdk): GetMyStarredRepos and GetMyWatchedRepos accept no ListOptions.
-			endpoint := "user/subscriptions"
-			if opts.Starred {
-				endpoint = "user/starred"
+		window, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Repository, *gitea.Response, error) {
+			switch {
+			case opts.Owner == "" && opts.Starred:
+				return c.Repositories.ListMyStarredRepos(ctx, list)
+			case opts.Owner == "" && opts.Watched:
+				return c.Repositories.ListMyWatchedRepos(ctx, list)
+			case isOrg:
+				return c.Repositories.ListOrgRepos(ctx, opts.Owner, gitea.ListOrgReposOptions{ListOptions: list})
+			case opts.Owner != "":
+				return c.Repositories.ListUserRepos(ctx, opts.Owner, gitea.ListReposOptions{ListOptions: list})
+			default:
+				return c.Repositories.ListMyRepos(ctx, gitea.ListReposOptions{ListOptions: list})
 			}
-			window, err = rawPage[*gitea.Repository](ctx, s.Client, endpoint, nil, limit, page)
-		} else {
-			window, err = callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Repository, *gitea.Response, error) {
-				switch {
-				case isOrg:
-					return c.Repositories.ListOrgRepos(ctx, opts.Owner, gitea.ListOrgReposOptions{ListOptions: list})
-				case opts.Owner != "":
-					return c.Repositories.ListUserRepos(ctx, opts.Owner, gitea.ListReposOptions{ListOptions: list})
-				default:
-					return c.Repositories.ListMyRepos(ctx, gitea.ListReposOptions{ListOptions: list})
-				}
-			})
-		}
+		})
 		return convertPage(window, repositoryFrom), err
 	}
 	if opts.Kind == "" {

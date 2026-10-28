@@ -6,7 +6,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"time"
 
 	gitea "gitea.dev/sdk"
@@ -117,23 +116,20 @@ func (s Issues) searchRepository(ctx context.Context, opts DiscussionSearchOptio
 }
 
 func (s Issues) searchInstance(ctx context.Context, opts DiscussionSearchOptions, kind gitea.IssueType) (Page[*gitea.Issue], error) {
-	query := url.Values{"q": {opts.Query}, "state": {opts.State}, "type": {string(kind)}}
-	for key, value := range map[string]string{"owner": opts.Owner, "team": opts.Team, "created_by": opts.Author, "labels": opts.Labels, "milestones": opts.Milestones} {
-		if value != "" {
-			query.Set(key, value)
-		}
+	query := gitea.ListIssueOption{
+		State: gitea.StateType(opts.State), Type: kind, KeyWord: opts.Query, CreatedBy: opts.Author, Owner: opts.Owner, Team: opts.Team,
+		Since: deref(opts.Since), Before: deref(opts.Before),
+		Assigned: opts.Assigned, Created: opts.Authored, Mentioned: opts.Mentioned, ReviewRequested: opts.ReviewRequested, Reviewed: opts.Reviewed,
 	}
-	for key, value := range map[string]*time.Time{"since": opts.Since, "before": opts.Before} {
-		if value != nil {
-			query.Set(key, value.Format(time.RFC3339))
-		}
+	if opts.Labels != "" {
+		query.Labels = []string{opts.Labels}
 	}
-	for key, enabled := range map[string]bool{"created": opts.Authored, "assigned": opts.Assigned, "mentioned": opts.Mentioned, "review_requested": opts.ReviewRequested, "reviewed": opts.Reviewed} {
-		if enabled {
-			query.Set(key, "true")
-		}
+	if opts.Milestones != "" {
+		query.Milestones = []string{opts.Milestones}
 	}
-	// TODO(sdk): ListIssueOption lacks the assigned, created, mentioned, review_requested and reviewed flags.
-	page, err := rawPage[*gitea.Issue](ctx, s.Client, "repos/issues/search", query, opts.Limit, opts.Page)
+	page, err := callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Issue, *gitea.Response, error) {
+		query.ListOptions = list
+		return c.Issues.ListIssues(ctx, query)
+	})
 	return page, Classify(err, "", "", "")
 }

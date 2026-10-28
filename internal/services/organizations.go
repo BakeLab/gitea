@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"sync"
@@ -174,12 +173,21 @@ func (s Organizations) Create(ctx context.Context, opts OrganizationOptions) (Or
 
 // Edit changes only supplied organization preferences.
 func (s Organizations) Edit(ctx context.Context, name string, opts OrganizationOptions) (Organization, error) {
-	var org gitea.Organization
-	// TODO(sdk): EditOrgOption needs pointer fields so omitted preferences stay unchanged, and EditOrg should return the organization.
-	if err := sendJSON(ctx, s.Client, http.MethodPatch, "orgs/"+url.PathEscape(name), opts, &org); err != nil {
+	option := gitea.UpdateOrgOption{
+		FullName: opts.FullName, Description: opts.Description, Website: opts.Website, Location: opts.Location,
+		RepoAdminChangeTeamAccess: opts.RepoAdminChangeTeamAccess,
+	}
+	if opts.Visibility != nil {
+		visibility := gitea.VisibleType(*opts.Visibility)
+		option.Visibility = &visibility
+	}
+	org, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Organization, *gitea.Response, error) {
+		return c.Organizations.UpdateOrg(ctx, name, option)
+	})
+	if err != nil {
 		return Organization{}, Classify(err, "organization", strconv.Quote(name), "")
 	}
-	return organizationFrom(&org), nil
+	return organizationFrom(org), nil
 }
 
 // Delete deletes the named organization.

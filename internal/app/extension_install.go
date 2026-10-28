@@ -59,7 +59,6 @@ type extensionSource interface {
 	commit(ctx context.Context, ref string) (string, error)
 	file(ctx context.Context, ref, path string) ([]byte, bool, error)
 	download(ctx context.Context, release extensionRelease, asset extensionAsset) (io.ReadCloser, error)
-	assetDigest(ctx context.Context, release extensionRelease, asset extensionAsset) (string, error)
 	// cloneArgs are the Git arguments that authenticate a clone, or turn off credentials.
 	cloneArgs() ([]string, error)
 }
@@ -117,10 +116,6 @@ func (s giteaExtensionSource) download(ctx context.Context, release extensionRel
 	return (services.Releases{Client: s.t.client, Repository: s.t.Repo}).DownloadAsset(ctx, release.id, asset.id)
 }
 
-func (s giteaExtensionSource) assetDigest(ctx context.Context, release extensionRelease, asset extensionAsset) (string, error) {
-	return (services.Releases{Client: s.t.client, Repository: s.t.Repo}).AssetDigest(ctx, release.id, asset.id)
-}
-
 func (s giteaExtensionSource) cloneArgs() ([]string, error) {
 	if s.anonymous {
 		return []string{"-c", "credential.helper="}, nil
@@ -169,10 +164,6 @@ func (s githubExtensionSource) file(ctx context.Context, ref, path string) ([]by
 
 func (s githubExtensionSource) download(ctx context.Context, _ extensionRelease, asset extensionAsset) (io.ReadCloser, error) {
 	return s.client.Download(ctx, github.Asset{Name: asset.name, URL: asset.url})
-}
-
-func (s githubExtensionSource) assetDigest(context.Context, extensionRelease, extensionAsset) (string, error) {
-	return "", nil
 }
 
 func (s githubExtensionSource) cloneArgs() ([]string, error) {
@@ -301,14 +292,7 @@ func (a *application) resolveExtension(ctx context.Context, source extensionSour
 // recorded at upload, else the one checksums.txt lists. Without either, only the digest gt records
 // at install protects the executable from then on.
 func (a *application) publishedDigest(ctx context.Context, c *extensionCandidate) error {
-	digest := c.asset.digest
-	if digest == "" {
-		var err error
-		if digest, err = c.source.assetDigest(ctx, c.release, c.asset); err != nil {
-			return err
-		}
-	}
-	if digest != "" {
+	if digest := c.asset.digest; digest != "" {
 		if !extensions.ValidDigest(strings.ToLower(digest)) {
 			return fmt.Errorf("the source published an invalid digest for %s", c.asset.name)
 		}
@@ -501,7 +485,7 @@ whose name ends in OS-ARCH, of the latest release or of the release that --pin n
 such an asset, it clones the repository at the release, the --pin commit or the default branch,
 which must hold an executable gt-NAME at its root.
 
-gt checks a downloaded asset against the SHA-256 the instance recorded for it, else against the
+gt checks a downloaded asset against the SHA-256 GitHub recorded for it, else against the
 checksums.txt asset of the release. When the release publishes neither, gt asks with a default
 of no, or installs with --yes. It records the SHA-256 and refuses to run the extension once the
 executable changes.

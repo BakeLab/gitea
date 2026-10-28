@@ -5,9 +5,7 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,22 +44,11 @@ type TimelineEvent struct {
 	OldDeadline *string `json:"old_deadline"`
 }
 
-// timelineComment is a timeline event as Gitea sends it.
-// TODO(sdk): TimelineComment lacks assignee, assignee_team, removed_assignee and dependent_issue.
-type timelineComment struct {
-	gitea.TimelineComment
-	Assignee        *gitea.User  `json:"assignee"`
-	AssigneeTeam    *gitea.Team  `json:"assignee_team"`
-	RemovedAssignee bool         `json:"removed_assignee"`
-	DependentIssue  *gitea.Issue `json:"dependent_issue"`
-}
-
 // timelineBodies are the event types whose body is text someone wrote. Gitea keeps internal
 // values in the body of others, such as "1" for an added label.
 var timelineBodies = []string{"comment", "code", "review", "dismiss_review"}
 
-func timelineEventFrom(full *timelineComment) TimelineEvent {
-	event := &full.TimelineComment
+func timelineEventFrom(event *gitea.TimelineComment) TimelineEvent {
 	result := TimelineEvent{ID: event.ID, Type: event.Type, Author: login(event.Poster), URL: event.HTMLURL, CreatedAt: timestamp(event.Created)}
 	if slices.Contains(timelineBodies, event.Type) {
 		result.Body = &event.Body
@@ -81,14 +68,14 @@ func timelineEventFrom(full *timelineComment) TimelineEvent {
 	if event.Type == "change_title" {
 		result.OldTitle, result.NewTitle = &event.OldTitle, &event.NewTitle
 	}
-	if full.Assignee != nil {
-		assignee := login(full.Assignee)
-		result.Assignee, result.RemovedAssignee = &assignee, &full.RemovedAssignee
+	if event.Assignee != nil {
+		assignee := login(event.Assignee)
+		result.Assignee, result.RemovedAssignee = &assignee, &event.RemovedAssignee
 	}
-	if full.AssigneeTeam != nil {
-		result.AssigneeTeam, result.RemovedAssignee = &full.AssigneeTeam.Name, &full.RemovedAssignee
+	if event.AssigneeTeam != nil {
+		result.AssigneeTeam, result.RemovedAssignee = &event.AssigneeTeam.Name, &event.RemovedAssignee
 	}
-	if issue := full.DependentIssue; issue != nil && issue.Repository != nil {
+	if issue := event.DependentIssue; issue != nil && issue.Repository != nil {
 		dependent := issue.Repository.FullName + "#" + strconv.FormatInt(issue.Index, 10)
 		result.DependentIssue = &dependent
 	}
@@ -113,13 +100,13 @@ func (s Issues) Timeline(ctx context.Context, n int64, limit, page int) (Page[Ti
 	if err != nil {
 		return Page[TimelineEvent]{}, err
 	}
-	list := func(limit, page int) ([]*timelineComment, error) {
-		var events []*timelineComment
-		endpoint := fmt.Sprintf("repos/%s/%s/issues/%d/timeline?limit=%d&page=%d", url.PathEscape(owner), url.PathEscape(repo), n, limit, page)
-		err := getJSON(ctx, s.Client, endpoint, &events)
+	list := func(limit, page int) ([]*gitea.TimelineComment, error) {
+		events, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) ([]*gitea.TimelineComment, *gitea.Response, error) {
+			return c.Issues.ListIssueTimeline(ctx, owner, repo, n, gitea.ListIssueCommentOptions{ListOptions: listOptions(limit, page)})
+		})
 		return events, err
 	}
-	events, err := instancePage(ctx, s.Client, limit, page, func(limit, page int) ([]*timelineComment, http.Header, error) {
+	events, err := instancePage(ctx, s.Client, limit, page, func(limit, page int) ([]*gitea.TimelineComment, http.Header, error) {
 		events, err := list(limit, page)
 		headers := http.Header{}
 		// A full page may continue, so it asks for the event after it. A page shorter than
@@ -128,7 +115,7 @@ func (s Issues) Timeline(ctx context.Context, n int64, limit, page int) (Page[Ti
 		switch size := len(events); {
 		case err != nil || size == 0:
 		case size == limit:
-			var after []*timelineComment
+			var after []*gitea.TimelineComment
 			after, err = list(1, page*limit+1)
 			next = len(after) > 0
 		default:

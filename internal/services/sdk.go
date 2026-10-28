@@ -18,9 +18,10 @@ import (
 )
 
 // sdkClient binds the SDK to the instance's API transport, which owns authentication, retries,
-// redirects, and error capture. The empty version disables the SDK's version probe and gates.
+// redirects, and error capture, and follows a download's redirect to storage without credentials.
+// The empty version disables the SDK's version probe and gates.
 func sdkClient(client *transport.Client) (*gitea.Client, error) {
-	return gitea.NewClient(client.BaseURL, gitea.SetHTTPClient(client.API()), gitea.SetGiteaVersion(""))
+	return gitea.NewClient(client.BaseURL, gitea.SetHTTPClient(client.API()), gitea.SetStorageHTTPClient(client.Storage().API()), gitea.SetGiteaVersion(""))
 }
 
 // call runs one SDK operation and maps a failure onto the errors raw requests report: the
@@ -34,6 +35,11 @@ func call[T any](ctx context.Context, client *transport.Client, op func(context.
 	ctx, captured := transport.CaptureErrors(ctx)
 	result, resp, err := op(ctx, sdk)
 	if err = sdkError(ctx, resp, err, captured); err != nil {
+		if apiErr, ok := errors.AsType[*transport.APIError](err); ok && resp != nil && resp.Response != nil {
+			if base, parseErr := url.Parse(client.BaseURL); parseErr == nil && !strings.EqualFold(resp.Request.URL.Host, base.Host) {
+				apiErr.Storage = resp.Request.URL.Host
+			}
+		}
 		return zero, resp, err
 	}
 	return result, resp, nil

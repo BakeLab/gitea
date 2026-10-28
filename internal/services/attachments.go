@@ -66,7 +66,7 @@ func assetURL(attachment *gitea.Attachment) string {
 
 // uploadAttachment streams a multipart upload to an attachment collection endpoint without
 // buffering the file in memory.
-// TODO(sdk): CreateReleaseAttachment and CreateIssueAttachment buffer the whole file.
+// TODO(sdk): the attachment uploads stream through a pipe, which HTTP signing has to buffer.
 func uploadAttachment(ctx context.Context, client *transport.Client, endpoint, name string, input io.Reader) (ReleaseAsset, error) {
 	body, contentType, err := fileUpload(name, input)
 	if err != nil {

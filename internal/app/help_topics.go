@@ -363,8 +363,8 @@ under the XDG data directory, and gt NAME runs. Built-in commands always win ove
 
 Installing: gt installs the release asset NAME-OS-ARCH or REPO-OS-ARCH (.exe on Windows) of the
 latest release, else one whose name ends in OS-ARCH, or else clones the repository, which must
-hold an executable gt-NAME at its root. It checks an asset against the SHA-256 the instance
-recorded at upload, else against the release's checksums.txt, in sha256sum format; without
+hold an executable gt-NAME at its root. It checks an asset against the SHA-256 GitHub recorded
+at upload, else against the release's checksums.txt, in sha256sum format; without
 either it asks with a default of no, or installs with --yes. An optional gt-extension.yml in
 the repository declares:
 

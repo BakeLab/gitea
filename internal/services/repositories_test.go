@@ -165,23 +165,16 @@ func TestRepositoryReadme(t *testing.T) {
 	require.EqualError(t, err, `branch "develp" not found in alice/project`)
 }
 
-func TestRepositoryCreateSetsADescriptionBeyondTheSDKByteLimitByEdit(t *testing.T) {
-	description := strings.Repeat("日", 800) // 2400 bytes, 800 characters: Gitea accepts it, the SDK would not
+func TestRepositoryCreateSendsADescriptionOfManyBytes(t *testing.T) {
+	description := strings.Repeat("日", 800) // 2400 bytes in 800 characters, within Gitea's limit of 2048 characters
 	var methods []string
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		methods = append(methods, r.Method)
-		body := requestJSON(t, r)
-		switch r.Method {
-		case http.MethodPost:
-			require.Empty(t, body["description"])
-			_, _ = w.Write([]byte(`{"id":1,"name":"project","full_name":"alice/project"}`))
-		case http.MethodPatch:
-			require.Equal(t, description, body["description"])
-			_, _ = w.Write([]byte(`{"id":1,"name":"project","full_name":"alice/project","description":"` + description + `"}`))
-		}
+		require.Equal(t, description, requestJSON(t, r)["description"])
+		_, _ = w.Write([]byte(`{"id":1,"name":"project","full_name":"alice/project","description":"` + description + `"}`))
 	}))
 	created, err := (Repositories{Client: client}).Create(context.Background(), "", RepositoryOptions{Name: "project", Description: description})
 	require.NoError(t, err)
-	require.Equal(t, []string{http.MethodPost, http.MethodPatch}, methods)
+	require.Equal(t, []string{http.MethodPost}, methods)
 	require.Equal(t, description, created.Description)
 }

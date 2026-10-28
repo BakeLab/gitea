@@ -82,13 +82,15 @@ func (s Issues) SetBlockedBy(ctx context.Context, n int64, blocker IssueReferenc
 	if err != nil {
 		return err
 	}
-	method := http.MethodPost
-	if !block {
-		method = http.MethodDelete
-	}
-	// TODO(sdk): IssueMeta lacks the owner and repo that Gitea needs to find the blocking issue.
-	body := map[string]any{"owner": owner, "repo": repo, "index": blocker.Number}
-	err = sendJSON(ctx, s.Client, method, fmt.Sprintf("%s/%d/dependencies", s.endpoint(), n), body, nil)
+	err = repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, repoOwner, repoName string) (*gitea.Response, error) {
+		meta := gitea.IssueMeta{Index: blocker.Number, Owner: owner, Name: repo}
+		if block {
+			_, resp, err := c.Issues.CreateIssueDependency(ctx, repoOwner, repoName, n, meta)
+			return resp, err
+		}
+		_, resp, err := c.Issues.RemoveIssueDependency(ctx, repoOwner, repoName, n, meta)
+		return resp, err
+	})
 	name := blocker.Repository + "#" + strconv.FormatInt(blocker.Number, 10)
 	// Gitea answers 500 when the dependency to add exists or the one to remove does not.
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok {

@@ -76,7 +76,7 @@ func TestBranchCreateAndProtectPayloads(t *testing.T) {
 func TestBranchCreateFromATagOrCommitSendsOldRefName(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost+" /api/v1/repos/owner/repo/branches", r.Method+" "+r.URL.Path)
-		assert.Equal(t, map[string]any{"new_branch_name": "hotfix", "old_ref_name": "v1.0.0"}, requestJSON(t, r))
+		assert.Equal(t, map[string]any{"new_branch_name": "hotfix", "old_branch_name": "", "old_ref_name": "v1.0.0"}, requestJSON(t, r))
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"name":"hotfix","commit":{"id":"abc"}}`))
 	}))

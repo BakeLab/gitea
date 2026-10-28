@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/transport"
+	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/require"
 )
 
@@ -119,8 +119,9 @@ func TestPagesReportTheCountedTotal(t *testing.T) {
 		t.Run(fmt.Sprintf("%+v", tc), func(t *testing.T) {
 			server, _ := cappedServer(t, tc.total, tc.maxItems, true, tc.count)
 			client := transport.New(server.URL, "", false)
-			query := url.Values{"state": {"open"}}
-			window, err := rawPage[Organization](context.Background(), client, "orgs", query, tc.limit, tc.page)
+			window, err := callPage(context.Background(), client, tc.limit, tc.page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Organization, *gitea.Response, error) {
+				return c.Organizations.ListOrgs(ctx, gitea.ListOrgsOptions{ListOptions: list})
+			})
 			require.NoError(t, err)
 			require.Len(t, window.Items, min(tc.limit, max(0, tc.total-(tc.page-1)*tc.limit)))
 			require.Equal(t, tc.more, window.More)
@@ -128,7 +129,6 @@ func TestPagesReportTheCountedTotal(t *testing.T) {
 			if tc.count {
 				require.Equal(t, tc.total, window.Total)
 			}
-			require.Equal(t, url.Values{"state": {"open"}}, query, "the caller's query is not modified")
 		})
 	}
 }

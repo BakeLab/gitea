@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"gitea.dev/cli/internal/transport"
@@ -77,6 +76,10 @@ func variableFrom(variable *gitea.ActionsVariable) ActionVariable {
 	return ActionVariable{Name: variable.Name, Value: variable.Data, Description: variable.Description}
 }
 
+func repoVariableFrom(variable *gitea.RepoActionsVariable) ActionVariable {
+	return ActionVariable{Name: variable.Name, Value: variable.Value, Description: variable.Description}
+}
+
 // ActionSecrets manages scoped Actions secrets without returning secret data.
 type ActionSecrets struct {
 	Client *transport.Client
@@ -134,8 +137,7 @@ func (s ActionSecrets) Delete(ctx context.Context, name string) error {
 		if err != nil {
 			return nil, err
 		}
-		// TODO(sdk): DeleteRepoSecret does not escape the secret name.
-		return c.Actions.DeleteRepoSecret(ctx, owner, repo, url.PathEscape(name))
+		return c.Actions.DeleteRepoSecret(ctx, owner, repo, name)
 	})
 	return classifyValue(err, "secret", name, s.Scope)
 }
@@ -146,50 +148,41 @@ type ActionVariables struct {
 	Scope  ActionScope
 }
 
-// repoVariables addresses repository variables, or one of them when name is set, for raw requests.
-// TODO(sdk): RepoActionsVariable.Description, a description on Create/UpdateRepoVariable, and name
-// escaping in the repository variable methods.
-func (s ActionVariables) repoVariables(name string) string {
-	endpoint := "repos/" + s.Scope.Repository + "/actions/variables"
-	if name != "" {
-		endpoint += "/" + url.PathEscape(name)
-	}
-	return endpoint
-}
-
 // ListPage lists a page of variables, with what the server reports about the other pages.
 func (s ActionVariables) ListPage(ctx context.Context, limit, page int) (Page[ActionVariable], error) {
-	var window Page[*gitea.ActionsVariable]
-	var err error
 	if s.Scope.Account || s.Scope.Organization != "" {
-		window, err = callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.ActionsVariable, *gitea.Response, error) {
+		window, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.ActionsVariable, *gitea.Response, error) {
 			if s.Scope.Account {
 				return c.Actions.ListUserVariables(ctx, list)
 			}
 			return c.Actions.ListOrgVariables(ctx, s.Scope.Organization, gitea.ListOrgActionsVariableOption{ListOptions: list})
 		})
-	} else {
-		window, err = rawPage[*gitea.ActionsVariable](ctx, s.Client, s.repoVariables(""), nil, limit, page)
+		return convertPage(window, variableFrom), classifyScope(err, s.Scope)
 	}
-	return convertPage(window, variableFrom), classifyScope(err, s.Scope)
+	window, err := callPage(ctx, s.Client, limit, page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.RepoActionsVariable, *gitea.Response, error) {
+		owner, repo, err := splitRepository(s.Scope.Repository)
+		if err != nil {
+			return nil, nil, err
+		}
+		return c.Actions.ListRepoVariables(ctx, owner, repo, gitea.ListRepoActionsVariableOption{ListOptions: list})
+	})
+	return convertPage(window, repoVariableFrom), classifyScope(err, s.Scope)
 }
 
 // View retrieves one variable.
 func (s ActionVariables) View(ctx context.Context, name string) (ActionVariable, error) {
-	variable := new(gitea.ActionsVariable)
-	var err error
-	switch {
-	case s.Scope.Account:
-		variable, _, err = call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.ActionsVariable, *gitea.Response, error) {
-			return c.Actions.GetUserVariable(ctx, name)
+	if !s.Scope.Account && s.Scope.Organization == "" {
+		variable, err := repoConvert(ctx, s.Client, s.Scope.Repository, repoVariableFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.RepoActionsVariable, *gitea.Response, error) {
+			return c.Actions.GetRepoVariable(ctx, owner, repo, name)
 		})
-	case s.Scope.Organization != "":
-		variable, _, err = call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.ActionsVariable, *gitea.Response, error) {
-			return c.Actions.GetOrgVariable(ctx, s.Scope.Organization, name)
-		})
-	default:
-		err = getJSON(ctx, s.Client, s.repoVariables(name), variable)
+		return variable, classifyValue(err, "variable", name, s.Scope)
 	}
+	variable, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.ActionsVariable, *gitea.Response, error) {
+		if s.Scope.Account {
+			return c.Actions.GetUserVariable(ctx, name)
+		}
+		return c.Actions.GetOrgVariable(ctx, s.Scope.Organization, name)
+	})
 	if err != nil {
 		return ActionVariable{}, classifyValue(err, "variable", name, s.Scope)
 	}
@@ -230,11 +223,12 @@ func (s ActionVariables) Set(ctx context.Context, name, value string, newDescrip
 			return c.Actions.CreateOrgVariable(ctx, s.Scope.Organization, name, create)
 		})
 	default:
-		method := http.MethodPost
-		if exists {
-			method = http.MethodPut
-		}
-		err = sendJSON(ctx, s.Client, method, s.repoVariables(name), update, nil)
+		err = repoDo(ctx, s.Client, s.Scope.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+			if exists {
+				return c.Actions.UpdateRepoVariableWithOption(ctx, owner, repo, name, update)
+			}
+			return c.Actions.CreateRepoVariableWithOption(ctx, owner, repo, name, create)
+		})
 	}
 	return ActionVariable{Name: ActionValueName(name), Value: value, Description: description}, classifyValue(err, "variable", name, s.Scope)
 }
@@ -252,7 +246,9 @@ func (s ActionVariables) Delete(ctx context.Context, name string) error {
 			return c.Actions.DeleteOrgVariable(ctx, s.Scope.Organization, name)
 		})
 	default:
-		err = sendJSON(ctx, s.Client, http.MethodDelete, s.repoVariables(name), nil, nil)
+		err = repoDo(ctx, s.Client, s.Scope.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+			return c.Actions.DeleteRepoVariable(ctx, owner, repo, name)
+		})
 	}
 	return classifyValue(err, "variable", name, s.Scope)
 }

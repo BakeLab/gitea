@@ -8,12 +8,19 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
+
+// upload sends a small attachment upload, the request gt still sends without the SDK.
+func upload(ctx context.Context, client *transport.Client, endpoint string) error {
+	_, err := uploadAttachment(ctx, client, endpoint, "a.txt", strings.NewReader("a"))
+	return err
+}
 
 func TestRawBodyCancellationPreservesContextError(t *testing.T) {
 	started := make(chan struct{})
@@ -26,8 +33,7 @@ func TestRawBodyCancellationPreservesContextError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { <-started; cancel() }()
-	var result any
-	require.ErrorIs(t, getJSON(ctx, client, "resource", &result), context.Canceled)
+	require.ErrorIs(t, upload(ctx, client, "resource"), context.Canceled)
 }
 
 func TestRawBodyThatBreaksOffIsARequestFailure(t *testing.T) {
@@ -50,15 +56,14 @@ func TestRawBodyThatBreaksOffIsARequestFailure(t *testing.T) {
 		}
 	}))
 	client = client.WithResponseTimeout(50 * time.Millisecond)
-	var result any
-	err := getJSON(context.Background(), client, "stalled", &result)
+	err := upload(context.Background(), client, "stalled")
 	failure, ok := errors.AsType[*transport.RequestFailure](err)
 	require.True(t, ok, "a stalled body is a request failure, not invalid JSON: %v", err)
 	require.ErrorIs(t, err, transport.ErrTimeout)
 	require.Equal(t, client.BaseURL, failure.Server)
-	err = getJSON(context.Background(), client, "dropped", &result)
+	err = upload(context.Background(), client, "dropped")
 	require.ErrorAs(t, err, new(*transport.RequestFailure))
 	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
-	require.ErrorIs(t, getJSON(context.Background(), client, "invalid", &result), errInvalidJSON)
-	require.ErrorIs(t, getJSON(context.Background(), client, "empty", &result), errInvalidJSON)
+	require.ErrorIs(t, upload(context.Background(), client, "invalid"), errInvalidJSON)
+	require.ErrorIs(t, upload(context.Background(), client, "empty"), errInvalidJSON)
 }

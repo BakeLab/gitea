@@ -5,7 +5,6 @@ package services
 
 import (
 	"context"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -37,9 +36,13 @@ func (s Repositories) Generate(ctx context.Context, source string, opts Reposito
 		}
 		opts.Owner = account
 	}
-	// TODO(sdk): CreateRepoFromTemplateOption has no default_branch.
-	var response gitea.Repository
-	if err := sendJSON(ctx, s.Client, http.MethodPost, "repos/"+source+"/generate", opts, &response); err != nil {
+	response, err := repoCall(ctx, s.Client, source, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Repository, *gitea.Response, error) {
+		return c.Repositories.CreateRepoFromTemplate(ctx, owner, name, gitea.CreateRepoFromTemplateOption{
+			Owner: opts.Owner, Name: opts.Name, Description: opts.Description, DefaultBranch: opts.DefaultBranch, Private: opts.Private,
+			GitContent: opts.Content, GitHooks: opts.GitHooks, Avatar: opts.Avatar, Labels: opts.Labels, Topics: opts.Topics, Webhooks: opts.Webhooks,
+		})
+	})
+	if err != nil {
 		// Gitea answers a missing template and a missing owner with the same 404.
 		if IsNotFound(err) {
 			if missingRepository(ctx, s.Client, source) != nil {
@@ -49,7 +52,7 @@ func (s Repositories) Generate(ctx context.Context, source string, opts Reposito
 		}
 		return Repository{}, Classify(err, "repository", "", "")
 	}
-	return repositoryFrom(&response), nil
+	return repositoryFrom(response), nil
 }
 
 // Licenses lists the license templates that repository creation accepts.
@@ -137,12 +140,17 @@ func (s Repositories) Migrate(ctx context.Context, opts RepositoryMigrationOptio
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 	}
-	// TODO(sdk): MigrateRepoOption.Validate demands a token for every forge service, though Gitea
-	// also imports with a username and password or anonymously, and counts the description in bytes
-	// where Gitea allows 2048 characters.
-	var item gitea.Repository
-	if err := sendJSON(ctx, s.Client, http.MethodPost, "repos/migrate", opts, &item); err != nil {
+	item, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Repository, *gitea.Response, error) {
+		return c.Repositories.MigrateRepo(ctx, gitea.MigrateRepoOption{
+			RepoName: opts.Name, RepoOwner: opts.Owner, CloneAddr: opts.CloneURL, Service: gitea.GitServiceType(opts.Service),
+			AuthUsername: opts.AuthUser, AuthPassword: opts.AuthPassword, AuthToken: opts.AuthToken,
+			Mirror: opts.Mirror, Private: opts.Private, Description: opts.Description, Wiki: opts.Wiki, Milestones: opts.Milestones,
+			Labels: opts.Labels, Issues: opts.Issues, PullRequests: opts.PullRequests, Releases: opts.Releases,
+			MirrorInterval: opts.MirrorInterval, LFS: opts.LFS, LFSEndpoint: opts.LFSEndpoint,
+		})
+	})
+	if err != nil {
 		return Repository{}, err
 	}
-	return repositoryFrom(&item), nil
+	return repositoryFrom(item), nil
 }

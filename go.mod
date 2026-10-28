@@ -10,7 +10,7 @@ require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/huh/v2 v2.0.3
 	code.gitea.io/gitea-vet v0.2.3
-	gitea.dev/sdk v1.3.0
+	gitea.dev/sdk v1.5.0
 	github.com/42wim/httpsig v1.3.0
 	github.com/adrg/xdg v0.5.3
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de

@@ -7,8 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
 	"path"
 	"slices"
 	"strconv"
@@ -45,47 +43,25 @@ type Run struct {
 // Completed reports whether the run finished, whatever its conclusion.
 func (r Run) Completed() bool { return completedActionStatus(r.Status) }
 
-type runResponse struct {
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
-	StartedAt    string `json:"started_at"`
-	CompletedAt  string `json:"completed_at"`
-	ID           int64  `json:"id"`
-	RunNumber    int64  `json:"run_number"`
-	DisplayTitle string `json:"display_title"`
-	Path         string `json:"path"`
-	Status       string `json:"status"`
-	Conclusion   string `json:"conclusion"`
-	HTMLURL      string `json:"html_url"`
-	HeadBranch   string `json:"head_branch"`
-	Event        string `json:"event"`
-	HeadSHA      string `json:"head_sha"`
-	RunAttempt   int64  `json:"run_attempt"`
-	Actor        struct {
-		Login string `json:"login"`
-	} `json:"actor"`
-}
-
-// result converts the response; until the run is named after its workflow, Workflow is the
-// workflow's file name without extension.
-func (r runResponse) result() Run {
+// runFrom converts a run; until the run is named after its workflow, Workflow is the workflow's
+// file name without extension.
+func runFrom(r *gitea.ActionsWorkflowRun) Run {
 	file, _, _ := strings.Cut(r.Path, "@")
 	return Run{
 		ID: r.ID, RunNumber: r.RunNumber, Title: r.DisplayTitle, Status: r.Status, Conclusion: r.Conclusion, URL: r.HTMLURL,
 		Branch: r.HeadBranch, Workflow: strings.TrimSuffix(file, path.Ext(file)), WorkflowPath: file,
-		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, StartedAt: runTime(r.StartedAt), CompletedAt: runTime(r.CompletedAt),
-		Event: r.Event, Actor: r.Actor.Login, Commit: r.HeadSHA, Attempt: r.RunAttempt,
+		CreatedAt: timestamp(r.CreatedAt), UpdatedAt: timestamp(r.UpdatedAt), StartedAt: runTime(r.StartedAt), CompletedAt: runTime(r.CompletedAt),
+		Event: r.Event, Actor: login(r.Actor), Commit: r.HeadSha, Attempt: r.RunAttempt,
 	}
 }
 
-// runTime returns an Actions timestamp, or nil for the zero or Unix epoch time Gitea reports
-// for a run or job that has not started or completed.
-func runTime(raw string) *string {
-	t, err := time.Parse(time.RFC3339Nano, raw)
-	if raw == "" || (err == nil && t.Unix() <= 0) {
+// runTime is the time of a run phase, or nil before the phase, for which Gitea sends the zero or
+// Unix epoch time.
+func runTime(t time.Time) *string {
+	if t.Unix() <= 0 {
 		return nil
 	}
-	return &raw
+	return optionalTimestamp(&t)
 }
 
 // RunListOptions supplies server-side run filters and pagination. Workflow is a workflow file
@@ -180,37 +156,29 @@ func (s Actions) runs(ctx context.Context, opts RunListOptions) (Page[Run], erro
 }
 
 func (s Actions) runsPage(ctx context.Context, opts RunListOptions) (Page[Run], error) {
-	query := url.Values{}
-	for key, value := range map[string]string{"branch": opts.Branch, "event": opts.Event, "actor": opts.Actor, "head_sha": opts.Commit} {
-		if value != "" {
-			query.Set(key, value)
+	query := gitea.ListRepoActionsRunsOptions{Branch: opts.Branch, Event: opts.Event, Actor: opts.Actor, HeadSHA: opts.Commit, Statuses: opts.Statuses}
+	runs, err := callPage(ctx, s.Client, opts.Limit, opts.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.ActionsWorkflowRun, *gitea.Response, error) {
+		owner, repo, err := splitRepository(s.Repository)
+		if err != nil {
+			return nil, nil, err
 		}
-	}
-	for _, status := range opts.Statuses {
-		query.Add("status", status)
-	}
-	endpoint := s.endpoint() + "runs"
-	if opts.Workflow != "" {
-		endpoint = s.endpoint() + "workflows/" + url.PathEscape(opts.Workflow) + "/runs"
-	}
-	runs, err := instancePage(ctx, s.Client, opts.Limit, opts.Page, func(limit, page int) ([]Run, http.Header, error) {
-		query.Set("limit", strconv.Itoa(limit))
-		query.Set("page", strconv.Itoa(page))
-		var response struct {
-			Runs []runResponse `json:"workflow_runs"`
+		query.ListOptions = list
+		var response *gitea.ActionsWorkflowRunsResponse
+		var resp *gitea.Response
+		if opts.Workflow != "" {
+			response, resp, err = c.Actions.ListRepoRunsByWorkflow(ctx, owner, repo, opts.Workflow, query)
+		} else {
+			response, resp, err = c.Actions.ListRepoRuns(ctx, owner, repo, query)
 		}
-		// TODO(sdk): ListRepoActionsRunsOptions takes one status and ActionsWorkflowRun lacks created_at/updated_at.
-		headers, err := rawJSON(ctx, s.Client, http.MethodGet, endpoint+"?"+query.Encode(), nil, &response)
-		runs := make([]Run, len(response.Runs))
-		for i, item := range response.Runs {
-			runs[i] = item.result()
+		if response == nil {
+			return nil, resp, err
 		}
-		return runs, headers, err
+		return response.WorkflowRuns, resp, err
 	})
 	if opts.Workflow != "" && IsNotFound(err) {
 		return Page[Run]{}, NotFound("workflow", strconv.Quote(opts.Workflow), s.Repository)
 	}
-	return runs, Classify(err, "repository", s.Repository, "")
+	return convertPage(runs, runFrom), Classify(err, "repository", s.Repository, "")
 }
 
 // nameRuns names runs after their workflows.
@@ -238,10 +206,10 @@ func (s Actions) workflowNames(ctx context.Context) (map[string]string, error) {
 
 // Run retrieves one Actions run.
 func (s Actions) Run(ctx context.Context, id int64) (Run, error) {
-	var response runResponse
-	// TODO(sdk): ActionsWorkflowRun lacks created_at/updated_at.
-	err := getJSON(ctx, s.Client, fmt.Sprintf("%sruns/%d", s.endpoint(), id), &response)
-	return response.result(), repositoryItemError(ctx, s.Client, s.Repository, err, "run", strconv.FormatInt(id, 10))
+	run, err := repoConvert(ctx, s.Client, s.Repository, runFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.ActionsWorkflowRun, *gitea.Response, error) {
+		return c.Actions.GetRepoRun(ctx, owner, repo, id)
+	})
+	return run, repositoryItemError(ctx, s.Client, s.Repository, err, "run", strconv.FormatInt(id, 10))
 }
 
 // NameRun names a run that a mutation returned after its workflow; it stays as is when the
@@ -356,15 +324,14 @@ func (s Actions) Watch(ctx context.Context, id int64, interval time.Duration, up
 // CancelRun requests cancellation without deleting the run or its history.
 // Force cancellation is an explicit operation for unresponsive runners.
 func (s Actions) CancelRun(ctx context.Context, id int64, force bool) (Run, error) {
-	action := "cancel"
-	if force {
-		action = "force-cancel"
-	}
-	var response runResponse
-	// TODO(sdk): ActionsWorkflowRun lacks created_at/updated_at.
-	err := sendJSON(ctx, s.Client, http.MethodPost, fmt.Sprintf("%sruns/%d/%s", s.endpoint(), id, action), nil, &response)
+	run, err := repoConvert(ctx, s.Client, s.Repository, runFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.ActionsWorkflowRun, *gitea.Response, error) {
+		if force {
+			return c.Actions.ForceCancelRepoRun(ctx, owner, repo, id)
+		}
+		return c.Actions.CancelRepoRun(ctx, owner, repo, id)
+	})
 	if err != nil {
 		return Run{}, repositoryItemError(ctx, s.Client, s.Repository, err, "run", strconv.FormatInt(id, 10))
 	}
-	return response.result(), nil
+	return run, nil
 }

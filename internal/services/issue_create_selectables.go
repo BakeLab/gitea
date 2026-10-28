@@ -5,6 +5,8 @@ package services
 
 import (
 	"context"
+
+	gitea "gitea.dev/sdk"
 )
 
 // IssueTemplate is a repository issue template used to seed create forms.
@@ -18,27 +20,17 @@ type IssueTemplate struct {
 	FileName string
 }
 
-type issueTemplateResponse struct {
-	Name            string   `json:"name"`
-	About           string   `json:"about"`
-	Title           string   `json:"title"`
-	MarkdownContent string   `json:"content"`
-	Form            []any    `json:"body"`
-	Labels          []string `json:"labels"`
-	Ref             string   `json:"ref"`
-	FileName        string   `json:"file_name"`
-}
-
 // IssueTemplates lists repository issue templates; null responses become an empty list.
 func (s Issues) IssueTemplates(ctx context.Context) ([]IssueTemplate, error) {
-	var response []issueTemplateResponse
-	// TODO(sdk): IssueFormElementAttributes.Options is []string, so GetIssueTemplates fails on checkbox options, which are objects.
-	if err := getJSON(ctx, s.Client, "repos/"+s.Repository+"/issue_templates", &response); err != nil {
+	response, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.IssueTemplate, *gitea.Response, error) {
+		return c.Issues.GetIssueTemplates(ctx, owner, repo)
+	})
+	if err != nil {
 		return nil, err
 	}
 	result := make([]IssueTemplate, 0, len(response))
 	for _, r := range response {
-		result = append(result, IssueTemplate{Name: r.Name, About: r.About, Title: r.Title, Content: r.MarkdownContent, Labels: r.Labels, Form: r.Form != nil, Ref: templateRef(r.Ref), FileName: r.FileName})
+		result = append(result, IssueTemplate{Name: r.Name, About: r.About, Title: r.IssueTitle, Content: r.MarkdownContent, Labels: r.IssueLabels, Form: r.IsForm(), Ref: templateRef(r.IssueRef), FileName: r.Filename})
 	}
 	return result, nil
 }

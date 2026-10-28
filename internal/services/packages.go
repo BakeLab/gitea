@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 
@@ -164,20 +163,17 @@ func (s Packages) CheckGenericUpload(ctx context.Context, name, version string, 
 }
 
 // UploadGeneric streams one file into a version of a generic package, creating either as needed.
-// TODO(sdk): the SDK has no client for the package registries' upload endpoints.
 func (s Packages) UploadGeneric(ctx context.Context, name, version, file string, input io.Reader) error {
 	if err := s.checkRegistryAccount(); err != nil {
 		return err
 	}
-	endpoint := fmt.Sprintf("/api/packages/%s/generic/%s/%s/%s", url.PathEscape(s.Owner), url.PathEscape(name), url.PathEscape(version), url.PathEscape(file))
-	response, err := s.Client.Do(ctx, http.MethodPut, endpoint, input, http.Header{"Content-Type": {"application/octet-stream"}})
+	err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+		return c.Packages.UploadGenericPackageFile(ctx, s.Owner, name, version, file, input)
+	})
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusConflict {
 		return genericFileExists(name, version, file, err)
 	}
-	if err != nil {
-		return Classify(err, "package file", s.key("generic", name, version)+"/"+file, "")
-	}
-	return response.Body.Close()
+	return Classify(err, "package file", s.key("generic", name, version)+"/"+file, "")
 }
 
 // errRegistrySignature refuses a package upload from an SSH key account up front: Gitea's package

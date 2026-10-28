@@ -78,11 +78,17 @@ func (c *Client) DownloadSigned(ctx context.Context, raw string) (*http.Response
 	if location.Scheme != "https" && location.Scheme != base.Scheme {
 		return nil, errors.New("download redirect must use HTTPS or the instance's scheme")
 	}
-	unsigned := *c
-	unsigned.Token, unsigned.Signer, unsigned.Sudo = "", nil, ""
-	response, err = unsigned.get(ctx, location, false)
+	response, err = c.Storage().get(ctx, location, false)
 	if failure, ok := errors.AsType[*APIError](err); ok && !strings.EqualFold(location.Host, base.Host) {
 		failure.Storage = location.Host
 	}
 	return response, err
+}
+
+// Storage returns this client without credentials, for a download that the instance redirected
+// to another host such as signed object storage.
+func (c *Client) Storage() *Client {
+	unsigned := *c
+	unsigned.Token, unsigned.Signer, unsigned.Sudo = "", nil, ""
+	return &unsigned
 }

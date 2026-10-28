@@ -165,15 +165,13 @@ var ErrJobNotStarted = errors.New("job not started")
 // JobLogs streams a job's plain-text logs within the selected instance. A job that has not
 // started fails with ErrJobNotStarted.
 func (s Actions) JobLogs(ctx context.Context, id int64) (io.ReadCloser, error) {
-	// TODO(sdk): GetRepoRunJobLogs buffers the whole log; a reader variant would allow streaming.
-	response, err := s.Client.Do(ctx, http.MethodGet, fmt.Sprintf("%sjobs/%d/logs", s.endpoint(), id), nil, nil)
+	body, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (io.ReadCloser, *gitea.Response, error) {
+		return c.Actions.GetRepoRunJobLogsReader(ctx, owner, repo, id)
+	})
 	if api, ok := errors.AsType[*transport.APIError](err); ok && api.Status == http.StatusNotFound && strings.Contains(api.Message, "not started") {
 		return nil, fmt.Errorf("job %d: %w", id, ErrJobNotStarted)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return response.Body, nil
+	return body, err
 }
 
 // FollowJobLogs emits only newly appended bytes and stops when the job completes.
@@ -293,9 +291,9 @@ func (s Actions) FollowJobLogs(ctx context.Context, run, id int64, interval time
 
 // RunLogsArchive streams the server's ZIP archive without extracting its entries. A run without
 // logs, such as one that never started, is reported as not found.
-// TODO(sdk): GetRepoRunLogsReader cannot follow the redirect to object storage that serves logs
-// directly.
 func (s Actions) RunLogsArchive(ctx context.Context, run int64) (io.ReadCloser, error) {
-	body, err := downloadAPI(ctx, s.Client, fmt.Sprintf("%sruns/%d/logs", s.endpoint(), run))
+	body, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (io.ReadCloser, *gitea.Response, error) {
+		return c.Actions.GetRepoRunLogsReader(ctx, owner, repo, run)
+	})
 	return body, repositoryItemError(ctx, s.Client, s.Repository, err, "logs of run", strconv.FormatInt(run, 10))
 }

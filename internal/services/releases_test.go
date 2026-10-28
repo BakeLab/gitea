@@ -96,6 +96,20 @@ func TestReleaseArchiveFollowsObjectStorageRedirect(t *testing.T) {
 	require.Equal(t, "archive bytes", string(data))
 }
 
+func TestReleaseArchiveNamesTheStorageHostThatRefusedIt(t *testing.T) {
+	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer storage.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, storage.URL+"/bucket/archive?X-Amz-Signature=expired", http.StatusFound)
+	}))
+	defer server.Close()
+	service := Releases{Client: transport.New(server.URL, "secret", false), Repository: "alice/project"}
+	_, err := service.Archive(context.Background(), "main", "zip")
+	require.ErrorContains(t, err, "storage host "+strings.TrimPrefix(storage.URL, "http://")+" refused the signed download with HTTP 403")
+}
+
 func TestReleaseAssetDownloadRejectsUnsafeIdentifiers(t *testing.T) {
 	for _, uuid := range []string{"", "../secret", "a/b", `a\b`, "a.b"} {
 		t.Run(uuid, func(t *testing.T) {
@@ -333,20 +347,4 @@ func TestReleaseDraftsRequireAnExistingTarget(t *testing.T) {
 	no := false
 	_, err = service.Edit(context.Background(), 7, ReleaseOptions{Draft: &no})
 	require.EqualError(t, err, `target "gone" not found in alice/project`)
-}
-
-func TestReleaseAssetDigest(t *testing.T) {
-	digest := ""
-	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/repos/alice/project/releases/1/assets/2", r.URL.Path)
-		_, _ = w.Write([]byte(`{"id":2,"name":"file.bin","sha256":"` + digest + `"}`))
-	}))
-	service := Releases{Client: client, Repository: "alice/project"}
-	got, err := service.AssetDigest(context.Background(), 1, 2)
-	require.NoError(t, err)
-	assert.Empty(t, got, "older instances and assets have no digest")
-	digest = strings.Repeat("a", 64)
-	got, err = service.AssetDigest(context.Background(), 1, 2)
-	require.NoError(t, err)
-	assert.Equal(t, digest, got)
 }

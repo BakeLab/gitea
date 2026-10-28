@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -224,25 +223,16 @@ func (s Pulls) ListPage(ctx context.Context, options PullListOptions) (Page[Pull
 }
 
 func (s Pulls) listPage(ctx context.Context, options PullListOptions) (Page[Pull], error) {
-	query := url.Values{"state": {options.State}}
-	if options.Sort != "" {
-		query.Set("sort", options.Sort)
-	}
-	if options.Author != "" {
-		query.Set("poster", options.Author)
-	}
-	if options.Base != "" {
-		query.Set("base_branch", options.Base)
-	}
-	if options.Milestone > 0 {
-		query.Set("milestone", strconv.FormatInt(options.Milestone, 10))
-	}
-	for _, label := range options.Labels {
-		query.Add("labels", strconv.FormatInt(label, 10))
-	}
-
-	// TODO(sdk): ListPullRequestsOptions lacks the poster, base_branch, and labels filters.
-	page, err := rawPage[*gitea.PullRequest](ctx, s.Client, "repos/"+s.Repository+"/pulls", query, options.Limit, options.Page)
+	page, err := callPage(ctx, s.Client, options.Limit, options.Page, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.PullRequest, *gitea.Response, error) {
+		owner, repo, err := splitRepository(s.Repository)
+		if err != nil {
+			return nil, nil, err
+		}
+		return c.PullRequests.ListRepoPullRequests(ctx, owner, repo, gitea.ListPullRequestsOptions{
+			ListOptions: list, State: gitea.StateType(options.State), Sort: options.Sort, Milestone: options.Milestone,
+			Poster: options.Author, BaseBranch: options.Base, Labels: options.Labels,
+		})
+	})
 	if err != nil {
 		if IsNotFound(err) {
 			repo, lookupErr := (Repositories{Client: s.Client}).get(ctx, s.Repository)
@@ -352,11 +342,9 @@ func (r *approvalRules) ignoresStale(ctx context.Context, s Pulls, rule string) 
 		return false
 	}
 	return r.rules.get(rule, func() bool {
-		// TODO(sdk): BranchProtection lacks ignore_stale_approvals.
-		var protection struct {
-			IgnoreStaleApprovals bool `json:"ignore_stale_approvals"`
-		}
-		err := getJSON(ctx, s.Client, "repos/"+s.Repository+"/branch_protections/"+url.PathEscape(rule), &protection)
+		protection, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.BranchProtection, *gitea.Response, error) {
+			return c.Repositories.GetBranchProtection(ctx, owner, name, rule)
+		})
 		return err == nil && protection.IgnoreStaleApprovals
 	})
 }
@@ -450,12 +438,16 @@ func (s Pulls) NewestClosed(ctx context.Context, keep func(Pull) bool) (Pull, bo
 
 // Create opens a pull request.
 func (s Pulls) Create(ctx context.Context, opts PullOptions) (Pull, error) {
-	// TODO(sdk): CreatePullRequestOption lacks allow_maintainer_edit.
-	var pull gitea.PullRequest
-	if err := sendJSON(ctx, s.Client, http.MethodPost, "repos/"+s.Repository+"/pulls", opts, &pull); err != nil {
+	pull, err := repoConvert(ctx, s.Client, s.Repository, pullFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
+		return c.PullRequests.CreatePullRequest(ctx, owner, name, gitea.CreatePullRequestOption{
+			Head: opts.Head, Base: opts.Base, Title: opts.Title, Body: opts.Body, Assignees: opts.Assignees,
+			Milestone: opts.Milestone, Labels: opts.Labels, Deadline: opts.Deadline, AllowMaintainerEdit: opts.AllowMaintainerEdit,
+		})
+	})
+	if err != nil {
 		return Pull{}, s.existingPullError(ctx, s.createError(ctx, err, opts.Head), opts)
 	}
-	return pullFrom(&pull), nil
+	return pull, nil
 }
 
 // existingPullError links the open pull request that already exists for the branches of opts,
