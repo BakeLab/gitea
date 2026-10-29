@@ -97,7 +97,7 @@ $ gt workflow view ci --web`,
 				return err
 			}
 			service := services.Actions{Client: t.client, Repository: t.Repo}
-			workflow, err := service.FindWorkflow(cmd.Context(), args[0])
+			workflow, err := service.FindWorkflowAt(cmd.Context(), args[0], ref)
 			if err != nil {
 				return err
 			}
@@ -166,18 +166,18 @@ func (a *application) workflowRunCommand() *cobra.Command {
 		Long: `Start a run of a workflow that has a workflow_dispatch trigger.
 
 Inputs are checked against the inputs that the workflow declares: unknown inputs, missing
-required inputs and values that a choice or boolean input does not accept are refused. In a
-terminal, gt asks for missing required inputs, or for every input when none is given.
+required inputs and values that a choice, boolean or number input does not accept are refused.
+In a terminal, gt asks for missing required inputs, or for every input when none is given.
 
-The workflow is looked up among those the server lists from the default branch, so it must exist
-there; --ref only selects the branch or tag whose version of it runs, as in gh. List them with
-gt workflow list.
+The workflow is looked up, like Gitea does, among the files in the first of .gitea/workflows and
+.github/workflows that exists on the branch or tag it runs on, so one that exists only on a branch
+runs with --ref. gt workflow list shows those of the default branch.
 
 Without --ref, the workflow runs on the checked-out branch, which must be on the server, or on
 the default branch when the repository does not come from the working directory.
 
 With --follow, the command exits with 5, like gt run watch, when the run completes without
-success.`,
+success, and with 3 when --timeout expires first.`,
 		Example: `# run a workflow on the default or current branch
 $ gt workflow run CI
 # run it on a branch with inputs
@@ -188,7 +188,7 @@ $ gt workflow run nightly --follow`,
 		Annotations: map[string]string{"gt.arguments": workflowArguments},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if follow && a.options.json != "" {
-				return clierr.Wrap(clierr.Usage, errors.New("--follow cannot be combined with --json/--jq"))
+				return clierr.Wrap(clierr.Usage, errors.New("--follow cannot be combined with --json or --jq"))
 			}
 			if interval <= 0 || timeout <= 0 {
 				return clierr.Wrap(clierr.Usage, errors.New("--interval and --timeout must be positive"))
@@ -207,19 +207,15 @@ $ gt workflow run nightly --follow`,
 				return err
 			}
 			service := services.Actions{Client: t.client, Repository: t.Repo}
-			workflow, err := service.FindWorkflow(cmd.Context(), args[0])
-			if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Kind == "workflow" {
-				// Like gh, the workflow comes from the server's list, so --ref cannot add one.
-				return fmt.Errorf("%w; workflows are listed from the default branch and must exist there, even with --ref; see gt workflow list%s", err, a.suggestedRepo(t))
+			if ref, err = a.dispatchRef(cmd.Context(), t, ref); err != nil {
+				return err
 			}
+			workflow, err := service.FindWorkflowAt(cmd.Context(), args[0], ref)
 			if err != nil {
 				return err
 			}
 			if !workflow.Enabled() {
 				return fmt.Errorf("workflow %s is disabled; enable it with: gt workflow enable %s%s", workflow.ID, workflow.ID, a.suggestedRepo(t))
-			}
-			if ref, err = a.dispatchRef(cmd.Context(), t, ref); err != nil {
-				return err
 			}
 			definition, err := service.WorkflowFile(cmd.Context(), workflow, ref)
 			if err != nil {
@@ -269,7 +265,7 @@ $ gt workflow run nightly --follow`,
 			if len(jobs) == 0 {
 				jobs = []services.Job{job}
 			}
-			if err := a.followJobLogs(ctx, cmd, service, result.ID, jobs, interval); err != nil {
+			if err := a.followJobLogs(ctx, cmd, service, result.ID, jobs, interval); err != nil && !errors.Is(err, errNoStartedJobs) {
 				return timeoutError(err, timeout, "following the logs of run %d", result.ID)
 			}
 			// Like gt run watch, fail when the run does not succeed; it completes just after its jobs.
@@ -283,7 +279,7 @@ $ gt workflow run nightly --follow`,
 	cmd.Flags().StringVarP(&ref, "ref", "r", "", "Branch or tag to run the workflow on (default: the current or default branch)")
 	cmd.Flags().StringArrayVarP(&fields, "field", "f", nil, "Workflow input as `key=value` (repeatable)")
 	cmd.Flags().BoolVar(&follow, "follow", false, "Follow the logs of the run's jobs after dispatching it")
-	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "Polling interval with --follow")
+	cmd.Flags().DurationVarP(&interval, "interval", "i", 2*time.Second, "Polling interval with --follow")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to follow")
 	cmd.ValidArgsFunction = firstArg(a.completeWorkflows())
 	_ = cmd.RegisterFlagCompletionFunc("ref", a.completeBranches())
@@ -373,7 +369,7 @@ func (a *application) dispatchValues(cmd *cobra.Command, workflow services.Workf
 			}
 			values[input.Name] = answer
 		case missing:
-			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("missing required input %s for %s; pass -f %s=<value>", input.Name, workflow.Label(), input.Name))
+			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("%s requires input %s; pass -f %s=<value>", workflow.Label(), input.Name, input.Name))
 		}
 	}
 	return values, nil
@@ -399,7 +395,7 @@ func inputValue(input services.WorkflowInput, value string) (string, error) {
 		}
 	}
 	if input.Required && value == "" {
-		return "", fmt.Errorf("input %s is required", input.Name)
+		return "", fmt.Errorf("input %s requires a value", input.Name)
 	}
 	return value, nil
 }

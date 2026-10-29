@@ -115,6 +115,75 @@ func FindWorkflow(items []Workflow, raw, scope string) (Workflow, error) {
 	return Workflow{}, NotFound("workflow", strconv.Quote(raw), scope)
 }
 
+// workflowDirs are the directories that Gitea runs workflows from, the first that exists.
+var workflowDirs = []string{".gitea/workflows", ".github/workflows"}
+
+// WorkflowAt returns the workflow that raw names among the workflow files at ref, like
+// FindWorkflow; the server lists workflows of the default branch only.
+func (s Actions) WorkflowAt(ctx context.Context, raw, ref string) (Workflow, error) {
+	scope := s.Repository + " on " + ref
+	for _, dir := range workflowDirs {
+		entries, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.ContentsResponse, *gitea.Response, error) {
+			return c.Repositories.ListContents(ctx, owner, repo, ref, dir)
+		})
+		if api, ok := errors.AsType[*transport.APIError](err); ok && api.Status == http.StatusNotFound {
+			if strings.Contains(api.Message, "[id: "+ref+",") {
+				return Workflow{}, &NotFoundError{Kind: "ref", Key: strconv.Quote(ref), Scope: s.Repository, Err: err}
+			}
+			continue
+		}
+		if err != nil {
+			return Workflow{}, err
+		}
+		var items []Workflow
+		for _, entry := range entries {
+			if ext := path.Ext(entry.Name); entry.Type == "file" && (ext == ".yml" || ext == ".yaml") {
+				items = append(items, Workflow{ID: entry.Name, Path: entry.Path, URL: deref(entry.HTMLURL)})
+			}
+		}
+		workflow, err := FindWorkflow(items, raw, scope)
+		if _, ok := errors.AsType[*NotFoundError](err); !ok {
+			return workflow, err
+		}
+		for i := range items { // the listing has no names, so read them only when no file matches
+			data, err := s.WorkflowFile(ctx, items[i], ref)
+			if err != nil {
+				return Workflow{}, err
+			}
+			var definition struct{ Name string }
+			if yaml.Unmarshal(data, &definition) == nil {
+				items[i].Name = definition.Name
+			}
+		}
+		return FindWorkflow(items, raw, scope)
+	}
+	return Workflow{}, NotFound("workflow", strconv.Quote(strings.TrimSpace(raw)), scope)
+}
+
+// FindWorkflowAt returns the workflow that raw names as Gitea runs it at ref, from the first of
+// workflowDirs that exists there, or that FindWorkflow returns when ref is empty. A file that
+// the server lists keeps its name and state.
+func (s Actions) FindWorkflowAt(ctx context.Context, raw, ref string) (Workflow, error) {
+	listed, err := s.FindWorkflow(ctx, raw)
+	if ref == "" {
+		return listed, err
+	}
+	if notFound, ok := errors.AsType[*NotFoundError](err); ok && notFound.Kind == "workflow" {
+		err = nil
+	} else if err == nil {
+		raw = listed.ID
+	}
+	if err != nil {
+		return Workflow{}, err
+	}
+	workflow, err := s.WorkflowAt(ctx, raw, ref)
+	if err != nil || workflow.ID != listed.ID {
+		return workflow, err
+	}
+	listed.Path, listed.URL = workflow.Path, workflow.URL
+	return listed, nil
+}
+
 // Dispatch triggers a workflow and reports the run it created.
 func (s Actions) Dispatch(ctx context.Context, id, ref string, inputs map[string]string) (DispatchResult, error) {
 	details, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.RunDetails, *gitea.Response, error) {
@@ -123,14 +192,15 @@ func (s Actions) Dispatch(ctx context.Context, id, ref string, inputs map[string
 	if api, ok := errors.AsType[*transport.APIError](err); ok && api.Status == http.StatusNotFound && strings.Contains(api.Message, "ref") {
 		// Gitea resolves a bare ref as a branch only; a tag needs its full name.
 		if !strings.HasPrefix(ref, "refs/") {
-			if retried, retryErr := s.Dispatch(ctx, id, "refs/tags/"+ref, inputs); retryErr == nil {
-				return retried, nil
+			retried, retryErr := s.Dispatch(ctx, id, "refs/tags/"+ref, inputs)
+			if missing, ok := errors.AsType[*NotFoundError](retryErr); !ok || missing.Kind != "ref" {
+				return retried, retryErr
 			}
 		}
 		return DispatchResult{}, &NotFoundError{Kind: "ref", Key: strconv.Quote(ref), Scope: s.Repository, Err: err}
 	}
 	if err != nil {
-		return DispatchResult{}, Classify(err, "workflow", id, s.Repository)
+		return DispatchResult{}, Classify(err, "workflow", id, s.Repository+" on "+ref)
 	}
 	return DispatchResult{ID: details.WorkflowRunID, URL: details.HTMLURL}, nil
 }

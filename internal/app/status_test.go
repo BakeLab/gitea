@@ -29,8 +29,10 @@ func TestStatusJSONAndActionsScope(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/actions/runs"):
 			runs++
 			require.Equal(t, "/api/v1/repos/alice/project/actions/runs", r.URL.Path)
-			require.Equal(t, []string{"failure", "timed_out"}, r.URL.Query()["status"])
-			_, _ = w.Write([]byte(`{"workflow_runs":[{"id":7,"display_title":"Broken build","status":"completed","conclusion":"failure"}]}`))
+			require.Equal(t, []string{"failure"}, r.URL.Query()["status"])
+			_, _ = w.Write([]byte(`{"workflow_runs":[{"id":7,"display_title":"Broken build","path":"ci.yml@refs/heads/main","status":"completed","conclusion":"failure"}]}`))
+		case r.URL.Path == "/api/v1/repos/alice/project/actions/workflows":
+			_, _ = w.Write([]byte(workflowsFixture))
 		case strings.HasSuffix(r.URL.Path, "/issues") || strings.HasSuffix(r.URL.Path, "/search"):
 			_, _ = w.Write([]byte(`[]`))
 		default:
@@ -39,8 +41,8 @@ func TestStatusJSONAndActionsScope(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"status", "-R", "alice/project", "--json=user,pull_requests,runs_included,failing_runs", "--jq", "{user, pull_requests, runs_included, run_ids: [.failing_runs[].id]}"}))
-	require.JSONEq(t, `{"user":"alice","pull_requests":{"current_branch":null,"authored":[],"assigned":[],"review_requested":[]},"runs_included":true,"run_ids":[7]}`, out.String())
+	require.NoError(t, Execute(context.Background(), deps, []string{"status", "-R", "alice/project", "--json=user,pull_requests,runs_included,failing_runs", "--jq", "{user, pull_requests, runs_included, runs: [.failing_runs[] | [.id, .workflow]]}"}))
+	require.JSONEq(t, `{"user":"alice","pull_requests":{"current_branch":null,"authored":[],"assigned":[],"review_requested":[]},"runs_included":true,"runs":[[7,"CI"]]}`, out.String())
 	require.Empty(t, diagnostics.String())
 	require.Equal(t, 1, runs)
 	actionsEnabled = false

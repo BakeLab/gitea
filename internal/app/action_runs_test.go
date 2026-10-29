@@ -29,7 +29,8 @@ const (
 	workflowsFixture = `{"total_count":2,"workflows":[
 		{"id":"ci.yml","name":"CI","path":".gitea/workflows/ci.yml","state":"active","html_url":"https://gitea.test/alice/project/src/branch/main/.gitea/workflows/ci.yml"},
 		{"id":"nightly.yaml","name":"Nightly","path":".gitea/workflows/nightly.yaml","state":"disabled_manually"}]}`
-	queuedRunFixture = `{"id":47,"run_number":10,"display_title":"Add workflows","path":"ci.yml@refs/heads/main","event":"workflow_dispatch",
+	workflowDirFixture = `[{"name":"ci.yml","path":".gitea/workflows/ci.yml","type":"file"},{"name":"nightly.yaml","path":".gitea/workflows/nightly.yaml","type":"file"}]`
+	queuedRunFixture   = `{"id":47,"run_number":10,"display_title":"Add workflows","path":"ci.yml@refs/heads/main","event":"workflow_dispatch",
 		"head_branch":"main","head_sha":"f0c151dde0c0ef6c","status":"queued","run_attempt":1,"actor":{"login":"alice"},
 		"created_at":"2028-01-01T11:58:00Z","started_at":"1970-01-01T00:00:00Z","completed_at":"1970-01-01T00:00:00Z",
 		"html_url":"https://gitea.test/alice/project/actions/runs/47"}`
@@ -200,6 +201,7 @@ func TestRunListResolvesWorkflowNamesAndReportsEmptyFilters(t *testing.T) {
 	require.Equal(t, "no runs match your filters in alice/project\n", diagnostics.String())
 	require.Contains(t, *requests, "GET actions/workflows/ci.yml/runs")
 	requireUsageBeforeRequests(t, "--status must be queued, in_progress, waiting", "run", "list", "--status", "nope")
+	requireUsageBeforeRequests(t, "cancelled, skipped, or neutral", "run", "list", "--status", "timed_out") //nolint:misspell // Gitea API spelling.
 }
 
 func TestRunListExplainsTheAccountFlag(t *testing.T) {
@@ -506,15 +508,15 @@ func TestRunMutationsReportWhatHappened(t *testing.T) {
 		{
 			"rerun",
 			[]string{"run", "rerun", "29"},
-			map[string]string{"GET actions/runs/29": completedRun, "POST actions/runs/29/rerun": completedRun},
-			[]string{"GET actions/runs/29", "POST actions/runs/29/rerun", "GET actions/runs/29"},
+			map[string]string{"GET actions/runs/29": completedRun, "GET actions/runs/29/jobs": failedJobsFixture, "POST actions/runs/29/rerun": completedRun},
+			[]string{"GET actions/runs/29", "GET actions/runs/29/jobs", "POST actions/runs/29/rerun", "GET actions/runs/29"},
 			"", "✓ Requested rerun of run 29 (attempt 2); watch it with: gt run watch 29 -R alice/project\n", nil,
 		},
 		{
 			"rerun returns the run",
 			[]string{"run", "rerun", "29", "--json", "id,workflow"},
-			map[string]string{"GET actions/runs/29": completedRun, "POST actions/runs/29/rerun": completedRun, "GET actions/workflows": workflowsFixture},
-			[]string{"GET actions/runs/29", "POST actions/runs/29/rerun", "GET actions/runs/29", "GET actions/workflows"},
+			map[string]string{"GET actions/runs/29": completedRun, "GET actions/runs/29/jobs": failedJobsFixture, "POST actions/runs/29/rerun": completedRun, "GET actions/workflows": workflowsFixture},
+			[]string{"GET actions/runs/29", "GET actions/runs/29/jobs", "POST actions/runs/29/rerun", "GET actions/runs/29", "GET actions/workflows"},
 			`{"id":29,"workflow":"Nightly"}`, "", nil,
 		},
 		{
@@ -522,6 +524,13 @@ func TestRunMutationsReportWhatHappened(t *testing.T) {
 			[]string{"run", "rerun", "29", "--job", "TEST"},
 			map[string]string{"GET actions/runs/29": completedRun, "GET actions/runs/29/jobs": failedJobsFixture, "POST actions/runs/29/jobs/31/rerun": `{"id":31}`},
 			[]string{"GET actions/runs/29", "GET actions/runs/29/jobs", "POST actions/runs/29/jobs/31/rerun", "GET actions/runs/29"},
+			"", "✓ Requested rerun of run 29 (attempt 2); watch it with: gt run watch 29 -R alice/project\n", nil,
+		},
+		{
+			"rerun the failed jobs",
+			[]string{"run", "rerun", "29", "--failed"},
+			map[string]string{"GET actions/runs/29": completedRun, "GET actions/runs/29/jobs": failedJobsFixture, "POST actions/runs/29/rerun-failed-jobs": "204 "},
+			[]string{"GET actions/runs/29", "GET actions/runs/29/jobs", "POST actions/runs/29/rerun-failed-jobs", "GET actions/runs/29"},
 			"", "✓ Requested rerun of run 29 (attempt 2); watch it with: gt run watch 29 -R alice/project\n", nil,
 		},
 		{
@@ -568,6 +577,28 @@ func TestRunMutationsReportWhatHappened(t *testing.T) {
 			require.Equal(t, tc.err, diagnostics.String())
 			require.Equal(t, tc.prompts, prompter.confirmations)
 		})
+	}
+}
+
+func TestRunRerunRefusesARunWithoutJobsToRerun(t *testing.T) {
+	server, requests := actionsAPI(t, map[string]string{
+		"GET actions/runs/29":      failedRunFixture,
+		"GET actions/runs/29/jobs": strings.ReplaceAll(failedJobsFixture, `"failure"`, `"success"`),
+	})
+	deps, _, _ := actionsDeps(t, server.URL, false)
+	err := Execute(context.Background(), deps, []string{"run", "rerun", "29", "--failed", "-R", "alice/project"})
+	require.EqualError(t, err, "run 29 has no failed or canceled jobs")
+	require.Equal(t, []string{"GET actions/runs/29", "GET actions/runs/29/jobs"}, *requests)
+	server, requests = actionsAPI(t, map[string]string{
+		"GET actions/runs/29":      failedRunFixture,
+		"GET actions/runs/29/jobs": `{"total_count":0,"jobs":[]}`,
+	})
+	for _, args := range [][]string{nil, {"--failed"}, {"--job", "build"}} {
+		*requests = nil
+		deps, _, _ := actionsDeps(t, server.URL, false)
+		err := Execute(context.Background(), deps, append([]string{"run", "rerun", "29", "-R", "alice/project"}, args...))
+		require.EqualError(t, err, "run 29 has no jobs to rerun; check its workflow file", "%v", args)
+		require.Equal(t, []string{"GET actions/runs/29", "GET actions/runs/29/jobs"}, *requests, "%v", args)
 	}
 }
 

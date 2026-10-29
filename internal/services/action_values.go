@@ -30,12 +30,17 @@ func (s ActionScope) String() string {
 	return s.Repository
 }
 
-// ActionSecret describes a secret without containing its value. CreatedAt is empty for a secret
-// that was just set, as Gitea does not return it.
+// ActionSecret describes a secret without containing its value.
 type ActionSecret struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	CreatedAt   string `json:"created_at"`
+}
+
+// SetActionSecret names a secret that was just set; Gitea does not return when it was created.
+type SetActionSecret struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // ActionValueName is the name Gitea stores a secret or variable under: names are upper-cased.
@@ -106,7 +111,7 @@ func (s ActionSecrets) ListPage(ctx context.Context, limit, page int) (Page[Acti
 
 // Set creates or replaces a secret; the API's PUT operation defines upsert semantics. The result
 // names the secret as Gitea stores it.
-func (s ActionSecrets) Set(ctx context.Context, name, value, description string) (ActionSecret, error) {
+func (s ActionSecrets) Set(ctx context.Context, name, value, description string) (SetActionSecret, error) {
 	option := gitea.CreateOrUpdateSecretOption{Data: value, Description: description}
 	err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		switch {
@@ -121,7 +126,7 @@ func (s ActionSecrets) Set(ctx context.Context, name, value, description string)
 		}
 		return c.Actions.CreateRepoSecret(ctx, owner, repo, name, option)
 	})
-	return ActionSecret{Name: ActionValueName(name), Description: description}, classifyValue(err, "secret", name, s.Scope)
+	return SetActionSecret{Name: ActionValueName(name), Description: description}, classifyValue(err, "secret", name, s.Scope)
 }
 
 // Delete removes only the named secret in the selected scope.

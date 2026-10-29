@@ -132,13 +132,15 @@ func (s Status) Summary(ctx context.Context, limit int, runsRepository string, d
 		if !repository.ActionsEnabled {
 			return result, nil
 		}
-		failing, err := (Actions{Client: s.Client, Repository: runsRepository}).Runs(ctx, RunListOptions{Limit: limit, Page: 1, Statuses: []string{"failure", "timed_out"}})
+		actions := Actions{Client: s.Client, Repository: runsRepository}
+		failing, err := actions.Runs(ctx, RunListOptions{Limit: limit, Page: 1, Statuses: []string{"failure"}})
 		if err != nil {
 			if discovered && (IsNotFound(err) || IsForbidden(err)) {
 				return result, nil
 			}
 			return result, err
 		}
+		_ = actions.nameRuns(ctx, failing) // best effort like NameRun, so a summary never fails on it
 		result.RunsRepository, result.FailingRuns, result.RunsIncluded = runsRepository, failing, true
 	}
 	return result, nil

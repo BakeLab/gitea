@@ -132,9 +132,12 @@ func TestRunLogsContinuePastJobsThatHaveNotStarted(t *testing.T) {
 				{"id":8,"name":"lint","status":"completed","conclusion":"skipped","started_at":"1970-01-01T00:00:00Z","completed_at":"2028-01-01T00:01:00Z"},
 				{"id":9,"name":"build","status":"queued","started_at":"1970-01-01T00:00:00Z","completed_at":"1970-01-01T00:00:00Z"},
 				{"id":10,"name":"test","status":"in_progress","started_at":"2028-01-01T00:00:00Z"},
-				{"id":11,"name":"deploy","status":"in_progress","started_at":"2028-01-01T00:00:00Z"}]}`))
+				{"id":11,"name":"deploy","status":"in_progress","started_at":"2028-01-01T00:00:00Z"},
+				{"id":12,"name":"release","status":"completed","conclusion":"cancelled","started_at":"2028-01-01T00:00:00Z","completed_at":"2028-01-01T00:02:00Z"}]}`)) //nolint:misspell // Gitea API spelling.
 		case "/api/v1/repos/owner/repo/actions/jobs/10/logs":
 			_, _ = w.Write([]byte("test output\n"))
+		case "/api/v1/repos/owner/repo/actions/jobs/12/logs":
+			_, _ = w.Write([]byte("release output\n"))
 		case "/api/v1/repos/owner/repo/actions/jobs/11/logs":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"job not started"}`))
@@ -146,10 +149,21 @@ func TestRunLogsContinuePastJobsThatHaveNotStarted(t *testing.T) {
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--no-input"}))
-	require.Equal(t, "test output\n", out.String())
-	require.Equal(t, "lint (job 8): never started (skipped)\nbuild (job 9): not started yet\ntest (job 10)\ndeploy (job 11): not started yet\n", diagnostics.String())
+	require.Equal(t, "test output\nrelease output\n", out.String())
+	require.Equal(t, "lint (job 8): never started (skipped)\nbuild (job 9): not started yet\ntest (job 10)\ndeploy (job 11): not started yet\nrelease (job 12)\n", diagnostics.String())
+	out.Reset()
 	diagnostics.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--no-input", "--job", "lint", "--follow", "-i", "1ms"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--no-input", "--failed"}))
+	require.Equal(t, "release output\n", out.String())
+	diagnostics.Reset()
+	err := Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--no-input", "--job", "lint"})
+	require.EqualError(t, err, "run 7 has no logs: none of the selected jobs has started")
+	require.Equal(t, 1, clierr.ExitCode(err))
+	require.Equal(t, "lint (job 8): never started (skipped)\n", diagnostics.String())
+	diagnostics.Reset()
+	err = Execute(context.Background(), deps, []string{"run", "logs", "7", "-R", "owner/repo", "--no-input", "--job", "lint", "--follow", "-i", "1ms"})
+	require.EqualError(t, err, "run 7 has no logs: none of the selected jobs has started")
+	require.Equal(t, 1, clierr.ExitCode(err))
 	require.Equal(t, "lint (job 8): never started (skipped)\n", diagnostics.String())
 }
 
@@ -187,6 +201,13 @@ func TestRunLogsAndRerunSelectTheJobOfAJobURL(t *testing.T) {
 		err := Execute(context.Background(), deps, tc.args)
 		require.EqualError(t, err, tc.err)
 		require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	}
+	for job, command := range map[int]string{30: "logs", 31: "rerun"} {
+		*requests = nil
+		err := Execute(context.Background(), deps, []string{"run", command, jobURL(job), "--job", "999"})
+		require.EqualError(t, err, fmt.Sprintf("--job 999 cannot be combined with the URL of job %d", job))
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+		require.Empty(t, *requests)
 	}
 }
 

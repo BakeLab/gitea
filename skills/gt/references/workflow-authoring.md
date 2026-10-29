@@ -10,8 +10,9 @@ when a detail matters, as they change with Gitea releases.
 ## Before the first workflow
 
 - Workflows are `.yaml` files in `.gitea/workflows/`.
-- Repositories have Actions disabled by default: enable it in the repository settings
-  ("Enable Repository Actions"); `gt repo view --no-input --json actions_enabled` tells.
+- Actions must be enabled on the instance. New repositories then have it on unless the
+  administrator changed the default repository units; otherwise enable it in the repository
+  settings ("Enable Repository Actions"). `gt repo view --no-input --json actions_enabled` tells.
 - Jobs run on a registered Gitea Runner; `runs-on` labels must match the labels of a runner
   of the instance. A run that waits forever usually lacks a matching runner
   ([monitoring.md](monitoring.md#waiting)).

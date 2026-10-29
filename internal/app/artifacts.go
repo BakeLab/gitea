@@ -236,9 +236,6 @@ func (a *application) downloadArtifact(cmd *cobra.Command, service services.Acti
 		defer body.Close()
 		return path, a.download(cmd, f, path, body)
 	}
-	if f.clobber && f.skipExisting {
-		return "", clierr.Wrap(clierr.Usage, errors.New("--clobber cannot be combined with --skip-existing"))
-	}
 	dir := cmp.Or(f.dir, ".")
 	if isolate {
 		if !filepath.IsLocal(artifact.Name) || strings.ContainsAny(artifact.Name, `/\`) {

@@ -67,7 +67,7 @@ func TestActionValueSetReadsValuesAndReportsStoredNames(t *testing.T) {
 			[]string{"secret", "set", "token", "--body", "x", "--json"},
 			"",
 			[]string{`PUT actions/secrets/token {"data":"x","description":""}`},
-			`{"name":"TOKEN","description":"","created_at":""}`, "",
+			`{"name":"TOKEN","description":""}`, "",
 		},
 		{
 			"JSON of a one-line dotenv file is an array",
@@ -142,9 +142,20 @@ func TestActionValueListsShowScopeAndExplainTheAccountFlags(t *testing.T) {
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"variable", "list", "-R", "alice/project"}))
 	require.Equal(t, "Showing 1 of 1 variables in alice/project\n\nNAME         VALUE    DESCRIPTION\nENVIRONMENT  staging  Target environment\n", out.String())
-	err := Execute(context.Background(), deps, []string{"secret", "list", "--account"})
-	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-	require.ErrorContains(t, err, "unknown flag: --account")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"secret", "list", "--help"}))
+	require.NotContains(t, out.String(), "--account")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"variable", "list", "--help"}))
+	require.Contains(t, out.String(), "--account")
+}
+
+func TestActionValueSetRejectsANameGivenTwice(t *testing.T) {
+	envFile := filepath.Join(t.TempDir(), ".env")
+	require.NoError(t, os.WriteFile(envFile, []byte("API_KEY=abc\napi_key=def\n"), 0o600))
+	for _, kind := range []string{"secret", "variable"} {
+		requireUsageBeforeRequests(t, "API_KEY is given more than once in "+envFile, kind, "set", "--env-file", envFile)
+	}
 }
 
 func TestVariableGetAndView(t *testing.T) {

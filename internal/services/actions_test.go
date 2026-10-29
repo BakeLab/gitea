@@ -341,7 +341,12 @@ func TestDispatchFallsBackToATagRef(t *testing.T) {
 		}
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
 		refs = append(refs, payload.Ref)
-		if payload.Ref == "v1.0" || strings.HasSuffix(payload.Ref, "nope") {
+		if payload.Ref == "refs/tags/v2" {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"workflow does not have a workflow_dispatch trigger"}`))
+			return
+		}
+		if payload.Ref == "v1.0" || payload.Ref == "v2" || strings.HasSuffix(payload.Ref, "nope") {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"ref \"` + payload.Ref + `\" not found"}`))
 			return
@@ -356,7 +361,10 @@ func TestDispatchFallsBackToATagRef(t *testing.T) {
 	var missing *NotFoundError
 	require.ErrorAs(t, err, &missing)
 	require.Equal(t, "ref", missing.Kind)
-	require.Equal(t, []string{"v1.0", "refs/tags/v1.0", "nope", "refs/tags/nope"}, refs)
+	_, err = service.Dispatch(context.Background(), "ci.yml", "v2", nil)
+	require.ErrorContains(t, err, "workflow does not have a workflow_dispatch trigger")
+	require.NotErrorAs(t, err, &missing)
+	require.Equal(t, []string{"v1.0", "refs/tags/v1.0", "nope", "refs/tags/nope", "v2", "refs/tags/v2"}, refs)
 }
 
 func TestRunAndWorkflowListsNameAMissingRepository(t *testing.T) {

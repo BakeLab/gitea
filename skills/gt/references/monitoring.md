@@ -44,14 +44,14 @@ gt run jobs 34 --no-input --json id,name,conclusion,steps
 ```
 
 - `--status` takes a status or a conclusion: `queued`, `in_progress`, `waiting`, `completed`,
-  `success`, `failure`, `cancelled`, `skipped`, `timed_out` and others.
+  `success`, `failure`, `cancelled`, `skipped` and others.
 - `--commit` takes a full SHA or a revision of the local clone.
 - A run is given by its ID (`34`, `#34`) or its URL; a job URL selects one job.
 
 ## Reading logs
 
 ```sh
-gt run logs 34 --failed --no-input                     # every failed job
+gt run logs 34 --failed --no-input                     # every failed or canceled job
 gt run logs 34 --job build --no-input                  # one job, by name or ID
 gt run logs https://gitea.example.com/OWNER/REPO/actions/runs/34/jobs/71 --no-input
 gt run logs 34 --job build --follow --no-input         # stream until the job completes
@@ -61,7 +61,7 @@ gt run logs 34 --output logs.zip --no-input            # whole run as a ZIP arch
 - The log goes to stdout and each job's name to stderr, so `2>/dev/null` leaves pure log.
 - Logs can be long. Search them (`| grep -n -i -E 'error|fail|panic'`) or read the end
   (`| tail -n 200`) before loading everything.
-- `gt run view 34 --log --no-input` prints the logs of every job after the run summary.
+- `gt run view 34 --log --no-input` prints the logs of every job instead of the run summary.
 - Steps are in `gt run jobs 34 --json steps`: a failed step's name narrows where to look.
 
 From a failing check straight to its log:
@@ -77,8 +77,9 @@ A check whose `url` points elsewhere comes from an external CI; gt cannot read i
 
 - A real failure: reproduce locally when possible, fix, commit and push, then wait on the new
   checks with `gt pr checks --watch`.
-- A flaky failure: `gt run rerun 34 --failed --no-input`, or one job with `--job build`.
-  Rerun only completed runs; cancel a stuck one first with `gt run cancel 34 --no-input`.
+- A flaky failure: `gt run rerun 34 --failed --no-input` reruns the failed or canceled jobs,
+  or one job with `--job build`. Rerun only completed runs; cancel a stuck one first with
+  `gt run cancel 34 --no-input`.
 - Ask the user before rerunning repeatedly or cancelling someone else's run.
 
 ## Artifacts

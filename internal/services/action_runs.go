@@ -74,7 +74,7 @@ type RunListOptions struct {
 }
 
 // RunStatuses are the values Gitea accepts as run status filters.
-var RunStatuses = []string{"queued", "in_progress", "waiting", "requested", "pending", "action_required", "completed", "success", "failure", "cancelled", "skipped", "timed_out", "neutral"} //nolint:misspell // Gitea API spelling.
+var RunStatuses = []string{"queued", "in_progress", "waiting", "requested", "pending", "action_required", "completed", "success", "failure", "cancelled", "skipped", "neutral"} //nolint:misspell // Gitea API spelling.
 
 // ErrRunScanExhausted reports time filters that matched too few of the runs a scan may read.
 var ErrRunScanExhausted = fmt.Errorf("time filters scanned %d runs without exhausting the history", maxRunScanPages*100)

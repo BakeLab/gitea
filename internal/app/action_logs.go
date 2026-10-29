@@ -32,7 +32,8 @@ func (a *application) runLogsCommand() *cobra.Command {
 		Use:   "logs [<run-id>]",
 		Short: "Print the logs of a run's jobs",
 		Long: `Print the logs of a run's jobs, one after another; the name of each job goes to stderr.
-With --tail, gt prints only the last lines of each job's log.
+With --tail, gt prints only the last lines of each job's log. --failed selects the jobs that
+failed or were canceled, those that gt run rerun --failed reruns.
 
 With --follow, gt waits for jobs to start and prints new log lines until they complete,
 prefixing each line with its job's name when it follows several jobs. With --output or --dir,
@@ -42,7 +43,7 @@ like --job.`,
 $ gt run logs 34
 # follow the logs of one job while it runs
 $ gt run logs 34 --job build --follow
-# print the last 50 lines of each failed job
+# print the last 50 lines of each failed or canceled job
 $ gt run logs 34 --failed --tail 50
 # download the logs as a ZIP archive
 $ gt run logs 34 --output logs.zip`,
@@ -140,13 +141,13 @@ $ gt run logs 34 --output logs.zip`,
 				}
 				jobs = []services.Job{selected}
 			case failed:
-				jobs = slices.DeleteFunc(jobs, func(job services.Job) bool { return job.Conclusion != "failure" })
+				jobs = slices.DeleteFunc(jobs, func(job services.Job) bool { return !failedJob(job) })
 				if len(jobs) == 0 {
-					return fmt.Errorf("run %d has no failed jobs", run)
+					return fmt.Errorf("run %d has no failed or canceled jobs", run)
 				}
 			}
 			if !follow {
-				return a.printJobLogs(cmd, service, jobs, tail)
+				return a.printJobLogs(cmd, service, run, jobs, tail)
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 			defer cancel()
@@ -155,7 +156,7 @@ $ gt run logs 34 --output logs.zip`,
 	}
 	archive.register(cmd)
 	cmd.Flags().StringVarP(&job, "job", "j", "", "Only the logs of this job, by `name or ID`")
-	cmd.Flags().BoolVar(&failed, "failed", false, "Only the logs of failed jobs")
+	cmd.Flags().BoolVar(&failed, "failed", false, "Only the logs of failed and canceled jobs")
 	cmd.Flags().IntVar(&tail, "tail", 0, "Only the last `N` lines of each job's log")
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Wait for jobs to start and print new lines until they complete")
 	cmd.Flags().DurationVarP(&interval, "interval", "i", 5*time.Second, "Polling interval with --follow")
@@ -177,11 +178,12 @@ func runJob(ctx context.Context, service services.Actions, jobs []services.Job, 
 }
 
 // printJobLogs prints the logs of jobs on stdout, each headed by its name on stderr. Jobs that
-// have not started are reported on stderr and skipped. A positive tail prints only the last tail
-// lines of each log.
-func (a *application) printJobLogs(cmd *cobra.Command, service services.Actions, jobs []services.Job, tail int) (err error) {
+// have not started are reported on stderr and skipped; it fails when none of them has. A positive
+// tail prints only the last tail lines of each log.
+func (a *application) printJobLogs(cmd *cobra.Command, service services.Actions, run int64, jobs []services.Job, tail int) (err error) {
 	out := a.logWriter(cmd)
 	defer func() { err = cmp.Or(err, terminal.ResetSGR(out)) }()
+	printed := false
 	for _, job := range jobs {
 		label := fmt.Sprintf("%s (job %d)", terminal.SafeLine(job.Name), job.ID)
 		var logs io.ReadCloser
@@ -213,8 +215,18 @@ func (a *application) printJobLogs(cmd *cobra.Command, service services.Actions,
 		if err := cmp.Or(copyErr, closeErr, terminal.ResetSGR(out)); err != nil {
 			return err
 		}
+		printed = true
+	}
+	if !printed {
+		return noLogsError(run)
 	}
 	return nil
+}
+
+var errNoStartedJobs = errors.New("none of the selected jobs has started")
+
+func noLogsError(run int64) error {
+	return fmt.Errorf("run %d has no logs: %w", run, errNoStartedJobs)
 }
 
 // copyTail writes the last n lines that r reads to w, holding no more than those in memory.
@@ -250,6 +262,7 @@ func (a *application) logWriter(cmd *cobra.Command) io.Writer {
 func (a *application) followJobLogs(ctx context.Context, cmd *cobra.Command, service services.Actions, run int64, jobs []services.Job, interval time.Duration) (err error) {
 	out := a.logWriter(cmd)
 	defer func() { err = cmp.Or(err, terminal.ResetSGR(out)) }()
+	printed := false
 	for _, job := range jobs {
 		label := fmt.Sprintf("%s (job %d)", terminal.SafeLine(job.Name), job.ID)
 		if !job.Started() && job.Completed() {
@@ -276,6 +289,10 @@ func (a *application) followJobLogs(ctx context.Context, cmd *cobra.Command, ser
 		if err := cmp.Or(err, lines.Flush(), terminal.ResetSGR(out)); err != nil {
 			return err
 		}
+		printed = true
+	}
+	if !printed {
+		return noLogsError(run)
 	}
 	return nil
 }

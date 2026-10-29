@@ -268,7 +268,7 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 				if err != nil {
 					return err
 				}
-				return a.printJobLogs(cmd, service, jobs, 0)
+				return a.printJobLogs(cmd, service, id, jobs, 0)
 			}
 			run, err := service.RunDetails(cmd.Context(), id)
 			if err != nil {
@@ -774,10 +774,10 @@ func (a *application) runRerunCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rerun [<run-id>]",
 		Short: "Rerun a workflow run",
-		Long:  "Rerun all jobs of a completed workflow run, only its failed jobs, or a single job, which --job or\nthe URL of the job selects.",
+		Long:  "Rerun all jobs of a completed workflow run, only its failed and canceled jobs, or a single job,\nwhich --job or the URL of the job selects.",
 		Example: `# rerun a run
 $ gt run rerun 34
-# rerun only the jobs that failed
+# rerun only the jobs that failed or were canceled
 $ gt run rerun 34 --failed
 # rerun one job, by name or ID
 $ gt run rerun 34 --job build`,
@@ -808,12 +808,19 @@ $ gt run rerun 34 --job build`,
 			if !run.Completed() {
 				return a.unfinished(t, run)
 			}
+			jobs, err := service.Jobs(cmd.Context(), id)
+			if err != nil {
+				return err
+			}
 			var jobID int64
-			if job != "" {
-				jobs, err := service.Jobs(cmd.Context(), id)
-				if err != nil {
-					return err
+			switch {
+			case len(jobs) == 0: // Gitea creates a run without jobs for an invalid workflow file.
+				return fmt.Errorf("run %d has no jobs to rerun; check its workflow file", id)
+			case failed:
+				if !slices.ContainsFunc(jobs, failedJob) {
+					return fmt.Errorf("run %d has no failed or canceled jobs", id)
 				}
+			case job != "":
 				selected, err := findJob(jobs, job, id)
 				if err != nil {
 					return err
@@ -836,11 +843,16 @@ $ gt run rerun 34 --job build`,
 			return a.jsonResult(cmd, run)
 		},
 	}
-	cmd.Flags().BoolVar(&failed, "failed", false, "Rerun only the failed jobs")
+	cmd.Flags().BoolVar(&failed, "failed", false, "Rerun only the failed and canceled jobs")
 	cmd.Flags().StringVarP(&job, "job", "j", "", "Rerun only this job, by `name or ID`")
 	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	_ = cmd.RegisterFlagCompletionFunc("job", a.completeJobs())
 	return cmd
+}
+
+// failedJob reports whether a job is one that rerun --failed and logs --failed select.
+func failedJob(job services.Job) bool {
+	return job.Conclusion == "failure" || job.Conclusion == "cancelled" //nolint:misspell // Gitea API spelling.
 }
 
 // unfinished refuses to act on a run that has not completed, as Gitea does, before asking anything.
@@ -862,6 +874,9 @@ func jobOfRunURL(args []string, job, conflicting string) (string, int64, error) 
 	}
 	if conflicting != "" {
 		return "", 0, clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with the URL of job %d", conflicting, parsed.Job))
+	}
+	if id, err := strconv.ParseInt(strings.TrimSpace(job), 10, 64); err == nil && id != parsed.Job {
+		return "", 0, clierr.Wrap(clierr.Usage, fmt.Errorf("--job %s cannot be combined with the URL of job %d", job, parsed.Job))
 	}
 	return cmp.Or(job, strconv.FormatInt(parsed.Job, 10)), parsed.Job, nil
 }

@@ -86,7 +86,9 @@ View this workflow on Gitea: https://gitea.test/alice/project/src/branch/main/.g
 
 func TestWorkflowRunChecksInputsBeforeDispatching(t *testing.T) {
 	server, requests := actionsAPI(t, map[string]string{
+		"GET ":                                 `{"full_name":"alice/project","default_branch":"main"}`,
 		"GET actions/workflows":                workflowsFixture,
+		"GET contents/.gitea/workflows":        workflowDirFixture,
 		"GET contents/.gitea/workflows/ci.yml": contentsOf(ciWorkflowFile),
 	})
 	for _, tc := range []struct {
@@ -96,27 +98,87 @@ func TestWorkflowRunChecksInputsBeforeDispatching(t *testing.T) {
 		{[]string{"-f", "note=x", "-f", "bogus=1"}, `unknown input "bogus" for CI (ci.yml); inputs: target, dry_run, note`},
 		{[]string{"-f", "note=x", "-f", "target=moon"}, `invalid value "moon" for input target: use staging, production`},
 		{[]string{"-f", "note=x", "-f", "dry_run=maybe"}, `invalid value "maybe" for input dry_run: use true or false`},
-		{[]string{"-f", "target=production"}, "missing required input note for CI (ci.yml); pass -f note=<value>"},
-		{nil, "missing required input note for CI (ci.yml); pass -f note=<value>"},
+		{[]string{"-f", "note="}, "input note requires a value"},
+		{[]string{"-f", "target=production"}, "CI (ci.yml) requires input note; pass -f note=<value>"},
+		{nil, "CI (ci.yml) requires input note; pass -f note=<value>"},
 	} {
 		*requests = nil
 		deps, _, _ := actionsDeps(t, server.URL, false)
 		err := Execute(context.Background(), deps, append([]string{"workflow", "run", "CI", "-R", "alice/project", "--ref", "main"}, tc.args...))
 		require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", tc.args)
 		require.EqualError(t, err, tc.err)
-		require.Equal(t, []string{"GET actions/workflows", "GET contents/.gitea/workflows/ci.yml"}, *requests, "nothing is dispatched")
+		require.Equal(t, []string{"GET actions/workflows", "GET contents/.gitea/workflows", "GET contents/.gitea/workflows/ci.yml"}, *requests, "nothing is dispatched")
 	}
 	deps, _, _ := actionsDeps(t, server.URL, false)
 	require.EqualError(t, Execute(context.Background(), deps, []string{"workflow", "run", "nightly", "-R", "alice/project"}),
 		"workflow nightly.yaml is disabled; enable it with: gt workflow enable nightly.yaml -R alice/project")
 }
 
-func TestWorkflowRunExplainsWorkflowsComeFromTheDefaultBranch(t *testing.T) {
-	server, requests := actionsAPI(t, map[string]string{"GET actions/workflows": workflowsFixture})
-	deps, _, _ := actionsDeps(t, server.URL, false)
-	err := Execute(context.Background(), deps, []string{"workflow", "run", "branch-only", "-R", "alice/project", "--ref", "feature"})
-	require.EqualError(t, err, `workflow "branch-only" not found in alice/project; workflows are listed from the default branch and must exist there, even with --ref; see gt workflow list -R alice/project`)
-	require.Equal(t, []string{"GET actions/workflows"}, *requests)
+func TestWorkflowRunFindsAWorkflowThatExistsOnlyOnTheRef(t *testing.T) {
+	server, requests := actionsAPI(t, map[string]string{
+		"GET actions/workflows":                             workflowsFixture,
+		"GET contents/.gitea/workflows":                     `404 {"message":"object does not exist [id: , rel_path: .gitea]"}`,
+		"GET contents/.github/workflows":                    `[{"name":"branch-only.yml","path":".github/workflows/branch-only.yml","type":"file"},{"name":"README.md","path":".github/workflows/README.md","type":"file"}]`,
+		"GET contents/.github/workflows/branch-only.yml":    contentsOf("name: Branchy\non: [workflow_dispatch]\njobs: {}\n"),
+		"POST actions/workflows/branch-only.yml/dispatches": `{"workflow_run_id":52}`,
+	})
+	deps, out, _ := actionsDeps(t, server.URL, false)
+	require.NoError(t, Execute(context.Background(), deps, []string{"workflow", "run", "branch-only", "-R", "alice/project", "--ref", "feature", "--json", "id"}))
+	require.JSONEq(t, `{"id":52}`, out.String())
+	require.Equal(t, []string{
+		"GET actions/workflows", "GET contents/.gitea/workflows", "GET contents/.github/workflows",
+		"GET contents/.github/workflows/branch-only.yml", `POST actions/workflows/branch-only.yml/dispatches {"ref":"feature"}`,
+	}, *requests)
+
+	*requests = nil
+	deps, out, _ = actionsDeps(t, server.URL, false)
+	require.NoError(t, Execute(context.Background(), deps, []string{"workflow", "run", "branchy", "-R", "alice/project", "--ref", "feature", "--json", "id"}))
+	require.JSONEq(t, `{"id":52}`, out.String())
+	require.Equal(t, []string{
+		"GET actions/workflows", "GET contents/.gitea/workflows", "GET contents/.github/workflows", "GET contents/.github/workflows/branch-only.yml",
+		"GET contents/.github/workflows/branch-only.yml", `POST actions/workflows/branch-only.yml/dispatches {"ref":"feature"}`,
+	}, *requests)
+
+	deps, _, _ = actionsDeps(t, server.URL, false)
+	err := Execute(context.Background(), deps, []string{"workflow", "run", "README", "-R", "alice/project", "--ref", "feature"})
+	require.EqualError(t, err, `workflow "README" not found in alice/project on feature`)
+
+	deps, out, _ = actionsDeps(t, server.URL, false)
+	require.NoError(t, Execute(context.Background(), deps, []string{"workflow", "view", "branchy", "-R", "alice/project", "--yaml", "--ref", "feature"}))
+	require.Equal(t, "name: Branchy\non: [workflow_dispatch]\njobs: {}\n", out.String())
+}
+
+// Gitea runs the workflows in the first of .gitea/workflows and .github/workflows that exists on the ref, not on the default branch.
+func TestWorkflowRunAndViewReadTheWorkflowFolderOfTheRef(t *testing.T) {
+	listed := `{"total_count":1,"workflows":[{"id":"ci.yml","name":"CI","path":".github/workflows/ci.yml","state":"active"}]}`
+	moved := map[string]string{
+		"GET actions/workflows":                    listed,
+		"GET contents/.gitea/workflows":            `[{"name":"ci.yml","path":".gitea/workflows/ci.yml","type":"file"}]`,
+		"GET contents/.gitea/workflows/ci.yml":     contentsOf("on:\n  workflow_dispatch:\n    inputs:\n      level: {required: true}\n"),
+		"POST actions/workflows/ci.yml/dispatches": `{"workflow_run_id":53}`,
+	}
+	server, requests := actionsAPI(t, moved)
+	deps, out, _ := actionsDeps(t, server.URL, false)
+	require.NoError(t, Execute(context.Background(), deps, []string{"workflow", "run", "ci", "-R", "alice/project", "--ref", "moved", "-f", "level=low", "--json", "id"}))
+	require.JSONEq(t, `{"id":53}`, out.String())
+	require.Equal(t, `POST actions/workflows/ci.yml/dispatches {"ref":"moved","inputs":{"level":"low"}}`, (*requests)[len(*requests)-1])
+	deps, out, _ = actionsDeps(t, server.URL, false)
+	require.NoError(t, Execute(context.Background(), deps, []string{"workflow", "view", "ci", "-R", "alice/project", "--yaml", "--ref", "moved"}))
+	require.Equal(t, "on:\n  workflow_dispatch:\n    inputs:\n      level: {required: true}\n", out.String())
+
+	moved["POST actions/workflows/ci.yml/dispatches"] = `404 {"message":"workflow \"ci.yml\" doesn't exist"}`
+	deps, _, _ = actionsDeps(t, server.URL, false)
+	err := Execute(context.Background(), deps, []string{"workflow", "run", "ci", "-R", "alice/project", "--ref", "moved", "-f", "level=low"})
+	require.EqualError(t, err, "workflow ci.yml not found in alice/project on moved")
+
+	hidden, _ := actionsAPI(t, map[string]string{
+		"GET actions/workflows":                  listed,
+		"GET contents/.gitea/workflows":          `[{"name":"only.yml","path":".gitea/workflows/only.yml","type":"file"}]`,
+		"GET contents/.gitea/workflows/only.yml": contentsOf("name: Only\non: push\n"),
+	})
+	deps, _, _ = actionsDeps(t, hidden.URL, false)
+	err = Execute(context.Background(), deps, []string{"workflow", "run", "ci", "-R", "alice/project", "--ref", "hidden", "-f", "level=low"})
+	require.EqualError(t, err, `workflow "ci.yml" not found in alice/project on hidden`)
 }
 
 // dispatchingPrompter answers workflow inputs: selections with their first choice, confirmations
@@ -139,9 +201,10 @@ func (p *dispatchingPrompter) ConfirmDefault(_ context.Context, title string, de
 
 func TestWorkflowRunDispatchesOnTheDefaultBranch(t *testing.T) {
 	server, requests := actionsAPI(t, map[string]string{
-		"GET ":                                 `{"full_name":"alice/project","default_branch":"trunk"}`,
-		"GET actions/workflows":                workflowsFixture,
-		"GET contents/.gitea/workflows/ci.yml": contentsOf(ciWorkflowFile),
+		"GET ":                                     `{"full_name":"alice/project","default_branch":"trunk"}`,
+		"GET actions/workflows":                    workflowsFixture,
+		"GET contents/.gitea/workflows":            workflowDirFixture,
+		"GET contents/.gitea/workflows/ci.yml":     contentsOf(ciWorkflowFile),
 		"POST actions/workflows/ci.yml/dispatches": `{"workflow_run_id":51,"html_url":"https://gitea.test/alice/project/actions/runs/51"}`,
 	})
 	for _, tc := range []struct {
@@ -171,7 +234,7 @@ func TestWorkflowRunDispatchesOnTheDefaultBranch(t *testing.T) {
 			require.NoError(t, Execute(context.Background(), deps, append([]string{"workflow", "run", "ci.yml", "-R", "alice/project"}, tc.args...)))
 			require.Equal(t, tc.out, out.String())
 			require.Equal(t, tc.err, diagnostics.String())
-			require.Equal(t, []string{"GET actions/workflows", "GET ", "GET contents/.gitea/workflows/ci.yml", "POST actions/workflows/ci.yml/dispatches " + tc.payload}, *requests)
+			require.Equal(t, []string{"GET ", "GET actions/workflows", "GET contents/.gitea/workflows", "GET contents/.gitea/workflows/ci.yml", "POST actions/workflows/ci.yml/dispatches " + tc.payload}, *requests)
 			if tc.prompter != nil {
 				require.Equal(t, []string{"target — Deploy target"}, tc.prompter.titles)
 				require.Equal(t, []string{"dry_run", "note — Free-form note (required)"}, tc.prompter.asked)
@@ -182,7 +245,8 @@ func TestWorkflowRunDispatchesOnTheDefaultBranch(t *testing.T) {
 
 func TestWorkflowRunPromptsShowInputsFromTheWorkflowSafely(t *testing.T) {
 	server, _ := actionsAPI(t, map[string]string{
-		"GET actions/workflows": workflowsFixture,
+		"GET actions/workflows":         workflowsFixture,
+		"GET contents/.gitea/workflows": workflowDirFixture,
 		"GET contents/.gitea/workflows/ci.yml": contentsOf(`on:
   workflow_dispatch:
     inputs:
@@ -215,7 +279,7 @@ func TestWorkflowRunNeedsTheCheckedOutBranchOnTheServer(t *testing.T) {
 	}}
 	err := Execute(context.Background(), deps, []string{"workflow", "run", "ci.yml", "-f", "note=x"})
 	require.EqualError(t, err, "branch local-only is not on alice/project; push it or pass --ref main")
-	require.Equal(t, []string{"GET actions/workflows", "GET branches/local-only", "GET "}, *requests)
+	require.Equal(t, []string{"GET branches/local-only", "GET "}, *requests)
 }
 
 func TestWorkflowStateChangesNeedNoConfirmation(t *testing.T) {
@@ -253,6 +317,7 @@ func TestWorkflowStateChangesNeedNoConfirmation(t *testing.T) {
 func TestWorkflowRunFollowStreamsTheLogsOfItsJobs(t *testing.T) {
 	server, _ := actionsAPI(t, map[string]string{
 		"GET actions/workflows":                    workflowsFixture,
+		"GET contents/.gitea/workflows":            workflowDirFixture,
 		"GET contents/.gitea/workflows/ci.yml":     contentsOf("on: workflow_dispatch\n"),
 		"POST actions/workflows/ci.yml/dispatches": `{"workflow_run_id":11,"html_url":"https://gitea.test/alice/project/actions/runs/11"}`,
 		"GET actions/runs/11/jobs":                 failedJobsFixture,
@@ -269,6 +334,7 @@ func TestWorkflowRunFollowStreamsTheLogsOfItsJobs(t *testing.T) {
 	require.Equal(t, "build (job 30)\ntest (job 31)\n", diagnostics.String())
 	succeeded, _ := actionsAPI(t, map[string]string{
 		"GET actions/workflows":                    workflowsFixture,
+		"GET contents/.gitea/workflows":            workflowDirFixture,
 		"GET contents/.gitea/workflows/ci.yml":     contentsOf("on: workflow_dispatch\n"),
 		"POST actions/workflows/ci.yml/dispatches": `{"workflow_run_id":11}`,
 		"GET actions/runs/11/jobs":                 `{"total_count":1,"jobs":[{"id":30,"name":"build","status":"completed","conclusion":"success","started_at":"2028-01-01T11:00:05Z"}]}`,
@@ -276,7 +342,19 @@ func TestWorkflowRunFollowStreamsTheLogsOfItsJobs(t *testing.T) {
 		"GET actions/jobs/30/logs":                 "compiled\n",
 	})
 	deps, _, _ = actionsDeps(t, succeeded.URL, false)
-	require.NoError(t, Execute(context.Background(), deps, []string{"workflow", "run", "ci", "-R", "alice/project", "--ref", "main", "--follow", "--interval=1ms"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"workflow", "run", "ci", "-R", "alice/project", "--ref", "main", "--follow", "-i", "1ms"}))
+	// A run whose jobs never start still exits with its conclusion.
+	unstarted, _ := actionsAPI(t, map[string]string{
+		"GET actions/workflows":                    workflowsFixture,
+		"GET contents/.gitea/workflows":            workflowDirFixture,
+		"GET contents/.gitea/workflows/ci.yml":     contentsOf("on: workflow_dispatch\n"),
+		"POST actions/workflows/ci.yml/dispatches": `{"workflow_run_id":11}`,
+		"GET actions/runs/11/jobs":                 `{"total_count":1,"jobs":[{"id":30,"name":"build","status":"completed","conclusion":"cancelled"}]}`, //nolint:misspell // Gitea API spelling.
+		"GET actions/runs/11":                      `{"id":11,"status":"completed","conclusion":"cancelled"}`,                                           //nolint:misspell // Gitea API spelling.
+	})
+	deps, _, _ = actionsDeps(t, unstarted.URL, false)
+	err = Execute(context.Background(), deps, []string{"workflow", "run", "ci", "-R", "alice/project", "--ref", "main", "--follow", "-i", "1ms"})
+	require.Equal(t, clierr.Unsuccessful, clierr.ExitCode(err))
 	err = Execute(context.Background(), deps, []string{"workflow", "run", "ci.yml", "-R", "alice/project", "--ref", "main", "--follow", "--json"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.ErrorContains(t, err, "--follow cannot be combined with --json")

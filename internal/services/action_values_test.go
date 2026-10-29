@@ -113,7 +113,7 @@ func TestSecretMutationsUseTheirScope(t *testing.T) {
 			service := ActionSecrets{Client: client, Scope: scope.scope}
 			item, err := service.Set(context.Background(), "TOKEN", "secret", "deploy key")
 			require.NoError(t, err)
-			require.Equal(t, ActionSecret{Name: "TOKEN", Description: "deploy key"}, item)
+			require.Equal(t, SetActionSecret{Name: "TOKEN", Description: "deploy key"}, item)
 			require.NoError(t, service.Delete(context.Background(), "A B"))
 			require.Equal(t, []string{"PUT " + scope.path + "/secrets/TOKEN", "DELETE " + scope.path + "/secrets/A%20B"}, requests)
 		})
@@ -211,7 +211,7 @@ func TestValueListsNameAMissingScope(t *testing.T) {
 }
 
 func TestSecretSetResultHasEveryJSONField(t *testing.T) {
-	data, err := json.Marshal(ActionSecret{Name: "TOKEN"})
+	data, err := json.Marshal(SetActionSecret{Name: "TOKEN"})
 	require.NoError(t, err)
-	require.JSONEq(t, `{"name":"TOKEN","description":"","created_at":""}`, string(data))
+	require.JSONEq(t, `{"name":"TOKEN","description":""}`, string(data))
 }

@@ -47,13 +47,10 @@ type actionScopeFlags struct {
 	account bool
 }
 
-// register adds the scope flags to cmd; account adds --account, which secret list lacks.
-func (f *actionScopeFlags) register(a *application, cmd *cobra.Command, kind string, account bool) {
+func (f *actionScopeFlags) register(a *application, cmd *cobra.Command, kind string) {
 	cmd.Flags().StringVarP(&f.org, "org", "o", "", "Use the "+kind+"s of an organization instead of a repository")
 	_ = cmd.RegisterFlagCompletionFunc("org", a.completeOrgs())
-	if account {
-		cmd.Flags().BoolVar(&f.account, "account", false, "Use the "+kind+"s of your user account instead of a repository or organization")
-	}
+	cmd.Flags().BoolVar(&f.account, "account", false, "Use the "+kind+"s of your user account instead of a repository or organization")
 }
 
 func (f *actionScopeFlags) scope() services.ActionScope {
@@ -121,6 +118,9 @@ $ gt secret list --org acme`
 		Example: example,
 		Args:    argsExact(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if secret && scope.account {
+				return clierr.Wrap(clierr.Usage, errors.New("secret list cannot be combined with --account: Gitea cannot list account secrets"))
+			}
 			selected, t, err := scope.resolve(a, cmd)
 			if err != nil {
 				return err
@@ -154,7 +154,10 @@ $ gt secret list --org acme`
 		},
 	}
 	pageFlags(cmd, &limit, &page)
-	scope.register(a, cmd, kind, !secret)
+	scope.register(a, cmd, kind)
+	if secret {
+		_ = cmd.Flags().MarkHidden("account")
+	}
 	return cmd
 }
 
@@ -207,7 +210,7 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("--env-file cannot be combined with a %s name", kind))
 			}
 			if len(args) == 0 && envFile == "" {
-				return clierr.Wrap(clierr.Usage, &argumentError{problem: "pass a " + kind + " name or --env-file", cmd: cmd})
+				return clierr.Wrap(clierr.Usage, &argumentError{problem: commandName(cmd) + " requires a name argument or --env-file", cmd: cmd})
 			}
 			if envFile != "" && (cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file")) {
 				return clierr.Wrap(clierr.Usage, errors.New("--env-file cannot be combined with --body or --body-file"))
@@ -233,13 +236,26 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 				}
 				entries = []envEntry{{args[0], value}}
 			}
+			seen := map[string]bool{}
 			for _, entry := range entries {
 				if err := checkActionValueName(entry.name); err != nil {
 					return err
 				}
-				// A variable may hold only whitespace, such as a separator; a secret may not.
-				if entry.value == "" || (secret && strings.TrimSpace(entry.value) == "") {
+				name := services.ActionValueName(entry.name)
+				if seen[name] {
+					source := envFile
+					if source == "-" {
+						source = "standard input"
+					}
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is given more than once in %s", name, source))
+				}
+				seen[name] = true
+				if entry.value == "" {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("the value of %s is empty", entry.name))
+				}
+				// A variable may hold only whitespace, such as a separator; a secret may not.
+				if secret && strings.TrimSpace(entry.value) == "" {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("the value of %s contains only whitespace", entry.name))
 				}
 				// Gitea counts the bytes of a secret and the characters of a variable.
 				if secret && len(entry.value) > 65536 {
@@ -267,9 +283,9 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 			}
 			if secret {
 				service := services.ActionSecrets{Client: t.client, Scope: selected}
-				return setActionValues(a, cmd, len(args), entries, func(entry envEntry) (services.ActionSecret, error) {
+				return setActionValues(a, cmd, len(args), entries, func(entry envEntry) (services.SetActionSecret, error) {
 					return service.Set(cmd.Context(), entry.name, entry.value, description)
-				}, func(item services.ActionSecret) string { return report(item.Name) })
+				}, func(item services.SetActionSecret) string { return report(item.Name) })
 			}
 			service := services.ActionVariables{Client: t.client, Scope: selected}
 			var newDescription *string
@@ -285,8 +301,11 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 	cmd.Flags().StringVarP(&bodyFile, "body-file", "F", "", "Read the value from a file, or - for standard input")
 	cmd.Flags().StringVarP(&envFile, "env-file", "f", "", "Set every NAME=value of a dotenv file, or - for standard input")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Description")
-	scope.register(a, cmd, kind, true)
+	scope.register(a, cmd, kind)
 	cmd.ValidArgsFunction = a.completeActionValues(secret, &scope)
+	if secret {
+		return jsonOutput(cmd, jsonFields[services.SetActionSecret]())
+	}
 	return cmd
 }
 
@@ -303,7 +322,7 @@ func (a *application) actionValue(cmd *cobra.Command, secret bool, name, body, b
 	if cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") {
 		return a.readSecret(cmd, body, bodyFile, "body", "body-file")
 	}
-	missing := clierr.Wrap(clierr.Usage, errors.New("missing value: pass --body, --body-file or standard input"))
+	missing := clierr.Wrap(clierr.Usage, fmt.Errorf("%s requires --body, --body-file or standard input", commandName(cmd)))
 	if !a.deps.Streams.InTTY {
 		data, err := io.ReadAll(a.deps.Streams.In)
 		if err != nil {
@@ -421,7 +440,7 @@ $ gt %[1]s delete DEPLOY_TOKEN --org acme --yes`, kind),
 			return nil
 		},
 	}
-	scope.register(a, cmd, kind, true)
+	scope.register(a, cmd, kind)
 	cmd.ValidArgsFunction = a.completeActionValues(secret, &scope)
 	return cmd
 }
@@ -455,7 +474,7 @@ $ gt variable view ENVIRONMENT`,
 			return a.writeHuman(cmd, view.Render(d))
 		},
 	}
-	scope.register(a, cmd, "variable", true)
+	scope.register(a, cmd, "variable")
 	cmd.ValidArgsFunction = a.completeActionValues(false, &scope)
 	return cmd
 }
@@ -486,7 +505,7 @@ $ region=$(gt variable get REGION --org acme)`,
 			return writeTerminalSafe(cmd.OutOrStdout(), a.deps.Streams.OutTTY, strings.NewReader(item.Value+"\n"))
 		},
 	}
-	scope.register(a, cmd, "variable", true)
+	scope.register(a, cmd, "variable")
 	cmd.ValidArgsFunction = a.completeActionValues(false, &scope)
 	return cmd
 }
