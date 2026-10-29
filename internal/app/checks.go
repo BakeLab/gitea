@@ -128,7 +128,11 @@ func checksOutcome(items []services.Check) error {
 // checkCounts words how the checks stand: "0 failing, 1 successful, and 2 pending checks".
 func checkCounts(items []services.Check) string {
 	failing, pending, passed := services.Tally(items)
-	return fmt.Sprintf("%d failing, %d successful, and %d pending checks", failing, passed, pending)
+	noun := "checks"
+	if failing+passed+pending == 1 {
+		noun = "check"
+	}
+	return fmt.Sprintf("%d failing, %d successful, and %d pending %s", failing, passed, pending, noun)
 }
 
 // checksText is the human summary of checks: a colored verdict, the counts and a table.

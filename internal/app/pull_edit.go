@@ -6,6 +6,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -130,6 +131,17 @@ outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnot
 				return err
 			}
 			before = &current
+		}
+		if opts.ReviewerChanges != nil && slices.ContainsFunc(reviewers.Add.Users, func(user string) bool { return strings.EqualFold(user, t.login()) }) {
+			if before == nil {
+				if current, err = service.View(cmd.Context(), n); err != nil {
+					return err
+				}
+				before = &current
+			}
+			if strings.EqualFold(current.Author, t.login()) {
+				return clierr.Wrap(clierr.Usage, errors.New("--add-reviewer cannot include @me; Gitea does not let the author review their pull request"))
+			}
 		}
 		if keepDraft {
 			draft = current.Draft

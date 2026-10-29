@@ -126,7 +126,7 @@ fewer than required give review_required.`, Args: argsExact(0), RunE: func(cmd *
 	cmd.Flags().StringVarP(&options.Head, "head", "H", "", "Filter by head branch, or OWNER:BRANCH for a fork")
 	cmd.Flags().BoolVarP(&options.Draft, "draft", "d", false, "Show only drafts")
 	cmd.Flags().StringVarP(&options.Search, "search", "S", "", "Filter by text in the title or body")
-	cmd.Flags().StringSliceVarP(&labels, "label", "l", nil, "Filter by labels; repo: or org: picks between same-named labels")
+	cmd.Flags().StringSliceVarP(&labels, "label", "l", nil, "Filter by label `names`; a pull request must have all of them; prefix repo: or org: to disambiguate")
 	cmd.Flags().StringVarP(&milestone, "milestone", "m", "", "Filter by milestone title or ID")
 	enumFlag(cmd, &options.Sort, "sort", "", "", "Order", "oldest", "recentupdate", "recentclose", "leastupdate", "mostcomment", "leastcomment", "priority")
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the pull request list in the browser")

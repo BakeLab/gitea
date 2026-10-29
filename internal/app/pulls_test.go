@@ -20,13 +20,13 @@ import (
 )
 
 // pullListServer lists the pull requests of alice/project: #17 from bob's fork, #15 a draft, #14
-// merged and #16 closed, with the total count Gitea reports.
+// merged and #16 closed, an AGit pull request, with the total count Gitea reports.
 func pullListServer(t *testing.T, states *[]string) *http.Server {
 	t.Helper()
 	pulls := map[string]string{
 		"open": `[{"number":17,"title":"Improve greeting","state":"open","user":{"login":"bob"},"created_at":"2026-10-11T10:00:00Z","head":{"ref":"bob/greeting","repo":{"full_name":"bob/project"}},"html_url":"http://gitea/alice/project/pulls/17"},
 			{"number":15,"title":"WIP: experiment","state":"open","draft":true,"user":{"login":"alice"},"created_at":"2026-10-11T09:00:00Z","head":{"ref":"experiment","repo":{"full_name":"alice/project"}}}]`,
-		"closed": `[{"number":16,"title":"Add usage guide","state":"closed","user":{"login":"alice"},"head":{"ref":"docs/guide"}},
+		"closed": `[{"number":16,"title":"Add usage guide","state":"closed","user":{"login":"alice"},"head":{"ref":"refs/pull/16/head","label":""}},
 			{"number":14,"title":"Fix README typo","state":"closed","merged":true,"user":{"login":"alice"},"head":{"ref":"fix/typo"}}]`,
 	}
 	return &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +63,10 @@ ID   TITLE             BRANCH            AUTHOR  CREATED
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--state", "merged"}))
 	require.Equal(t, "Showing 1 of 1 merged pull requests in alice/project\n\nID   TITLE            BRANCH    STATE   AUTHOR  CREATED\n#14  Fix README typo  fix/typo  merged  alice\n", stripLinks(out.String()))
+
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "--state", "closed"}))
+	require.Contains(t, stripLinks(out.String()), "#16  Add usage guide  refs/pull/16/head  closed")
 
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "-R", "alice/project", "-d"}))
@@ -291,7 +295,7 @@ func TestPullViewResolvesCurrentBranch(t *testing.T) {
 	require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, []string{"pr", "view"})))
 	err := Execute(context.Background(), deps, []string{"pr", "view", "-R", "alice/project"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-	require.EqualError(t, err, "pass a pull request number, URL or branch with --repo")
+	require.EqualError(t, err, "pr view requires a pull request number, URL or branch with --repo")
 }
 
 func TestPullCommandsNameTheIssueAPullRequestNumberBelongsTo(t *testing.T) {

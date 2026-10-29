@@ -30,9 +30,9 @@ func (a *application) pullReviewSubmitCommand() *cobra.Command {
 			return err
 		}
 		if state == "" {
-			return errReviewType(cmd)
+			return errReviewType(cmd, kind)
 		}
-		missingBody := clierr.Wrap(clierr.Usage, errors.New("a change request needs a body; pass --body, --body-file or --editor"))
+		missingBody := errReviewBody("REQUEST_CHANGES")
 		var supplied *string
 		if cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") {
 			if body, err = a.readBody(cmd, body, file); err != nil {
@@ -166,6 +166,8 @@ func (a *application) pullReviewDeleteCommand() *cobra.Command {
 	return cmd
 }
 
+var errDismissReason = clierr.Wrap(clierr.Usage, errors.New("pr review dismiss requires a reason; pass --body, --body-file or --editor"))
+
 func (a *application) pullReviewDismissCommand(dismiss bool) *cobra.Command {
 	var body, file string
 	var useEditor bool
@@ -187,6 +189,8 @@ func (a *application) pullReviewDismissCommand(dismiss bool) *cobra.Command {
 				body = draft.Body
 			case cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file"):
 				body, err = a.readBody(cmd, body, file)
+			case !a.canPrompt():
+				return errDismissReason
 			default:
 				_, err = a.requireInput(cmd, &body, "body", "Reason for dismissing the review", nil)
 			}
@@ -194,7 +198,7 @@ func (a *application) pullReviewDismissCommand(dismiss bool) *cobra.Command {
 				return err
 			}
 			if strings.TrimSpace(body) == "" {
-				return clierr.Wrap(clierr.Usage, errors.New("a dismissal needs a reason; pass --body, --body-file or --editor"))
+				return errDismissReason
 			}
 			return nil
 		}

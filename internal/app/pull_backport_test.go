@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -39,6 +40,9 @@ type backportServer struct {
 	bodies      [][]byte
 	failCreates int
 	pullCommits []string
+	// extra answers the requests it handles ahead of the others; atomic, since a request from a
+	// git subprocess has no happens-before edge the race detector sees.
+	extra atomic.Pointer[func(http.ResponseWriter, *http.Request) bool]
 }
 
 func newBackportServer(t *testing.T) *backportServer {
@@ -67,6 +71,9 @@ func newBackportServer(t *testing.T) *backportServer {
 		"GIT_PROJECT_ROOT=" + s.root, "GIT_HTTP_EXPORT_ALL=1", "GIT_CONFIG_GLOBAL=" + os.Getenv("GIT_CONFIG_GLOBAL"), "GIT_CONFIG_NOSYSTEM=1",
 	}}
 	s.server = newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if extra := s.extra.Load(); extra != nil && (*extra)(w, r) {
+			return
+		}
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/alice/project.git/"):
 			backend.ServeHTTP(w, r)
@@ -75,6 +82,8 @@ func newBackportServer(t *testing.T) *backportServer {
 				"merged":true,"merge_commit_sha":%q,"merge_base":%q,"base":{"ref":"main"},"head":{"ref":"feature","sha":%q},
 				"labels":[{"id":3,"name":"kind/bug"},{"id":4,"name":"old","is_archived":true}],"milestone":{"id":9,"title":"1.3.0"}}`,
 				merge, s.releaseTip, s.pullCommits[1])
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/git/refs/pull/7/head":
+			writePullRef(w, 7, s.pullCommits[1])
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project":
 			fmt.Fprint(w, `{"full_name":"alice/project","default_branch":"main","has_pull_requests":true,"permissions":{"push":true}}`)
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/repos/alice/project/branches/"):
@@ -114,6 +123,11 @@ func newBackportServer(t *testing.T) *backportServer {
 	return s
 }
 
+// handle sets the handler that answers requests ahead of the others.
+func (s *backportServer) handle(extra func(http.ResponseWriter, *http.Request) bool) {
+	s.extra.Store(&extra)
+}
+
 func (s *backportServer) git(dir string, args ...string) string {
 	s.t.Helper()
 	output, err := (git.System{}).Output(context.Background(), dir, false, args...)
@@ -132,7 +146,7 @@ func (s *backportServer) commit(name, content, message string) string {
 func (s *backportServer) run(args ...string) (string, string, error) {
 	s.t.Helper()
 	deps, out, diagnostics := serverDeps(s.t, s.server.URL)
-	deps.Git = git.System{}
+	deps.Git = git.System{ErrOut: diagnostics}
 	err := Execute(context.Background(), deps, append(args, "--repo", "alice/project", "--cwd", s.work))
 	return out.String(), diagnostics.String(), err
 }
@@ -180,8 +194,10 @@ func TestPullBackportConflicts(t *testing.T) {
 	}
 	t.Run("undone while the other targets go ahead", func(t *testing.T) {
 		s := conflicting(t)
-		out, _, err := s.run("pr", "backport", "7", "--to", "release/v1", "--to", "release/v2", "--yes")
+		out, diagnostics, err := s.run("pr", "backport", "7", "--to", "release/v1", "--to", "release/v2", "--yes")
 		require.ErrorContains(t, err, "cherry-picking to release/v1 conflicts in two.txt; nothing was changed. Run again with --keep")
+		require.NotContains(t, diagnostics, "cherry-pick --continue")
+		require.NotContains(t, diagnostics, "could not apply")
 		require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 		require.Len(t, s.created, 1)
 		require.Equal(t, "release/v2", s.created[0]["base"])
@@ -197,10 +213,24 @@ func TestPullBackportConflicts(t *testing.T) {
 		require.Len(t, s.created, 1)
 		require.Equal(t, "release/v2", s.created[0]["base"])
 	})
+	t.Run("a target that has its changes keeps Git's advice to itself", func(t *testing.T) {
+		s := newBackportServer(t)
+		s.git(s.pusher, "switch", "--quiet", "-c", "v1", "origin/release/v1")
+		s.commit("one.txt", "one\n", "backport one")
+		s.commit("two.txt", "two\n", "backport two")
+		s.git(s.pusher, "push", "--quiet", "origin", "HEAD:release/v1")
+		for _, flags := range [][]string{{"--yes"}, {"--keep", "--yes"}} {
+			_, diagnostics, err := s.run(append([]string{"pr", "backport", "7", "--to", "release/v1"}, flags...)...)
+			require.EqualError(t, err, "the changes of pull request #7 are already on release/v1")
+			require.Empty(t, diagnostics, flags)
+			require.Equal(t, "work", s.git(s.work, "branch", "--show-current"))
+		}
+	})
 	t.Run("kept, resolved and continued", func(t *testing.T) {
 		s := conflicting(t)
-		_, _, err := s.run("pr", "backport", "7", "--to", "release/v1", "--keep", "--yes")
+		_, diagnostics, err := s.run("pr", "backport", "7", "--to", "release/v1", "--keep", "--yes")
 		require.ErrorContains(t, err, "resolve the conflicts on branch backport-7-release-v1")
+		require.Contains(t, diagnostics, "could not apply")
 		require.Empty(t, s.created)
 		require.Equal(t, "backport-7-release-v1", s.git(s.work, "branch", "--show-current"))
 
@@ -217,6 +247,9 @@ func TestPullBackportConflicts(t *testing.T) {
 		require.Equal(t, "backport-7-release-v1", s.created[0]["head"])
 		require.Equal(t, s.server.URL+"/alice/project/pulls/12\n", out)
 		require.Equal(t, "work", s.git(s.work, "branch", "--show-current"))
+
+		_, _, err = s.run("pr", "backport", "7", "--to", "release/v1", "--yes")
+		require.EqualError(t, err, `branch "backport-7-release-v1" already exists for pull request #12; choose another with --branch, or delete it with gt pr clean 12 once that pull request is merged or closed`)
 	})
 }
 
@@ -229,12 +262,16 @@ func TestPullBackportChecksBeforeCherryPicking(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--to", "release/v1"}, "pr backport requires --yes without a terminal"},
+		{[]string{"--to", "release/v1"}, "confirmation required to push the backport branch; rerun with --yes"},
+		{[]string{"--to", "nosuch", "--yes"}, `--to requires an existing branch: branch "nosuch" not found in alice/project`},
 		{[]string{"--to", "release/v1", "--milestone", "nosuch", "--yes"}, `milestone "nosuch" not found`},
 		{[]string{"--to", "release/v2", "--yes"}, "branch backport-7-release-v2 already exists in alice/project; choose another with --branch"},
 	} {
 		_, _, err := s.run(append([]string{"pr", "backport", "7"}, tc.args...)...)
 		require.ErrorContains(t, err, tc.want)
+		if tc.args[1] == "nosuch" {
+			require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+		}
 		require.Empty(t, s.git(s.work, "branch", "--list", "backport-*"), tc.args)
 	}
 	require.Empty(t, s.created)
@@ -266,9 +303,21 @@ func TestPullBackportRetriesAFailedPullRequestWithContinue(t *testing.T) {
 	require.Empty(t, s.created)
 
 	s.git(s.work, "switch", "--quiet", "backport-7-release-v1")
-	out, _, err := s.run("pr", "backport", "--continue", "--yes")
-	require.NoError(t, err)
+	// The advice to fork renames origin, which the branch recorded as its base remote.
+	s.handle(func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/repos/alice/project/forks" {
+			return false
+		}
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprintf(w, `{"full_name":"bob/project","clone_url":"%s/bob/project.git"}`, s.server.URL)
+		return true
+	})
+	deps, out, diagnostics := serverDeps(t, s.server.URL)
+	deps.Git = git.System{ErrOut: diagnostics}
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "--org", "bob", "--add-remote", "--cwd", s.work}), diagnostics.String())
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "backport", "--continue", "--yes", "--cwd", s.work}), diagnostics.String())
 	require.Len(t, s.created, 1)
-	require.Equal(t, s.server.URL+"/alice/project/pulls/12\n", out)
+	require.Equal(t, s.server.URL+"/alice/project/pulls/12\n", out.String())
 	require.Equal(t, "work", s.git(s.work, "branch", "--show-current"))
 }

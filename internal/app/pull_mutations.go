@@ -245,7 +245,7 @@ func (a *application) forkRemote(ctx context.Context, t target, base *pullBase) 
 // fork the account can push to is used instead.
 func (a *application) forkForPush(cmd *cobra.Command, t target, branch string) (remote, owner string, err error) {
 	if !a.canPrompt() {
-		return "", "", fmt.Errorf("you cannot push to %s; fork it with gt repo fork --remote and retry", t.Repo)
+		return "", "", fmt.Errorf("you cannot push to %s; fork it with gt repo fork --add-remote and retry", t.Repo)
 	}
 	ctx := cmd.Context()
 	names, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote")
@@ -269,7 +269,7 @@ func (a *application) forkForPush(cmd *cobra.Command, t target, branch string) (
 		}
 	}
 	if remote == "" {
-		return "", "", fmt.Errorf("you cannot push to %s, and Git remotes fork and %s point elsewhere; add a remote of your fork with gt repo fork --remote --remote-name NAME and retry", t.Repo, t.login())
+		return "", "", fmt.Errorf("you cannot push to %s, and Git remotes fork and %s point elsewhere; add a remote of your fork with gt repo fork --add-remote --remote-name NAME and retry", t.Repo, t.login())
 	}
 	question := fmt.Sprintf("You cannot push to %s. Fork it and push branch %s to the fork?", t.Repo, branch)
 	if existing != "" {
@@ -299,7 +299,7 @@ func (a *application) forkForPush(cmd *cobra.Command, t target, branch string) (
 }
 
 func (a *application) addPullMutations(group *cobra.Command) {
-	group.AddCommand(a.pullCreateCommand(), a.pullStateCommand(true), a.pullStateCommand(false), a.pullDiffCommand(), a.pullReviewCommand(), a.pullMergeCommand())
+	group.AddCommand(a.pullCreateCommand(), a.pullStateCommand(true), a.pullStateCommand(false), a.pullDiffCommand(), a.pullReviewCommand(), a.pullMergeCommand(), a.pullUpdateBranchCommand())
 }
 
 func (a *application) pullStateCommand(closing bool) *cobra.Command {
@@ -335,7 +335,7 @@ func (a *application) pullStateCommand(closing bool) *cobra.Command {
 			a.done(cmd, "%s pull request %s", done, ref)
 		}
 		if deleteBranch {
-			item = a.deleteHead(cmd, service, item, false, true)
+			item = a.deleteHead(cmd, t, service, item, false, true)
 		}
 		return a.pullResult(cmd, t, item)
 	}}
@@ -356,7 +356,7 @@ $ gt pr close 13 -c "Superseded by #15" --delete-branch`
 // asked to delete it as part of the merge; a branch Gitea kept then stays, since Gitea keeps the
 // head branch of another open pull request, which deleting it would close. It returns item with
 // HeadRemoteDeleted set when the remote branch is gone.
-func (a *application) deleteHead(cmd *cobra.Command, service services.Pulls, item services.Pull, merging, local bool) services.Pull {
+func (a *application) deleteHead(cmd *cobra.Command, t target, service services.Pulls, item services.Pull, merging, local bool) services.Pull {
 	switch {
 	case item.Head == "":
 		// An AGit pull request has no head branch to delete.
@@ -385,7 +385,7 @@ func (a *application) deleteHead(cmd *cobra.Command, service services.Pulls, ite
 		}
 	}
 	if local {
-		a.deleteLocalHead(cmd, item)
+		a.deleteLocalHead(cmd, t, item)
 	}
 	return item
 }
@@ -403,16 +403,34 @@ func (a *application) headKeptFor(ctx context.Context, service services.Pulls, i
 	return ""
 }
 
-// deleteLocalHead deletes the checked-out branch when it is at the head of the pull request,
-// switching to the base branch first, like gh pr merge --delete-branch.
-func (a *application) deleteLocalHead(cmd *cobra.Command, item services.Pull) {
+// deleteLocalHead deletes the checked-out branch when it is at the head of the pull request, or
+// is a branch of it that is behind, switching to the base branch first, like gh pr merge
+// --delete-branch, and then fast-forwards the base branch.
+func (a *application) deleteLocalHead(cmd *cobra.Command, t target, item services.Pull) {
 	ctx := cmd.Context()
 	branch, err := a.currentBranch(ctx)
 	if err != nil || branch == item.Base || item.HeadSHA == "" {
 		return
 	}
-	if tip, err := a.gitProbe().Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}"); err != nil || tip != item.HeadSHA {
+	probe := a.gitProbe()
+	tip, err := probe.Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
+	if err != nil {
 		return
+	}
+	if tip != item.HeadSHA {
+		config := git.ReadBranchConfig(ctx, probe, a.options.cwd, branch)
+		if branch != item.Head && config.PullNumber != item.Number && (item.Head == "" || config.Merge != item.Head) {
+			return // another branch than the pull request's
+		}
+		a.fetchPullHead(ctx, t, item)
+		if _, err := probe.Output(ctx, a.options.cwd, false, "merge-base", "--is-ancestor", tip, item.HeadSHA); err != nil {
+			if failure, ok := errors.AsType[*git.CommandError](err); ok && failure.ExitCode == 1 {
+				a.warn(cmd, "Kept local branch %s: it has commits that are not in the pull request", branch)
+			} else {
+				a.warn(cmd, "Kept local branch %s: it is not at the head of the pull request", branch)
+			}
+			return
+		}
 	}
 	result, err := git.CleanPull(ctx, a.deps.Git, git.CleanOptions{Directory: a.options.cwd, DefaultBranch: item.Base, LocalBranch: branch, Prompt: a.canPrompt()})
 	if err != nil {
@@ -420,6 +438,64 @@ func (a *application) deleteLocalHead(cmd *cobra.Command, item services.Pull) {
 		return
 	}
 	a.done(cmd, "Switched to %s and deleted local branch %s", result.DefaultBranch, result.LocalBranch)
+	a.reportCleaned(cmd, t, result, true)
+}
+
+// fetchPullHead fetches the head of pull request item from the base remote when the clone lacks
+// its commit, such as after gt pr update-branch or a push from another clone, so that a branch
+// behind it is told from one with commits of its own.
+func (a *application) fetchPullHead(ctx context.Context, t target, item services.Pull) {
+	if item.HeadSHA == "" {
+		return
+	}
+	probe := a.gitProbe()
+	if _, err := probe.Output(ctx, a.options.cwd, false, "cat-file", "-e", item.HeadSHA+"^{commit}"); err == nil {
+		return
+	}
+	snapshot, err := a.settings()
+	if err != nil {
+		return
+	}
+	remote, err := a.checkoutRemote(ctx, t, snapshot)
+	if err != nil {
+		return
+	}
+	credentials, err := a.remoteCredentials(ctx, t, remote)
+	if err != nil {
+		return
+	}
+	_, _ = probe.Output(ctx, a.options.cwd, false, append(credentials, "fetch", "--quiet", "--no-tags", "--", remote, fmt.Sprintf("refs/pull/%d/head", item.Number))...)
+}
+
+// reportCleaned reports the Git remote that deleting a pull request's local branch removed, and
+// fast-forwards the base branch when it switched there.
+func (a *application) reportCleaned(cmd *cobra.Command, t target, result git.CleanResult, switched bool) {
+	if result.RemovedRemote != "" {
+		a.done(cmd, "Removed Git remote %s", result.RemovedRemote)
+	}
+	ctx := cmd.Context()
+	if current, err := a.currentBranch(ctx); !switched || err != nil || current != result.DefaultBranch {
+		return
+	}
+	snapshot, err := a.settings()
+	if err != nil {
+		return
+	}
+	remote, err := a.checkoutRemote(ctx, t, snapshot)
+	if err != nil {
+		return
+	}
+	credentials, err := a.remoteCredentials(ctx, t, remote)
+	if err != nil {
+		return
+	}
+	synced, err := git.SyncBranch(ctx, a.deps.Git, git.SyncOptions{Directory: a.options.cwd, Remote: remote, Branch: result.DefaultBranch, CredentialArgs: credentials, Prompt: a.policy(snapshot).CanPrompt(a.deps.Streams)})
+	switch {
+	case err != nil:
+		a.warn(cmd, "Did not fast-forward %s: %v", result.DefaultBranch, err)
+	case synced.Previous != synced.Commit:
+		a.done(cmd, "Fast-forwarded %s to %s/%s", result.DefaultBranch, remote, result.DefaultBranch)
+	}
 }
 
 func (a *application) pullDiffCommand() *cobra.Command {
@@ -539,7 +615,7 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 		defer finishDraft(&editorDraft, &runErr)
 		for name, set := range map[string]bool{"merge": style.merge, "squash": style.squash, "rebase": style.rebase} {
 			if set && method != "" {
-				return clierr.Wrap(clierr.Usage, errors.New("choose one merge method: --merge, --squash, --rebase or --method"))
+				return clierr.Wrap(clierr.Usage, errors.New("pr merge requires one merge method: --merge, --squash, --rebase or --method"))
 			}
 			if set {
 				method = name
@@ -584,7 +660,7 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 		case item.Merged:
 			a.warn(cmd, "Pull request %s is already merged", ref)
 			if deleteBranch {
-				item = a.deleteHead(cmd, service, item, false, true)
+				item = a.deleteHead(cmd, t, service, item, false, true)
 			}
 			return a.pullResult(cmd, t, item)
 		case item.State == "closed":
@@ -653,7 +729,7 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 					return explain(err, "commit %s is not on the base branch %s of %s", commit, item.Base, t.Repo)
 				// Gitea answers a diverged fast-forward-only merge with a server error carrying Git's hints.
 				case strings.Contains(apiErr.Message, "DivergingFastForwardOnly"):
-					return explain(err, "cannot fast-forward pull request %s: the base branch has commits the head lacks; rebase the head branch or choose another merge method", ref)
+					return explain(err, "cannot fast-forward pull request %s: the base branch has commits the head lacks; rebase the head branch with: gt pr update-branch %d --rebase, or choose another merge method", ref, n)
 				}
 			}
 			return err
@@ -671,7 +747,7 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 				a.done(cmd, "%s pull request %s", mergeVerbs[method], ref)
 			}
 			if deleteBranch {
-				merged = a.deleteHead(cmd, service, merged, !manual && !item.HeadRemoteDeleted, deleteLocal)
+				merged = a.deleteHead(cmd, t, service, merged, !manual && !item.HeadRemoteDeleted, deleteLocal)
 			}
 		}
 		return a.pullResult(cmd, t, merged)

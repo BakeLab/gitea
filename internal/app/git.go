@@ -4,10 +4,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"io"
 
 	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/terminal"
 )
 
 func (a *application) git(ctx context.Context, args ...string) (string, error) {
@@ -21,6 +23,19 @@ func (a *application) gitIn(ctx context.Context, dir string, args ...string) (st
 		return "", err
 	}
 	return a.deps.Git.Output(ctx, dir, a.policy(snapshot).CanPrompt(a.deps.Streams), args...)
+}
+
+// heldGit returns a runner that holds back Git's diagnostics, and a function that shows them.
+func (a *application) heldGit() (git.Runner, func()) {
+	runner, ok := a.deps.Git.(git.System)
+	if !ok || runner.ErrOut == nil {
+		return a.deps.Git, func() {}
+	}
+	shown, held := runner.ErrOut, &bytes.Buffer{}
+	runner.ErrOut = held
+	return runner, func() {
+		_, _ = io.Copy(terminal.SafeWriter(shown, a.deps.Streams.ErrTTY, false), held)
+	}
 }
 
 // currentBranch names the checked-out branch without writing Git diagnostics.

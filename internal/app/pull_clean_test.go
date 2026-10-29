@@ -31,7 +31,7 @@ func TestPullCleanRejectsOpenPullBeforeGitMutation(t *testing.T) {
 	runner := &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true"}}
 	deps.Git = runner
 	err := Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input"})
-	require.ErrorContains(t, err, "still open")
+	require.ErrorContains(t, err, "pull request #7 is still open")
 	require.Equal(t, []string{"rev-parse --is-inside-work-tree"}, runner.calls)
 	require.Empty(t, out.String())
 }
@@ -56,7 +56,7 @@ func TestPullCleanDeletesLocalAndRemoteBranches(t *testing.T) {
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
 	configureHost(t, deps, server.URL, settings.Host{User: "alice", Users: tokenAccounts(settings.StoreFile, "alice")})
-	deleteRemote := credentialCall(t, deps, server.URL, "alice", "push", "--delete", "--force-with-lease=refs/heads/feature:abc123", "--", "origin", "refs/heads/feature")
+	deleteRemote := credentialCall(t, deps, server.URL, "alice", "push", "--quiet", "--delete", "--force-with-lease=refs/heads/feature:abc123", "--", "origin", "refs/heads/feature")
 	runner := &fakeGit{results: map[string]string{
 		deleteRemote:                      "",
 		"remote":                          "origin",
@@ -134,17 +134,22 @@ func TestPullCleanRequiresIgnoreSHAWhenHeadMissingLocally(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
-	deps.Git = &fakeGit{results: map[string]string{
+	runner := &fakeGit{results: map[string]string{
 		"remote":                          "origin",
 		"remote get-url origin":           "https://example.org/alice/project.git",
 		"rev-parse --is-inside-work-tree": "true",
 		"for-each-ref --format=%(objectname)%09%(refname:lstrip=2)%09%(upstream:remotename) refs/heads/": "deadbeef\tfeature\torigin/feature",
 		"rev-parse --verify refs/remotes/origin/feature^{commit}":                                        "deadbeef",
 	}}
+	deps.Git = runner
 	err := Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-	require.ErrorContains(t, err, "--ignore-sha")
+	require.EqualError(t, err, "no local branch is at commit abc123: the pull request was never checked out here, or the local branch diverged; retry with --ignore-sha to select it by name")
 	require.Empty(t, out.String())
+	// Git failing is no usage error.
+	delete(runner.results, "for-each-ref --format=%(objectname)%09%(refname:lstrip=2)%09%(upstream:remotename) refs/heads/")
+	err = Execute(context.Background(), deps, []string{"pr", "clean", "7", "--repo", "alice/project", "--no-input"})
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 }
 
 func TestPullCleanFindsTheLocalBranchOfAnAGitPullRequestByItsCommit(t *testing.T) {
@@ -236,4 +241,61 @@ func TestPullCleanOfAnAGitPullRequestWithADivergedBranch(t *testing.T) {
 			require.NotContains(t, err.Error(), "--ignore-sha")
 		})
 	}
+}
+
+func TestPullCleanDeletesABranchBehindTheHeadAndTheRemoteCheckoutAdded(t *testing.T) {
+	s := newBackportServer(t)
+	s.git(s.work, "remote", "add", "pulls/bob/project", s.server.URL+"/alice/project.git")
+	s.git(s.work, "fetch", "--quiet", "pulls/bob/project", "refs/pull/7/head:refs/remotes/pulls/bob/project/feature")
+	s.git(s.work, "switch", "--quiet", "--create", "feature", s.pullCommits[0])
+	s.git(s.work, "branch", "--quiet", "--set-upstream-to", "pulls/bob/project/feature")
+	s.git(s.pusher, "commit", "--quiet", "--allow-empty", "-m", "later")
+	s.git(s.pusher, "push", "--quiet", "origin", "HEAD:main")
+	out, _, err := s.run("pr", "clean", "7", "--yes", "--json", "local_branch,removed_remote")
+	require.NoError(t, err)
+	require.JSONEq(t, `{"local_branch":"feature","removed_remote":"pulls/bob/project"}`, out)
+	require.Equal(t, "origin", s.git(s.work, "remote"))
+	require.Equal(t, "main", s.git(s.work, "branch", "--show-current"))
+	require.Equal(t, s.git(s.pusher, "rev-parse", "HEAD"), s.git(s.work, "rev-parse", "main"))
+}
+
+// newHeadOnlyOnTheRemote moves the head of pull request #7 to a commit that only Gitea has, as
+// gt pr update-branch or a push from another clone does, and checks out a branch behind it.
+func newHeadOnlyOnTheRemote(t *testing.T) *backportServer {
+	s := newBackportServer(t)
+	s.git(s.pusher, "switch", "--quiet", "feature")
+	s.pullCommits[1] = s.commit("three.txt", "three\n", "add three")
+	s.git(s.pusher, "push", "--quiet", "--force", "origin", "HEAD:refs/pull/7/head")
+	s.git(s.work, "switch", "--quiet", "--create", "feature", s.pullCommits[0])
+	return s
+}
+
+func TestPullCleanFetchesAHeadTheCloneLacks(t *testing.T) {
+	s := newHeadOnlyOnTheRemote(t)
+	out, diagnostics, err := s.run("pr", "clean", "7", "--yes", "--json", "local_branch")
+	require.NoError(t, err, diagnostics)
+	require.JSONEq(t, `{"local_branch":"feature"}`, out)
+	require.NotContains(t, diagnostics, "fatal:")
+	require.Equal(t, "main", s.git(s.work, "branch", "--show-current"))
+}
+
+func TestPullMergeDeleteBranchFetchesAHeadTheCloneLacks(t *testing.T) {
+	s := newHeadOnlyOnTheRemote(t)
+	s.handle(func(w http.ResponseWriter, r *http.Request) bool {
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/repos/alice/project/branches/feature":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls":
+			writeFirstPage(w, r, `[]`)
+		default:
+			return false
+		}
+		return true
+	})
+	_, diagnostics, err := s.run("pr", "merge", "7", "--delete-branch", "--yes")
+	require.NoError(t, err, diagnostics)
+	require.NotContains(t, diagnostics, "Kept local branch")
+	require.NotContains(t, diagnostics, "fatal:")
+	require.Empty(t, s.git(s.work, "branch", "--list", "feature"))
+	require.Equal(t, "main", s.git(s.work, "branch", "--show-current"))
 }

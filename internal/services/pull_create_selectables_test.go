@@ -60,7 +60,7 @@ func TestPullCreateChoicesFetchRepositoryOnce(t *testing.T) {
 				want = CreateSelectables{
 					CanPush:    true,
 					Assignees:  []string{"alice"},
-					Milestones: []Milestone{{ID: 1, Title: "v1"}},
+					Milestones: []Milestone{{ID: 1, Title: "v1", URL: client.BaseURL + "/alice/project/milestone/1"}},
 					Labels:     []Label{{ID: 2, Name: "bug"}},
 				}
 			}

@@ -71,7 +71,7 @@ func TestCheckoutSelectedInstanceDisambiguatesSharedSSHRemote(t *testing.T) {
 func TestCheckoutMatchesRemoteThroughEnvironmentSSHHost(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/repos/alice/project/pulls/7", r.URL.Path)
-		_, _ = fmt.Fprint(w, `{"number":7,"head":{"sha":"abc123","ref":"feature","repo":{"full_name":"alice/project","ssh_url":"git@ssh.example.org:alice/project.git"}}}`)
+		_, _ = fmt.Fprint(w, `{"number":7,"head":{"sha":"abc123","ref":"feature","repo":{"full_name":"alice/project","ssh_url":"git@ssh.example.org:alice/project.git","permissions":{"push":true}}}}`)
 	}))
 	defer server.Close()
 	deps, out, diagnostics := testDeps(t)
@@ -80,7 +80,7 @@ func TestCheckoutMatchesRemoteThroughEnvironmentSSHHost(t *testing.T) {
 		"remote": "origin", "remote get-url origin": "git@ssh.example.org:alice/project.git",
 		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch feature": "", "check-ref-format refs/heads/feature": "",
 		"status --porcelain=v1 --untracked-files=no": "", "for-each-ref --format=%(refname) refs/heads/": "",
-		"fetch --quiet --no-tags -- origin refs/heads/feature": "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --quiet --create feature abc123": "",
+		"fetch --quiet --no-tags --refmap= -- origin refs/heads/feature": "", "rev-parse --verify FETCH_HEAD^{commit}": "abc123", "switch --quiet --create feature abc123": "",
 		"config branch.feature.remote origin": "", "config branch.feature.merge refs/heads/feature": "",
 		"config branch.feature.gitea-cli-pr 7": "", "config branch.feature.gitea-cli-base-remote origin": "",
 	}}
@@ -93,9 +93,9 @@ func TestCheckoutMatchesRemoteThroughEnvironmentSSHHost(t *testing.T) {
 		"config branch.local.remote origin": "", "config branch.local.merge refs/heads/feature": "",
 		"config branch.local.gitea-cli-pr 7": "", "config branch.local.gitea-cli-base-remote origin": "",
 	})
-	deps.Streams.OutTTY = true
+	// Scripts need the push command as much as people do.
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", "7", "--repo", "alice/project", "--remote", "origin", "--branch", "local", "--no-input"}))
-	require.Contains(t, diagnostics.String(), "Checked out #7 into local; push to it with: git push origin HEAD:feature")
+	require.Equal(t, "! Branch local is not named like the head branch; push to it with: git push origin HEAD:feature\n", diagnostics.String())
 }
 
 func TestSSHCheckoutUsesAccountKeyOnlyForFetch(t *testing.T) {
@@ -111,7 +111,7 @@ func TestSSHCheckoutUsesAccountKeyOnlyForFetch(t *testing.T) {
 	}})
 	sshArgs, err := git.SSHArguments("/keys/alice key", false)
 	require.NoError(t, err)
-	fetch := strings.Join(append(sshArgs, "fetch", "--quiet", "--no-tags", "--", "origin", "refs/heads/feature"), " ")
+	fetch := strings.Join(append(sshArgs, "fetch", "--quiet", "--no-tags", "--refmap=", "--", "origin", "refs/heads/feature"), " ")
 	runner := &fakeGit{results: map[string]string{
 		"remote": "origin", "remote get-url origin": "ssh://git@git.example.org:2222/alice/project.git",
 		"rev-parse --is-inside-work-tree": "true", "check-ref-format --branch feature": "", "check-ref-format refs/heads/feature": "",
@@ -220,4 +220,69 @@ func TestCheckoutHeadRemoteFallsBackForANameGitRefuses(t *testing.T) {
 			undo()
 		}
 	}
+}
+
+func TestCheckoutOffersAPushOnlyWhenItCanUpdateThePullRequest(t *testing.T) {
+	const repo = `"repo":{"full_name":"alice/project","clone_url":"%[2]s/alice/project.git","permissions":{"push":%[3]t}}`
+	for _, tc := range []struct {
+		name, head, branch string
+		push               bool
+		want               string
+		args               []string
+	}{
+		{"agit", `{"ref":"refs/pull/7/head","sha":%[1]q}`, "pr/7", true, "! Branch pr/7 is 1 commit ahead of the pull request\n", nil},
+		{
+			"deleted head", `{"ref":"refs/pull/7/head","label":"feature","sha":%[1]q}`, "pr/7", true,
+			"! Branch pr/7 is 1 commit ahead of the pull request; its head branch was deleted, so a push cannot update it\n", nil,
+		},
+		{
+			"head branch", `{"ref":"feature","label":"feature","sha":%[1]q,` + repo + `}`, "feature", true,
+			"! Branch feature is 1 commit ahead of the pull request; push to update it\n", nil,
+		},
+		{
+			"read-only head branch", `{"ref":"feature","label":"feature","sha":%[1]q,` + repo + `}`, "feature", false,
+			"! Branch feature is 1 commit ahead of the pull request; you cannot push to alice/project\n", nil,
+		},
+		{
+			"renamed head branch", `{"ref":"feature","label":"feature","sha":%[1]q,` + repo + `}`, "renamed", true,
+			"! Branch renamed is not named like the head branch; push to it with: git push origin HEAD:feature\n" +
+				"! Branch renamed is 1 commit ahead of the pull request; push to update it\n",
+			[]string{"--branch", "renamed"},
+		},
+		{
+			"read-only renamed head branch", `{"ref":"feature","label":"feature","sha":%[1]q,` + repo + `}`, "renamed", false,
+			"! Branch renamed is 1 commit ahead of the pull request; you cannot push to alice/project\n",
+			[]string{"--branch", "renamed"},
+		},
+	} {
+		s := newBackportServer(t)
+		s.git(s.pusher, "push", "--quiet", "origin", "feature")
+		s.handle(func(w http.ResponseWriter, r *http.Request) bool {
+			if r.URL.Path != "/api/v1/repos/alice/project/pulls/7" {
+				return false
+			}
+			fmt.Fprintf(w, `{"number":7,"state":"open","head":`+tc.head+`,"base":{"ref":"main",`+repo+`}}`,
+				s.pullCommits[1], s.server.URL, tc.push)
+			return true
+		})
+		s.git(s.work, "fetch", "--quiet", "origin", "refs/pull/7/head")
+		s.git(s.work, "switch", "--quiet", "-c", tc.branch, "FETCH_HEAD")
+		s.git(s.work, "commit", "--quiet", "--allow-empty", "-m", "local")
+		s.git(s.work, "config", "branch."+tc.branch+".gitea-cli-pr", "7")
+		s.git(s.work, "switch", "--quiet", "work")
+		_, diagnostics, err := s.run(append([]string{"pr", "checkout", "7", "--no-input"}, tc.args...)...)
+		require.NoError(t, err, tc.name)
+		require.Equal(t, tc.want, diagnostics, tc.name)
+	}
+}
+
+func TestCheckoutRefusesAnExistingBranchOfNoPullRequest(t *testing.T) {
+	s := newBackportServer(t)
+	for _, branch := range []string{"main", "work"} {
+		_, _, err := s.run("pr", "checkout", "7", "--branch", branch, "--no-input")
+		require.EqualError(t, err, "branch "+branch+" already exists and is not of pull request #7; choose another checkout branch with --branch")
+	}
+	require.Equal(t, "refs/heads/main", s.git(s.work, "config", "--get", "branch.main.merge"))
+	_, err := (git.System{}).Output(context.Background(), s.work, false, "config", "--get", "branch.main.gitea-cli-pr")
+	require.Error(t, err)
 }

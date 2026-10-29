@@ -82,15 +82,28 @@ func (r reviewType) state() (string, error) {
 	case 1:
 		return states[0], nil
 	}
+	return "", clierr.Wrap(clierr.Usage, errors.New(r.choose()))
+}
+
+// choose asks for one of the review types the command takes.
+func (r reviewType) choose() string {
 	if r.pendingFlag {
-		return "", clierr.Wrap(clierr.Usage, errors.New("choose one review type: --approve, --request-changes, --comment or --pending"))
+		return "choose one review type: --approve, --request-changes, --comment or --pending"
 	}
-	return "", clierr.Wrap(clierr.Usage, errors.New("choose one review type: --approve, --request-changes or --comment"))
+	return "choose one review type: --approve, --request-changes or --comment"
 }
 
 // errReviewType asks for a review type where gt cannot prompt for one.
-func errReviewType(cmd *cobra.Command) error {
-	return clierr.Wrap(clierr.Usage, &argumentError{problem: "choose a review type: --approve, --request-changes, or --comment", cmd: cmd})
+func errReviewType(cmd *cobra.Command, kind reviewType) error {
+	return clierr.Wrap(clierr.Usage, &argumentError{problem: kind.choose(), cmd: cmd})
+}
+
+// errReviewBody names what supplies the body a review of state needs.
+func errReviewBody(state string) error {
+	if state == "COMMENT" {
+		return clierr.Wrap(clierr.Usage, errors.New("--comment requires a body or inline comments; pass --body, --body-file, --editor or --comments-file"))
+	}
+	return clierr.Wrap(clierr.Usage, errors.New("--request-changes requires a body; pass --body, --body-file or --editor"))
 }
 
 // reviewVerbs reports a submitted review by its state: "Approved pull request alice/x#1 (Add one)".
@@ -188,14 +201,14 @@ func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
 		}
 		if state == "" {
 			if localFlagsChanged(cmd) || !a.canPrompt() || a.deps.ReviewForm == nil {
-				return errReviewType(cmd)
+				return errReviewType(cmd, kind)
 			}
 			return a.reviewInteractively(cmd, args)
 		}
 		// A comment needs a body or inline comments, and a change request a body. The inline
 		// comments can be those of the pending review that a comment publishes, looked up below.
 		needsBody := state == "REQUEST_CHANGES" || (state != "APPROVED" && len(comments) == 0)
-		missingBody := clierr.Wrap(clierr.Usage, fmt.Errorf("a %s needs a body; pass --body, --body-file or --editor", reviewNouns[state]))
+		missingBody := errReviewBody(state)
 		explicit := cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file")
 		if body, err = a.readBody(cmd, body, file); err != nil {
 			return err
@@ -537,8 +550,12 @@ func (a *application) warnReplacedPendingBody(cmd *cobra.Command, pending *servi
 	}
 }
 
-// pullHead names the head branch of a pull request, as OWNER:BRANCH when it is in a fork of repo.
+// pullHead names the head branch of a pull request, as OWNER:BRANCH when it is in a fork of repo,
+// or the pull ref of an AGit pull request, whose topic Gitea does not return.
 func pullHead(item services.Pull, repo string) string {
+	if item.Head == "" {
+		return fmt.Sprintf("refs/pull/%d/head", item.Number)
+	}
 	if owner, _, ok := strings.Cut(item.HeadRepo, "/"); ok && !strings.EqualFold(item.HeadRepo, repo) {
 		return owner + ":" + item.Head
 	}
@@ -761,12 +778,18 @@ func (a *application) pullReviewResolveCommand(resolve bool) *cobra.Command {
 	if !resolve {
 		verb, short, done = "unresolve", "Reopen a resolved inline conversation", "Reopened"
 	}
-	cmd := &cobra.Command{Use: verb + " <comment-id>", Short: short, Annotations: textOutput("conversation state changes do not return a resource"), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := number(args[0])
+	cmd := &cobra.Command{Use: verb + " [<number> | <url> | <branch>] <comment-id>", Short: short, Annotations: pullArgumentRequiredAnnotation(textOutput("conversation state changes do not return a resource")), Args: usageArgs(cobra.RangeArgs(1, 2)), RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := number(args[len(args)-1])
 		if err != nil {
 			return err
 		}
-		t, err := a.resolve(cmd.Context(), true)
+		// Gitea finds the comment by its ID alone; the pull request, as for reply, selects the repository.
+		var t target
+		if len(args) == 2 {
+			t, _, err = a.pullSelector(cmd, args[:1])
+		} else {
+			t, err = a.resolve(cmd.Context(), true)
+		}
 		if err != nil {
 			return err
 		}
@@ -776,7 +799,8 @@ func (a *application) pullReviewResolveCommand(resolve bool) *cobra.Command {
 		a.done(cmd, "%s conversation of review comment %d in %s", done, id, t.Repo)
 		return nil
 	}}
-	cmd.Example = fmt.Sprintf("# Find the comment IDs with: gt pr review comments 13\n$ gt pr review %s 36", verb)
+	cmd.Example = fmt.Sprintf("# Find the comment IDs with: gt pr review comments 13\n$ gt pr review %s 13 36\n$ gt pr review %s 36", verb, verb)
+	cmd.ValidArgsFunction = a.completeReviewArgs(true)
 	return cmd
 }
 
@@ -788,6 +812,10 @@ func (a *application) pullReviewReplyCommand() *cobra.Command {
 		defer finishDraft(&draft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
 			return err
+		}
+		prompt := !useEditor && !cmd.Flags().Changed("body") && !cmd.Flags().Changed("body-file")
+		if prompt && !a.canPrompt() {
+			return missingBody(cmd)
 		}
 		t, n, id, err := a.pullAndID(cmd, args)
 		if err != nil {
@@ -802,10 +830,7 @@ func (a *application) pullReviewReplyCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if !useEditor && !cmd.Flags().Changed("body") && !cmd.Flags().Changed("body-file") {
-			if !a.canPrompt() {
-				return clierr.Wrap(clierr.Usage, errors.New("a reply needs a body; pass --body, --body-file or --editor"))
-			}
+		if prompt {
 			if draft, err = a.bodyEditor(cmd, terminal.BodyTitle)(cmd.Context(), ""); err != nil {
 				return err
 			}

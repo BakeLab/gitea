@@ -38,6 +38,9 @@ type BackportOptions struct {
 	Target, Branch               string
 	// Keep leaves a conflicting cherry-pick in progress to resolve instead of undoing the backport.
 	Keep bool
+	// Hold, when set, returns a runner for one cherry-pick that holds back Git's diagnostics and a
+	// function that shows them, so that only those of a cherry-pick left to the user are shown.
+	Hold func() (Runner, func())
 }
 
 // BackportResult describes a backport branch: the commits picked from the base branch and the
@@ -108,7 +111,7 @@ func Backport(ctx context.Context, runner Runner, opts BackportOptions) (Backpor
 	if existing, err := optional(run("rev-parse", "--verify", "--quiet", "refs/heads/"+opts.Branch)); err != nil {
 		return BackportResult{}, err
 	} else if existing != "" {
-		return BackportResult{}, &BackportSkipped{fmt.Errorf("branch %q already exists; choose another with --branch, or finish its backport with gt pr backport --continue", opts.Branch)}
+		return BackportResult{}, &BackportSkipped{existingBranch(run, opts.Branch)}
 	}
 	fetch := func(ref string) (string, error) {
 		args := append(append([]string{}, opts.CredentialArgs...), "fetch", "--quiet", "--no-tags", "--", opts.Remote, ref)
@@ -149,7 +152,9 @@ func Backport(ctx context.Context, runner Runner, opts BackportOptions) (Backpor
 		return BackportResult{}, fmt.Errorf("could not create branch %s: %w", opts.Branch, err)
 	}
 	undo := func() {
-		_, _ = run("cherry-pick", "--abort")
+		if picking, _ := cherryPickInProgress(run); picking {
+			_, _ = run("cherry-pick", "--abort")
+		}
 		_, _ = run(switchBack(from)...)
 		_, _ = run("branch", "--quiet", "-D", opts.Branch)
 	}
@@ -162,22 +167,34 @@ func Backport(ctx context.Context, runner Runner, opts BackportOptions) (Backpor
 			return BackportResult{}, err
 		}
 	}
-	_, err = run(append([]string{"cherry-pick", "-x", "--allow-empty"}, picks...)...)
+	show := func() {}
+	pick := func(args ...string) error {
+		picker := runner
+		if opts.Hold != nil {
+			picker, show = opts.Hold()
+		}
+		_, err := picker.Output(ctx, opts.Directory, opts.Prompt, args...)
+		return err
+	}
+	err = pick(append([]string{"cherry-pick", "-x", "--allow-empty"}, picks...)...)
 	for err != nil {
 		if picking, _ := cherryPickInProgress(run); !picking {
+			show()
 			undo()
 			return BackportResult{}, fmt.Errorf("could not cherry-pick to %s: %w", opts.Target, err)
 		}
 		// A commit whose changes the target already has stops the cherry-pick without conflicts.
 		if emptyPick(run) {
-			_, err = run("cherry-pick", "--skip")
+			err = pick("cherry-pick", "--skip")
 			continue
 		}
 		conflict := &BackportConflict{Target: opts.Target, Branch: opts.Branch, Kept: opts.Keep}
 		if files, err := run("diff", "--name-only", "--diff-filter=U"); err == nil && files != "" {
 			conflict.Files = strings.Split(files, "\n")
 		}
-		if !opts.Keep {
+		if opts.Keep {
+			show()
+		} else {
 			undo()
 		}
 		return BackportResult{}, conflict
@@ -187,6 +204,22 @@ func Backport(ctx context.Context, runner Runner, opts BackportOptions) (Backpor
 		return BackportResult{}, &BackportSkipped{fmt.Errorf("the changes of pull request #%d are already on %s", opts.Number, opts.Target)}
 	}
 	return finishBackport(run, opts.Branch, BackportResult{Target: opts.Target, Branch: opts.Branch, Picked: picks, Number: opts.Number}, onto, from)
+}
+
+// existingBranch explains why a backport cannot use an existing branch, which a stopped backport
+// or the pull request opened from it may still need.
+func existingBranch(run func(...string) (string, error), branch string) error {
+	get := func(key string) string {
+		value, _ := optional(run("config", "--get", "branch."+branch+"."+key))
+		return value
+	}
+	if get(backportNumberKey) != "" {
+		return fmt.Errorf("branch %q already exists; choose another with --branch, or finish its backport with gt pr backport --continue", branch)
+	}
+	if n, err := strconv.ParseInt(get(pullNumberKey), 10, 64); err == nil && n > 0 {
+		return fmt.Errorf("branch %q already exists for pull request #%d; choose another with --branch, or delete it with gt pr clean %d once that pull request is merged or closed", branch, n, n)
+	}
+	return fmt.Errorf("branch %q already exists; choose another with --branch", branch)
 }
 
 // emptyPick reports whether the stopped cherry-pick has no conflicts and nothing to commit.

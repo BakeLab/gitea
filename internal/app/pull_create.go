@@ -44,8 +44,11 @@ repository, or, when origin is not the repository itself or you cannot push to i
 remote of your own fork; otherwise it goes to the repository's remote. Without push access and
 a fork remote, gt offers on a terminal to fork the repository and adds the fork as the remote
 "fork", or one named after your login when "fork" points elsewhere; elsewhere, run gt repo fork
---remote first. A missing base branch fails before the push. After a push to a fork, gt pr
-commands on the branch keep selecting the repository rather than the fork.`, Annotations: map[string]string{"gt.confirm": "true"}, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+--add-remote first. A missing base branch fails before the push. After a push to a fork, gt pr
+commands on the branch keep selecting the repository rather than the fork.
+
+With --agit, only the author of an AGit pull request can push to it, so on a branch of someone
+else's, such as from gt pr checkout, pass --topic to open your own.`, Annotations: map[string]string{"gt.confirm": "true"}, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		return a.runPullCreate(cmd, &f)
 	}}
 	create.Flags().StringSliceVarP(&f.options.Assignees, "assignee", "a", nil, "Assign users by username; @me for yourself")
@@ -100,7 +103,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		if f.web {
 			return clierr.Wrap(clierr.Usage, errors.New("--web cannot be combined with --agit; AGit creates the pull request through git push, without a branch to compare"))
 		}
-		if err := onlyFlagsWith(cmd, "agit", "AGit pushes carry only a title and body", "title", "body", "body-file", "editor", "head", "base", "draft", "fill", "allow-maintainer-edits", "topic"); err != nil {
+		if err := onlyFlagsWith(cmd, "agit", "AGit pushes carry only a title and body", "title", "body", "body-file", "editor", "head", "base", "draft", "fill", "topic"); err != nil {
 			return err
 		}
 		if f.topic != "" && f.topic == f.options.Base {
@@ -171,7 +174,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	if f.options.Head == "" {
 		owner, branch := a.defaultPullHead(cmd.Context())
 		if branch == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("supply --head outside a branch checkout"))
+			return clierr.Wrap(clierr.Usage, errors.New("pr create requires --head outside a branch checkout"))
 		}
 		f.options.Head = branch
 		if !f.agit && owner != "" && !strings.EqualFold(owner, t.owner()) {
@@ -188,7 +191,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 			return err
 		}
 		if f.options.Base = repo.DefaultBranch; f.options.Base == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("supply --base; repository has no default branch"))
+			return clierr.Wrap(clierr.Usage, errors.New("pr create requires --base: the repository has no default branch"))
 		}
 	}
 	base.branch = f.options.Base
@@ -212,7 +215,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		if subject, body, ok := a.singleCommitMessage(cmd.Context(), f.options.Base, a.localHead(cmd.Context(), t, f.options.Head)); ok {
 			f.options.Title, commitBody = subject, body
 		} else if f.options.Title = terminal.DefaultPullTitle(f.options.Head); f.options.Title == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("supply --title"))
+			return clierr.Wrap(clierr.Usage, errors.New("pr create requires --title"))
 		}
 	}
 	service := services.Pulls{Client: t.client, Repository: t.Repo}
@@ -284,7 +287,8 @@ func (a *application) pushAgit(cmd *cobra.Command, t target, s settings.Snapshot
 	if _, branch, ok := strings.Cut(opts.Head, ":"); ok {
 		opts.Head = branch
 	}
-	if opts.Topic == "" {
+	topicGiven := opts.Topic != ""
+	if !topicGiven {
 		opts.Topic = opts.Head
 	}
 	if opts.Topic == opts.Base {
@@ -303,13 +307,47 @@ func (a *application) pushAgit(cmd *cobra.Command, t target, s settings.Snapshot
 	if err := base.checkEnabled(cmd.Context(), t); err != nil {
 		return err
 	}
+	if !topicGiven {
+		if err := a.refuseForeignAgitBranch(cmd.Context(), t, opts.Head); err != nil {
+			return err
+		}
+	}
+	// Gitea refuses a push for several reasons, such as one the topic already has or one that drops
+	// commits, and does not say which topic a pull request has, so no refusal is taken as up to date.
 	if err := git.PushAgitPR(cmd.Context(), a.deps.Git, opts); err != nil {
+		if _, isGit := errors.AsType[*git.CommandError](err); isGit {
+			return fmt.Errorf("Git did not push %s to refs/for/%s/%s; see its output above", opts.Head, opts.Base, opts.Topic)
+		}
 		return err
 	}
-	if pull, ok := a.recordAgitPull(cmd.Context(), t, opts); ok {
-		return a.reportCreatedPull(cmd, t, pull)
+	pull, ok := a.recordAgitPull(cmd.Context(), t, opts)
+	if !ok {
+		a.warn(cmd, "Pushed %s, but could not find its pull request among your open AGit pull requests into %s", opts.Head, opts.Base)
+		return nil
 	}
-	return nil
+	return a.reportCreatedPull(cmd, t, pull)
+}
+
+// refuseForeignAgitBranch refuses to push head to its own name as topic when it is the branch of
+// another user's open AGit pull request, such as from pr checkout: only the author can push to
+// one, so the push would quietly open another pull request.
+func (a *application) refuseForeignAgitBranch(ctx context.Context, t target, head string) error {
+	if strings.HasPrefix(head, "refs/") {
+		return nil
+	}
+	number := git.ReadBranchConfig(ctx, a.gitProbe(), a.options.cwd, head).PullNumber
+	if number == 0 {
+		return nil
+	}
+	pull, viewErr := (services.Pulls{Client: t.client, Repository: t.Repo}).View(ctx, number)
+	if viewErr != nil || pull.State != "open" || pull.Head != "" || pull.HeadRemoteDeleted {
+		return nil
+	}
+	if account, err := services.CurrentAccount(ctx, t.client); err != nil || strings.EqualFold(pull.Author, account) {
+		return err
+	}
+	return fmt.Errorf("branch %s belongs to AGit pull request %s by %s, which only its author can push to; pass --topic to open your own pull request",
+		head, refLabel(t.Repo, number, pull.Title), pull.Author)
 }
 
 func agitTopicError(topic string) error {
@@ -319,8 +357,9 @@ func agitTopicError(topic string) error {
 // recordAgitPull records the AGit pull request just pushed from the head branch in that branch's
 // configuration, like pr checkout does: an AGit pull request has no head branch, so this is how
 // pr commands on the branch, and pr clean --ignore-sha, find it. It returns that pull request, so
-// that its URL is printed like for other created pull requests. It is best effort: it looks for an
-// open AGit pull request at the branch's commit among the most recent ones.
+// that its URL is printed like for other created pull requests. It is best effort: it looks for the
+// user's own open AGit pull request at the branch's commit among the most recent ones, and finds
+// none when there are several, as Gitea does not say which topic a pull request has.
 func (a *application) recordAgitPull(ctx context.Context, t target, opts git.AgitOptions) (services.Pull, bool) {
 	if strings.HasPrefix(opts.Head, "refs/") {
 		return services.Pull{}, false
@@ -334,13 +373,18 @@ func (a *application) recordAgitPull(ctx context.Context, t target, opts git.Agi
 	if err != nil {
 		return services.Pull{}, false
 	}
-	for _, pull := range pulls {
-		if pull.Head == "" && pull.HeadSHA == sha && pull.Base == opts.Base {
-			_ = git.RecordPull(ctx, probe, a.options.cwd, opts.Head, pull.Number, opts.Remote)
-			return pull, true
-		}
+	account, err := services.CurrentAccount(ctx, t.client)
+	if err != nil {
+		return services.Pull{}, false
 	}
-	return services.Pull{}, false
+	mine := slices.DeleteFunc(pulls, func(pull services.Pull) bool {
+		return pull.Head != "" || pull.HeadRemoteDeleted || pull.HeadSHA != sha || pull.Base != opts.Base || !strings.EqualFold(pull.Author, account)
+	})
+	if len(mine) != 1 {
+		return services.Pull{}, false
+	}
+	_ = git.RecordPull(ctx, probe, a.options.cwd, opts.Head, mine[0].Number, opts.Remote)
+	return mine[0], true
 }
 
 func (a *application) defaultPullHead(ctx context.Context) (owner, branch string) {
@@ -498,7 +542,7 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 		return err
 	}
 	if values.Base == "" {
-		return clierr.Wrap(clierr.Usage, errors.New("supply a target branch; repository has no default branch"))
+		return clierr.Wrap(clierr.Usage, errors.New("pr create requires a target branch: the repository has no default branch"))
 	}
 	if values.Agit && a.options.json != "" {
 		return clierr.Wrap(clierr.Usage, errors.New("--json/--jq cannot be combined with AGit create; AGit creates the pull request through git push"))

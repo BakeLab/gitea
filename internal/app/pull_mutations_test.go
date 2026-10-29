@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/terminal"
 
 	"github.com/stretchr/testify/require"
@@ -325,6 +326,21 @@ func TestPullMergeUsesTheRepositoryDefaultsAndKeepsTheLocalBranch(t *testing.T) 
 	}
 }
 
+func TestPullMergeTellsWhyItKeepsTheCheckedOutHeadBranch(t *testing.T) {
+	var payload map[string]any
+	server := newAuthenticatedServer(mergeServer(t, openPull, &payload))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	fake := &fakeGit{
+		results: map[string]string{"symbolic-ref --quiet HEAD": "feature", "rev-parse --verify refs/heads/feature^{commit}": "local1"},
+		errs:    map[string]error{"merge-base --is-ancestor local1 abc123": &git.CommandError{ExitCode: 1}},
+	}
+	deps.Git = fake
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "--yes", "--delete-branch"}))
+	require.Equal(t, "! Kept local branch feature: it has commits that are not in the pull request\n", diagnostics.String())
+	require.NotContains(t, fake.calls, "branch -D -- feature")
+}
+
 func TestPullMergeAsksForTheMethodAndBranchDeletion(t *testing.T) {
 	var payload map[string]any
 	server := newAuthenticatedServer(mergeServer(t, openPull, &payload))
@@ -478,8 +494,74 @@ func TestPullMergeExplainsADivergedFastForward(t *testing.T) {
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
 	err := Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "-s", "fast-forward-only", "--delete-branch=false", "--yes"})
-	require.EqualError(t, err, "cannot fast-forward pull request alice/project#3 (Add login): the base branch has commits the head lacks; rebase the head branch or choose another merge method")
+	require.EqualError(t, err, "cannot fast-forward pull request alice/project#3 (Add login): the base branch has commits the head lacks; rebase the head branch with: gt pr update-branch 3 --rebase, or choose another merge method")
 	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+}
+
+func TestPullUpdateBranch(t *testing.T) {
+	var updates []string
+	pull, allowRebase, compared := openPull, true, 0
+	status, message := http.StatusOK, ""
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project":
+			_, _ = fmt.Fprintf(w, `{"full_name":"alice/project","allow_rebase_update":%t}`, allowRebase)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/3":
+			_, _ = w.Write([]byte(pull))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/compare/abc123...base1":
+			_, _ = fmt.Fprintf(w, `{"total_commits":%d,"commits":[]}`, compared)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/alice/project/pulls/3/update":
+			updates = append(updates, r.URL.RawQuery)
+			w.WriteHeader(status)
+			_, _ = fmt.Fprintf(w, `{"message":%q}`, message)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "update-branch", "3", "-R", "alice/project", "--json", "number"}))
+	require.JSONEq(t, `{"number":3}`, out.String())
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "update-branch", "3", "-R", "alice/project", "--rebase"}))
+	require.Equal(t, []string{"", "style=rebase"}, updates)
+
+	// Gitea tells only site administrators that the head branch is up to date.
+	status, updates = http.StatusInternalServerError, nil
+	pull = `{"number":3,"title":"Add login","state":"open","merge_base":"base1","base":{"ref":"main","sha":"base1"},"head":{"ref":"feature","sha":"abc123"}}`
+	for _, args := range [][]string{{"pr", "update-branch", "3", "-R", "alice/project"}, {"pr", "update-branch", "3", "-R", "alice/project", "--rebase"}} {
+		diagnostics.Reset()
+		require.NoError(t, Execute(context.Background(), deps, args))
+		require.Equal(t, "! Pull request alice/project#3 (Add login) is already up to date with main\n", diagnostics.String())
+	}
+	require.Empty(t, updates)
+	// Right after an update, Gitea still holds the merge base from before it.
+	pull = `{"number":3,"title":"Add login","state":"open","merge_base":"old","base":{"ref":"main","sha":"base1"},"head":{"ref":"feature","sha":"abc123"}}`
+	for _, missing := range []int{0, 2} {
+		compared = missing
+		diagnostics.Reset()
+		err := Execute(context.Background(), deps, []string{"pr", "update-branch", "3", "-R", "alice/project"})
+		if missing == 0 {
+			require.NoError(t, err)
+			require.Equal(t, "! Pull request alice/project#3 (Add login) is already up to date with main\n", diagnostics.String())
+		} else {
+			require.ErrorContains(t, err, "HTTP 500")
+		}
+	}
+	pull, message = openPull, "HeadBranch of PR 3 is up to date"
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "update-branch", "3", "-R", "alice/project"}))
+	require.Equal(t, "! Pull request alice/project#3 (Add login) is already up to date with main\n", diagnostics.String())
+
+	status, message = http.StatusConflict, "rebase failed because of conflict"
+	err := Execute(context.Background(), deps, []string{"pr", "update-branch", "3", "-R", "alice/project", "--rebase"})
+	require.EqualError(t, err, "cannot update pull request alice/project#3 (Add login): its head branch feature conflicts with main; merge or rebase it locally and push it")
+
+	allowRebase, updates = false, nil
+	err = Execute(context.Background(), deps, []string{"pr", "update-branch", "3", "-R", "alice/project", "--rebase"})
+	require.EqualError(t, err, "rebase updates are disabled in alice/project; update with a merge commit (without --rebase)")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+	require.Empty(t, updates)
 }
 
 func TestPullMergeAlreadyMergedIsANoOp(t *testing.T) {
@@ -536,8 +618,8 @@ func TestPullMergeMethodFlags(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"pr", "merge", "3", "--squash", "--rebase"}, "choose one merge method: --merge, --squash, --rebase or --method"},
-		{[]string{"pr", "merge", "3", "--squash", "-s", "merge"}, "choose one merge method"},
+		{[]string{"pr", "merge", "3", "--squash", "--rebase"}, "pr merge requires one merge method: --merge, --squash, --rebase or --method"},
+		{[]string{"pr", "merge", "3", "--squash", "-s", "merge"}, "pr merge requires one merge method"},
 		{[]string{"pr", "merge", "3", "-s"}, "-s takes a method (merge, rebase, rebase-merge, squash, fast-forward-only or manually-merged); for gh-style use --squash"},
 		{[]string{"pr", "merge", "3", "-s", "bogus"}, "--method must be merge, rebase, rebase-merge, squash, fast-forward-only, or manually-merged"},
 		{[]string{"pr", "merge", "3", "-s", "manually-merged"}, "--method manually-merged requires --commit"},

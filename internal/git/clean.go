@@ -30,7 +30,14 @@ type CleanResult struct {
 	RemoteDeleted    bool   `json:"remote_deleted"`
 	RemoteSkipped    bool   `json:"remote_skipped"`
 	RemoteSkipReason string `json:"remote_skip_reason,omitempty"`
+	// RemovedRemote is the Git remote that pr checkout added for the branch, removed with it.
+	RemovedRemote string `json:"removed_remote,omitempty"`
 }
+
+// CleanSelectionError reports that no single local branch of the pull request could be selected.
+type CleanSelectionError struct{ message string }
+
+func (e *CleanSelectionError) Error() string { return e.message }
 
 // FindCleanBranchOptions searches for a local branch belonging to a closed PR.
 type FindCleanBranchOptions struct {
@@ -69,6 +76,10 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 		}
 		return out
 	}
+	behindHead := func(sha string) bool {
+		behind, _ := ancestor(run, sha, opts.HeadSHA)
+		return behind
+	}
 	preferred := setOf(opts.PreferredNames)
 	matching := setOf(opts.MatchingRemotes)
 	candidates := []candidate{}
@@ -97,7 +108,8 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 			if !byName {
 				continue
 			}
-		} else if opts.HeadSHA == "" || sha != opts.HeadSHA {
+		} else if opts.HeadSHA == "" || (sha != opts.HeadSHA && (!byName || !behindHead(sha))) {
+			// A branch of the pull request that is behind its head has no commits of its own.
 			continue
 		}
 		remoteName, matched := "", matching[upstream]
@@ -124,17 +136,14 @@ func FindCleanBranch(ctx context.Context, runner Runner, opts FindCleanBranchOpt
 	if len(candidates) == 0 {
 		switch {
 		case opts.IgnoreSHA && opts.HeadBranch == "":
-			return "", "", errors.New("no local branch was recorded for this AGit pull request; it has no head branch to select by name")
+			return "", "", &CleanSelectionError{"no local branch was recorded for this AGit pull request; it has no head branch to select by name"}
 		case opts.IgnoreSHA:
-			return "", "", fmt.Errorf("local branch %q was not found for the selected pull request", opts.HeadBranch)
+			return "", "", &CleanSelectionError{fmt.Sprintf("local branch %q was not found for the selected pull request", opts.HeadBranch)}
 		case opts.HeadBranch == "" && !named:
 			// An AGit pull request has no head branch name to retry with.
-			return "", "", fmt.Errorf(`local branch for commit %s was not found.
-Either this pull request was never checked out, or the local branch diverged`, opts.HeadSHA)
+			return "", "", &CleanSelectionError{fmt.Sprintf("no local branch is at commit %s: the pull request was never checked out here, or the local branch diverged", shortCommit(opts.HeadSHA))}
 		}
-		return "", "", fmt.Errorf(`local branch for commit %s was not found.
-Either this pull request was never checked out, or the local branch diverged.
-Retry with --ignore-sha to select by branch name`, opts.HeadSHA)
+		return "", "", &CleanSelectionError{fmt.Sprintf("no local branch is at commit %s: the pull request was never checked out here, or the local branch diverged; retry with --ignore-sha to select it by name", shortCommit(opts.HeadSHA))}
 	}
 	selected := []candidate{}
 	for _, item := range candidates {
@@ -151,7 +160,7 @@ Retry with --ignore-sha to select by branch name`, opts.HeadSHA)
 		for _, item := range candidates {
 			names = append(names, item.name)
 		}
-		return "", "", fmt.Errorf("local branch %q was not found, and the branches at its head commit (%s) neither have its name nor track it; rename the one to clean to %s", opts.HeadBranch, strings.Join(names, ", "), opts.HeadBranch)
+		return "", "", &CleanSelectionError{fmt.Sprintf("local branch %q was not found, and the branches at its head commit (%s) neither have its name nor track it; rename the one to clean to %s", opts.HeadBranch, strings.Join(names, ", "), opts.HeadBranch)}
 	}
 	if recorded := slices.DeleteFunc(slices.Clone(selected), func(item candidate) bool { return !item.recorded }); len(recorded) > 0 {
 		selected = recorded
@@ -172,7 +181,7 @@ Retry with --ignore-sha to select by branch name`, opts.HeadSHA)
 		for _, item := range selected {
 			names = append(names, item.name)
 		}
-		return "", "", fmt.Errorf("multiple local branches match this pull request (%s); check out or rename until one remains", strings.Join(names, ", "))
+		return "", "", &CleanSelectionError{fmt.Sprintf("multiple local branches match this pull request (%s); check out or rename until one remains", strings.Join(names, ", "))}
 	}
 	return selected[0].name, selected[0].remote, nil
 }
@@ -216,26 +225,49 @@ func CleanPull(ctx context.Context, runner Runner, opts CleanOptions) (CleanResu
 			return CleanResult{}, fmt.Errorf("could not switch to %s before deleting %s: %w", opts.DefaultBranch, opts.LocalBranch, err)
 		}
 	}
+	tracked, _ := run("config", "--get", "branch."+opts.LocalBranch+".remote")
 	if _, err := run("branch", "-D", "--", opts.LocalBranch); err != nil {
 		return CleanResult{}, fmt.Errorf("local branch could not be deleted: %w", err)
 	}
 	result := CleanResult{LocalBranch: opts.LocalBranch, DefaultBranch: opts.DefaultBranch}
-	if !opts.DeleteRemote {
+	if opts.DeleteRemote {
+		push := append([]string{}, opts.CredentialArgs...)
+		push = append(push, "push", "--quiet", "--delete")
+		if opts.RemoteSHA != "" {
+			push = append(push, "--force-with-lease=refs/heads/"+opts.RemoteBranch+":"+opts.RemoteSHA)
+		}
+		push = append(push, "--", opts.Remote, "refs/heads/"+opts.RemoteBranch)
+		if _, err := run(push...); err != nil {
+			return result, fmt.Errorf("deleted local branch %s, but deleting remote branch %s failed: %w", opts.LocalBranch, opts.RemoteBranch, err)
+		}
+		result.Remote, result.RemoteBranch, result.RemoteDeleted = opts.Remote, opts.RemoteBranch, true
+	} else {
 		result.RemoteSkipped = true
 		result.RemoteSkipReason = "remote head was already deleted or push is unavailable"
-		return result, nil
 	}
-	push := append([]string{}, opts.CredentialArgs...)
-	push = append(push, "push", "--delete")
-	if opts.RemoteSHA != "" {
-		push = append(push, "--force-with-lease=refs/heads/"+opts.RemoteBranch+":"+opts.RemoteSHA)
-	}
-	push = append(push, "--", opts.Remote, "refs/heads/"+opts.RemoteBranch)
-	if _, err := run(push...); err != nil {
-		return result, fmt.Errorf("deleted local branch %s, but deleting remote branch %s failed: %w", opts.LocalBranch, opts.RemoteBranch, err)
-	}
-	result.Remote, result.RemoteBranch, result.RemoteDeleted = opts.Remote, opts.RemoteBranch, true
+	result.RemovedRemote = removeCheckoutRemote(run, tracked)
 	return result, nil
+}
+
+// removeCheckoutRemote removes remote, returning its name, when it is one that pr checkout added
+// for a fork (pulls/OWNER/REPO) and no branch tracks it anymore.
+func removeCheckoutRemote(run func(...string) (string, error), remote string) string {
+	if !strings.HasPrefix(remote, "pulls/") {
+		return ""
+	}
+	listing, err := run("config", "--get-regexp", `^branch\..*\.remote$`)
+	if failure, ok := errors.AsType[*CommandError](err); err != nil && (!ok || failure.ExitCode != 1) { // 1: no branch tracks a remote
+		return ""
+	}
+	for line := range strings.Lines(listing) {
+		if _, value, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " "); value == remote {
+			return ""
+		}
+	}
+	if _, err := run("remote", "remove", "--", remote); err != nil {
+		return ""
+	}
+	return remote
 }
 
 // switchAway switches to branch: detached at it when another worktree has it checked out, and

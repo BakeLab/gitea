@@ -82,6 +82,20 @@ func TestPullEditAddsAssigneesWithoutExtraReads(t *testing.T) {
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/issues/7", "PATCH /api/v1/repos/alice/project/pulls/7"}, calls)
 }
 
+func TestPullEditRefusesTheAuthorAsReviewerBeforeEditing(t *testing.T) {
+	var calls []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		_, _ = w.Write([]byte(`{"number":7,"user":{"login":"alice"}}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	err := Execute(context.Background(), deps, []string{"pr", "edit", "7", "-R", "alice/project", "--add-reviewer", "@me"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, "--add-reviewer cannot include @me; Gitea does not let the author review their pull request")
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/pulls/7"}, calls)
+}
+
 func TestPullEditImplicitInteractiveForm(t *testing.T) {
 	var patches []string
 	title := "Old"

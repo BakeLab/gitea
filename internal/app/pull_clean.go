@@ -19,9 +19,22 @@ import (
 
 func (a *application) pullCleanCommand() *cobra.Command {
 	var ignoreSHA bool
-	cmd := &cobra.Command{Use: "clean [<number> | <url> | <branch>]", Short: "Delete the branches of a merged or closed pull request", Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "clean [<number> | <url> | <branch>]", Short: "Delete the branches of a merged or closed pull request", Long: `Delete the local branch of a merged or closed pull request and its head branch on Gitea,
+switching to the repository's default branch first when the local branch is checked out, and
+then fast-forwarding that branch.
+
+The local branch is the one at the pull request's head commit, or behind it, that pr checkout
+created or that has the head branch's name; --ignore-sha selects it by name alone, even with
+commits that are not in the pull request. A Git remote that pr checkout added for a fork goes
+with it once no branch tracks it.
+
+The head branch on Gitea is kept when you cannot push to it or another open pull request uses
+it, and gt refuses to clean when it moved past the pull request. gt never deletes the default
+branch, the branches of an open pull request, or, without --ignore-sha, a local branch with
+commits that are not in the pull request. Deleting asks for a confirmation; without a terminal,
+pass --yes.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
 		if !a.insideClone(cmd.Context()) {
-			return clierr.Wrap(clierr.Usage, errors.New("pr clean must run inside a Git clone"))
+			return clierr.Wrap(clierr.Usage, errors.New("pr clean requires a Git clone"))
 		}
 		target, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
@@ -44,7 +57,7 @@ func (a *application) pullCleanCommand() *cobra.Command {
 			return err
 		}
 		if pull.State == "open" {
-			return errors.New("pull request is still open; close or merge it before cleaning branches")
+			return fmt.Errorf("pull request #%d is still open; close or merge it before cleaning branches", n)
 		}
 		// AGit pull requests have no head branch; their local branch is found by its commit, or
 		// with --ignore-sha by what pr checkout or pr create --agit recorded, or as pr/NUMBER.
@@ -60,12 +73,17 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		if owner, _, _ := strings.Cut(pull.HeadRepo, "/"); owner != "" && !strings.EqualFold(pull.HeadRepo, target.Repo) {
 			preferred = append(preferred, owner+"/"+pull.Head)
 		}
-		localBranch, remote, err := git.FindCleanBranch(cmd.Context(), a.deps.Git, git.FindCleanBranchOptions{
+		if !ignoreSHA {
+			a.fetchPullHead(cmd.Context(), target, pull)
+		}
+		localBranch, remote, err := git.FindCleanBranch(cmd.Context(), a.gitProbe(), git.FindCleanBranchOptions{
 			Directory: a.options.cwd, HeadSHA: pull.HeadSHA, HeadBranch: pull.Head, IgnoreSHA: ignoreSHA, DefaultBranch: repository.DefaultBranch,
 			PreferredNames: preferred, MatchingRemotes: matchingRemotes, PullNumber: n,
 		})
-		if err != nil {
+		if _, selection := errors.AsType[*git.CleanSelectionError](err); selection {
 			return clierr.Wrap(clierr.Usage, err)
+		} else if err != nil {
+			return err
 		}
 		// Gitea reports a moved branch's tip as the head of a closed pull request, so the local
 		// branch found by it holds those commits too.
@@ -115,6 +133,7 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: prompt, NonTTY: strings.ToLower(description[:1]) + description[1:]}); err != nil {
 			return err
 		}
+		current, _ := a.currentBranch(cmd.Context())
 		result, err := git.CleanPull(cmd.Context(), a.deps.Git, git.CleanOptions{
 			Directory: a.options.cwd, DefaultBranch: repository.DefaultBranch, LocalBranch: localBranch,
 			Remote: remote, RemoteBranch: pull.Head, RemoteSHA: pull.HeadSHA, CredentialArgs: credentialArgs,
@@ -137,6 +156,7 @@ func (a *application) pullCleanCommand() *cobra.Command {
 		case !pull.HeadCanPush:
 			a.warn(cmd, "Kept remote branch %s: you cannot push to %s", pull.Head, pull.HeadRepo)
 		}
+		a.reportCleaned(cmd, target, result, current == localBranch)
 		return a.jsonResult(cmd, result)
 	}}
 	cmd.Flags().BoolVar(&ignoreSHA, "ignore-sha", false, "Find the local branch by name instead of commit hash")

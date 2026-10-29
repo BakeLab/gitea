@@ -51,6 +51,7 @@ type Pull struct {
 	// or "". Only commands that read the reviews fill it.
 	ReviewDecision    string `json:"review_decision"`
 	Base              string `json:"base"`
+	BaseSHA           string `json:"-"`
 	Head              string `json:"head"`
 	HeadSHA           string `json:"head_sha"`
 	HeadRepo          string `json:"head_repo"`
@@ -60,6 +61,7 @@ type Pull struct {
 	HeadSSHURL        string `json:"-"`
 	// AllowMaintainerEdit tells whether maintainers can push to the head branch.
 	AllowMaintainerEdit bool `json:"-"`
+	BaseCanPush         bool `json:"-"`
 	// Reviewers and ReviewerTeams are the outstanding review requests. Gitea's own list also
 	// names users who already reviewed, so commands that read the reviews replace them with
 	// WithReviews.
@@ -106,7 +108,7 @@ func pullFrom(pull *gitea.PullRequest) Pull {
 		Deadline: optionalTimestamp(pull.Deadline), ID: pull.ID, Number: pull.Index, Title: pull.Title, Body: pull.Body,
 		URL: pull.HTMLURL, State: state, Merged: pull.HasMerged, MergedAt: optionalTimestamp(pull.Merged), MergedBy: login(pull.MergedBy),
 		MergeCommitSHA: pull.MergedCommitID, MergeBase: pull.MergeBase, Mergeable: pull.Mergeable, Draft: pull.Draft, AllowMaintainerEdit: pull.AllowMaintainerEdit,
-		Base: base.Ref, Head: headBranch, HeadSHA: head.Sha, HeadRemoteDeleted: remoteDeleted,
+		Base: base.Ref, BaseSHA: base.Sha, Head: headBranch, HeadSHA: head.Sha, HeadRemoteDeleted: remoteDeleted,
 		Reviewers: convertAll(pull.RequestedReviewers, login), Reviews: []Review{}, Comments: int64(pull.Comments),
 		ReviewerTeams: convertAll(pull.RequestedReviewersTeams, func(team *gitea.Team) string { return team.Name }),
 	}
@@ -121,6 +123,9 @@ func pullFrom(pull *gitea.PullRequest) Pull {
 		if repo.Permissions != nil {
 			result.HeadCanPush = repo.Permissions.Push
 		}
+	}
+	if base.Repository != nil && base.Repository.Permissions != nil {
+		result.BaseCanPush = base.Repository.Permissions.Push
 	}
 	// A deleted head branch is fetched from the base repository's refs/pull, while the head
 	// repository still names the fork it came from.
@@ -170,7 +175,9 @@ type PullListOptions struct {
 	State, Sort, Author, Base string
 	Limit, Page               int
 	Milestone                 int64
-	Labels                    []int64
+	// Labels must all be on a pull request. Gitea's filter matches any of them, and repeats a pull
+	// request for each one it has, so List checks more than one itself.
+	Labels []int64
 	// Draft, Head (BRANCH or OWNER:BRANCH), Assignee, NoAssignee, Search (text in the title or
 	// body) and the merged state have no server filter; List applies them to every pull request
 	// it reads.
@@ -180,7 +187,7 @@ type PullListOptions struct {
 
 // filtered reports whether a filter needs every pull request read.
 func (o PullListOptions) filtered() bool {
-	return o.State == "merged" || o.Draft || o.NoAssignee || o.Head != "" || o.Assignee != "" || o.Search != ""
+	return o.State == "merged" || len(o.Labels) > 1 || o.Draft || o.NoAssignee || o.Head != "" || o.Assignee != "" || o.Search != ""
 }
 
 // matches applies the filters without a server equivalent to item.
@@ -195,6 +202,9 @@ func (o PullListOptions) matches(item Pull) bool {
 		(branch == "" || (item.Head == branch && (owner == "" || strings.EqualFold(owner, headOwner)))) &&
 		(o.Assignee == "" || slices.ContainsFunc(item.Assignees, func(name string) bool { return strings.EqualFold(name, o.Assignee) })) &&
 		(!o.NoAssignee || len(item.Assignees) == 0) &&
+		!slices.ContainsFunc(o.Labels, func(id int64) bool {
+			return !slices.ContainsFunc(item.Labels, func(label Label) bool { return label.ID == id })
+		}) &&
 		(search == "" || strings.Contains(strings.ToLower(item.Title), search) || strings.Contains(strings.ToLower(item.Body), search))
 }
 
@@ -212,14 +222,20 @@ func (s Pulls) ListPage(ctx context.Context, options PullListOptions) (Page[Pull
 	if !options.filtered() {
 		return s.listPage(ctx, options)
 	}
-	query := options
+	query, seen := options, map[int64]bool{}
 	if query.State == "merged" {
 		query.State = "closed"
 	}
 	return filteredPage(options.Limit, options.Page, func(limit, page int) (Page[Pull], error) {
 		query.Limit, query.Page = limit, page
 		return s.listPage(ctx, query)
-	}, options.matches)
+	}, func(item Pull) bool {
+		if seen[item.Number] || !options.matches(item) {
+			return false
+		}
+		seen[item.Number] = true
+		return true
+	})
 }
 
 func (s Pulls) listPage(ctx context.Context, options PullListOptions) (Page[Pull], error) {
@@ -1223,6 +1239,68 @@ func (s Pulls) MergeSettings(ctx context.Context) (MergeSettings, error) {
 		settings.Default = settings.Styles[0]
 	}
 	return settings, nil
+}
+
+// ErrPullUpToDate reports a head branch that already has every commit of its base branch.
+var ErrPullUpToDate = errors.New("the head branch already has the commits of the base branch")
+
+// ErrPullUpdateConflicts reports a head branch that cannot take the commits of its base branch
+// without conflicts.
+var ErrPullUpdateConflicts = errors.New("the head branch conflicts with the base branch")
+
+// ErrRebaseUpdateDisabled reports a repository that does not allow updating a head branch by
+// rebasing it.
+var ErrRebaseUpdateDisabled = errors.New("the repository does not allow rebase updates")
+
+// UpdateBranch brings the new commits of the base branch of pull into its head branch, with a
+// merge commit, or with rebase by rebasing the head branch onto the base branch.
+func (s Pulls) UpdateBranch(ctx context.Context, pull Pull, rebase bool) error {
+	// Gitea tells only site administrators that a head branch is up to date; others get a bare 500.
+	if pull.MergeBase != "" && pull.MergeBase == pull.BaseSHA {
+		return ErrPullUpToDate
+	}
+	var err error
+	if rebase {
+		var repo *gitea.Repository
+		if repo, err = repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Repository, *gitea.Response, error) {
+			return c.Repositories.GetRepo(ctx, owner, name)
+		}); err != nil {
+			return err
+		}
+		if !repo.AllowRebaseUpdate {
+			return ErrRebaseUpdateDisabled
+		}
+		err = s.rebaseBranch(ctx, pull.Number)
+	} else {
+		err = repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
+			return c.PullRequests.UpdatePullRequest(ctx, owner, name, pull.Number)
+		})
+	}
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok {
+		switch {
+		// Gitea stores the merge base only once it checked the pull request again after a push.
+		case apiErr.Status == http.StatusInternalServerError && (strings.Contains(apiErr.Message, "is up to date") || s.upToDate(ctx, pull.Number)):
+			return fmt.Errorf("%w: %w", ErrPullUpToDate, err)
+		case apiErr.Status == http.StatusConflict:
+			return fmt.Errorf("%w: %w", ErrPullUpdateConflicts, err)
+		}
+	}
+	return pullError(ctx, s.Client, s.Repository, err, pull.Number)
+}
+
+// upToDate reports whether the head branch of pull request n has every commit of its base branch.
+func (s Pulls) upToDate(ctx context.Context, n int64) bool {
+	pull, err := s.get(ctx, n)
+	if err != nil || pull.Head == nil || pull.Base == nil || pull.Head.Sha == "" || pull.Base.Sha == "" {
+		return false
+	}
+	if pull.MergeBase == pull.Base.Sha {
+		return true
+	}
+	missing, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Compare, *gitea.Response, error) {
+		return c.Repositories.CompareCommits(ctx, owner, name, pull.Head.Sha, pull.Base.Sha)
+	})
+	return err == nil && missing.TotalCommits == 0
 }
 
 // mergeRecheckDelay is how long Merge waits before it retries a merge that Gitea refused while

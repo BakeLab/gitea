@@ -97,13 +97,13 @@ func TestPullFiltersAreEncodedBeforeListing(t *testing.T) {
 		assert.Equal(t, "feature/topic", query.Get("base_branch"))
 		assert.Equal(t, "recentupdate", query.Get("sort"))
 		assert.Equal(t, "9", query.Get("milestone"))
-		assert.Equal(t, []string{"10", "11"}, query["labels"])
+		assert.Equal(t, []string{"10"}, query["labels"])
 		assert.Equal(t, "2", query.Get("page"))
 		_, _ = w.Write([]byte(`[{"number":7,"user":{"login":"alice"},"mergeable":true,"created_at":"2026-10-01T12:00:00Z","updated_at":"2026-10-02T12:00:00Z"}]`))
 	}))
 	defer server.Close()
 	service := Pulls{Client: transport.New(server.URL, "token", false), Repository: "alice/project"}
-	options := PullListOptions{State: "open", Limit: 30, Page: 2, Author: "alice", Base: "feature/topic", Sort: "recentupdate", Milestone: 9, Labels: []int64{10, 11}}
+	options := PullListOptions{State: "open", Limit: 30, Page: 2, Author: "alice", Base: "feature/topic", Sort: "recentupdate", Milestone: 9, Labels: []int64{10}}
 	items, _, err := service.List(context.Background(), options)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
@@ -504,6 +504,23 @@ func TestPullClientFiltersCountWhenEveryPullWasRead(t *testing.T) {
 	require.False(t, page.More)
 	require.True(t, page.Counted)
 	require.Equal(t, 2, page.Total)
+}
+
+func TestPullLabelsRequireAllWithoutRepeats(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, []string{"10", "11"}, r.URL.Query()["labels"])
+		if r.URL.Query().Get("page") != "1" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		both := `{"number":1,"labels":[{"id":10},{"id":11}]}`
+		_, _ = w.Write([]byte(`[{"number":2,"labels":[{"id":10}]},` + both + `,` + both + `]`))
+	}))
+	page, err := (Pulls{Client: client, Repository: "alice/project"}).ListPage(context.Background(), PullListOptions{State: "open", Labels: []int64{10, 11}, Limit: 30, Page: 1})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.EqualValues(t, 1, page.Items[0].Number)
+	require.Equal(t, 1, page.Total)
 }
 
 func TestPullNoAssigneeKeepsUnassignedPulls(t *testing.T) {

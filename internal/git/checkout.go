@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -15,6 +16,9 @@ import (
 const (
 	pullNumberKey     = "gitea-cli-pr"
 	pullBaseRemoteKey = "gitea-cli-base-remote"
+	// pullHeadKey records the head pr checkout last checked out, which tells a rewritten pull
+	// request from local commits on the branch.
+	pullHeadKey = "gitea-cli-pr-head"
 )
 
 // CheckoutOptions identifies the base remote and how to check out the PR commit.
@@ -42,6 +46,8 @@ type CheckoutResult struct {
 	Commit   string `json:"commit"`
 	Remote   string `json:"remote,omitempty"`
 	Tracking string `json:"tracking,omitempty"`
+	// Unpushed counts the commits an existing branch has on top of the PR head, which it keeps.
+	Unpushed int `json:"-"`
 }
 
 // CheckoutPull fetches a PR head and checks out its commit.
@@ -91,9 +97,6 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 				if err != nil {
 					return CheckoutResult{}, err
 				}
-				if commit != options.ExpectedCommit && !options.Update {
-					return CheckoutResult{}, fmt.Errorf("branch %q already exists with a different commit; pass --update to fast-forward it, or choose another checkout branch with --branch", options.Branch)
-				}
 				previousCommit = commit
 				existing = true
 			}
@@ -115,8 +118,12 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 		fetchRef = "refs/heads/" + options.HeadBranch
 		tracking = options.HeadRemote + "/" + options.HeadBranch
 	}
+	knownHead, unpushed := "", 0
+	if existing && previousCommit != options.ExpectedCommit {
+		knownHead = checkedOutHead(ctx, runner, options.Directory, options.Branch, options.Number, tracking)
+	}
 	fetchArgs := append([]string{}, options.CredentialArgs...)
-	fetchArgs = append(fetchArgs, "fetch", "--quiet", "--no-tags", "--", fetchRemote, fetchRef)
+	fetchArgs = append(fetchArgs, "fetch", "--quiet", "--no-tags", "--refmap=", "--", fetchRemote, fetchRef) // the remote-tracking branch moves only on success, so a retry still tells a rewrite
 	if _, err := run(fetchArgs...); err != nil {
 		return CheckoutResult{}, err
 	}
@@ -136,17 +143,39 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 			return CheckoutResult{}, errors.New("local branch changed while fetching; retry checkout")
 		}
 		if localCommit != commit {
-			// merge-base --is-ancestor exits with status 1 to answer that it is not an ancestor.
-			if _, err := run("merge-base", "--is-ancestor", localCommit, commit); err != nil {
-				if failure, ok := errors.AsType[*CommandError](err); ok && failure.ExitCode == 1 {
-					if ReadBranchConfig(ctx, runner, options.Directory, options.Branch).PullNumber == options.Number {
-						return CheckoutResult{}, fmt.Errorf("pull request #%d was rewritten, such as by a force push, since branch %s was checked out; to drop the commits it no longer has, run: git checkout -B %s %s", options.Number, options.Branch, options.Branch, commit)
-					}
-					return CheckoutResult{}, fmt.Errorf("local branch %s has commits that pull request #%d does not have, so it cannot be fast-forwarded; choose another checkout branch with --branch, or drop them with: git checkout -B %s %s", options.Branch, options.Number, options.Branch, commit)
-				}
+			behind, err := ancestor(run, localCommit, commit)
+			if err != nil {
 				return CheckoutResult{}, err
 			}
+			ahead := false
+			if !behind {
+				if ahead, err = ancestor(run, commit, localCommit); err != nil {
+					return CheckoutResult{}, err
+				}
+			}
+			rewritten := false
+			if !behind && !ahead && knownHead != "" {
+				kept, _ := ancestor(run, knownHead, commit)
+				rewritten = !kept
+			}
+			switch {
+			case behind && !options.Update:
+				return CheckoutResult{}, fmt.Errorf("branch %s is behind pull request #%d; pass --update to fast-forward it, or choose another checkout branch with --branch", options.Branch, options.Number)
+			case ahead:
+				count, _ := run("rev-list", "--count", commit+".."+localCommit)
+				if unpushed, _ = strconv.Atoi(count); unpushed < 1 {
+					unpushed = 1
+				}
+			case behind:
+			case rewritten:
+				return CheckoutResult{}, fmt.Errorf("pull request #%d was rewritten, such as by a force push, since branch %s was checked out; to reset the branch to it, discarding the commits it no longer has and any local ones, run: git checkout -B %s %s", options.Number, options.Branch, options.Branch, commit)
+			default:
+				return CheckoutResult{}, fmt.Errorf("local branch %s has commits that are not in pull request #%d, so it cannot be fast-forwarded; choose another checkout branch with --branch, or reset it to the pull request, discarding those commits, with: git checkout -B %s %s", options.Branch, options.Number, options.Branch, commit)
+			}
 		}
+	}
+	if tracking != "" {
+		_, _ = run("update-ref", "refs/remotes/"+tracking, commit)
 	}
 	switchArgs := []string{"switch", "--quiet", "--detach", commit}
 	if !options.Detached {
@@ -158,7 +187,7 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 	if _, err := run(switchArgs...); err != nil {
 		return CheckoutResult{}, fmt.Errorf("PR was fetched, but checkout failed: %w", err)
 	}
-	if existing && previousCommit != commit {
+	if existing && previousCommit != commit && unpushed == 0 {
 		if _, err := run("merge", "--ff-only", "--no-edit", commit); err != nil {
 			return CheckoutResult{}, fmt.Errorf("checked out the existing branch, but its fast-forward failed: %w", err)
 		}
@@ -175,8 +204,34 @@ func CheckoutPull(ctx context.Context, runner Runner, options CheckoutOptions) (
 		if err := RecordPull(ctx, runner, options.Directory, options.Branch, options.Number, options.Remote); err != nil {
 			return CheckoutResult{}, fmt.Errorf("checked out the branch, but could not record its pull request: %w", err)
 		}
+		_, _ = run("config", "branch."+options.Branch+"."+pullHeadKey, commit) // without it, a rewrite is told by the remote-tracking branch
 	}
-	return CheckoutResult{Branch: options.Branch, Commit: commit, Detached: options.Detached, Remote: fetchRemote, Tracking: tracking}, nil
+	return CheckoutResult{Branch: options.Branch, Commit: commit, Detached: options.Detached, Remote: fetchRemote, Tracking: tracking, Unpushed: unpushed}, nil
+}
+
+// checkedOutHead returns the pull request head that pr checkout last left on branch, else the
+// remote-tracking branch of tracking as it was before the fetch, or "" when neither is known.
+func checkedOutHead(ctx context.Context, runner Runner, dir, branch string, number int64, tracking string) string {
+	if ReadBranchConfig(ctx, runner, dir, branch).PullNumber == number {
+		if head, err := runner.Output(ctx, dir, false, "config", "--get", "branch."+branch+"."+pullHeadKey); err == nil && head != "" {
+			return head
+		}
+	}
+	if tracking == "" {
+		return ""
+	}
+	head, _ := runner.Output(ctx, dir, false, "rev-parse", "--verify", "--quiet", "refs/remotes/"+tracking+"^{commit}")
+	return head
+}
+
+// ancestor reports whether ancestor is an ancestor of commit; merge-base --is-ancestor answers
+// that it is not with exit status 1.
+func ancestor(run func(...string) (string, error), ancestor, commit string) (bool, error) {
+	_, err := run("merge-base", "--is-ancestor", ancestor, commit)
+	if failure, ok := errors.AsType[*CommandError](err); ok && failure.ExitCode == 1 {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // RecordPull records in the configuration of branch the pull request it belongs to and the remote
@@ -196,6 +251,25 @@ func RecordPull(ctx context.Context, runner Runner, dir, branch string, number i
 func RecordBaseRemote(ctx context.Context, runner Runner, dir, branch, remote string) error {
 	_, err := runner.Output(ctx, dir, false, "config", "branch."+branch+"."+pullBaseRemoteKey, remote)
 	return err
+}
+
+// RenameBaseRemote records to as the base remote of every branch that recorded from, after git
+// remote rename, which updates only Git's own keys.
+func RenameBaseRemote(ctx context.Context, runner Runner, dir, from, to string) error {
+	listing, err := runner.Output(ctx, dir, false, "config", "--get-regexp", `^branch\..*\.`+regexp.QuoteMeta(pullBaseRemoteKey)+`$`)
+	if err != nil {
+		return nil // none recorded
+	}
+	for line := range strings.Lines(listing) {
+		key, value, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
+		if value != from {
+			continue
+		}
+		if _, err := runner.Output(ctx, dir, false, "config", key, to); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // requireBranchFreeElsewhere fails when branch is checked out in a linked worktree other than

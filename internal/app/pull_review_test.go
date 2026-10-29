@@ -335,7 +335,7 @@ func TestCommentWithAnEmptyBodyPublishesAPendingReviewWithInlineComments(t *test
 		{"inline comments", `[{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes","comments_count":1,"user":{"login":"alice"}}]`, ""},
 		// The empty body replaces the pending one, which leaves nothing to publish.
 		{"only a body", `[{"id":9,"state":"PENDING","user":{"login":"alice"},"body":"Draft notes","user":{"login":"alice"}}]`, `-b "" would clear the body of pending review 9 and leave it empty; leave out --body to keep its body`},
-		{"no pending review", `[]`, "a comment needs a body; pass --body, --body-file or --editor"},
+		{"no pending review", `[]`, "--comment requires a body or inline comments; pass --body, --body-file, --editor or --comments-file"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var posts []string
@@ -459,6 +459,7 @@ func TestReviewCommentCommandsNameTheMissingCommentOrRepository(t *testing.T) {
 	}{
 		{[]string{"pr", "review", "resolve", "9"}, "comment does not exist [id: 9, issue_id: 0]", true, "review comment 9 not found in alice/x"},
 		{[]string{"pr", "review", "unresolve", "9"}, "comment does not exist [id: 9, issue_id: 0]", true, "review comment 9 not found in alice/x"},
+		{[]string{"pr", "review", "resolve", "20", "9"}, "comment does not exist [id: 9, issue_id: 0]", true, "review comment 9 not found in alice/x"},
 		{[]string{"pr", "review", "resolve", "9"}, "not found", false, "repository alice/x not found"},
 	} {
 		t.Run(strings.Join(tc.args, " ")+" "+tc.message, func(t *testing.T) {
@@ -514,9 +515,9 @@ func TestReviewUsageErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"pr", "review", "13"}, "choose a review type: --approve, --request-changes, or --comment\nUsage: gt pr review [<number> | <url> | <branch>] [flags]\nRun 'gt pr review --help' for examples."},
+		{[]string{"pr", "review", "13"}, "choose one review type: --approve, --request-changes, --comment or --pending\nUsage: gt pr review [<number> | <url> | <branch>] [flags]\nRun 'gt pr review --help' for examples."},
 		{[]string{"pr", "review", "create", "13"}, "Run 'gt pr review create --help' for examples."},
-		{[]string{"pr", "review", "13", "--body", "x"}, "choose a review type"},
+		{[]string{"pr", "review", "13", "--body", "x"}, "choose one review type"},
 		{[]string{"pr", "review", "13", "-a", "-c"}, "choose one review type"},
 		{[]string{"pr", "review", "13", "--approve", "--comment"}, "choose one review type"},
 		{[]string{"pr", "review", "13", "--pending", "-a"}, "choose one review type: --approve, --request-changes, --comment or --pending"},
@@ -525,7 +526,7 @@ func TestReviewUsageErrors(t *testing.T) {
 		{[]string{"pr", "review", "reject"}, `to request changes run: gt pr review <number> --request-changes`},
 		{[]string{"pr", "review", "lst", "13"}, `unknown command "lst" for "gt pr review"; did you mean list?`},
 		{[]string{"pr", "review", "13", "14", "-a"}, "too many arguments"},
-		{[]string{"pr", "review", "submit", "13"}, "choose a review type"},
+		{[]string{"pr", "review", "submit", "13"}, "choose one review type: --approve, --request-changes or --comment"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			requireUsageBeforeRequests(t, tc.want, tc.args...)
@@ -557,7 +558,7 @@ func TestReviewNeedsABodyWithoutPrompts(t *testing.T) {
 	deps, _, _ := serverDeps(t, server.URL)
 	err := Execute(context.Background(), deps, []string{"pr", "review", "13", "-R", "alice/x", "--request-changes"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-	require.EqualError(t, err, "a change request needs a body; pass --body, --body-file or --editor")
+	require.EqualError(t, err, "--request-changes requires a body; pass --body, --body-file or --editor")
 }
 
 func TestReviewSubmitFindsThePendingReview(t *testing.T) {

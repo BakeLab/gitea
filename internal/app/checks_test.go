@@ -96,7 +96,7 @@ func TestChecksSummaryAndExitCodes(t *testing.T) {
 		{
 			name:     "pending",
 			statuses: `[{"id":1,"context":"ci / test (pull_request)","status":"pending","description":"Waiting to run","target_url":"/alice/x/actions/runs/18/jobs/18"}]`,
-			want: "Some checks are still pending\n0 failing, 0 successful, and 1 pending checks\n\n" +
+			want: "Some checks are still pending\n0 failing, 0 successful, and 1 pending check\n\n" +
 				"   NAME                      STATUS   DESCRIPTION\n" +
 				"\x1b]8;;SERVER/alice/x/actions/runs/18/jobs/18\x1b\\*\x1b]8;;\x1b\\  ci / test (pull_request)  pending  Waiting to run\n",
 			code: clierr.Pending,
@@ -193,7 +193,7 @@ func TestChecksWatchRedrawsOnlyOnATerminalThatInterpretsEscapes(t *testing.T) {
 			deps.Streams.OutTTY, deps.Streams.OutPlain = true, tc.plain
 			require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checks", "8", "-R", "alice/x", "--watch", "--interval=1ms"}))
 			require.Equal(t, tc.live, strings.Contains(out.String(), "Refreshing every"))
-			require.Equal(t, !tc.live, strings.Contains(diagnostics.String(), "checks: 0 failing, 1 successful, and 0 pending checks\n"))
+			require.Equal(t, !tc.live, strings.Contains(diagnostics.String(), "checks: 0 failing, 1 successful, and 0 pending check\n"))
 			final := out.String()
 			if tc.live {
 				require.True(t, strings.HasPrefix(final, "\x1b[?1049h\x1b[H\x1b[J"), "the live view redraws on the alternate screen")

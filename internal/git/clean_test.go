@@ -165,7 +165,7 @@ func TestCleanPullDeletesLocalAndRemoteBranches(t *testing.T) {
 	require.Equal(t, CleanResult{LocalBranch: "feature", Remote: "origin", RemoteBranch: "feature", DefaultBranch: "main", RemoteDeleted: true}, result)
 	require.Contains(t, runner.calls, "switch --quiet -- main")
 	require.Contains(t, runner.calls, "branch -D -- feature")
-	require.Contains(t, runner.calls, "-c credential.helper=gt push --delete -- origin refs/heads/feature")
+	require.Contains(t, runner.calls, "-c credential.helper=gt push --quiet --delete -- origin refs/heads/feature")
 }
 
 func TestCleanPullSkipsRemoteWhenUnavailable(t *testing.T) {
@@ -262,14 +262,18 @@ func TestCleanPullDeletesTheRemoteBranchBesideATagWithTheSameName(t *testing.T) 
 		RemoteSHA: strings.Repeat("1", 40),
 	}
 	// A remote branch that moved past the expected commit stays.
-	_, err := CleanPull(context.Background(), System{}, opts)
+	var stderr strings.Builder
+	_, err := CleanPull(context.Background(), System{ErrOut: &stderr}, opts)
 	require.ErrorContains(t, err, "deleting remote branch feature failed")
+	require.Contains(t, stderr.String(), "stale info")
 	require.Equal(t, "refs/heads/feature\nrefs/heads/main\nrefs/tags/feature\n", run(remote, "for-each-ref", "--format=%(refname)"))
 	run(dir, "branch", "feature")
 	opts.RemoteSHA = strings.TrimSpace(run(dir, "rev-parse", "main"))
-	result, err := CleanPull(context.Background(), System{}, opts)
+	stderr.Reset()
+	result, err := CleanPull(context.Background(), System{ErrOut: &stderr}, opts)
 	require.NoError(t, err)
 	require.True(t, result.RemoteDeleted)
+	require.Empty(t, stderr.String())
 	require.Equal(t, "refs/heads/main\nrefs/tags/feature\n", run(remote, "for-each-ref", "--format=%(refname)"))
 }
 
@@ -306,4 +310,30 @@ func TestCleanPullSwitchesToABaseBranchThatIsNotCheckedOutHere(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, run(dir, "rev-parse", "release-1"), run(dir, "rev-parse", "HEAD"))
 	require.Equal(t, "", run(dir, "branch", "--list", "feature"))
+}
+
+func TestCleanPullRemovesTheRemoteOfAForkOnceNoBranchTracksIt(t *testing.T) {
+	gittest.Isolate(t)
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+		return strings.TrimSpace(string(out))
+	}
+	remote, dir := t.TempDir(), t.TempDir()
+	run(remote, "init", "--quiet", "--bare")
+	run(dir, "init", "--quiet", "--initial-branch=main")
+	run(dir, "commit", "--quiet", "--allow-empty", "--message=x")
+	run(dir, "remote", "add", "pulls/bob/project", remote)
+	run(dir, "push", "--quiet", "pulls/bob/project", "main:feature")
+	run(dir, "fetch", "--quiet", "pulls/bob/project")
+	run(dir, "branch", "--quiet", "--track", "one", "pulls/bob/project/feature")
+	run(dir, "branch", "--quiet", "--track", "two", "pulls/bob/project/feature")
+	result, err := CleanPull(context.Background(), System{}, CleanOptions{Directory: dir, DefaultBranch: "main", LocalBranch: "one"})
+	require.NoError(t, err)
+	require.Empty(t, result.RemovedRemote)
+	result, err = CleanPull(context.Background(), System{}, CleanOptions{Directory: dir, DefaultBranch: "main", LocalBranch: "two"})
+	require.NoError(t, err)
+	require.Equal(t, "pulls/bob/project", result.RemovedRemote)
+	require.Empty(t, run(dir, "remote"))
 }

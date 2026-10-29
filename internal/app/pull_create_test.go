@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/stretchr/testify/require"
@@ -118,8 +120,10 @@ func TestPullCreateAgitPushesToMatchingRemoteWithoutRemoteFlag(t *testing.T) {
 func TestPullCreateAgitRecordsThePullRequestOfTheBranch(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls" {
+			// Another user's AGit pull request has the same commit.
 			_, _ = w.Write([]byte(`[{"number":6,"head":{"ref":"refs/pull/6/head","label":"","sha":"othersha"},"base":{"ref":"main"}},
-				{"number":5,"title":"Title","html_url":"https://example.test/alice/project/pulls/5","head":{"ref":"refs/pull/5/head","label":"","sha":"localsha"},"base":{"ref":"main"}}]`))
+				{"number":4,"user":{"login":"bob"},"head":{"ref":"refs/pull/4/head","label":"","sha":"localsha"},"base":{"ref":"main"}},
+				{"number":5,"title":"Title","user":{"login":"alice"},"html_url":"https://example.test/alice/project/pulls/5","head":{"ref":"refs/pull/5/head","label":"","sha":"localsha"},"base":{"ref":"main"}}]`))
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project" {
@@ -130,7 +134,7 @@ func TestPullCreateAgitRecordsThePullRequestOfTheBranch(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
-	deps, out, _ := serverDeps(t, server.URL)
+	deps, out, diagnostics := serverDeps(t, server.URL)
 	pushKey := credentialCall(t, deps, server.URL, "alice", "push", "-o", "title=Title", "--", "origin", "refs/heads/feature:refs/for/main/feature")
 	runner := &fakeGit{results: map[string]string{
 		"remote":                          "origin",
@@ -142,11 +146,63 @@ func TestPullCreateAgitRecordsThePullRequestOfTheBranch(t *testing.T) {
 		pushKey: "",
 	}}
 	deps.Git = runner
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "--agit", "-R", "alice/project", "--title", "Title", "--head", "feature", "--base", "main", "--no-input"}))
+	create := []string{"pr", "create", "--agit", "-R", "alice/project", "--title", "Title", "--head", "feature", "--base", "main", "--no-input"}
+	require.NoError(t, Execute(context.Background(), deps, create))
 	require.Contains(t, runner.calls, pushKey)
 	require.Contains(t, runner.calls, "config branch.feature.gitea-cli-pr 5")
 	require.Contains(t, runner.calls, "config branch.feature.gitea-cli-base-remote origin")
 	require.Equal(t, "https://example.test/alice/project/pulls/5\n", out.String(), "the URL is printed like for other created pull requests")
+
+	// Gitea refuses a push for several reasons, so a refusal is never taken as up to date.
+	runner.errs = map[string]error{pushKey: &git.CommandError{ExitCode: 1}}
+	out.Reset()
+	err := Execute(context.Background(), deps, create)
+	require.EqualError(t, err, "Git did not push feature to refs/for/main/feature; see its output above")
+	require.Empty(t, out.String())
+
+	// Pushed, but the pull request is not among the open ones.
+	runner.errs = nil
+	runner.results["rev-parse --verify refs/heads/feature^{commit}"] = "newsha"
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, create))
+	require.Equal(t, "! Pushed feature, but could not find its pull request among your open AGit pull requests into main\n", diagnostics.String())
+	require.Empty(t, out.String())
+}
+
+// Only its author can push to an AGit pull request, so pushing a branch of another user's to the
+// branch name would quietly open another pull request.
+func TestPullCreateAgitRefusesABranchOfAnotherUsersPullRequestWithoutTopic(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_pull_requests":true}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls/6":
+			_, _ = w.Write([]byte(`{"number":6,"title":"Theirs","state":"open","user":{"login":"bob"},"head":{"ref":"refs/pull/6/head","label":"","sha":"localsha"},"base":{"ref":"main"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/alice/project/pulls":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	pushKey := credentialCall(t, deps, server.URL, "alice", "push", "-o", "title=Title", "--", "origin", "refs/heads/pr/6:refs/for/main/mine")
+	runner := &fakeGit{results: map[string]string{
+		"remote":                                      "origin",
+		"remote get-url origin":                       server.URL + "/alice/project.git",
+		"rev-parse --is-inside-work-tree":             "true",
+		"config --get branch.pr/6.gitea-cli-pr":       "6",
+		"rev-parse --verify refs/heads/pr/6^{commit}": "localsha",
+		pushKey: "",
+	}}
+	deps.Git = runner
+	create := []string{"pr", "create", "--agit", "-R", "alice/project", "--title", "Title", "--head", "pr/6", "--base", "main", "--no-input"}
+	err := Execute(context.Background(), deps, create)
+	require.EqualError(t, err, "branch pr/6 belongs to AGit pull request alice/project#6 (Theirs) by bob, which only its author can push to; pass --topic to open your own pull request")
+	require.False(t, slices.ContainsFunc(runner.calls, func(call string) bool { return strings.Contains(call, " push ") }))
+	require.NoError(t, Execute(context.Background(), deps, append(create, "--topic", "mine")))
+	require.Contains(t, runner.calls, pushKey)
 }
 
 func TestPullCreateSkipsPushWhenHeadAlreadyPublished(t *testing.T) {
@@ -320,8 +376,8 @@ func TestPullCreateGoesThroughAForkWithoutPushAccessToTheBase(t *testing.T) {
 		{name: "fork remote", remotes: "origin fork", want: "alice:feature"},
 		{name: "fork on a terminal", tty: true, forks: true, want: "alice:feature"},
 		{name: "fork remote elsewhere", remotes: "origin fork", forkRepo: "bob/other", pushRemote: "alice", tty: true, forks: true, want: "alice:feature"},
-		{name: "fork remotes elsewhere", remotes: "origin fork alice", forkRepo: "bob/other", tty: true, err: "you cannot push to acme/project, and Git remotes fork and alice point elsewhere; add a remote of your fork with gt repo fork --remote --remote-name NAME and retry"},
-		{name: "no fork without a terminal", err: "you cannot push to acme/project; fork it with gt repo fork --remote and retry"},
+		{name: "fork remotes elsewhere", remotes: "origin fork alice", forkRepo: "bob/other", tty: true, err: "you cannot push to acme/project, and Git remotes fork and alice point elsewhere; add a remote of your fork with gt repo fork --add-remote --remote-name NAME and retry"},
+		{name: "no fork without a terminal", err: "you cannot push to acme/project; fork it with gt repo fork --add-remote and retry"},
 		{name: "missing base", tty: true, err: `branch "main" not found in acme/project`},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -79,7 +79,11 @@ func (a *application) pullCheckoutCommand() *cobra.Command {
 	var detached, update bool
 	cmd := &cobra.Command{Use: "checkout {<number> | <url> | <branch>}", Aliases: []string{"co"}, Short: "Check out a pull request", Long: `Check out the head of a pull request in a local branch that tracks the head branch, so
 that pr commands without an argument select the pull request, and git push updates it when the
-branch is named like the head branch. gt prints the push command for a branch named otherwise.`, Annotations: pullArgumentRequiredAnnotation(nil), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
+branch is named like the head branch. gt prints the push command for a branch named otherwise.
+
+An existing branch of the pull request is reused: one with commits on top of the head is
+checked out as it is, and one behind the head is fast-forwarded with --update. An existing
+branch named with --branch that is not of the pull request is refused.`, Annotations: pullArgumentRequiredAnnotation(nil), Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if detached && (cmd.Flags().Changed("branch") || update) {
 			return clierr.Wrap(clierr.Usage, errors.New("--detach cannot be combined with --branch or --update"))
 		}
@@ -92,7 +96,7 @@ branch is named like the head branch. gt prints the push command for a branch na
 			}
 		}
 		if !a.insideClone(cmd.Context()) {
-			return clierr.Wrap(clierr.Usage, errors.New("pr checkout must run inside a Git clone"))
+			return clierr.Wrap(clierr.Usage, errors.New("pr checkout requires a Git clone"))
 		}
 		target, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
@@ -115,6 +119,10 @@ branch is named like the head branch. gt prints the push command for a branch na
 		}
 		if branch == "" && !detached {
 			branch = a.checkoutBranchName(cmd.Context(), target, pull)
+		} else if branch != "" {
+			if err := a.refuseForeignBranch(cmd.Context(), target, pull, branch); err != nil {
+				return err
+			}
 		}
 		rawRemote, err := a.git(cmd.Context(), "remote", "get-url", remote)
 		if err != nil {
@@ -150,12 +158,29 @@ branch is named like the head branch. gt prints the push command for a branch na
 			undoRemote()
 			return err
 		}
+		canPush := pull.HeadCanPush || pull.AllowMaintainerEdit && pull.BaseCanPush
 		if result.Detached {
 			a.done(cmd, "Checked out #%d at %s (detached HEAD)", n, shortSHA(result.Commit))
-		} else if options.HeadBranch != "" && result.Branch != options.HeadBranch {
-			a.done(cmd, "Checked out #%d into %s; push to it with: git push %s HEAD:%s", n, result.Branch, options.HeadRemote, options.HeadBranch)
 		} else {
 			a.done(cmd, "Checked out #%d into %s", n, result.Branch)
+			if canPush && options.HeadBranch != "" && result.Branch != options.HeadBranch {
+				a.warn(cmd, "Branch %s is not named like the head branch; push to it with: git push %s HEAD:%s", result.Branch, options.HeadRemote, options.HeadBranch)
+			}
+		}
+		if commits := "commits"; result.Unpushed > 0 {
+			if result.Unpushed == 1 {
+				commits = "commit"
+			}
+			hint := "; push to update it"
+			switch {
+			case pull.HeadRemoteDeleted:
+				hint = "; its head branch was deleted, so a push cannot update it"
+			case options.HeadBranch == "":
+				hint = "" // such as an AGit pull request, which only its author's AGit push updates
+			case !canPush:
+				hint = "; you cannot push to " + pull.HeadRepo
+			}
+			a.warn(cmd, "Branch %s is %d %s ahead of the pull request%s", result.Branch, result.Unpushed, commits, hint)
 		}
 		return a.jsonResult(cmd, result)
 	}}
@@ -196,12 +221,31 @@ func (a *application) checkoutBranchName(ctx context.Context, t target, pull ser
 			continue
 		}
 		config := git.ReadBranchConfig(ctx, a.gitProbe(), a.options.cwd, name)
-		tracksHead := config.Merge == pull.Head && pull.HeadRepo != "" && strings.EqualFold(a.remoteRepository(ctx, t, config.Remote), pull.HeadRepo)
-		if config.PullNumber == pull.Number || tracksHead || (tip == pull.HeadSHA && (sameRepo || config.Remote == "")) {
+		if a.branchOfPull(ctx, t, pull, config) || (tip == pull.HeadSHA && (sameRepo || config.Remote == "")) {
 			return name
 		}
 	}
 	return fallback
+}
+
+// branchOfPull reports whether a local branch with config is of pull: one an earlier checkout of it
+// created, or one that tracks its head branch.
+func (a *application) branchOfPull(ctx context.Context, t target, pull services.Pull, config git.BranchConfig) bool {
+	tracksHead := config.Merge == pull.Head && pull.HeadRepo != "" && strings.EqualFold(a.remoteRepository(ctx, t, config.Remote), pull.HeadRepo)
+	return config.PullNumber == pull.Number || tracksHead
+}
+
+// refuseForeignBranch fails when the local branch named by --branch exists and is not of pull, as
+// checking it out would take it over: re-point its upstream at the head and record the pull request.
+func (a *application) refuseForeignBranch(ctx context.Context, t target, pull services.Pull, branch string) error {
+	probe := a.gitProbe()
+	if _, err := probe.Output(ctx, a.options.cwd, false, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}"); err != nil {
+		return nil
+	}
+	if a.branchOfPull(ctx, t, pull, git.ReadBranchConfig(ctx, probe, a.options.cwd, branch)) {
+		return nil
+	}
+	return fmt.Errorf("branch %s already exists and is not of pull request #%d; choose another checkout branch with --branch", branch, pull.Number)
 }
 
 // branchPathTaken reports whether a branch name cannot be created because another branch is a

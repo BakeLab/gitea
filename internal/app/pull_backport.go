@@ -36,7 +36,7 @@ squash merge the squashed commit; cherry-picks use -x. The new branch is backpor
 started from the --to branch of the base repository's remote, and gt switches back to the branch
 it ran on afterwards. Like gt pr create, it pushes to your fork when you cannot push to the
 repository; a fork it has to create first is offered only on a terminal, so elsewhere run gt repo
-fork --remote first. Pushing asks for a confirmation; without a terminal, pass --yes.
+fork --add-remote first. Pushing asks for a confirmation; without a terminal, pass --yes.
 
 A cherry-pick that conflicts is undone, and other --to branches are still tried, as they are
 after a --to branch that already has the pull request's changes. With --keep, gt
@@ -79,11 +79,11 @@ request.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": 
 			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
 		}
 		if !a.insideClone(cmd.Context()) {
-			return clierr.Wrap(clierr.Usage, errors.New("pr backport must run inside a Git clone"))
+			return clierr.Wrap(clierr.Usage, errors.New("pr backport requires a Git clone"))
 		}
 		// The backport branch is pushed after a confirmation, which fails only once it exists.
 		if !a.options.yes && !a.canPrompt() {
-			return clierr.Wrap(clierr.Usage, errors.New("pr backport requires --yes without a terminal"))
+			return a.confirmAction(cmd, terminal.Confirmation{NonTTY: "push the backport branch"})
 		}
 		if resume {
 			return a.continueBackport(cmd, milestone)
@@ -129,6 +129,12 @@ func (a *application) runBackport(cmd *cobra.Command, args, targets []string, br
 	if !pull.Merged || pull.MergeCommitSHA == nil || *pull.MergeCommitSHA == "" {
 		return fmt.Errorf("pull request #%d is not merged; only merged pull requests can be backported", n)
 	}
+	if err := (services.Branches{Client: t.client}).RequireAll(ctx, t.Repo, targets); err != nil {
+		if services.IsNotFound(err) {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--to requires an existing branch: %w", err))
+		}
+		return err
+	}
 	milestoneID, err := backportMilestone(cmd, t, milestone)
 	if err != nil {
 		return err
@@ -154,6 +160,7 @@ func (a *application) runBackport(cmd *cobra.Command, args, targets []string, br
 		result, err := git.Backport(ctx, a.deps.Git, git.BackportOptions{
 			CredentialArgs: credentials, Directory: a.options.cwd, Remote: remote, Prompt: a.policy(snapshot).CanPrompt(a.deps.Streams),
 			Number: n, Base: pull.Base, MergeCommit: *pull.MergeCommitSHA, MergeBase: pull.MergeBase, Target: to, Branch: name, Keep: keep,
+			Hold: a.heldGit,
 		})
 		conflict, conflicted := errors.AsType[*git.BackportConflict](err)
 		if _, skipped := errors.AsType[*git.BackportSkipped](err); skipped || conflicted && !conflict.Kept {
