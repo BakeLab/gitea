@@ -70,6 +70,37 @@ func uploadAttachment(ctx context.Context, client *transport.Client, endpoint, n
 	return assetFrom(&attachment), nil
 }
 
+// viewOnProjects is View that also returns the IDs of the open projects the issue is on.
+// TODO(sdk): gitea.Issue has no projects field.
+func (s Issues) viewOnProjects(ctx context.Context, number int64) (Issue, []int64, error) {
+	owner, name, err := splitRepository(s.Repository)
+	if err != nil {
+		return Issue{}, nil, err
+	}
+	resp, err := s.Client.Do(ctx, http.MethodGet, fmt.Sprintf("repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(name), number), nil, nil)
+	if err != nil {
+		return Issue{}, nil, s.issueError(ctx, err, number)
+	}
+	defer resp.Body.Close()
+	var issue struct {
+		gitea.Issue
+		Projects []struct {
+			ID       int64 `json:"id"`
+			IsClosed bool  `json:"is_closed"`
+		} `json:"projects"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&issue); err != nil {
+		return Issue{}, nil, decodeError(ctx, resp, err)
+	}
+	var open []int64
+	for _, project := range issue.Projects {
+		if !project.IsClosed {
+			open = append(open, project.ID)
+		}
+	}
+	return discussionFrom(&issue.Issue), open, nil
+}
+
 // rebaseBranch rebases the head branch of pull request n onto its base branch.
 // TODO(sdk): PullRequestsService.UpdatePullRequest has no option for style=rebase.
 func (s Pulls) rebaseBranch(ctx context.Context, n int64) error {

@@ -33,7 +33,7 @@ func (a *application) issueCommand() *cobra.Command {
 	group := &cobra.Command{Use: "issue", Short: "Manage issues", Long: `Work with the issues of a repository: list, view and create them, edit, close or reopen
 one or more, and comment on them. Gitea lists pull requests among issues, so most issue
 commands also accept a pull request number.`}
-	group.AddCommand(a.issueListCommand(), a.issueViewCommand(), a.issueCreateCommand(), a.issueEditCommand(),
+	group.AddCommand(a.issueListCommand(), a.issueViewCommand(), a.issueCreateCommand(), a.issueEditCommand(), a.issueMoveCommand(),
 		a.issueStateCommand("close"), a.issueStateCommand("reopen"), a.issueAttachmentCommand(issueRef), a.commentCommand(issueRef), a.timelineCommand(issueRef))
 	return jsonOutput(group, jsonFields[services.Issue]())
 }

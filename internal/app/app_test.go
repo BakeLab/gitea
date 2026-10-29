@@ -374,11 +374,11 @@ func TestHelpTopicsAndUnknownTopics(t *testing.T) {
 		require.Contains(t, out.String(), want, args)
 	}
 	for args, want := range map[string]string{
-		"help nope":       `unknown help topic "nope"; run gt help to list commands and topics`,
-		"help isue":       `unknown help topic "isue"; did you mean issue?`,
-		"help isue list":  `unknown help topic "isue list"; did you mean issue?`,
-		"help env":        `unknown help topic "env"; did you mean environment?`,
-		"help issue nope": `unknown help topic "issue nope"; run gt help to list commands and topics`,
+		"help nope":        `unknown help topic "nope"; run gt help to list commands and topics`,
+		"help isue":        `unknown help topic "isue"; did you mean issue?`,
+		"help isue list":   `unknown help topic "isue list"; did you mean issue?`,
+		"help env":         `unknown help topic "env"; did you mean environment?`,
+		"help issue bogus": `unknown help topic "issue bogus"; run gt help to list commands and topics`,
 	} {
 		out.Reset()
 		err := Execute(context.Background(), deps, strings.Fields(args))

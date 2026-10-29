@@ -23,13 +23,14 @@ type Projects struct {
 	Repository string
 }
 
-// Board is a project with its default column and the column that holds each issue on it, by the
-// issue's global ID.
+// Board is a project with its columns, its default column and the column that holds each issue
+// on it, by the issue's global ID.
 type Board struct {
 	scope gitea.ProjectScope
 	*gitea.Project
+	columns       []*gitea.ProjectColumn
 	defaultColumn int64
-	columns       map[int64]int64
+	held          map[int64]int64
 }
 
 // Boards resolves the open projects that refs name by ID or title: a number is an ID before it is
@@ -172,7 +173,7 @@ func (s Projects) load(ctx context.Context, board *Board, withIssues bool) error
 	if err != nil {
 		return err
 	}
-	board.columns = map[int64]int64{}
+	board.columns, board.held = columns, map[int64]int64{}
 	if len(columns) == 0 {
 		return nil
 	}
@@ -180,17 +181,22 @@ func (s Projects) load(ctx context.Context, board *Board, withIssues bool) error
 	if !withIssues {
 		return nil
 	}
-	held := make([][]*gitea.Issue, len(columns))
-	err = concurrently(len(columns), func(i int) error {
+	return s.loadIssues(ctx, board)
+}
+
+// loadIssues reads which column of the loaded board holds each issue.
+func (s Projects) loadIssues(ctx context.Context, board *Board) error {
+	held := make([][]*gitea.Issue, len(board.columns))
+	err := concurrently(len(board.columns), func(i int) error {
 		issues, err := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.Issue, *gitea.Response, error) {
-			return c.Projects.ListProjectColumnIssues(ctx, board.scope, board.ID, columns[i].ID, list)
+			return c.Projects.ListProjectColumnIssues(ctx, board.scope, board.ID, board.columns[i].ID, list)
 		})
 		held[i] = issues
 		return err
 	})
 	for i, issues := range held {
 		for _, issue := range issues {
-			board.columns[issue.ID] = columns[i].ID
+			board.held[issue.ID] = board.columns[i].ID
 		}
 	}
 	return err
@@ -200,7 +206,7 @@ func (s Projects) load(ctx context.Context, board *Board, withIssues bool) error
 // whether it sent the request: an issue already on the board keeps its column. A board without
 // columns first gets the default column Gitea creates for it on the web.
 func (s Projects) Add(ctx context.Context, board *Board, issueID int64) (bool, error) {
-	if _, held := board.columns[issueID]; held {
+	if _, held := board.held[issueID]; held {
 		return false, nil
 	}
 	if board.defaultColumn == 0 {
@@ -233,7 +239,7 @@ func (s Projects) createDefaultColumn(ctx context.Context, board *Board) error {
 // Remove takes the issue with the global ID issueID off board, and reports whether it sent the
 // request: an issue that is not on it is left as it is.
 func (s Projects) Remove(ctx context.Context, board Board, issueID int64) (bool, error) {
-	column, held := board.columns[issueID]
+	column, held := board.held[issueID]
 	if !held {
 		return false, nil
 	}

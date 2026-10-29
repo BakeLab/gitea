@@ -5,9 +5,13 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -214,4 +218,91 @@ func TestIssueEditAddsToProjectsOfTheUserOwningTheRepository(t *testing.T) {
 	// Gitea lets only the user who owns a repository put its issues on their projects.
 	err := Execute(context.Background(), deps, []string{"issue", "edit", "3", "-R", "bob/notes", "--add-project", "Personal"})
 	require.ErrorContains(t, err, `project "Personal" not found in bob/notes`)
+}
+
+func TestIssueMoveMatchesColumnsAndSendsOnlyRealMoves(t *testing.T) {
+	current := int64(10)
+	var moves []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/version":
+			_, _ = w.Write([]byte(`{"version":"28.0.0"}`))
+		case "GET /api/v1/repos/acme/app/issues/12":
+			_, _ = w.Write([]byte(`{"id":70,"number":12,"title":"Crash","projects":[{"id":3,"is_closed":false},{"id":5,"is_closed":true}]}`))
+		case "GET /api/v1/repos/acme/app/projects":
+			writeFirstPage(w, r, `[]`)
+		case "GET /api/v1/orgs/acme/projects":
+			writeFirstPage(w, r, `[{"id":3,"title":"Board"}]`)
+		case "GET /api/v1/orgs/acme/projects/3/columns":
+			writeFirstPage(w, r, `[{"id":10,"title":"Todo"},{"id":11,"title":"In progress"}]`)
+		case "GET /api/v1/orgs/acme/projects/3/columns/10/issues", "GET /api/v1/orgs/acme/projects/3/columns/11/issues":
+			if strings.Contains(r.URL.Path, "/columns/"+strconv.FormatInt(current, 10)+"/") {
+				writeFirstPage(w, r, `[{"id":70,"number":12}]`)
+			} else {
+				writeFirstPage(w, r, `[]`)
+			}
+		case "POST /api/v1/orgs/acme/projects/3/issues/70/move":
+			var body struct {
+				ColumnID int64 `json:"column_id"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			moves = append(moves, strconv.FormatInt(body.ColumnID, 10))
+			current = body.ColumnID
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	run := func(args ...string) error {
+		return Execute(context.Background(), deps, append([]string{"issue", "move", "-R", "acme/app"}, args...))
+	}
+	require.NoError(t, run("12", "to", "in-progress"))
+	require.Equal(t, []string{"11"}, moves)
+	require.NoError(t, run("12", "In progress"))
+	require.Equal(t, []string{"11"}, moves)
+	require.Contains(t, diagnostics.String(), "is already in")
+	require.NoError(t, run("12", "todo", "--project", "board"))
+	require.Equal(t, []string{"11", "10"}, moves)
+	// A number is a column ID first.
+	require.NoError(t, run("12", "to", "11"))
+	require.Equal(t, []string{"11", "10", "11"}, moves)
+	require.ErrorContains(t, run("12", "to", "Review"), `no column matches "Review"`)
+	require.ErrorContains(t, run("12", "to", "Todo", "--project", "Roadmap"), `project "Roadmap" not found`)
+	// The words of an unquoted name are not taken apart at "to".
+	err := run("12", "To", "Do")
+	require.ErrorContains(t, err, `issue move takes one column; quote a column name with spaces, such as "To Do"`)
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.Equal(t, clierr.Usage, clierr.ExitCode(run("12")))
+	require.Len(t, moves, 3)
+}
+
+func TestIssueMoveExplainsBoardsItCannotUse(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/acme/app/issues/12":
+			_, _ = w.Write([]byte(`{"id":70,"number":12,"title":"Crash","projects":[{"id":3}]}`))
+		case "GET /api/v1/repos/acme/app/projects":
+			writeFirstPage(w, r, `[]`)
+		case "GET /api/v1/orgs/acme/projects":
+			writeFirstPage(w, r, `[{"id":3,"title":"Board"},{"id":4,"title":"Roadmap"}]`)
+		case "GET /api/v1/orgs/acme/projects/3/columns", "GET /api/v1/orgs/acme/projects/4/columns":
+			writeFirstPage(w, r, `[{"id":10,"title":"Todo"}]`)
+		case "GET /api/v1/orgs/acme/projects/3/columns/10/issues", "GET /api/v1/orgs/acme/projects/4/columns/10/issues":
+			// Gitea lists no issues to an account that cannot change the board.
+			writeFirstPage(w, r, `[]`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	run := func(args ...string) error {
+		return Execute(context.Background(), deps, append([]string{"issue", "move", "-R", "acme/app"}, args...))
+	}
+	require.EqualError(t, run("12", "Todo"), `issue #12 is on project "Board", but its columns do not list it; moving it needs write access to the project`)
+	require.EqualError(t, run("12", "Todo", "--project", "Roadmap"), `issue #12 is not on project "Roadmap"`)
 }
