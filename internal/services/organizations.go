@@ -4,6 +4,7 @@
 package services
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -411,7 +412,7 @@ func concurrently(n int, request func(i int) error) error {
 // IsMember reports whether username belongs to the organization. It fails with a *NotFoundError
 // when the organization or the user does not exist.
 func (s Organizations) IsMember(ctx context.Context, name, username string) (bool, error) {
-	member, err := s.check(ctx, "", func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	member, err := s.check(ctx, name, "", func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		_, resp, err := c.Organizations.CheckOrgMembership(ctx, name, username)
 		return resp, err
 	})
@@ -427,19 +428,21 @@ func (s Organizations) IsMember(ctx context.Context, name, username string) (boo
 
 // IsPublicMember reports whether username's membership of the organization is public.
 func (s Organizations) IsPublicMember(ctx context.Context, name, username string) (bool, error) {
-	return s.check(ctx, "", func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	return s.check(ctx, name, "", func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		_, resp, err := c.Organizations.CheckPublicOrgMembership(ctx, name, username)
 		return resp, err
 	})
 }
 
-// check runs a membership check that answers no with a 404. Given a username, it fails with a
-// *NotFoundError when that user does not exist.
-func (s Organizations) check(ctx context.Context, username string, op func(context.Context, *gitea.Client) (*gitea.Response, error)) (bool, error) {
+// check runs a membership check of org that answers no with a 404. Given a username, it fails
+// with a *NotFoundError when that user does not exist.
+func (s Organizations) check(ctx context.Context, org, username string, op func(context.Context, *gitea.Client) (*gitea.Response, error)) (bool, error) {
 	// Gitea redirects callers who are not members to the public membership check.
 	err := do(transport.WithoutRedirects(ctx), s.Client, op)
 	if failure, ok := errors.AsType[*transport.APIError](err); ok && failure.Status == http.StatusSeeOther {
-		return false, &transport.APIError{Status: http.StatusForbidden, Method: failure.Method, Endpoint: failure.Endpoint, Message: "only organization members can check memberships"}
+		forbidden := &transport.APIError{Status: http.StatusForbidden, Method: failure.Method, Endpoint: failure.Endpoint, Message: failure.Message}
+		org = cmp.Or(org, "the organization")
+		return false, &RefusedError{Text: "checking memberships of " + org + " requires membership of " + org, Err: forbidden}
 	}
 	if IsNotFound(err) {
 		// A mistyped user is not a missing membership.

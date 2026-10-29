@@ -64,7 +64,7 @@ $ gt ssh-key list --json title,fingerprint`,
 					return []terminal.Cell{{Text: strconv.FormatInt(key.ID, 10), Link: webURL(target, "user", "settings", "keys")}, {Text: key.Title, Bold: true}, {Text: key.Fingerprint, Muted: true}, {Time: terminal.ParseTime(key.CreatedAt)}}
 				},
 				Context: "SSH keys of " + account,
-				Empty:   "no SSH keys for " + account + "; add one with: gt ssh-key add ~/.ssh/id_ed25519.pub",
+				Empty:   "no SSH keys for " + account + "; add one with: gt ssh-key create ~/.ssh/id_ed25519.pub",
 			}, servicePage(keys, page))
 		},
 	}
@@ -178,9 +178,9 @@ func (a *application) sshKeyCreateCommand() *cobra.Command {
 		Long: `Add an SSH public key to your account. Without a file, or with -, the key is read from stdin.
 
 The title defaults to the key's comment, such as alice@laptop, or else to this computer's name.`,
-		Example: `$ gt ssh-key add ~/.ssh/id_ed25519.pub
-$ gt ssh-key add ~/.ssh/id_ed25519.pub --title "Work laptop"
-$ cat key.pub | gt ssh-key add`,
+		Example: `$ gt ssh-key create ~/.ssh/id_ed25519.pub
+$ gt ssh-key create ~/.ssh/id_ed25519.pub --title "Work laptop"
+$ cat key.pub | gt ssh-key create`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			source := "-"
 			if len(args) > 0 {

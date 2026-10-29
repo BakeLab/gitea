@@ -5,7 +5,9 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -128,6 +130,9 @@ func (s AdminUsers) Create(ctx context.Context, username string, opts AdminUserO
 		})
 	})
 	if err != nil {
+		if refused := passwordRefusal(err); refused != nil {
+			return AdminUser{}, refused
+		}
 		// A refusal such as a taken name is about the new user.
 		return AdminUser{}, Classify(err, "user", strconv.Quote(username), "")
 	}
@@ -143,6 +148,24 @@ func (s AdminUsers) Create(ctx context.Context, username string, opts AdminUserO
 		return adminUserFrom(created), fmt.Errorf("user %s created but could not be reloaded: %w", username, err)
 	}
 	return item, nil
+}
+
+// passwordRules words the bare codes with which Gitea refuses a new user's password, such as
+// "PasswordIsRequired" for one shorter than the minimum length.
+var passwordRules = map[string]string{
+	"PasswordIsRequired": "password is shorter than the instance's minimum length",
+	"PasswordComplexity": "password does not meet the instance's complexity rules",
+}
+
+func passwordRefusal(err error) error {
+	apiErr, ok := errors.AsType[*transport.APIError](err)
+	if !ok || apiErr.Status != http.StatusBadRequest {
+		return nil
+	}
+	if text, ok := passwordRules[apiErr.Message]; ok {
+		return &RefusedError{Text: text, Err: err}
+	}
+	return nil
 }
 
 func (s AdminUsers) edit(ctx context.Context, username string, current *gitea.User, opts AdminUserOptions) error {

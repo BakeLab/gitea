@@ -85,8 +85,14 @@ func TestSSHKeyViewRefusesKeysOfOtherAccounts(t *testing.T) {
 			_, _ = w.Write([]byte(`{"login":"admin"}`))
 			return
 		}
+		if r.URL.Path == "/api/v1/user/keys/4" {
+			_, _ = w.Write([]byte(`{"id":4,"title":"other","key":"ssh-ed25519 BBBB"}`))
+			return
+		}
 		_, _ = w.Write([]byte(sshKeyJSON))
 	}))
 	_, err := (SSHKeys{Client: client}).View(context.Background(), 3)
 	require.EqualError(t, err, "SSH key 3 belongs to alice, not to admin")
+	_, err = (SSHKeys{Client: client}).View(context.Background(), 4)
+	require.EqualError(t, err, "SSH key 4 belongs to another account, not to admin")
 }

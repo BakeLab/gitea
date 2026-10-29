@@ -92,7 +92,11 @@ func TestSSHKeyDeleteNamesTheKey(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		_, _ = w.Write([]byte(`{"id":2,"title":"uxkey","fingerprint":"SHA256:aR5L"}`))
+		if r.URL.Path == "/api/v1/user/keys/3" { // Gitea names the owner of others' keys only to administrators
+			_, _ = w.Write([]byte(`{"id":3,"title":"bobkey","fingerprint":"SHA256:bob"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":2,"title":"uxkey","fingerprint":"SHA256:aR5L","user":{"login":"alice"}}`))
 	}))
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
@@ -101,6 +105,8 @@ func TestSSHKeyDeleteNamesTheKey(t *testing.T) {
 	deps.Prompter = prompt
 	require.Error(t, Execute(context.Background(), deps, []string{"ssh-key", "delete", "2"}))
 	require.Equal(t, []string{`Delete SSH key "uxkey" (SHA256:aR5L)?`}, prompt.confirmations)
+	require.EqualError(t, Execute(context.Background(), deps, []string{"ssh-key", "delete", "3"}), "SSH key 3 belongs to another account, not to alice")
+	require.Len(t, prompt.confirmations, 1)
 	require.False(t, deleted)
 }
 

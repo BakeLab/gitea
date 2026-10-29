@@ -5,9 +5,11 @@ package services
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
+	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
 	"github.com/stretchr/testify/require"
 )
@@ -75,6 +77,24 @@ func TestAdminCreateAppliesRestrictionsAndReloads(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, item.Restricted)
 	require.Equal(t, []string{"POST /api/v1/admin/users", "PATCH /api/v1/admin/users/new-account", "GET /api/v1/admin/users"}, requests)
+}
+
+func TestAdminCreateWordsARefusedPassword(t *testing.T) {
+	for code, want := range map[string]string{
+		"PasswordIsRequired": "password is shorter than the instance's minimum length",
+		"PasswordComplexity": "password does not meet the instance's complexity rules",
+	} {
+		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"message":"` + code + `"}`))
+		}))
+		email := "account@example.test"
+		_, err := (AdminUsers{Client: client}).Create(context.Background(), "new-account", AdminUserOptions{Email: &email, Password: "short"})
+		require.EqualError(t, err, want)
+		apiErr, ok := errors.AsType[*transport.APIError](err)
+		require.True(t, ok)
+		require.Equal(t, http.StatusBadRequest, apiErr.Status)
+	}
 }
 
 func TestAdminCreateReportsFollowupFailureWithoutRetrying(t *testing.T) {

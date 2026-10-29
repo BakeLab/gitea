@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"strconv"
@@ -302,6 +303,14 @@ func (s Teams) update(ctx context.Context, id int64, opts TeamOptions) (Team, er
 			CanCreateOrgRepo: opts.CanCreateRepo, IncludesAllRepositories: opts.AllRepositories, UnitsMap: opts.Units,
 		})
 	})
+	// Gitea 28 answers a rename to a taken name with HTTP 500.
+	if failure, ok := errors.AsType[*transport.APIError](err); ok && strings.Contains(failure.Message, "team already exists") {
+		conflict := &ConflictError{Reason: ReasonExists, Kind: "team", Key: strconv.Quote(deref(opts.Name)), Err: err}
+		if current, viewErr := s.View(ctx, id); viewErr == nil {
+			conflict.Scope = current.Organization
+		}
+		return Team{}, conflict
+	}
 	if err != nil {
 		return Team{}, err
 	}
@@ -336,7 +345,7 @@ func (s Teams) Members(ctx context.Context, id int64, limit, page int) (Page[Tea
 
 // IsMember reports whether username belongs to the team.
 func (s Teams) IsMember(ctx context.Context, id int64, username string) (bool, error) {
-	return Organizations{Client: s.Client}.check(ctx, username, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	return Organizations{Client: s.Client}.check(ctx, "", username, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		_, resp, err := c.Organizations.GetTeamMember(ctx, id, username)
 		return resp, err
 	})

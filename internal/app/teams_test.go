@@ -113,6 +113,10 @@ func TestTeamRepoAddTakesRepositoriesAsArguments(t *testing.T) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/teams/5":
 			_, _ = w.Write([]byte(`{"id":5,"name":"devs","permission":"none","organization":{"username":"acme"}}`))
+		case "GET /api/v1/teams/6":
+			_, _ = w.Write([]byte(`{"id":6,"name":"ops","permission":"write","includes_all_repositories":true,"organization":{"username":"acme"}}`))
+		case "GET /api/v1/teams/7":
+			_, _ = w.Write([]byte(`{"id":7,"name":"Owners","permission":"owner","includes_all_repositories":true,"organization":{"username":"acme"}}`))
 		case "PUT /api/v1/teams/5/repos/acme/service", "PUT /api/v1/teams/5/repos/acme/website":
 			granted = append(granted, r.URL.Path)
 			w.WriteHeader(http.StatusNoContent)
@@ -127,10 +131,12 @@ func TestTeamRepoAddTakesRepositoriesAsArguments(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"team", "repo", "add", "5", "service", "acme/website"}))
 	require.Equal(t, []string{"/api/v1/teams/5/repos/acme/service", "/api/v1/teams/5/repos/acme/website"}, granted)
 	for args, want := range map[string]string{
-		"alice/project":           "alice/project is not owned by organization acme; teams can only be granted repositories of their organization",
-		"service -R acme/service": "--repo is not used by gt team repo add; name the repositories as arguments",
+		"add 5 alice/project":           "alice/project is not owned by organization acme; teams can only be granted repositories of their organization",
+		"add 5 service -R acme/service": "--repo is not used by team repo add; name the repositories as arguments",
+		"remove 6 service --yes":        "team acme/ops has access to all repositories of acme; revoke it with gt team edit acme/ops --all-repositories=false first",
+		"remove 7 service --yes":        "team acme/Owners is the owner team of acme, which always has access to all of its repositories",
 	} {
-		err := Execute(context.Background(), deps, append([]string{"team", "repo", "add", "5"}, strings.Fields(args)...))
+		err := Execute(context.Background(), deps, append([]string{"team", "repo"}, strings.Fields(args)...))
 		require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
 		require.ErrorContains(t, err, want)
 	}

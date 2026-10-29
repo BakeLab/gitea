@@ -207,3 +207,17 @@ func TestTeamEditSendsThePermissionBeforeTheUnits(t *testing.T) {
 	require.Nil(t, bodies[0]["units_map"], "Gitea 28 keeps an admin team admin when one request sets both")
 	require.Equal(t, map[string]any{"repo.wiki": "read"}, bodies[1]["units_map"])
 }
+
+func TestTeamRenameToATakenNameNamesTheTeam(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"id":5,"name":"devs","organization":{"username":"acme"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"team already exists [org_id: 3, name: ops]"}`))
+	}))
+	name := "ops"
+	_, err := (Teams{Client: client}).Edit(context.Background(), 5, TeamOptions{Name: &name})
+	require.EqualError(t, err, `team "ops" already exists in acme`)
+}

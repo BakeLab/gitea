@@ -679,15 +679,19 @@ its organization. Repositories are named alone, such as service, or as ORG/NAME.
 
 func (a *application) teamRepoAccessCommand(grant bool) *cobra.Command {
 	verb, short, example := "remove", "Revoke team access to repositories", "$ gt team repo remove acme/developers legacy"
+	long := short + ` of its organization. Name the repositories alone, such as
+service, or as ORG/NAME. A team with access to all repositories keeps it; turn that off with
+gt team edit --all-repositories=false first.`
 	annotations := map[string]string{"gt.text": "team access changes do not return a resource", "gt.arguments": teamArguments, "gt.confirm": "true"}
 	if grant {
 		verb, short, example = "add", "Grant a team access to repositories", "$ gt team repo add acme/developers service\n$ gt team repo add 2 acme/service acme/website"
+		long = short + ` of its organization. Name the repositories alone, such as service, or as ORG/NAME;
+repositories of other owners cannot be granted to a team.`
 		delete(annotations, "gt.confirm")
 	}
 	return &cobra.Command{
 		Use: verb + " <team> <repository>...", Short: short, Args: nonBlankArgs(cobra.MinimumNArgs(2), "team name", "repository"), Example: example, Annotations: annotations,
-		Long: short + ` of its organization. Name the repositories alone, such as service, or as ORG/NAME;
-repositories of other owners cannot be granted to a team.`,
+		Long: long,
 		ValidArgsFunction: a.completeTeamThen(func(ctx context.Context, t target, team services.Team) ([]cobra.Completion, error) {
 			if grant {
 				repos, _, err := services.Repositories{Client: t.client}.List(ctx, services.RepositoryListOptions{Owner: team.Organization, Limit: completionLimit, Page: 1})
@@ -698,7 +702,7 @@ repositories of other owners cannot be granted to a team.`,
 		}),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("repo") {
-				return clierr.Wrap(clierr.Usage, fmt.Errorf("--repo is not used by %s; name the repositories as arguments: %s <team> <repository>", cmd.CommandPath(), cmd.CommandPath()))
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("--repo is not used by %s; name the repositories as arguments: %s <team> <repository>", commandName(cmd), cmd.CommandPath()))
 			}
 			_, service, team, err := a.team(cmd, args[0])
 			if err != nil {
@@ -711,6 +715,12 @@ repositories of other owners cannot be granted to a team.`,
 					return err
 				}
 				repos = append(repos, repo)
+			}
+			if !grant && team.Permission == "owner" {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("team %s is the owner team of %s, which always has access to all of its repositories", team.Slug(), team.Organization))
+			}
+			if !grant && team.AllRepositories {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("team %s has access to all repositories of %s; revoke it with gt team edit %s --all-repositories=false first", team.Slug(), team.Organization, team.Slug()))
 			}
 			if !grant {
 				if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Revoke team %s access to %s?", team.Slug(), joinNames(repos))}); err != nil {

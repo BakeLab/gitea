@@ -52,14 +52,16 @@ func (s SSHKeys) View(ctx context.Context, id int64) (SSHKey, error) {
 	if err != nil {
 		return SSHKey{}, Classify(err, "SSH key", strconv.FormatInt(id, 10), "")
 	}
+	account, err := CurrentAccount(ctx, s.Client)
+	if err != nil {
+		return SSHKey{}, err
+	}
+	owner := "another account" // Gitea names the owner only to the owner and administrators
 	if key.Owner != nil {
-		account, err := CurrentAccount(ctx, s.Client)
-		if err != nil {
-			return SSHKey{}, err
-		}
-		if owner := login(key.Owner); !strings.EqualFold(owner, account) {
-			return SSHKey{}, fmt.Errorf("SSH key %d belongs to %s, not to %s", id, owner, account)
-		}
+		owner = login(key.Owner)
+	}
+	if !strings.EqualFold(owner, account) {
+		return SSHKey{}, fmt.Errorf("SSH key %d belongs to %s, not to %s", id, owner, account)
 	}
 	return sshKeyFrom(key), nil
 }

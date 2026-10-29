@@ -132,6 +132,7 @@ func TestOrganizationMembershipChecksReportWhatGiteaRefuses(t *testing.T) {
 	require.EqualError(t, err, `organization "nobody" not found`)
 	_, err = service.IsMember(context.Background(), "acme", "bob")
 	require.True(t, IsForbidden(err), "%v", err)
+	require.EqualError(t, err, "checking memberships of acme requires membership of acme")
 	_, err = service.IsMember(context.Background(), "acme", "bbo")
 	require.EqualError(t, err, `user "bbo" not found`)
 	_, err = service.IsMember(context.Background(), "acme", "ghost")
