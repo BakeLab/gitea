@@ -485,26 +485,24 @@ func (a *application) completeRuns() cobra.CompletionFunc {
 
 // completeSecrets completes Actions secret names in the selected scope.
 func (a *application) completeSecrets(scope func() services.ActionScope) cobra.CompletionFunc {
-	return a.apiCompletion(false, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
-		selected := actionScope(scope, t)
-		if selected.Repository == "" && selected.Organization == "" && !selected.Account {
-			return nil, nil
-		}
-		items, err := services.ActionSecrets{Client: t.client, Scope: selected}.ListPage(ctx, completionLimit, 1)
+	list := func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, err := services.ActionSecrets{Client: t.client, Scope: actionScope(scope, t)}.ListPage(ctx, completionLimit, 1)
 		return describe(items.Items, func(item services.ActionSecret) (string, string) { return item.Name, item.Description }), err
-	})
+	}
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		return a.apiCompletion(inRepository(scope()), list)(cmd, args, toComplete)
+	}
 }
 
 // completeVariables completes Actions variable names in the selected scope.
 func (a *application) completeVariables(scope func() services.ActionScope) cobra.CompletionFunc {
-	return a.apiCompletion(false, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
-		selected := actionScope(scope, t)
-		if selected.Repository == "" && selected.Organization == "" && !selected.Account {
-			return nil, nil
-		}
-		items, err := services.ActionVariables{Client: t.client, Scope: selected}.ListPage(ctx, completionLimit, 1)
+	list := func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+		items, err := services.ActionVariables{Client: t.client, Scope: actionScope(scope, t)}.ListPage(ctx, completionLimit, 1)
 		return describe(items.Items, func(item services.ActionVariable) (string, string) { return item.Name, item.Description }), err
-	})
+	}
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		return a.apiCompletion(inRepository(scope()), list)(cmd, args, toComplete)
+	}
 }
 
 // actionScope applies the target's repository to a scope without organization or account.
@@ -596,23 +594,38 @@ func pathArgs(n int, variadic bool, path, complete cobra.CompletionFunc) cobra.C
 	}
 }
 
-// completionInstallHelp explains how to load the bash script with macOS's bash 3.2, which cannot
-// source <(gt completion bash); cobra's help covers the other shells.
+// completionInstallHelp replaces cobra's help for the completion scripts, whose Markdown headings
+// and tabs do not read like gt's; bash 3.2, macOS's default, cannot source <(gt completion bash).
 func completionInstallHelp(root *cobra.Command) {
 	completion, _, err := root.Find([]string{"completion"})
 	if err != nil || completion == root {
 		return
 	}
 	completion.Short = "Generate shell completion scripts"
-	examples := map[string]string{
-		"bash":       `$ eval "$(gt completion bash)"`,
-		"zsh":        `$ source <(gt completion zsh)`,
-		"fish":       `$ gt completion fish > ~/.config/fish/completions/gt.fish`,
-		"powershell": `$ gt completion powershell | Out-String | Invoke-Expression`,
+	completion.Long = "Generate the completion script of gt for bash, zsh, fish or powershell.\nRun gt completion <shell> --help to see how to load it."
+	help := map[string]struct{ long, example string }{
+		"bash": {`Generate the completion script for bash. It needs the bash-completion package.
+
+To load completions in every new shell, add the eval line below to ~/.bashrc (on macOS,
+~/.bash_profile); bash 3.2, the default on macOS, cannot source <(gt completion bash).`, `$ eval "$(gt completion bash)"`},
+		"zsh": {`Generate the completion script for zsh. It needs compinit; enable it
+with the line autoload -U compinit; compinit in ~/.zshrc.
+
+To load completions in every new shell, add the source line below to ~/.zshrc, or write
+the script to a directory of $fpath as _gt.`, `$ source <(gt completion zsh)
+$ gt completion zsh > "${fpath[1]}/_gt"`},
+		"fish": {`Generate the completion script for fish.
+
+To load completions in every new shell, write the script to ~/.config/fish/completions;
+to load them in the current shell only, pipe it to source.`, `$ gt completion fish > ~/.config/fish/completions/gt.fish
+$ gt completion fish | source`},
+		"powershell": {`Generate the completion script for PowerShell.
+
+To load completions in every new shell, add the line below to your PowerShell profile.`, `$ gt completion powershell | Out-String | Invoke-Expression`},
 	}
 	for _, shell := range completion.Commands() {
-		shell.Example = examples[shell.Name()]
-		shell.Args = argsExact(0)
+		shell.Long, shell.Example = help[shell.Name()].long, help[shell.Name()].example
+		shell.Args, shell.DisableFlagsInUseLine = argsExact(0), false
 		if shell.Annotations == nil {
 			shell.Annotations = map[string]string{}
 		}
@@ -621,9 +634,4 @@ func completionInstallHelp(root *cobra.Command) {
 			flag.Usage = "Disable completion descriptions"
 		}
 	}
-	bash, _, _ := completion.Find([]string{"bash"})
-	bash.Long = `Generate the completion script for bash. It needs the bash-completion package.
-
-To load completions in every new shell, add the eval line below to ~/.bashrc (on macOS,
-~/.bash_profile); bash 3.2, the default on macOS, cannot source <(gt completion bash).`
 }

@@ -140,19 +140,19 @@ func TestRequireInput(t *testing.T) {
 
 	asker := &askingPrompt{answers: []string{"", "red", "d73a4a"}}
 	value := ""
-	asked, err := RequireInput(context.Background(), &value, "color", "Color", hex, streams, policy, asker)
+	asked, err := RequireInput(context.Background(), &value, "Color", hex, errors.New("label create requires --color"), streams, policy, asker)
 	require.NoError(t, err)
 	require.True(t, asked)
 	require.Equal(t, "d73a4a", value)
 	require.Equal(t, []string{"", "red"}, asker.rejected)
 	require.Equal(t, []string{"Color (required):"}, asker.titles)
 
-	asked, err = RequireInput(context.Background(), &value, "color", "Color", hex, Streams{}, policy, asker)
+	asked, err = RequireInput(context.Background(), &value, "Color", hex, errors.New("label create requires --color"), Streams{}, policy, asker)
 	require.NoError(t, err, "a supplied value needs no prompt")
 	require.False(t, asked)
 	value = ""
-	_, err = RequireInput(context.Background(), &value, "color", "Color", hex, Streams{}, policy, asker)
-	require.EqualError(t, err, "missing required input: supply --color")
+	_, err = RequireInput(context.Background(), &value, "Color", hex, errors.New("label create requires --color"), Streams{}, policy, asker)
+	require.EqualError(t, err, "label create requires --color")
 }
 
 func TestFormPrompterConfirmDefault(t *testing.T) {

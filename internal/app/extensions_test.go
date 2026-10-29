@@ -196,6 +196,8 @@ func TestExtensionInstallRunAndRemove(t *testing.T) {
 	err = Execute(context.Background(), deps, []string{"--json", "hello"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.EqualError(t, err, "extension hello cannot be combined with --json")
+	runs.code = 0
+	require.NoError(t, Execute(context.Background(), deps, []string{"--no-input", "--yes", "hello"}), "every command accepts --no-input and --yes")
 
 	deps.Streams.Out.(interface{ Reset() }).Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "list", "--json", "name,tag,credentials,shadowed"}))
@@ -204,7 +206,7 @@ func TestExtensionInstallRunAndRemove(t *testing.T) {
 	require.NoError(t, os.WriteFile(extension.Path(), []byte("replaced"), 0o755))
 	err = Execute(context.Background(), deps, []string{"hello"})
 	require.ErrorContains(t, err, "extension hello changed since it was installed")
-	require.Len(t, runs.commands, 2, "a changed executable must not run")
+	require.Len(t, runs.commands, 3, "a changed executable must not run")
 
 	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "remove", "hello", "--yes"}))
 	err = Execute(context.Background(), deps, []string{"hello"})
@@ -368,7 +370,7 @@ func TestExtensionUpgradeRefusesChangedSources(t *testing.T) {
 	downloads := repo.downloads
 	err := Execute(context.Background(), deps, []string{"extension", "upgrade", "hello", "--no-input"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-	require.EqualError(t, err, "extension upgrade requires --yes when gt cannot prompt")
+	require.EqualError(t, err, "confirmation required to upgrade extension hello; rerun with --yes")
 	assert.Equal(t, downloads, repo.downloads, "nothing is downloaded that cannot be installed")
 
 	deps.Streams.Out.(interface{ Reset() }).Reset()
@@ -482,15 +484,39 @@ func TestLocalExtensionRunsInPlace(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "gt-dev"), []byte("#!/bin/sh\necho changed\n"), 0o755))
 	require.NoError(t, Execute(context.Background(), deps, []string{"dev"}))
 	assert.Equal(t, filepath.Join(dir, "gt-dev"), runs.commands[0].Path)
+	// There is nothing to upgrade it to.
+	require.EqualError(t, Execute(context.Background(), deps, []string{"extension", "install", dir}), "extension dev is already installed from "+dir+"; reinstall it with --force, or remove it with gt extension remove dev")
+	// gt-extension.yml applies as to a remote install.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "gt-extension.yml"), []byte("platforms: [plan9/mips]\n"), 0o644))
+	require.ErrorContains(t, Execute(context.Background(), deps, []string{"extension", "install", dir, "--force"}), "extension dev does not support "+runtime.GOOS+"/"+runtime.GOARCH)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "gt-extension.yml"), []byte("credentials: true\n"), 0o644))
+	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "install", dir, "--force"}))
+	assert.False(t, installedExtension(t, deps, "dev").Credentials, "gt cannot ask")
+	assert.Contains(t, deps.Streams.ErrOut.(fmt.Stringer).String(), "Extension dev asks for your Gitea token; allow it with gt extension install --force --allow-credentials "+dir)
+	prompt := &scriptedPrompter{accept: true}
+	deps.Prompter = prompt
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "install", dir, "--force"}))
+	assert.True(t, installedExtension(t, deps, "dev").Credentials)
+	assert.Equal(t, []string{"Give extension dev your Gitea token?"}, prompt.confirmations)
+	deps.Streams.InTTY, deps.Streams.ErrTTY = false, false
+	require.NoError(t, os.Remove(filepath.Join(dir, "gt-extension.yml")))
 
 	// Help lists only the global flags an extension accepts.
 	for _, args := range [][]string{{"help", "dev"}, {"extension", "exec", "--help"}} {
 		out.Reset()
 		require.NoError(t, Execute(context.Background(), deps, args))
 		assert.Contains(t, out.String(), "--cwd directory", args)
-		assert.Contains(t, out.String(), "Global flags: --host, --user; global flags go before the extension's name", args)
+		assert.Contains(t, out.String(), "Global flags: --host, --user, --no-input, --yes; global flags go before the extension's name", args)
 		assert.NotContains(t, out.String(), "--remote", args)
 		assert.NotContains(t, out.String(), "--sudo", args)
+	}
+	// Managing extensions selects no repository.
+	for _, args := range [][]string{{"extension", "--help"}, {"extension", "list", "--help"}} {
+		out.Reset()
+		require.NoError(t, Execute(context.Background(), deps, args))
+		assert.NotContains(t, out.String(), "-R, --repo", args)
+		assert.NotContains(t, out.String(), "--remote", args)
 	}
 }
 
@@ -729,6 +755,10 @@ func TestExtensionGetsNoTokenOfAnotherInstance(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"--user", "bob", "hello"}))
 	_, set = runs.env("GITEA_TOKEN")
 	assert.False(t, set, "the GITEA_TOKEN of an unknown account must not reach an extension running as bob")
+	// Without its instance, the token cannot be passed, which gt explains as for its own commands.
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "unbound"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"hello"}))
+	assert.Contains(t, deps.Streams.ErrOut.(fmt.Stringer).String(), "Could not pass your credentials to extension hello: GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance")
 }
 
 func TestExtensionGetsARefreshedOAuthToken(t *testing.T) {

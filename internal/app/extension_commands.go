@@ -26,9 +26,10 @@ from github.com; gt runs the gh extensions that do not depend on GitHub's own AP
 commands always win over an extension of the same name; gt extension exec runs it anyway.
 
 gt passes the global flags --host, --repo and --user before the extension's name on as
-GITEA_CLI_HOST, GITEA_CLI_REPO and GITEA_CLI_USER, runs it in --cwd, and passes everything
-after its name on unchanged. Extensions do not get your Gitea token unless you allowed it at
-install. See gt help extensions for the security model.`}
+GITEA_CLI_HOST, GITEA_CLI_REPO and GITEA_CLI_USER, runs it in --cwd, accepts --no-input and
+--yes, refuses other global flags, and passes everything after its name on unchanged.
+Extensions do not get your Gitea token unless you allowed it at install. See gt help
+extensions for the security model.`}
 	group.AddCommand(a.extensionInstallCommand(), a.extensionListCommand(), a.extensionRemoveCommand(), a.extensionUpgradeCommand(), a.extensionExecCommand(), a.extensionCreateCommand(), a.extensionSearchCommand(), a.extensionBrowseCommand())
 	return group
 }

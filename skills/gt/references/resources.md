@@ -79,7 +79,7 @@ gt pr view --no-input --json number,url,state,draft
 - A branch not on the remote yet is pushed first, which needs `--yes` without a terminal.
   Ask the user before that push.
 - Without push access, the branch goes to the user's fork when one is a remote. Otherwise ask
-  the user to run `gt repo fork --remote` first; gt does not fork without a terminal.
+  the user to run `gt repo fork --add-remote` first; gt does not fork without a terminal.
 - `Closes #17` (or `fixes`, `resolves`) in the body closes the issue when the pull request is
   merged.
 - Follow the repository's own contribution rules (title style, sign-off, templates) when they
@@ -96,6 +96,7 @@ New description.
 EOF
 gt pr edit 18 --add-reviewer carol --add-label bug --no-input
 gt pr ready 18 --no-input                       # draft to ready; --undo reverses it
+gt pr update-branch 18 --no-input               # merge the base branch in on Gitea; --rebase rewrites the head
 ```
 
 Pushing new commits with `git push` updates the pull request; then re-check CI
@@ -186,7 +187,7 @@ so it also needs the user's request; on a conflict it changes nothing and fails.
 ```sh
 gt repo view --no-input --json full_name,default_branch,private,actions_enabled
 gt repo list OWNER -L 100 --no-input --json full_name,description,archived
-gt repo fork --remote --no-input
+gt repo fork --add-remote --no-input
 gt repo edit --description "A short description" --add-topic cli --no-input
 gt repo edit --enable-wiki=false --no-input
 ```

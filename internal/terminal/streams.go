@@ -353,14 +353,14 @@ func (p *FormPrompter) ConfirmDefault(ctx context.Context, title string, default
 
 // RequireInput fills a missing value from a prompt titled label and marked "(required)" like the
 // form fields, re-prompting inline until the answer is non-empty and validate, when set, accepts
-// it. When prompts are unavailable it returns a usage error naming --flag. It reports whether it
+// it. When prompts are unavailable it returns missing as a usage error. It reports whether it
 // prompted.
-func RequireInput(ctx context.Context, value *string, flag, label string, validate func(string) error, streams Streams, policy Policy, prompt Prompter) (bool, error) {
+func RequireInput(ctx context.Context, value *string, label string, validate func(string) error, missing error, streams Streams, policy Policy, prompt Prompter) (bool, error) {
 	if *value != "" {
 		return false, nil
 	}
 	if !policy.CanPrompt(streams) {
-		return false, clierr.Wrap(clierr.Usage, fmt.Errorf("missing required input: supply --%s", flag))
+		return false, clierr.Wrap(clierr.Usage, missing)
 	}
 	entered, err := prompt.Ask(ctx, label+" (required):", func(s string) error {
 		if s == "" {

@@ -176,6 +176,25 @@ func (r *timeRange) parse(now time.Time) (since, until *time.Time, err error) {
 	return bounds[0], bounds[1], nil
 }
 
+// renameFlag adds old as a hidden alias of the string flag name, for scripts written before the rename.
+func renameFlag(cmd *cobra.Command, old, name string) {
+	cmd.Flags().String(old, "", "Deprecated: use --"+name)
+	_ = cmd.Flags().MarkHidden(old)
+}
+
+// renamedFlag moves a value given under the old name of a flag renamed by renameFlag to its new name.
+func (a *application) renamedFlag(cmd *cobra.Command, old, name string) error {
+	flags := cmd.Flags()
+	if !flags.Changed(old) {
+		return nil
+	}
+	if flags.Changed(name) {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --%s", name, old))
+	}
+	a.warn(cmd, "--%s is deprecated; use --%s", old, name)
+	return flags.Set(name, flags.Lookup(old).Value.String())
+}
+
 // openRegularFiles opens upload sources, rejecting anything but regular files.
 // Callers close the returned files even on error.
 func openRegularFiles(paths []string) ([]*os.File, error) {

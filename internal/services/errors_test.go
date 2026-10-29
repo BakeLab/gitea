@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/transport"
@@ -27,6 +28,7 @@ func TestCreatesAndListingsNameWhatIsMissingOrTaken(t *testing.T) {
 		"POST /api/v1/repos/alice/x/forks":                    {404, "not found"},
 		"GET /api/v1/repos/alice/x":                           {200, ""},
 		"POST /api/v1/repos/alice/x/branches":                 {409, "The branch already exists."},
+		"GET /api/v1/repos/alice/x/commits":                   {200, ""},
 		"GET /api/v1/repos/alice/missing/labels":              {404, "not found"},
 		"POST /api/v1/repos/alice/missing/branch_protections": {404, "not found"},
 	}
@@ -34,6 +36,10 @@ func TestCreatesAndListingsNameWhatIsMissingOrTaken(t *testing.T) {
 		answer, ok := answers[r.Method+" "+r.URL.Path]
 		require.True(t, ok, "unexpected %s %s", r.Method, r.URL.Path)
 		w.WriteHeader(answer.status)
+		if strings.HasSuffix(r.URL.Path, "/commits") {
+			_, _ = w.Write([]byte(`[{"sha":"abc"}]`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"message":"` + answer.message + `"}`))
 	}))
 	ctx := context.Background()

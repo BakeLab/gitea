@@ -57,7 +57,7 @@ gt run logs https://gitea.example.com/OWNER/REPO/actions/runs/34/jobs/71 --no-in
 ```
 
 An Actions check's `url` is its job URL, and `gt run logs` accepts that URL to print just
-that job. From a run ID instead, print the logs of every failed job:
+that job. From a run ID instead, print the logs of every failed or canceled job:
 
 ```sh
 gt run list --branch feature/login --status failure -L 5 --no-input --json id,workflow,title,conclusion
@@ -109,9 +109,9 @@ of the diff; gt refuses lines outside the diff. See [resources.md](references/re
 | --- | --- | --- |
 | Checks of a pull request | `gt pr checks 12` | [monitoring.md](references/monitoring.md) |
 | Wait for checks | `gt pr checks 12 --watch` | [monitoring.md](references/monitoring.md) |
-| Logs of failed jobs | `gt run logs 34 --failed` | [monitoring.md](references/monitoring.md) |
+| Logs of failed or canceled jobs | `gt run logs 34 --failed` | [monitoring.md](references/monitoring.md) |
 | Follow a running job | `gt run logs 34 --job build --follow` | [monitoring.md](references/monitoring.md) |
-| Rerun failed jobs | `gt run rerun 34 --failed` | [monitoring.md](references/monitoring.md) |
+| Rerun failed or canceled jobs | `gt run rerun 34 --failed` | [monitoring.md](references/monitoring.md) |
 | Download artifacts | `gt run download 34 --name build` | [monitoring.md](references/monitoring.md) |
 | Read an issue with comments | `gt issue view 17 --comments` | [resources.md](references/resources.md) |
 | Open an issue | `gt issue create --title T --body-file -` | [resources.md](references/resources.md) |
@@ -149,11 +149,14 @@ of the diff; gt refuses lines outside the diff. See [resources.md](references/re
 | Code | Meaning |
 | --- | --- |
 | 0 | Success, including an empty list |
-| 1 | The command failed, or `gt pr checks` found a failed check |
+| 1 | The command failed, `gt pr checks` found a failed check, or the instance did not respond within `http_timeout` |
 | 2 | Usage error, or a confirmation that needs `--yes` |
-| 3 | Canceled: declined confirmation or timeout |
+| 3 | Canceled: a declined confirmation or prompt, or a wait's `--timeout` expired |
 | 4 | Authentication missing or rejected |
+| 5 | `gt run watch` and `gt workflow run --follow`: the run completed without success |
+| 6 | `gt run watch --expect-head`: the run is for another commit |
 | 8 | `gt pr checks`: checks still pending |
+| 130 | Interrupted with Ctrl-C |
 
 `gt help exit-codes` has the full list. Branch on the code instead of parsing messages.
 

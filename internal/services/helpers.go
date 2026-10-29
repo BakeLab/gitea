@@ -184,6 +184,18 @@ func cappedPage[T any](limit, page int, maxSize func() int, fetch func(limit, pa
 	if !next && (!counted || total == (page-1)*limit+size && (page == 1 || linked || size != maxSize())) {
 		return Page[T]{Items: items, Total: total, Counted: counted}, nil
 	}
+	// A page shorter than the largest one the server answers is a filtered one: Gitea counts and
+	// pages over repositories the viewer cannot see. Pages then keep the server's positions, read
+	// in pages that start where the window does. A page of filterPageSize is taken as capped to
+	// spare the lookup on instances with Gitea's default maximum.
+	if size != filterPageSize {
+		if largest := maxSize(); largest > 0 && size < min(limit, largest) {
+			if limit <= largest {
+				return Page[T]{Items: items, More: next || (counted && total > page*limit), Total: total, Counted: counted}, nil
+			}
+			return positionedPage(limit, page, largest, items, headers, fetch)
+		}
+	}
 	offset := (page - 1) * limit
 	result := make([]T, 0, limit+size)
 	for serverPage := offset/size + 1; ; serverPage++ {
@@ -194,13 +206,47 @@ func cappedPage[T any](limit, page int, maxSize func() int, fetch func(limit, pa
 			}
 		}
 		result = append(result, batch[min(len(batch), max(0, offset-(serverPage-1)*size)):]...)
-		if len(batch) < size || len(result) >= limit {
+		if serverPage*size >= offset+limit || lastServerPage(headers, serverPage*size, len(batch), size) {
 			break
 		}
 	}
 	next, total, counted = pageHints(headers)
 	more := len(result) > limit || next || (counted && total > offset+limit)
 	return Page[T]{Items: result[:min(len(result), limit)], More: more, Total: total, Counted: counted}, nil
+}
+
+// positionedPage reads the window of limit items at page from server pages of at most largest
+// that start and end inside it, so no server page straddles two windows; first and its headers
+// are the server's page at page in pages of largest.
+func positionedPage[T any](limit, page, largest int, first []T, headers http.Header, fetch func(limit, page int) ([]T, http.Header, error)) (Page[T], error) {
+	offset, end := (page-1)*limit, page*limit
+	result := []T{}
+	for at := offset; at < end; {
+		step := min(largest, end-at)
+		for at%step != 0 {
+			step--
+		}
+		batch := first
+		if step != largest || at/step+1 != page {
+			var err error
+			if batch, headers, err = fetch(step, at/step+1); err != nil {
+				return Page[T]{}, err
+			}
+		}
+		result = append(result, batch...)
+		if at += step; lastServerPage(headers, at, len(batch), step) {
+			break
+		}
+	}
+	next, total, counted := pageHints(headers)
+	return Page[T]{Items: result, More: next || (counted && total > end), Total: total, Counted: counted}, nil
+}
+
+// lastServerPage reports whether a server page of size that ends at position end and held got
+// items is the last one: a short page is, unless the server links or counts more.
+func lastServerPage(headers http.Header, end, got, size int) bool {
+	next, total, counted := pageHints(headers)
+	return got < size && !next && (!counted || total <= end)
 }
 
 // callPage is instancePage over an SDK list call.

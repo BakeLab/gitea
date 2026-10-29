@@ -84,6 +84,10 @@ type options struct {
 	debug                         bool
 	// editor is the command's --editor, which needs a configured editor before any request.
 	editor bool
+	// repoArgument is set when repo holds a command's repository argument rather than --repo.
+	repoArgument bool
+	// ignoresRemote is set by commands whose repository never comes from --remote.
+	ignoresRemote bool
 }
 
 type application struct {
@@ -215,8 +219,11 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 			return clierr.Wrap(clierr.Usage, errors.New("--user cannot be empty"))
 		}
 		if cmd.Flags().Changed("sudo") {
-			if a.options.sudo == "" || strings.IndexFunc(a.options.sudo, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+			if strings.TrimSpace(a.options.sudo) == "" {
 				return clierr.Wrap(clierr.Usage, errors.New("--sudo requires a username"))
+			}
+			if strings.IndexFunc(a.options.sudo, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid --sudo username %q", a.options.sudo))
 			}
 			for c := cmd; c.HasParent(); c = c.Parent() {
 				if c.Name() == "auth" && !c.Parent().HasParent() {
@@ -342,7 +349,7 @@ func (a *application) checkOutputFlags(cmd *cobra.Command) error {
 	switch {
 	case cmd.Flags().Changed("json"):
 		if a.options.json == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--json= needs field names; use --json alone for every field"))
+			return clierr.Wrap(clierr.Usage, errors.New("--json= requires field names; use --json alone for every field"))
 		}
 		selected = "--json"
 	case a.options.jq != "" && cmd.Annotations["gt.rawjson"] == "":
@@ -494,9 +501,9 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 var jsonFieldList = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(,[A-Za-z][A-Za-z0-9_]*)*$`)
 
 // joinJSONFields accepts `--json number,title` like `--json=number,title`. The word stays a positional
-// argument only when the command neither outputs any of those fields, nor one they resemble, nor
-// rejects the argument, so a misspelled field lists the available fields. Unknown commands, such as
-// unexpanded aliases, are joined.
+// argument only when it is the only one and the command neither outputs any of those fields, nor one
+// they resemble, nor rejects the argument, so a misspelled field lists the available fields rather
+// than naming one more tag or label to change. Unknown commands, such as unexpanded aliases, are joined.
 func joinJSONFields(root *cobra.Command, args []string) []string {
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--" {
@@ -510,7 +517,7 @@ func joinJSONFields(root *cobra.Command, args []string) []string {
 			continue
 		}
 		cmd, _, err := root.Find(slices.Concat(args[:i+1], args[i+2:]))
-		if fields := commandOutputFields(cmd); err == nil && terminal.ValidateOutput(args[i+1], "", fields) != nil && !namesField(args[i+1], fields) && !resemblesField(args[i+1], fields) && acceptsArgs(args) {
+		if fields := commandOutputFields(cmd); err == nil && terminal.ValidateOutput(args[i+1], "", fields) != nil && !namesField(args[i+1], fields) && !resemblesField(args[i+1], fields) && acceptsArgs(args) && len(positionalArgs(slices.Concat(args[:i+1], args[i+2:]))) == 0 {
 			continue
 		}
 		args = slices.Concat(args[:i], []string{"--json=" + args[i+1]}, args[i+2:])
@@ -538,6 +545,15 @@ func resemblesField(list string, fields []string) bool {
 func acceptsArgs(args []string) bool {
 	cmd, rest, err := NewRoot(Dependencies{}).Find(args)
 	return err == nil && cmd.ParseFlags(rest) == nil && cmd.ValidateArgs(cmd.Flags().Args()) == nil
+}
+
+// positionalArgs returns the positional arguments of the command that args select, parsed like acceptsArgs.
+func positionalArgs(args []string) []string {
+	cmd, rest, err := NewRoot(Dependencies{}).Find(args)
+	if err != nil || cmd.ParseFlags(rest) != nil {
+		return nil
+	}
+	return cmd.Flags().Args()
 }
 
 func (a *application) policy(snapshot settings.Snapshot) terminal.Policy {

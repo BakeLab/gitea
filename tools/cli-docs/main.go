@@ -34,64 +34,45 @@ func main() {
 func generate(output string) error {
 	// Documentation describes built-ins, independently of personal settings,
 	// credentials, repository discovery, and environment-specific aliases.
-	root := app.NewRoot(app.Dependencies{})
-	var prepare func(*cobra.Command)
-	prepare = func(command *cobra.Command) {
-		command.DisableAutoGenTag = true
-		for _, child := range command.Commands() {
-			prepare(child)
-		}
-	}
-	prepare(root)
+	root := app.ReferenceRoot()
 	for _, directory := range []string{"reference", "man", "completion"} {
 		if err := os.MkdirAll(filepath.Join(output, directory), 0o755); err != nil {
 			return err
 		}
 	}
-	if err := doc.GenMarkdownTree(root, filepath.Join(output, "reference")); err != nil {
+	// Date the pages like gt man; make docs sets SOURCE_DATE_EPOCH to the last commit.
+	date := app.ManualDate(os.Getenv)
+	if err := walk(root, func(command *cobra.Command) error {
+		var page strings.Builder
+		if err := app.GenMarkdown(command, &page); err != nil {
+			return err
+		}
+		name := strings.ReplaceAll(command.CommandPath(), " ", "_") + ".md"
+		return os.WriteFile(filepath.Join(output, "reference", name), []byte(strings.TrimRight(page.String(), "\n")+"\n"), 0o644)
+	}); err != nil {
 		return err
 	}
-	pages, err := filepath.Glob(filepath.Join(output, "reference", "*.md"))
+	if err := walk(app.ManualRoot(), func(command *cobra.Command) error {
+		// GenMan fills an empty Title from the command path by mutating the header, so each page needs its own.
+		header := &doc.GenManHeader{Section: "1", Date: &date, Source: "gitea-cli", Manual: "gitea-cli Manual"}
+		name := strings.ReplaceAll(command.CommandPath(), " ", "-") + ".1"
+		return writeFile(filepath.Join(output, "man", name), func(w io.Writer) error { return app.GenMan(command, header, w) })
+	}); err != nil {
+		return err
+	}
+	var topics strings.Builder
+	for _, topic := range app.ManualCommands(root) {
+		if !topic.Runnable() && topic.Annotations["gt.topic"] != "" {
+			fmt.Fprintf(&topics, "* [gt help %s](gt_%s.md)\t - %s\n", topic.Name(), topic.Name(), topic.Short)
+		}
+	}
+	index := filepath.Join(output, "reference", "gt.md")
+	content, err := os.ReadFile(index)
 	if err != nil {
 		return err
 	}
-	for _, page := range pages {
-		content, err := os.ReadFile(page)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(page, []byte(strings.TrimRight(string(content), "\n")+"\n"), 0o644); err != nil {
-			return err
-		}
-	}
-	// Date the pages like gt man; make docs sets SOURCE_DATE_EPOCH to the last commit.
-	date := app.ManualDate(os.Getenv)
-	manual := app.ManualRoot()
-	header := &doc.GenManHeader{Section: "1", Date: &date, Source: "gitea-cli", Manual: "gitea-cli Manual"}
-	if err := doc.GenManTree(manual, header, filepath.Join(output, "man")); err != nil {
+	if err := os.WriteFile(index, []byte(string(content)+"\n### HELP TOPICS\n\n"+topics.String()), 0o644); err != nil {
 		return err
-	}
-	// Cobra skips the hidden help topics (environment, exit-codes, formatting); give them pages too.
-	for _, topic := range app.ManualCommands(root) {
-		if topic.Runnable() || topic.Annotations["gt.topic"] == "" {
-			continue
-		}
-		var page strings.Builder
-		if err := doc.GenMarkdownCustom(topic, &page, func(string) string { return "" }); err != nil {
-			return err
-		}
-		name := "gt_" + topic.Name() + ".md"
-		if err := os.WriteFile(filepath.Join(output, "reference", name), []byte(strings.TrimRight(page.String(), "\n")+"\n"), 0o644); err != nil {
-			return err
-		}
-		topicHeader := &doc.GenManHeader{Title: "GT-" + strings.ToUpper(topic.Name()), Section: "1", Date: &date, Source: "gitea-cli", Manual: "gitea-cli Manual"}
-		manualTopic, _, err := manual.Find([]string{topic.Name()})
-		if err != nil {
-			return err
-		}
-		if err := writeFile(filepath.Join(output, "man", "gt-"+topic.Name()+".1"), func(w io.Writer) error { return doc.GenMan(manualTopic, topicHeader, w) }); err != nil {
-			return err
-		}
 	}
 	completions := []struct {
 		name  string
@@ -121,6 +102,19 @@ Personal aliases are expanded dynamically by the installed shell completions.
 - Fish: `+"`completion/gt.fish`"+`
 - PowerShell: `+"`completion/gt.ps1`"+`
 `)+"\n"), 0o644)
+}
+
+// walk calls page for command and every command below it that has a page in the manual.
+func walk(command *cobra.Command, page func(*cobra.Command) error) error {
+	if err := page(command); err != nil {
+		return err
+	}
+	for _, child := range app.ManualCommands(command) {
+		if err := walk(child, page); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeFile(path string, write func(io.Writer) error) error {

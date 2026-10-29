@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 //go:build vendor
-// +build vendor
 
 package main
 

@@ -271,3 +271,50 @@ func TestShortLastPageWithLinksSkipsThePageSizeLookup(t *testing.T) {
 	require.Equal(t, []int{11, 12}, window.Items)
 	require.False(t, window.More)
 }
+
+func TestPagesOfAServerThatHidesCountedItemsHoldEachItemOnce(t *testing.T) {
+	for _, tc := range []struct {
+		total, maxItems int
+		hidden          func(id int) bool
+		limits          []int
+	}{
+		{100, 50, func(id int) bool { return id%2 == 0 }, []int{30, 100}},
+		{300, 100, func(id int) bool { return id%20 == 0 }, []int{30, 70, 100, 150, 200, 250}},
+		{200, 50, func(id int) bool { return id > 50 && id%10 == 0 }, []int{150}},
+	} {
+		fetch := func(limit, page int) ([]int, http.Header, error) {
+			size := min(limit, tc.maxItems)
+			var items []int
+			for id := (page-1)*size + 1; id <= min(page*size, tc.total); id++ {
+				if !tc.hidden(id) {
+					items = append(items, id)
+				}
+			}
+			headers := http.Header{"X-Total-Count": {strconv.Itoa(tc.total)}}
+			if page*size < tc.total {
+				headers.Set("Link", fmt.Sprintf(`<http://h/api/v1/o?limit=%d&page=%d>; rel="next"`, limit, page+1))
+			}
+			return items, headers, nil
+		}
+		var want []int
+		for id := 1; id <= tc.total; id++ {
+			if !tc.hidden(id) {
+				want = append(want, id)
+			}
+		}
+		for _, limit := range tc.limits {
+			t.Run(fmt.Sprintf("max %d limit %d of %d", tc.maxItems, limit, tc.total), func(t *testing.T) {
+				var seen []int
+				for page := 1; ; page++ {
+					window, err := cappedPage(limit, page, func() int { return tc.maxItems }, fetch)
+					require.NoError(t, err)
+					seen = append(seen, window.Items...)
+					if !window.More {
+						break
+					}
+				}
+				require.Equal(t, want, seen)
+			})
+		}
+	}
+}

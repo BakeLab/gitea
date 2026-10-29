@@ -126,6 +126,11 @@ func TestJoinJSONFields(t *testing.T) {
 		// command takes an argument.
 		{[]string{"issue", "view", "--json", "number,titel"}, []string{"issue", "view", "--json=number,titel"}},
 		{[]string{"search", "repo", "--json", "name,urll"}, []string{"search", "repo", "--json=name,urll"}},
+		// Next to another argument, the word is a misspelled field rather than one more tag to change.
+		{[]string{"release", "publish", "v11", "--json", "tag_name"}, []string{"release", "publish", "v11", "--json=tag_name"}},
+		{[]string{"release", "view", "--json", "tag_name", "v3"}, []string{"release", "view", "--json=tag_name", "v3"}},
+		{[]string{"search", "repo", "foo", "--json", "bar"}, []string{"search", "repo", "foo", "--json=bar"}},
+		{[]string{"release", "view", "--json", "v1"}, []string{"release", "view", "--json", "v1"}},
 	} {
 		deps, _, _ := testDeps(t)
 		require.Equal(t, tc.want, joinJSONFields(NewRoot(deps), tc.args), tc.args)
@@ -198,12 +203,13 @@ func TestSudoSendsHeaderAfterIdentityCheck(t *testing.T) {
 	require.EqualError(t, err, "repository alice/project not found")
 	requireUsageBeforeRequests(t, "--sudo cannot be combined with auth commands", "auth", "status", "--sudo", "bob")
 	requireUsageBeforeRequests(t, "--sudo requires a username", "repo", "view", "--sudo", "")
+	requireUsageBeforeRequests(t, `invalid --sudo username "a b"`, "repo", "view", "--sudo", "a b")
 }
 
 func TestJSONFieldErrorsListAvailableFields(t *testing.T) {
 	requireUsageBeforeRequests(t, "unknown JSON field \"titel\"\navailable fields: assignees, author, body", "issue", "list", "--json", "number,titel")
 	requireUsageBeforeRequests(t, "unknown JSON field \"workflw\"\navailable fields: actor, attempt, branch", "run", "list", "--json", "workflw")
-	requireUsageBeforeRequests(t, "--json= needs field names; use --json alone for every field", "pr", "list", "--json=")
+	requireUsageBeforeRequests(t, "--json= requires field names; use --json alone for every field", "pr", "list", "--json=")
 	requireUsageBeforeRequests(t, "version prints text; --jq is not supported", "version", "--jq", ".")
 }
 
@@ -324,7 +330,8 @@ func TestCommandHelpShowsRelevantFlagsOnly(t *testing.T) {
 	require.NotContains(t, out.String(), "Without an argument")
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "--help"}))
-	require.Equal(t, 1, strings.Count(out.String(), "\n  --remote "), "a local --remote hides the global one")
+	require.Contains(t, out.String(), "\n  --add-remote ")
+	require.Contains(t, out.String(), "\n      --remote remote ")
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "--help"}))
 	require.Contains(t, out.String(), "\nUSAGE\n  gt issue <command> [flags]\n\nAVAILABLE COMMANDS\n  attachment:  ")

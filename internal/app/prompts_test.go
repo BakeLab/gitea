@@ -42,7 +42,9 @@ func TestRequireInputPromptsWithTheLabel(t *testing.T) {
 	name := ""
 	cmd.Flags().StringVar(&name, "name", "", "")
 	_, err := a.requireInput(cmd, &name, "name", "Label name", nil)
-	require.EqualError(t, err, "missing required input: supply --name")
+	require.EqualError(t, err, "list requires --name")
+	_, err = a.requireInput(cmd, &name, "url", "Payload URL", nil)
+	require.EqualError(t, err, "list requires a payload URL argument")
 
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
 	a, cmd = outputApplication(deps, "")

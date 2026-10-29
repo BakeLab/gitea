@@ -75,8 +75,10 @@ func (a *application) editDraft(cmd *cobra.Command, body string) (terminal.Draft
 	return editor.Edit(cmd.Context(), command, body)
 }
 
-// errMissingBody names the flags that supply a body when there is no terminal to ask for one.
-var errMissingBody = clierr.Wrap(clierr.Usage, errors.New("missing required input: supply --body, --body-file or --editor"))
+// missingBody names the flags that supply a body when there is no terminal to ask for one.
+func missingBody(cmd *cobra.Command) error {
+	return clierr.Wrap(clierr.Usage, fmt.Errorf("%s requires --body, --body-file or --editor", commandName(cmd)))
+}
 
 // bodyEditor collects a body, such as that of an interactive form after the form ran. The editor
 // is resolved first: without one, the body is typed into an inline multi-line field with title

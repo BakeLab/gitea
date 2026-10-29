@@ -322,7 +322,7 @@ func TestReviewLifecycleEditorRejectsEmptyRequiredText(t *testing.T) {
 			}
 			err := Execute(context.Background(), deps, args)
 			require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-			require.ErrorContains(t, err, "needs a")
+			require.ErrorContains(t, err, "requires a")
 			require.NotContains(t, err.Error(), "draft saved", "an empty draft holds nothing to keep")
 			if verb == "submit" {
 				require.Equal(t, "Saved draft", editor.initial)

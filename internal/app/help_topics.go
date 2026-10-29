@@ -33,7 +33,7 @@ const (
 	globalFlagsLine = "Global flags: --host, --user, --sudo, --no-input, --interactive, --debug (see gt help environment)"
 	// extensionFlagsLine replaces globalFlagsLine for commands that run an extension, which take
 	// only the global flags of extensionFlags.
-	extensionFlagsLine = "Global flags: --host, --user; global flags go before the extension's name (see gt help extensions)"
+	extensionFlagsLine = "Global flags: --host, --user, --no-input, --yes; global flags go before the extension's name (see gt help extensions)"
 )
 
 // noRepoCommands are command paths, with their subcommands, that never select a repository, so their
@@ -86,9 +86,8 @@ func (a *application) writeHelp(cmd *cobra.Command, _ []string) {
 		}
 		section("INHERITED FLAGS", inherited+"\n\n"+globals)
 	}
-	section("ARGUMENTS", cmd.Annotations["gt.arguments"])
-	if outputsJSON(cmd) {
-		section("JSON FIELDS", cmp.Or(cmd.Annotations["gt.jsonfields"], wrap(strings.Join(commandOutputFields(cmd), ", "), 78)))
+	for _, extra := range extraSections(cmd) {
+		section(extra.title, extra.body)
 	}
 	if !cmd.HasParent() {
 		section("EXAMPLES", "$ gt issue create\n$ gt issue list --label bug\n$ gt pr checkout 13\n$ gt repo clone owner/name")
@@ -174,14 +173,9 @@ func helpFlags(cmd *cobra.Command) (local, inherited string) {
 		})
 	}
 	slices.SortFunc(own, func(x, y *pflag.Flag) int { return strings.Compare(x.Name, y.Name) })
-	path := cmd.CommandPath()
-	repo := !slices.ContainsFunc(noRepoCommands, func(prefix string) bool { return path == prefix || strings.HasPrefix(path, prefix+" ") })
-	// A command's own --remote, as in repo fork, hides the global flag of that name.
-	// repo clone takes its repository as an argument only, so --repo and --remote do nothing there.
-	selects := repo && path != "gt repo clone"
-	shown := map[string]bool{"repo": selects, "remote": selects && cmd.LocalFlags().Lookup("remote") == nil && !runsExtension(cmd), "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd) || cmd.Annotations["gt.rawjson"] != "", "yes": cmd.Annotations["gt.confirm"] != ""}
+	shown := sharedFlags(cmd)
 	var shared []*pflag.Flag
-	for _, name := range []string{"repo", "remote", "cwd", "json", "jq", "yes"} {
+	for _, name := range sharedFlagNames {
 		if shown[name] {
 			shared = append(shared, globals.Lookup(name))
 		}
@@ -190,6 +184,34 @@ func helpFlags(cmd *cobra.Command) (local, inherited string) {
 		shared = append(shared, help)
 	}
 	return flagUsages(own), flagUsages(shared)
+}
+
+// sharedFlagNames are the global flags that help and the manual list only where they apply.
+var sharedFlagNames = []string{"repo", "remote", "cwd", "json", "jq", "yes"}
+
+// sharedFlags reports which of sharedFlagNames apply to cmd.
+func sharedFlags(cmd *cobra.Command) map[string]bool {
+	path := cmd.CommandPath()
+	repo := !slices.ContainsFunc(noRepoCommands, func(prefix string) bool { return path == prefix || strings.HasPrefix(path, prefix+" ") })
+	// repo clone takes its repository as an argument only, so --repo and --remote do nothing there.
+	// Among gt extension's commands, only those running an extension take a repository.
+	selects := repo && path != "gt repo clone" && (!strings.HasPrefix(path, "gt extension") || runsExtension(cmd))
+	return map[string]bool{"repo": selects, "remote": selects && !runsExtension(cmd), "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd) || cmd.Annotations["gt.rawjson"] != "", "yes": cmd.Annotations["gt.confirm"] != ""}
+}
+
+// helpSection is a titled section of a help page.
+type helpSection struct{ title, body string }
+
+// extraSections are the ARGUMENTS and JSON FIELDS sections of cmd, which the manual shows too.
+func extraSections(cmd *cobra.Command) []helpSection {
+	var sections []helpSection
+	if arguments := cmd.Annotations["gt.arguments"]; arguments != "" {
+		sections = append(sections, helpSection{"ARGUMENTS", arguments})
+	}
+	if outputsJSON(cmd) {
+		sections = append(sections, helpSection{"JSON FIELDS", cmp.Or(cmd.Annotations["gt.jsonfields"], wrap(strings.Join(commandOutputFields(cmd), ", "), 78))})
+	}
+	return sections
 }
 
 // runsExtension reports whether cmd runs an extension.
@@ -301,7 +323,9 @@ func helpTopics(globals *pflag.FlagSet) []*cobra.Command {
 	var flags []*pflag.Flag
 	globals.VisitAll(func(flag *pflag.Flag) { flags = append(flags, flag) })
 	topics := []*cobra.Command{
-		{Use: "environment", Short: "Environment variables and global flags", Long: `Global flags work with every command, before or after the command name:
+		{Use: "environment", Short: "Environment variables and global flags", Long: `Global flags work with every built-in command, before or after the command name. An
+extension takes only --host, --repo, --user, --cwd, --no-input and --yes, before its name
+(see gt help extensions):
 
 ` + indent(flagUsages(flags)) + `
 
@@ -346,10 +370,11 @@ Preferences in config.yml are described in gt config --help.`},
 		{Use: "exit-codes", Short: "Exit codes used by gt", Long: `gt exits with one of these codes:
 
   0    success, including an empty list
-  1    the command failed
+  1    the command failed, also when the instance did not respond within http_timeout
   2    usage error: an unknown command or flag, or a missing or invalid argument
   3    canceled: a declined confirmation, a prompt left with Esc (or Ctrl-D with TERM=dumb),
-       or a timeout
+       a wait that ran out of its --timeout, such as gt run watch or gt pr checks --watch,
+       or a browser authorization of gt auth login not completed within 2 minutes
   4    authentication is missing or was rejected
   5    gt run watch and gt workflow run --follow: the run completed without success
   6    gt run watch --expect-head: the run is for another commit
@@ -383,7 +408,12 @@ GH_HOST. It gets:
   GITEA_CLI_EXECUTABLE         the path of gt, to call gt commands such as gt api
   GITEA_CLI_HOST, _REPO, _USER  from --host, --repo and --user before its name
   GITEA_TOKEN, GITEA_INSTANCE_URL  your token and its instance, only when you allowed it at
-                                   install; gh extensions also get GH_HOST and GH_TOKEN
+                                   install; gh extensions also get GH_HOST, GH_TOKEN and
+                                   GH_ENTERPRISE_TOKEN
+
+Global flags go before the extension's name; everything after it is the extension's own.
+--cwd sets its working directory, and --no-input and --yes are accepted but not passed on;
+other global flags, such as --json, are refused.
 
 gt itself refuses your stored credentials to an extension that was not given them. This is
 hygiene, not a sandbox: an extension runs with your privileges, can read gt's configuration
@@ -412,7 +442,9 @@ wording of text output may change between releases.
   -q, --jq EXPR      filter the JSON with a jq expression; implies --json
 
 The JSON FIELDS section of a command's help lists its fields, and shell completion
-offers them after --json. An unknown field reports the available ones.
+offers them after --json. An unknown field reports the available ones. A word after
+--json is read as an argument only when the command takes no other, as in
+gt release view --json v1; write --json=FIELDS to make it a field list.
 
 --jq runs inside gt, so jq does not need to be installed. String results print
 without quotes:
@@ -424,6 +456,11 @@ of issue view and issue edit, and the visibility of org member list. gt makes th
 the output includes the field: --json names it, or --json selects every field and the --jq
 expression names it. An expression that reaches such a field without naming it, as
 to_entries does, sees it empty; name the field in --json instead.
+
+Commands that take several arguments, such as issue close or milestone issue add, print an
+object for one argument and an array of the successful results for several. A script that
+needs one shape passes one argument per call, or several and reads the array, such as with
+--jq '.[]'.
 
 On a terminal, JSON is indented and colored; otherwise each value prints on one line.
 Commands that return no resource, such as deletes, reject --json.`},

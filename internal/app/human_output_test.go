@@ -147,6 +147,10 @@ func TestInvalidColorEnvironmentIsAUsageError(t *testing.T) {
 		require.EqualError(t, err, `invalid GITEA_CLI_COLOR "bogus": color must be auto, always, or never`, "%v", args)
 		require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	}
+	deps, _, _, _ = pagedDeps(t, server.URL, map[string]string{"GITEA_CLI_HTTP_TIMEOUT": "bogus"})
+	err := Execute(context.Background(), deps, []string{"config", "get", "http_timeout"})
+	require.EqualError(t, err, `invalid GITEA_CLI_HTTP_TIMEOUT "bogus": http_timeout must be a duration such as 30s or 5m, or 0 for none`)
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 }
 
 func TestTeaPagerAndColorEnvironmentOverrides(t *testing.T) {

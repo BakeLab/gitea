@@ -456,6 +456,13 @@ func TestCompletionInstallHelp(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	require.NoError(t, Execute(context.Background(), deps, []string{"completion", "bash", "--help"}))
 	require.Contains(t, out.String(), "$ eval \"$(gt completion bash)\"\n")
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		out.Reset()
+		require.NoError(t, Execute(context.Background(), deps, []string{"completion", shell, "--help"}))
+		require.Contains(t, out.String(), "USAGE\n  gt completion "+shell+" [flags]\n", shell)
+		require.NotContains(t, out.String(), "####", shell)
+		require.NotContains(t, out.String(), "\t", shell)
+	}
 }
 
 func TestCompletionTargetAcceptsABareTokenHost(t *testing.T) {
@@ -481,20 +488,24 @@ func TestAccountCompletionUsesInstanceOfRepository(t *testing.T) {
 	}
 }
 
-func TestActionValueCompletionOutsideARepository(t *testing.T) {
+func TestActionValueCompletionFollowsTheScope(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/orgs/acme/actions/variables":
 			_, _ = w.Write([]byte(`[{"name":"REGION","data":"eu"}]`))
 		case "/api/v1/user/actions/variables":
 			_, _ = w.Write([]byte(`[{"name":"HOME_REGION","data":"eu"}]`))
+		case "/api/v1/repos/alice/project/actions/variables":
+			_, _ = w.Write([]byte(`[{"name":"REPO_REGION","data":"eu"}]`))
+		case "/api/v1/repos/alice/project/actions/secrets":
+			_, _ = w.Write([]byte(`[{"name":"REPO_TOKEN"}]`))
 		default:
 			t.Errorf("unexpected request %s", r.URL.Path)
 			w.WriteHeader(http.StatusTeapot)
 		}
 	}))
 	defer server.Close()
-	deps, _, _ := serverDeps(t, server.URL)
+	deps, out, _ := serverDeps(t, server.URL)
 	a := &application{deps: deps}
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
@@ -509,6 +520,11 @@ func TestActionValueCompletionOutsideARepository(t *testing.T) {
 		values, _ := a.completeVariables(func() services.ActionScope { return tc.scope })(cmd, nil, "")
 		require.ElementsMatch(t, tc.want, values, name)
 	}
+	deps.Git = doctorGit(server.URL)
+	values, _ := complete(t, deps, out, "variable", "get", "")
+	require.Equal(t, []string{"REPO_REGION"}, values)
+	values, _ = complete(t, deps, out, "secret", "delete", "")
+	require.Equal(t, []string{"REPO_TOKEN"}, values)
 }
 
 func TestMilestoneCompletionOffersTheMilestonesTheCommandAccepts(t *testing.T) {

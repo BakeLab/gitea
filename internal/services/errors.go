@@ -278,3 +278,16 @@ func refusal(apiErr *transport.APIError) string {
 	}
 	return ""
 }
+
+// emptyRepository returns a *RefusedError naming repo when err is Gitea's refusal to work on a
+// repository without commits, such as "Git Repository is empty." or "repo is empty", and nil otherwise.
+func emptyRepository(err error, repo, next string) error {
+	apiErr, ok := errors.AsType[*transport.APIError](err)
+	if !ok {
+		return nil
+	}
+	if message := strings.ToLower(apiErr.Message); !strings.Contains(message, "repository is empty") && !strings.Contains(message, "repo is empty") {
+		return nil
+	}
+	return &RefusedError{Text: repo + " is empty; push a commit " + next, Err: err}
+}

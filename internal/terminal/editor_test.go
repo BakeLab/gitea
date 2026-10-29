@@ -33,7 +33,7 @@ func TestEditorRetainsPrivateDraftAfterSuccessAndFailure(t *testing.T) {
 		out, diagnostics := &bytes.Buffer{}, &bytes.Buffer{}
 		draft, err := (SystemEditor{Directory: directory, Streams: Streams{Out: out, ErrOut: diagnostics}}).Edit(context.Background(), shellquote.Join(program), "initial text")
 		if fail {
-			require.Error(t, err)
+			require.EqualError(t, err, "editor failed: exit status 7")
 		} else {
 			require.NoError(t, err)
 			require.Equal(t, "edited draft", draft.Body)

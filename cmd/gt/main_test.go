@@ -212,6 +212,8 @@ func TestRunDropsTerminalControlsFromErrors(t *testing.T) {
 			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_issues":true}`))
 		case "/api/v1/repos/alice/project/actions/workflows":
 			_, _ = w.Write([]byte(`{"workflows":[{"id":"ci.yml","name":"CI\u001b]0;PWNED\u0007","path":".gitea/workflows/ci.yml","state":"active"}]}`))
+		case "/api/v1/repos/alice/project/contents/.gitea/workflows":
+			_, _ = w.Write([]byte(`[{"name":"ci.yml","path":".gitea/workflows/ci.yml","type":"file"}]`))
 		case "/api/v1/repos/alice/project/contents/.gitea/workflows/ci.yml":
 			_, _ = w.Write([]byte(`{"type":"file","encoding":"base64","content":"` + definition + `"}`))
 		default:
@@ -229,7 +231,7 @@ func TestRunDropsTerminalControlsFromErrors(t *testing.T) {
 		},
 	}
 	require.Equal(t, 2, run(context.Background(), deps, []string{"workflow", "run", "ci.yml", "--ref", "main", "-R", "alice/project", "--no-input"}, app.Execute))
-	require.Contains(t, stderr.String(), "missing required input target for CI")
+	require.Contains(t, stderr.String(), "(ci.yml) requires input target; pass -f target=<value>")
 	require.NotContains(t, stderr.String(), "\x1b")
 	require.NotContains(t, stderr.String(), "\x07")
 }

@@ -285,7 +285,7 @@ func TestGiteaMetadataLifecycle(t *testing.T) {
 	}
 	require.NotEmpty(t, notifications)
 	var boundedNotifications []services.Notification
-	require.NoError(t, json.Unmarshal(scoped("notification", "list", "--type", "issue", "--since=24h", "--before=0s"), &boundedNotifications))
+	require.NoError(t, json.Unmarshal(scoped("notification", "list", "--type", "issue", "--since=24h", "--until=0s"), &boundedNotifications))
 	require.NotEmpty(t, boundedNotifications)
 	notificationID := strconv.FormatInt(notifications[0].ID, 10)
 	var notification services.Notification

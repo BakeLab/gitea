@@ -25,9 +25,10 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// extensionFlags are the global flags an extension receives, as the environment variables gt
-// itself reads them from; --cwd becomes its working directory.
-var extensionFlags = map[string]string{"host": "GITEA_CLI_HOST", "repo": "GITEA_CLI_REPO", "user": "GITEA_CLI_USER", "cwd": ""}
+// extensionFlags are the global flags an extension accepts, with the environment variables gt
+// itself reads them from; --cwd becomes its working directory, and --no-input and --yes, which
+// every gt command accepts, have no variable to pass.
+var extensionFlags = map[string]string{"host": "GITEA_CLI_HOST", "repo": "GITEA_CLI_REPO", "user": "GITEA_CLI_USER", "cwd": "", "no-input": "", "yes": ""}
 
 // defaultExtensionIndex lists the officially supported extensions.
 const defaultExtensionIndex = "https://gitea.com/gitea/cli-extensions"
@@ -255,7 +256,7 @@ func (a *application) extensionFlagEnv(root *cobra.Command, name string, leading
 			unsupported = append(unsupported, "--"+flag.Name)
 		case flag.Name == "cwd":
 			dir = flag.Value.String()
-		default:
+		case variable != "":
 			set[variable] = flag.Value.String()
 		}
 	})
@@ -323,14 +324,17 @@ func (a *application) extensionCredentials(ctx context.Context, extension extens
 		// GITEA_TOKEN belongs to the instance in GITEA_CLI_HOST or GITEA_INSTANCE_URL and to an account
 		// gt cannot check without a request; pass it on only when --host selects that instance and
 		// no account is named.
-		host, _ := a.envHost()
+		host, key := a.envHost()
+		if host == "" {
+			return set, errors.New("GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance")
+		}
 		snapshot, err := a.settings()
 		if err != nil {
 			return set, err
 		}
 		instance, err := settings.ResolveHost(host, snapshot.Hosts.Hosts)
 		if err != nil {
-			return set, err
+			return set, fmt.Errorf("invalid %s: %w", key, err)
 		}
 		if a.options.host != "" {
 			if selected, err := settings.ResolveHost(a.options.host, snapshot.Hosts.Hosts); err != nil || selected != instance {

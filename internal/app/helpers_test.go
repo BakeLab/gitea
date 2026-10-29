@@ -131,9 +131,11 @@ func (testNoKeyring) Delete(string, string) error        { return errNoTestKeyri
 
 type fakeGit struct {
 	results map[string]string
-	calls   []string
-	dirs    []string
-	prompt  bool
+	// errs are the failures of commands, such as a *git.CommandError.
+	errs   map[string]error
+	calls  []string
+	dirs   []string
+	prompt bool
 }
 
 func (f *fakeGit) Output(_ context.Context, dir string, prompt bool, args ...string) (string, error) {
@@ -141,6 +143,9 @@ func (f *fakeGit) Output(_ context.Context, dir string, prompt bool, args ...str
 	f.calls = append(f.calls, key)
 	f.dirs = append(f.dirs, dir)
 	f.prompt = prompt
+	if err, ok := f.errs[key]; ok {
+		return "", err
+	}
 	value, ok := f.results[key]
 	if !ok {
 		return "", errors.New("missing fake Git result")

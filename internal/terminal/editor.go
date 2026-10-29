@@ -64,7 +64,7 @@ func (e SystemEditor) Edit(ctx context.Context, command, body string) (Draft, er
 		if ctx.Err() != nil {
 			return draft, ctx.Err()
 		}
-		return draft, fmt.Errorf("%w; draft has been preserved", runErr)
+		return draft, runErr // The caller reports where the draft is.
 	}
 	data, err := os.ReadFile(draft.Path)
 	if err != nil {

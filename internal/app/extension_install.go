@@ -266,11 +266,8 @@ func (a *application) resolveExtension(ctx context.Context, source extensionSour
 			return c, err
 		}
 	}
-	if minimum := c.manifest.Metadata.MinVersion; extensions.Older(version.Current(), minimum) {
-		return c, fmt.Errorf("extension %s requires gt %s or newer; this is gt %s", name, minimum, version.Current())
-	}
-	if !c.manifest.Metadata.Supports(runtime.GOOS, runtime.GOARCH) {
-		return c, fmt.Errorf("extension %s does not support %s/%s (platforms: %s)", name, runtime.GOOS, runtime.GOARCH, strings.Join(c.manifest.Metadata.Platforms, ", "))
+	if err := checkExtensionMetadata(name, c.manifest.Metadata); err != nil {
+		return c, err
 	}
 	c.manifest.Kind = extensions.KindScript
 	if found {
@@ -286,6 +283,17 @@ func (a *application) resolveExtension(ctx context.Context, source extensionSour
 		}
 	}
 	return c, nil
+}
+
+// checkExtensionMetadata refuses an extension whose gt-extension.yml rules out this gt or platform.
+func checkExtensionMetadata(name string, metadata extensions.Metadata) error {
+	if minimum := metadata.MinVersion; extensions.Older(version.Current(), minimum) {
+		return fmt.Errorf("extension %s requires gt %s or newer; this is gt %s", name, minimum, version.Current())
+	}
+	if !metadata.Supports(runtime.GOOS, runtime.GOARCH) {
+		return fmt.Errorf("extension %s does not support %s/%s (platforms: %s)", name, runtime.GOOS, runtime.GOARCH, strings.Join(metadata.Platforms, ", "))
+	}
+	return nil
 }
 
 // publishedDigest finds the digest the source publishes for the candidate's asset: the one it
@@ -529,7 +537,7 @@ func (a *application) installExtension(cmd *cobra.Command, raw string, opts exte
 		return err
 	}
 	if !a.options.yes && !a.canPrompt() {
-		return clierr.Wrap(clierr.Usage, errors.New("extension install requires --yes when gt cannot prompt"))
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("confirmation required to install extension %s; rerun with --yes", name))
 	}
 	policy, err := a.extensionPolicy()
 	if err != nil {
@@ -610,6 +618,9 @@ func (a *application) checkExtensionName(cmd *cobra.Command, name string, force 
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("extension %s cannot be installed: the alias %s has that name; delete it with gt alias delete %s", name, name, name))
 	}
 	if installed, err := a.extensionStore().Lookup(name); err == nil && !force {
+		if installed.Kind == extensions.KindLocal || installed.Pinned {
+			return fmt.Errorf("extension %s is already installed from %s; reinstall it with --force, or remove it with gt extension remove %s", name, extensionOrigin(installed.Manifest), name)
+		}
 		return fmt.Errorf("extension %s is already installed from %s; upgrade it with gt extension upgrade %s, or reinstall it with --force", name, extensionOrigin(installed.Manifest), name)
 	}
 	return nil
@@ -658,6 +669,12 @@ func (a *application) installLocalExtension(cmd *cobra.Command, raw string, opts
 			return err
 		}
 	}
+	if err := checkExtensionMetadata(name, manifest.Metadata); err != nil {
+		return err
+	}
+	if manifest.Credentials, err = a.grantCredentials(cmd, manifest, opts.allowCredentials, policy); err != nil {
+		return err
+	}
 	stage, err := a.extensionStore().Stage()
 	if err != nil {
 		return err
@@ -694,7 +711,7 @@ $ gt extension upgrade --all --yes`,
 				return clierr.Wrap(clierr.Usage, errors.New("--all cannot be combined with extension names"))
 			}
 			if all && !dryRun && !a.options.yes && !a.canPrompt() {
-				return clierr.Wrap(clierr.Usage, errors.New("extension upgrade --all requires --yes when gt cannot prompt"))
+				return clierr.Wrap(clierr.Usage, errors.New("confirmation required to upgrade all extensions; rerun with --yes"))
 			}
 			return nil
 		},
@@ -785,7 +802,7 @@ func (a *application) upgradeExtension(cmd *cobra.Command, installed extensions.
 		return err
 	}
 	if (!current || force) && !dryRun && !a.options.yes && !a.canPrompt() {
-		return clierr.Wrap(clierr.Usage, errors.New("extension upgrade requires --yes when gt cannot prompt"))
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("confirmation required to upgrade extension %s; rerun with --yes", m.Name))
 	}
 	stage, err := a.stageExtension(ctx, &c)
 	if err != nil {
