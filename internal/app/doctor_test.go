@@ -82,7 +82,7 @@ func TestDoctorReportsEveryCheckInsteadOfFailingFirst(t *testing.T) {
 		{
 			name: "no account for the instance of the remote", env: map[string]string{"GITEA_CLI_HOST": server.URL},
 			statuses: "Config ok, Instance ok, Account failed, Repository skipped, Git warning",
-			account:  "no account for " + server.URL + " (instance from " + strings.Trim(origin, "()") + "); run gt auth login --host " + server.URL + ", or use -R to target another repository",
+			account:  "no account for " + server.URL + " (instance from " + strings.Trim(origin, "()") + ")",
 		},
 		{
 			name: "token of another instance", env: map[string]string{"GITEA_CLI_HOST": "https://other.example.org", "GITEA_TOKEN": "token"},
@@ -107,6 +107,9 @@ func TestDoctorReportsEveryCheckInsteadOfFailingFirst(t *testing.T) {
 				statuses[i] = check.Name + " " + check.Status
 				if check.Name == "Account" {
 					require.Equal(t, tc.account, check.Detail)
+				}
+				if check.Fix != "" {
+					require.NotContains(t, check.Detail, check.Fix, "the fix is named once")
 				}
 			}
 			require.Equal(t, tc.statuses, strings.Join(statuses, ", "))
@@ -211,6 +214,19 @@ func TestDoctorExplainsSSHRemoteOnAnotherPort(t *testing.T) {
 	require.Contains(t, out.String(), `{"detail":"the Git remote connects to 127.0.0.1:2222, which is no instance's SSH host","fix":"set GITEA_INSTANCE_SSH_HOST=127.0.0.1:2222","name":"SSH","status":"warning"}`, "ssh_host cannot override the variable")
 }
 
+func TestDoctorWithoutSettingsSaysTheyAreNotCreatedYet(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	deps.Git = &fakeGit{results: map[string]string{"--version": "git version 2.50.1"}}
+	require.Error(t, Execute(context.Background(), deps, []string{"doctor", "--json=checks"}))
+	var report doctorReport
+	require.NoError(t, json.Unmarshal(out.Bytes(), &report), out.String())
+	require.Equal(t, []doctorCheck{
+		{"Config", checkPassed, "config.yml and hosts.yml not created yet in " + deps.Settings.Dir, ""},
+		{"Instance", checkFailed, "no instance selected", "log in with gt auth login, or pass --host"},
+		{"Git", checkPassed, "git version 2.50.1", ""},
+	}, report.Checks)
+}
+
 func TestDoctorReportsBrokenSettingsFile(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	deps.Git = &fakeGit{results: map[string]string{"--version": "git version 2.50.1"}}
@@ -232,7 +248,7 @@ func TestDoctorShowsChecksOnATerminal(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"doctor"}))
 	lines := withoutANSI(out.String())
 	for _, want := range []string{
-		"✓  Config      config.yml and hosts.yml in " + deps.Settings.Dir + "\n",
+		"✓  Config      hosts.yml in " + deps.Settings.Dir + ", config.yml not created yet\n",
 		"✓  Account     alice (active instance account) · credential valid · scopes: all\n",
 		"✓  Repository  alice/project (git remote \"origin\") · default branch main\n",
 		"!  Git         git version 2.50.1 · credential helper not configured for " + server.URL + "\n" +

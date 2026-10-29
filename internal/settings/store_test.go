@@ -118,6 +118,42 @@ func TestUpdatePersistsOnlyExplicitPreferences(t *testing.T) {
 	require.Equal(t, "version: \"1\"\neditor: vi\ncolor: never\n", string(data))
 }
 
+func TestUpdateKeepsASymlinkedFile(t *testing.T) {
+	s, dotfiles := New(t.TempDir()), t.TempDir()
+	target := filepath.Join(dotfiles, "config.yml")
+	require.NoError(t, os.WriteFile(target, []byte("version: \"1\"\n"), 0o600))
+	if err := os.Symlink(target, filepath.Join(s.Dir, "config.yml")); err != nil {
+		t.Skip("symbolic links are unavailable:", err)
+	}
+	require.NoError(t, s.Update(TargetPreferences, func(snapshot *Snapshot) error { snapshot.Preferences.Editor = "vi"; return nil }))
+	link, err := os.Readlink(filepath.Join(s.Dir, "config.yml"))
+	require.NoError(t, err)
+	require.Equal(t, target, link)
+	data, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, "version: \"1\"\neditor: vi\n", string(data))
+
+	// A link to a file not created yet, through a relative link, creates that file.
+	require.NoError(t, os.Symlink("hosts.yml", filepath.Join(dotfiles, "relative.yml")))
+	require.NoError(t, os.Symlink(filepath.Join(dotfiles, "relative.yml"), filepath.Join(s.Dir, "hosts.yml")))
+	require.NoError(t, s.Update(TargetHosts, func(snapshot *Snapshot) error {
+		snapshot.Hosts.Hosts = map[string]Host{"https://example.org": {}}
+		return nil
+	}))
+	info, err := os.Lstat(filepath.Join(s.Dir, "hosts.yml"))
+	require.NoError(t, err)
+	require.Equal(t, os.ModeSymlink, info.Mode()&os.ModeSymlink, "the dangling link is kept")
+	data, err = os.ReadFile(filepath.Join(dotfiles, "hosts.yml"))
+	require.NoError(t, err)
+	require.Contains(t, string(data), "https://example.org")
+
+	missing := filepath.Join(dotfiles, "missing")
+	require.NoError(t, os.Remove(filepath.Join(s.Dir, "config.yml")))
+	require.NoError(t, os.Symlink(filepath.Join(missing, "config.yml"), filepath.Join(s.Dir, "config.yml")))
+	err = s.Update(TargetPreferences, func(snapshot *Snapshot) error { snapshot.Preferences.Editor = "vi"; return nil })
+	require.EqualError(t, err, "cannot write "+filepath.Join(s.Dir, "config.yml")+": its target directory "+missing+" does not exist")
+}
+
 func TestDisplayPreferencesAcceptOnlyTheirValues(t *testing.T) {
 	for _, tc := range []struct {
 		config string

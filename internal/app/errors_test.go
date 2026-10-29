@@ -128,6 +128,13 @@ func TestExplainWordsCredentialAndConnectionFailures(t *testing.T) {
 	_, err = (&http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}}).Get("http://example.test/api/v1/user")
 	err = transport.RequestError(context.Background(), "API request failed", err)
 	require.EqualError(t, Explain(context.Background(), deps, err), "cannot reach the proxy "+proxy.Host+" (connection refused); check HTTPS_PROXY and HTTP_PROXY")
+
+	plain := httptest.NewServer(http.NotFoundHandler())
+	defer plain.Close()
+	secure := strings.Replace(plain.URL, "http://", "https://", 1)
+	deps, _, _ = serverDeps(t, secure)
+	err = Execute(context.Background(), deps, []string{"issue", "list", "-R", "alice/project"})
+	require.EqualError(t, Explain(context.Background(), deps, err), secure+" answered with plain HTTP; if the instance serves HTTP, use "+plain.URL)
 }
 
 func TestExplainSuggestsTheLoginThatGrantsAMissingScope(t *testing.T) {
@@ -173,7 +180,8 @@ func TestTimeoutErrorsNameTheWaitAndKeepTheExitCode(t *testing.T) {
 	// A request that ran out of http_timeout is not the end of --timeout.
 	stalled := &transport.RequestFailure{Action: "reading the API response failed", Err: fmt.Errorf("no data received within 2s: %w", transport.ErrTimeout)}
 	require.Equal(t, error(stalled), timeoutError(stalled, time.Hour, "waiting for run %d", 34))
-	require.Equal(t, clierr.ExitCode(err), clierr.ExitCode(stalled))
+	require.Equal(t, clierr.Canceled, clierr.ExitCode(err))
+	require.Equal(t, clierr.Failure, clierr.ExitCode(stalled), "a request timeout is a failure, not a canceled wait")
 	require.EqualError(t, Explain(context.Background(), Dependencies{}, stalled), "the instance did not respond within http_timeout; raise it with: gt config set http_timeout DURATION")
 	require.EqualError(t, Explain(context.Background(), Dependencies{}, err), "timed out before the operation finished")
 }
@@ -190,7 +198,7 @@ func TestHTTPTimeoutNamesTheServerAndTheSetting(t *testing.T) {
 	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_HTTP_TIMEOUT": "50ms"})
 	err := Explain(context.Background(), deps, Execute(context.Background(), deps, []string{"api", "version"}))
 	require.EqualError(t, err, server.URL+" did not respond within http_timeout (50ms); raise GITEA_CLI_HTTP_TIMEOUT")
-	require.ErrorIs(t, err, context.DeadlineExceeded, "it exits like a timeout")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 
 	deps.Getenv = serverEnv(server.URL, nil)
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "http_timeout", "50ms"}))

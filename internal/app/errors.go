@@ -64,6 +64,10 @@ func Explain(ctx context.Context, deps Dependencies, err error) error {
 		if reason := unreachable(failure.Err); reason != "" && failure.Server != "" {
 			return explain(err, "cannot reach %s (%s); check --host or your network", failure.Server, reason)
 		}
+		// net/http reports this only as text.
+		if plain, ok := strings.CutPrefix(failure.Server, "https://"); ok && strings.Contains(failure.Err.Error(), "server gave HTTP response to HTTPS client") {
+			return explain(err, "%s answered with plain HTTP; if the instance serves HTTP, use http://%s", failure.Server, plain)
+		}
 	}
 	if errors.Is(err, transport.ErrTimeout) {
 		return httpTimeoutError(deps, err)

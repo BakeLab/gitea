@@ -11,9 +11,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/transport"
 	"golang.org/x/oauth2"
 )
 
@@ -47,6 +50,7 @@ func OAuthLogin(ctx context.Context, opts OAuthOptions) (Credential, error) {
 	if opts.Timeout == 0 {
 		opts.Timeout = 2 * time.Minute
 	}
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -114,7 +118,14 @@ func OAuthLogin(ctx context.Context, opts OAuthOptions) (Credential, error) {
 	}
 	select {
 	case <-ctx.Done():
-		return Credential{}, ctx.Err()
+		if parent.Err() != nil {
+			return Credential{}, parent.Err()
+		}
+		wait := opts.Timeout.String()
+		if minutes, ok := strings.CutSuffix(wait, "m0s"); ok {
+			wait = minutes + "m"
+		}
+		return Credential{}, clierr.Wrap(clierr.Canceled, fmt.Errorf("the browser authorization was not completed within %s; run gt auth login again", wait))
 	case err := <-failures:
 		return Credential{}, err
 	case code := <-codes:
@@ -124,7 +135,14 @@ func OAuthLogin(ctx context.Context, opts OAuthOptions) (Credential, error) {
 			if ctx.Err() != nil {
 				return Credential{}, ctx.Err()
 			}
-			return Credential{}, errors.New("OAuth token exchange failed; verify client ID and registered loopback redirect URI")
+			retrieve, ok := errors.AsType[*oauth2.RetrieveError](err)
+			if !ok {
+				return Credential{}, transport.RequestError(ctx, "OAuth token exchange failed", err)
+			}
+			if !rejected(retrieve) {
+				return Credential{}, unanswered("OAuth token exchange failed", opts.Instance, retrieve)
+			}
+			return Credential{}, clierr.Wrap(clierr.Authentication, errors.New("OAuth token exchange failed; verify client ID and registered loopback redirect URI"))
 		}
 		return Credential{AccessToken: token.AccessToken, RefreshToken: token.RefreshToken, ExpiresAt: token.Expiry}, nil
 	}
@@ -137,6 +155,36 @@ func withHTTPClient(ctx context.Context, client *http.Client) context.Context {
 		client = http.DefaultClient
 	}
 	return context.WithValue(ctx, oauth2.HTTPClient, client)
+}
+
+// rejected reports whether a token endpoint refused the request itself, as opposed to an instance or
+// proxy that failed to answer it.
+func rejected(err *oauth2.RetrieveError) bool {
+	return err.ErrorCode != "" || err.Response == nil || err.Response.StatusCode == http.StatusBadRequest || err.Response.StatusCode == http.StatusUnauthorized
+}
+
+// outageError words a token endpoint that failed to answer, and keeps a cause that callers tell
+// apart from a rejected credential.
+type outageError struct {
+	text  string
+	cause error
+}
+
+func (e *outageError) Error() string { return e.text }
+func (e *outageError) Unwrap() error { return e.cause }
+
+// IsOutage reports whether err is a token endpoint that failed to answer, which says nothing about
+// the credential.
+func IsOutage(err error) bool {
+	_, ok := errors.AsType[*outageError](err)
+	return ok
+}
+
+func unanswered(action, instance string, err *oauth2.RetrieveError) error {
+	return &outageError{
+		text:  fmt.Sprintf("%s: %s answered HTTP %s; try again later", action, instance, err.Response.Status),
+		cause: &transport.APIError{Status: err.Response.StatusCode, Method: http.MethodPost, Endpoint: "/login/oauth/access_token"},
+	}
 }
 
 func oauthConfig(instance, clientID string) *oauth2.Config {
@@ -153,14 +201,14 @@ func (m Manager) Refresh(ctx context.Context, instance, user string, httpClient 
 	host := snapshot.Hosts.Hosts[instance]
 	account, exists := host.Users[user]
 	if !exists {
-		return Credential{}, errors.New("account is not configured")
-	}
-	if account.AuthMethod != settings.AuthOAuth {
-		return m.credentials.Load(instance, user, account.CredentialStore)
+		return Credential{}, clierr.Wrap(clierr.Authentication, errors.New("account is not configured"))
 	}
 	credential, err := m.credentials.Load(instance, user, account.CredentialStore)
 	if err != nil {
-		return Credential{}, err
+		return Credential{}, clierr.Wrap(clierr.Authentication, err)
+	}
+	if account.AuthMethod != settings.AuthOAuth {
+		return credential, nil
 	}
 	needsRefresh := func(c Credential) bool { return !c.ExpiresAt.IsZero() && !now.Add(5*time.Minute).Before(c.ExpiresAt) }
 	if !force && !needsRefresh(credential) {
@@ -173,11 +221,11 @@ func (m Manager) Refresh(ctx context.Context, instance, user string, httpClient 
 		}
 		currentAccount, exists := current.Hosts.Hosts[instance].Users[user]
 		if !exists || currentAccount.AuthMethod != settings.AuthOAuth {
-			return errors.New("OAuth account changed while waiting to refresh")
+			return clierr.Wrap(clierr.Authentication, errors.New("OAuth account changed while waiting to refresh"))
 		}
 		credential, err = m.credentials.Load(instance, user, currentAccount.CredentialStore)
 		if err != nil {
-			return err
+			return clierr.Wrap(clierr.Authentication, err)
 		}
 		if credential.AccessToken != original.AccessToken && !needsRefresh(credential) {
 			return nil
@@ -186,7 +234,7 @@ func (m Manager) Refresh(ctx context.Context, instance, user string, httpClient 
 			return nil
 		}
 		if credential.RefreshToken == "" {
-			return errors.New("OAuth token cannot be refreshed; run gt auth login")
+			return clierr.Wrap(clierr.Authentication, errors.New("OAuth token cannot be refreshed; run gt auth login"))
 		}
 		clientID := current.Hosts.Hosts[instance].OAuthClientID
 		if clientID == "" {
@@ -203,9 +251,16 @@ func (m Manager) Refresh(ctx context.Context, instance, user string, httpClient 
 				return ctx.Err()
 			}
 			if requestContext.Err() != nil {
-				return errors.New("OAuth refresh timed out; try again")
+				return &outageError{text: "OAuth refresh timed out; try again", cause: &transport.RequestFailure{Action: "OAuth refresh", Server: instance, Err: fmt.Errorf("no answer within %s", refreshTimeout)}}
 			}
-			return errors.New("OAuth refresh failed; run gt auth login")
+			retrieve, ok := errors.AsType[*oauth2.RetrieveError](err)
+			if !ok {
+				return transport.RequestError(requestContext, "OAuth refresh failed", err)
+			}
+			if !rejected(retrieve) {
+				return unanswered("OAuth refresh failed", instance, retrieve)
+			}
+			return clierr.Wrap(clierr.Authentication, errors.New("OAuth refresh failed; run gt auth login"))
 		}
 		credential.AccessToken = token.AccessToken
 		if token.RefreshToken != "" {

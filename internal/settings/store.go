@@ -419,9 +419,17 @@ func (s *Store) Locked(fn func(Snapshot) error) error {
 	})
 }
 
-// AtomicWrite publishes a complete private file after flushing its contents.
-func AtomicWrite(filename string, data []byte) error {
+// AtomicWrite publishes a complete private file after flushing its contents. A symbolic link is
+// kept and its target replaced, or created when it does not exist yet.
+func AtomicWrite(name string, data []byte) error {
+	filename, err := linkTarget(name)
+	if err != nil {
+		return err
+	}
 	temp, err := os.CreateTemp(filepath.Dir(filename), ".gt-*")
+	if errors.Is(err, os.ErrNotExist) && filename != name {
+		return fmt.Errorf("cannot write %s: its target directory %s does not exist", name, filepath.Dir(filename))
+	}
 	if err != nil {
 		return err
 	}
@@ -439,6 +447,25 @@ func AtomicWrite(filename string, data []byte) error {
 		return err
 	}
 	return os.Rename(temp.Name(), filename)
+}
+
+// linkTarget follows the symbolic links of filename to the file they name, which may not exist.
+func linkTarget(filename string) (string, error) {
+	for range 40 {
+		info, err := os.Lstat(filename)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			return filename, nil
+		}
+		link, err := os.Readlink(filename)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(link) {
+			link = filepath.Join(filepath.Dir(filename), link)
+		}
+		filename = link
+	}
+	return "", fmt.Errorf("too many symbolic links at %s", filename)
 }
 
 // versionedKeys returns the top-level keys of the settings file at path, checking its version

@@ -91,7 +91,7 @@ func (t captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if resp.Request != nil {
 		sent = resp.Request
 	}
-	failure := newAPIError(sent.Context(), resp.StatusCode, req.Method, req.URL.Path, t.token, data)
+	failure := newAPIError(sent.Context(), resp.StatusCode, req.Method, req.URL.Path, resp.Header.Get("Content-Type"), t.token, data)
 	failure.bind(req.URL)
 	if redirect(resp.StatusCode) {
 		failure.Moved = movedRepository(req.URL, resp.Header.Get("Location"))

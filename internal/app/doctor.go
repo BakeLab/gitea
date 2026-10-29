@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -95,7 +97,7 @@ func (a *application) diagnose(ctx context.Context) doctorReport {
 		add(a.gitCheck(ctx, ""))
 		return report
 	}
-	add(doctorCheck{"Config", checkPassed, "config.yml and hosts.yml in " + a.deps.Settings.Dir, ""})
+	add(doctorCheck{"Config", checkPassed, settingsFiles(a.deps.Settings.Dir), ""})
 	t, err := a.resolveTarget(ctx, true, false)
 	repoErr := err
 	if err != nil && clierr.ExitCode(err) == clierr.Usage && a.options.repo == "" && a.deps.Getenv("GITEA_CLI_REPO") == "" {
@@ -104,7 +106,8 @@ func (a *application) diagnose(ctx context.Context) doctorReport {
 	report.Host, report.User, report.Repo = t.Host, t.User, t.Repo
 	report.HostSource, report.UserSource, report.RepoSource = t.HostSource, t.UserSource, t.RepoSource
 	if t.Host == "" {
-		add(doctorCheck{"Instance", checkFailed, Explain(ctx, a.deps, err).Error(), "gt auth login --host URL, or pass --host"})
+		problem, fix := splitRemedy(Explain(ctx, a.deps, err), "gt auth login --host URL, or pass --host")
+		add(doctorCheck{"Instance", checkFailed, problem, fix})
 		add(a.gitCheck(ctx, ""))
 		return report
 	}
@@ -181,7 +184,8 @@ func (a *application) instanceCheck(ctx context.Context, t target, client *trans
 		return doctorCheck{"Instance", checkPassed, fmt.Sprintf("%s · answers signed-in requests only · %dms", where, latency), ""}
 	}
 	if err != nil {
-		return doctorCheck{"Instance", checkFailed, where + ": " + Explain(ctx, a.deps, err).Error(), "check --host, the instance URL and your network"}
+		problem, fix := splitRemedy(Explain(ctx, a.deps, err), "check --host, the instance URL and your network")
+		return doctorCheck{"Instance", checkFailed, where + ": " + problem, fix}
 	}
 	detail := fmt.Sprintf("%s · Gitea %s · %dms", where, version, latency)
 	// Listings of more items than one page holds take several requests.
@@ -208,17 +212,18 @@ func (a *application) accountCheck(ctx context.Context, t target, snapshot setti
 		}
 	}
 	if err != nil {
-		detail := Explain(ctx, a.deps, err).Error()
-		if strings.Contains(detail, login) {
-			login = ""
+		problem, remedy := splitRemedy(Explain(ctx, a.deps, err), login)
+		if a.deps.Getenv("GITEA_TOKEN") != "" {
+			remedy = login
 		}
-		return doctorCheck{"Account", checkFailed, detail, login}
+		return doctorCheck{"Account", checkFailed, problem, remedy}
 	}
 	ctx, cancel := context.WithTimeout(ctx, doctorTimeout)
 	defer cancel()
 	user, err := services.CurrentAccount(ctx, authenticated.client)
 	if err != nil {
-		return doctorCheck{"Account", checkFailed, authenticated.User + ": " + Explain(ctx, a.deps, err).Error(), login}
+		problem, _ := splitRemedy(Explain(ctx, a.deps, err), "")
+		return doctorCheck{"Account", checkFailed, authenticated.User + ": " + problem, login}
 	}
 	detail := user + " (" + describeSource(authenticated.UserSource) + ") · credential valid"
 	if scopes, err := services.TokenScopes(ctx, authenticated.client); err == nil && len(scopes) > 0 {
@@ -234,9 +239,39 @@ func (a *application) repositoryCheck(ctx context.Context, t target) doctorCheck
 	where := t.Repo + " (" + describeSource(t.RepoSource) + ")"
 	repo, err := services.Repositories{Client: t.client}.View(ctx, t.Repo)
 	if err != nil {
-		return doctorCheck{"Repository", checkFailed, where + ": " + Explain(ctx, a.deps, err).Error(), "check the remote URL, or pass -R OWNER/REPO"}
+		problem, fix := splitRemedy(Explain(ctx, a.deps, err), "check the remote URL, or pass -R OWNER/REPO")
+		return doctorCheck{"Repository", checkFailed, where + ": " + problem, fix}
 	}
 	return doctorCheck{"Repository", checkPassed, where + " · default branch " + repo.DefaultBranch, ""}
+}
+
+// splitRemedy splits what err reports into the problem and the remedy after "; ", or fallback,
+// so that a check names its remedy once, as its fix.
+func splitRemedy(err error, fallback string) (problem, remedy string) {
+	problem, remedy, ok := strings.Cut(err.Error(), "; ")
+	if !ok {
+		remedy = fallback
+	}
+	return problem, remedy
+}
+
+// settingsFiles words which of the settings files in dir exist.
+func settingsFiles(dir string) string {
+	var existing, missing []string
+	for _, name := range []string{"config.yml", "hosts.yml"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			existing = append(existing, name)
+		} else {
+			missing = append(missing, name)
+		}
+	}
+	switch len(existing) {
+	case 0:
+		return "config.yml and hosts.yml not created yet in " + dir
+	case 1:
+		return existing[0] + " in " + dir + ", " + missing[0] + " not created yet"
+	}
+	return "config.yml and hosts.yml in " + dir
 }
 
 // gitCheck reports the installed Git and whether it asks gt for the credentials of instance.

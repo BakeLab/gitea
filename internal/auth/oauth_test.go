@@ -6,15 +6,19 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/transport"
 	"github.com/stretchr/testify/require"
 )
 
@@ -132,6 +136,73 @@ func TestOAuthWithoutHTTPClientUsesDefaultClient(t *testing.T) {
 	credential, err = manager.Refresh(context.Background(), server.URL, "alice", nil, false, time.Now())
 	require.NoError(t, err)
 	require.Equal(t, "access", credential.AccessToken)
+}
+
+func TestOAuthLoginReportsAnUnreachableTokenEndpoint(t *testing.T) {
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	_, err := OAuthLogin(context.Background(), OAuthOptions{Instance: closed.URL, Timeout: 5 * time.Second, Authorize: func(_ context.Context, raw string) error {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return err
+		}
+		response, err := http.Get(u.Query().Get("redirect_uri") + "?code=code&state=" + url.QueryEscape(u.Query().Get("state")))
+		if err != nil {
+			return err
+		}
+		return response.Body.Close()
+	}})
+	failure, ok := errors.AsType[*transport.RequestFailure](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, closed.URL, failure.Server)
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+}
+
+func TestOAuthLoginNamesAnUncompletedBrowserAuthorization(t *testing.T) {
+	_, err := OAuthLogin(context.Background(), OAuthOptions{Instance: "http://127.0.0.1:1", Timeout: 10 * time.Millisecond, Authorize: func(context.Context, string) error { return nil }})
+	require.EqualError(t, err, "the browser authorization was not completed within 10ms; run gt auth login again")
+	require.Equal(t, clierr.Canceled, clierr.ExitCode(err))
+}
+
+func TestOAuthTokenEndpointOutageIsNotARejectedCredential(t *testing.T) {
+	var status atomic.Int64
+	status.Store(http.StatusServiceUnavailable)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if status.Load() == http.StatusBadRequest {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintln(w, `{"error":"invalid_grant"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(int(status.Load()))
+		_, _ = fmt.Fprintln(w, "<h1>Maintenance</h1>")
+	}))
+	defer server.Close()
+	config := settings.New(t.TempDir())
+	manager := newTestManager(t, config, &Store{Dir: config.Dir})
+	now := time.Now()
+	require.NoError(t, manager.Register(server.URL, "alice", "file", "oauth", HostOptions{}, Credential{AccessToken: "old", RefreshToken: "refresh", ExpiresAt: now.Add(-time.Minute)}))
+	_, err := manager.Refresh(context.Background(), server.URL, "alice", server.Client(), false, now)
+	require.EqualError(t, err, "OAuth refresh failed: "+server.URL+" answered HTTP 503 Service Unavailable; try again later")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+	_, err = OAuthLogin(context.Background(), OAuthOptions{Instance: server.URL, HTTP: server.Client(), Timeout: 5 * time.Second, Authorize: func(_ context.Context, raw string) error {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return err
+		}
+		response, err := http.Get(u.Query().Get("redirect_uri") + "?code=code&state=" + url.QueryEscape(u.Query().Get("state")))
+		if err != nil {
+			return err
+		}
+		return response.Body.Close()
+	}})
+	require.EqualError(t, err, "OAuth token exchange failed: "+server.URL+" answered HTTP 503 Service Unavailable; try again later")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+	status.Store(http.StatusBadRequest)
+	_, err = manager.Refresh(context.Background(), server.URL, "alice", server.Client(), false, now)
+	require.EqualError(t, err, "OAuth refresh failed; run gt auth login")
+	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
 }
 
 func TestRefreshEndsBeforeSettingsLockWaitersGiveUp(t *testing.T) {

@@ -72,12 +72,19 @@ func TestInstanceConfigUpdatesPreserveAccountsAndGlobalPreferences(t *testing.T)
 	require.JSONEq(t, `{"ssh_host":{"value":"git.example.org:2222","source":"hosts.yml https://example.org:8443/base"}}`, out.String())
 	before, err := os.ReadFile(filepath.Join(deps.Settings.Dir, "hosts.yml"))
 	require.NoError(t, err)
-	for _, value := range [][2]string{{"prompt", "disabled"}, {"git_protocol", "invalid"}, {"insecure", "yes"}, {"ssh_host", "bad/path"}, {"user", "other"}, {"oauth_token", "secret"}} {
+	for _, value := range [][2]string{{"prompt", "disabled"}, {"git_protocol", "invalid"}, {"insecure", "yes"}, {"ssh_host", "bad/path"}, {"user", "other"}, {"oauth_token", "secret"}, {"client_key", "/certs/client.key"}} {
 		require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, []string{"config", "set", value[0], value[1], "--host", instance})))
 	}
 	after, err := os.ReadFile(filepath.Join(deps.Settings.Dir, "hosts.yml"))
 	require.NoError(t, err)
 	require.Equal(t, before, after)
+	require.EqualError(t, Execute(context.Background(), deps, []string{"config", "set", "client_key", "/certs/client.key", "--host", instance}), "client_key requires client_cert")
+	for _, value := range [][2]string{{"client_cert", "/certs/client.pem"}, {"client_key", "/certs/client.key"}, {"client_cert", ""}} {
+		require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", value[0], value[1], "--host", instance}))
+	}
+	snapshot, err = deps.Settings.Load()
+	require.NoError(t, err)
+	require.Empty(t, snapshot.Hosts.Hosts[instance].ClientKey, "clearing client_cert clears its key")
 }
 
 func TestAccountConfigOnlyChangesSelectedAccountMetadata(t *testing.T) {
@@ -125,6 +132,8 @@ func TestConfigSetHelpExplainsWhatHTTPTimeoutBounds(t *testing.T) {
 	help := strings.Join(strings.Fields(out.String()), " ")
 	require.Contains(t, help, "or for more data while a transfer stalls")
 	require.Contains(t, help, "The wait for an answer starts once an upload has reached the instance's machine, so an instance that reads uploads slowly from its connection needs a longer timeout")
+	require.NotContains(t, help, "user (active account)", "config set refuses user")
+	require.Contains(t, help, "The active account (user) changes with gt auth switch")
 }
 
 func TestConfigHelpDocumentsSettingsAndEnvironment(t *testing.T) {
@@ -291,6 +300,7 @@ func TestAliasSetGuardsExistingAliasesAndQuoting(t *testing.T) {
 	require.NoError(t, run("il", "gt issue list --label bug"))
 	require.Equal(t, "✓ Added alias il for \"issue list --label bug\"\n", withoutANSI(diagnostics.String()))
 	err := run("il", "issue list")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.ErrorContains(t, err, `alias il already expands to "issue list --label bug"; replace it with --clobber`)
 	diagnostics.Reset()
 	require.NoError(t, run("il", "issue list --state all", "--clobber"))
@@ -329,9 +339,13 @@ func TestAliasDeleteAndList(t *testing.T) {
 	require.EqualError(t, err, `no alias named "nope", "zz"; gt alias list shows them`)
 	require.NoError(t, run("delete", "a", "b"))
 	require.Equal(t, "✓ Deleted alias a (issue list)\n✓ Deleted alias b (issue list)\n", withoutANSI(diagnostics.String()))
-	require.Equal(t, clierr.Usage, clierr.ExitCode(run("delete")))
+	require.EqualError(t, run("delete"), "alias delete requires alias names or --all")
 	require.Equal(t, clierr.Usage, clierr.ExitCode(run("delete", "c", "--all")))
-	require.NoError(t, run("delete", "--all"))
+	// Without a terminal to ask on, deleting every alias takes --yes.
+	err = run("delete", "--all")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, "confirmation required to delete all aliases; rerun with --yes")
+	require.NoError(t, run("delete", "--all", "--yes"))
 	snapshot, err := deps.Settings.Load()
 	require.NoError(t, err)
 	require.Empty(t, snapshot.Preferences.Aliases)

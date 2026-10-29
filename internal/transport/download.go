@@ -80,7 +80,8 @@ func (c *Client) DownloadSigned(ctx context.Context, raw string) (*http.Response
 	}
 	response, err = c.Storage().get(ctx, location, false)
 	if failure, ok := errors.AsType[*APIError](err); ok && !strings.EqualFold(location.Host, base.Host) {
-		failure.Storage = location.Host
+		// Object storage answers in its own formats, such as an XML error document.
+		failure.Storage, failure.Message = location.Host, ""
 	}
 	return response, err
 }

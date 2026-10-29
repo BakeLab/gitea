@@ -40,6 +40,14 @@ func TestSetupGitCredentialsPreservesHelpersAndIsIdempotent(t *testing.T) {
 	data, err = runner.Output(ctx, cwd, false, "config", "--local", "--get", "credential."+instance+".useHttpPath")
 	require.NoError(t, err)
 	require.Equal(t, "true", data)
+	setup.User = "bob"
+	require.NoError(t, SetupCredentials(ctx, runner, setup))
+	data, err = runner.Output(ctx, cwd, false, "config", "--local", "--get-all", key)
+	require.NoError(t, err)
+	helpers = strings.Split(data, "\n")
+	require.Len(t, helpers, 2)
+	require.Equal(t, "existing-helper", helpers[0])
+	require.Contains(t, helpers[1], " --user bob")
 }
 
 func TestSetupGitCredentialsResetsOtherHelpersForTheInstance(t *testing.T) {

@@ -127,7 +127,7 @@ $ gt auth setup-git --host gitea.com
 $ gt auth setup-git --local --user alice`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if local && !a.insideClone(cmd.Context()) {
-				return clierr.Wrap(clierr.Usage, errors.New("setup-git --local must run inside a Git clone"))
+				return clierr.Wrap(clierr.Usage, errors.New("setup-git --local requires a Git clone"))
 			}
 			t, err := a.instanceTarget(cmd.Context())
 			if err != nil {
@@ -191,6 +191,11 @@ func (a *application) setupGit(cmd *cobra.Command, instance string, local, keepH
 	}
 	if err := git.SetupTLS(cmd.Context(), a.deps.Git, a.options.cwd, local, instance, host.ClientCert, host.ClientKey, host.Insecure); err != nil {
 		return err
+	}
+	if host.ClientCert == "" {
+		if err := git.UnsetTLSCertificate(cmd.Context(), a.deps.Git, a.options.cwd, local, instance); err != nil {
+			return err
+		}
 	}
 	if !host.Insecure && !effective[instance].Insecure {
 		if err := git.UnsetInsecureTLS(cmd.Context(), a.deps.Git, a.options.cwd, local, instance); err != nil {

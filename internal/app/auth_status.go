@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
+	"gitea.dev/cli/internal/transport"
 	"github.com/spf13/cobra"
 )
 
@@ -38,11 +40,24 @@ type authStatusRow struct {
 	// global, or empty when it is not.
 	GitHelper string `json:"git_credential_helper"`
 	account   settings.Account
+	err       error
 }
 
 // usable reports whether the row's credential can authenticate, as far as gt knows.
 func (r authStatusRow) usable() bool {
 	return r.Available && (r.Verified == nil || *r.Verified)
+}
+
+// unanswered reports whether verifying the row failed because its instance did not answer, which
+// says nothing about the credential.
+func (r authStatusRow) unanswered() bool {
+	if _, ok := errors.AsType[*transport.RequestFailure](r.err); ok || auth.IsOutage(r.err) {
+		return true
+	}
+	if apiErr, ok := errors.AsType[*transport.APIError](r.err); ok {
+		return apiErr.Status == http.StatusTooManyRequests || apiErr.Status >= http.StatusInternalServerError
+	}
+	return errors.Is(r.err, transport.ErrTimeout) || errors.Is(r.err, context.DeadlineExceeded)
 }
 
 // environment reports whether the row is the GITEA_TOKEN of the environment.
@@ -56,7 +71,9 @@ func (a *application) authStatusCommand() *cobra.Command {
 		Use: "status", Short: "Show the accounts gt can use", Args: argsExact(0),
 		Long: `Show the accounts gt can use on each instance, the active one, and how they
 authenticate. A GITEA_TOKEN replaces the active account of its instance. Fails with
-exit code 4 when there is no account, or when a credential is missing or rejected. With --json it exits 0 either way; read credential_available, verified and error.`,
+exit code 4 when there is no account, or when a credential is missing or rejected, and
+with exit code 1 when --verify gets no answer from an instance. With --json it exits 0
+either way; read credential_available, verified and error.`,
 		Example: `$ gt auth status
 # Check the credentials against their instances
 $ gt auth status --verify
@@ -135,19 +152,28 @@ $ gt auth status --host gitea.com --json`,
 			if err := a.writeAuthStatus(cmd, rows); err != nil {
 				return err
 			}
-			if failed := slices.DeleteFunc(slices.Clone(rows), authStatusRow.usable); len(failed) > 0 {
+			failed := slices.DeleteFunc(slices.Clone(rows), authStatusRow.usable)
+			unanswered := slices.DeleteFunc(slices.Clone(failed), func(row authStatusRow) bool { return !row.unanswered() })
+			rejected := slices.DeleteFunc(failed, authStatusRow.unanswered)
+			if len(rejected) > 0 {
 				// Logging in cannot help while GITEA_TOKEN replaces the stored account.
 				advice := "log in again with gt auth login"
-				if i := slices.IndexFunc(failed, authStatusRow.environment); i >= 0 {
+				if i := slices.IndexFunc(rejected, authStatusRow.environment); i >= 0 {
 					advice = "fix or unset GITEA_TOKEN"
-					if failed[i].Host == "" {
+					if rejected[i].Host == "" {
 						advice = "set GITEA_INSTANCE_URL to the instance of GITEA_TOKEN"
 					}
-					if len(failed) > 1 {
+					if len(rejected) > 1 {
 						advice += ", or log in again with gt auth login"
 					}
 				}
-				return clierr.Wrap(clierr.Authentication, fmt.Errorf("%d of %d credentials cannot authenticate; %s", len(failed), len(rows), advice))
+				if len(unanswered) > 0 {
+					advice += fmt.Sprintf("; %d more could not be checked because their instance did not answer", len(unanswered))
+				}
+				return clierr.Wrap(clierr.Authentication, fmt.Errorf("%d of %d credentials cannot authenticate; %s", len(rejected), len(rows), advice))
+			}
+			if len(unanswered) > 0 {
+				return fmt.Errorf("%d of %d credentials could not be checked because their instance did not answer; check --host or your network", len(unanswered), len(rows))
 			}
 			return nil
 		},
@@ -207,12 +233,24 @@ func (a *application) accountStatus(ctx context.Context, s settings.Snapshot, in
 			}
 		}
 		verified := err == nil
-		row.Verified = &verified
+		row.Verified, row.err = &verified, err
 		if err != nil {
-			row.Error = err.Error()
+			row.Error = Explain(ctx, withoutEnvironmentToken(a.deps), err).Error()
 		}
 	}
 	return row
+}
+
+// withoutEnvironmentToken explains errors of a stored credential, which GITEA_TOKEN did not send.
+func withoutEnvironmentToken(deps Dependencies) Dependencies {
+	getenv := deps.Getenv
+	deps.Getenv = func(key string) string {
+		if key == "GITEA_TOKEN" || getenv == nil {
+			return ""
+		}
+		return getenv(key)
+	}
+	return deps
 }
 
 // refreshedCredential loads the OAuth credential of an account, refreshing it first when it expires.
@@ -233,7 +271,7 @@ func (a *application) environmentStatus(ctx context.Context, s settings.Snapshot
 	row := authStatusRow{Method: settings.AuthToken, Store: "environment", Active: true, Available: true}
 	instance, err := settings.ResolveHost(a.tokenInstance(), s.Hosts.Hosts)
 	if a.tokenInstance() == "" || err != nil {
-		row.Available, row.Error = false, "GITEA_TOKEN needs GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance"
+		row.Available, row.Error = false, "GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance"
 		return row, true
 	}
 	row.Host = instance
@@ -243,7 +281,7 @@ func (a *application) environmentStatus(ctx context.Context, s settings.Snapshot
 		defer cancel()
 		user, err := services.CurrentAccount(ctx, client)
 		verified := err == nil
-		row.User, row.Verified = user, &verified
+		row.User, row.Verified, row.err = user, &verified, err
 		if err != nil {
 			row.Error = Explain(ctx, a.deps, err).Error()
 		} else {

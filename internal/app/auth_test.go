@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -19,7 +20,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -358,22 +361,21 @@ func TestAuthLoginMethodFlagsAreMutuallyExclusive(t *testing.T) {
 	keyPath := writeAppTempSSHKey(t, "")
 	deps, out, _ := testDeps(t)
 	deps.Streams.In = strings.NewReader("token\n")
-	for _, args := range [][]string{
-		{"auth", "login", "--host", "https://example.org", "--with-token", "--oauth", "--no-input"},
-		{"auth", "login", "--host", "https://example.org", "--with-token", "--ssh-key", keyPath, "--no-input"},
-		{"auth", "login", "--host", "https://example.org", "--oauth", "--ssh-agent-key", "SHA256:abc", "--no-input"},
-		{"auth", "login", "--host", "https://example.org", "--ssh-key", keyPath, "--ssh-agent-principal", "git", "--no-input"},
-		{"auth", "login", "--host", "https://example.org", "--ssh-agent-key", "SHA256:abc", "--ssh-agent-principal", "git", "--no-input"},
-		{"auth", "login", "--host", "https://example.org", "--no-input"},
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--with-token", "--oauth"}, "--with-token cannot be combined with --oauth"},
+		{[]string{"--with-token", "--ssh-key", keyPath}, "--with-token cannot be combined with --ssh-key"},
+		{[]string{"--oauth", "--ssh-agent-key", "SHA256:abc"}, "--oauth cannot be combined with --ssh-agent-key"},
+		{[]string{"--ssh-key", keyPath, "--ssh-agent-principal", "git"}, "--ssh-key cannot be combined with --ssh-agent-principal"},
+		{[]string{"--ssh-agent-key", "SHA256:abc", "--ssh-agent-principal", "git"}, "--ssh-agent-principal cannot be combined with --ssh-agent-key"},
+		{nil, "auth login requires --with-token, --oauth or --ssh-key when it cannot ask on a terminal"},
 	} {
-		t.Run(strings.Join(args[3:], " "), func(t *testing.T) {
-			err := Execute(context.Background(), deps, args)
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			err := Execute(context.Background(), deps, slices.Concat([]string{"auth", "login", "--host", "https://example.org"}, tc.args, []string{"--no-input"}))
 			require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-			if strings.Count(strings.Join(args, " "), "--") > 2 {
-				require.ErrorContains(t, err, "select one of --with-token, --oauth, --ssh-key")
-			} else {
-				require.ErrorContains(t, err, "select how to log in: --with-token, --oauth or --ssh-key")
-			}
+			require.EqualError(t, err, tc.want)
 			require.Empty(t, out.String())
 		})
 	}
@@ -381,7 +383,7 @@ func TestAuthLoginMethodFlagsAreMutuallyExclusive(t *testing.T) {
 
 func TestAuthLoginValidatesMethodBeforePromptingForHost(t *testing.T) {
 	for args, want := range map[string]string{
-		"auth login --with-token --oauth":       "select one of",
+		"auth login --with-token --oauth":       "--with-token cannot be combined with --oauth",
 		"auth login --with-token --client-id x": "--client-id cannot be combined with --with-token",
 		"auth login --with-token --scopes all":  "--scopes cannot be combined with --with-token",
 		"auth login --ssh-key k --scopes all":   "--scopes cannot be combined with --ssh-key",
@@ -460,6 +462,32 @@ func TestAuthRefreshExpiredCredentialOnlyOnce(t *testing.T) {
 	require.Empty(t, diagnostics.String())
 }
 
+func TestAuthRefreshTellsAnUnreachableInstanceFromARejectedToken(t *testing.T) {
+	rejecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprintln(w, `{"error":"invalid_grant"}`)
+	}))
+	defer rejecting.Close()
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	for _, tc := range []struct {
+		instance string
+		code     int
+		message  string
+	}{
+		{rejecting.URL, clierr.Authentication, "OAuth refresh failed; run gt auth login"},
+		{closed.URL, clierr.Failure, "cannot reach " + closed.URL},
+	} {
+		deps, _, _ := testDeps(t)
+		manager := testManager(t, deps)
+		require.NoError(t, manager.Register(tc.instance, "alice", "file", "oauth", auth.HostOptions{}, auth.Credential{AccessToken: "expired", RefreshToken: "refresh", ExpiresAt: time.Now().Add(-time.Hour)}))
+		err := Execute(context.Background(), deps, []string{"auth", "refresh", "--host", tc.instance, "--user", "alice", "--no-input"})
+		require.Equal(t, tc.code, clierr.ExitCode(err), tc.instance)
+		require.Contains(t, Explain(context.Background(), deps, err).Error(), tc.message)
+	}
+}
+
 func TestAuthRefreshRejectsTokenAccounts(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	manager := testManager(t, deps)
@@ -519,20 +547,36 @@ func TestAuthStatusVerifyChecksStoredCredentials(t *testing.T) {
 	}
 	require.Equal(t, "credential unavailable", rows[2].Error)
 	require.NotContains(t, out.String(), "status-token")
+	// A rejected stored credential is not GITEA_TOKEN's fault, even while one is set.
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "valid-status-token", "GITEA_CLI_HOST": server.URL})
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--verify", "--json=user,error"}))
+	require.Contains(t, out.String(), `{"error":"authentication rejected by `+server.URL+`; run gt auth login","user":"bob"}`)
+	require.NotContains(t, out.String(), "GITEA_TOKEN was rejected")
+	deps.Getenv = envFunc(nil)
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--verify", "--user", "alice"}))
 	require.Equal(t, server.URL+"\talice\ttrue\toauth\tfile\ttrue\ttrue\t2030-01-02T03:04:05Z\t\n", out.String())
 }
 
 func TestAuthStatusVerifyRefreshesExpiredOAuthToken(t *testing.T) {
+	var tokenStatus, userStatus atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/login/oauth/access_token":
+			if status := tokenStatus.Load(); status != 0 {
+				w.WriteHeader(int(status))
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "fresh", "refresh_token": "refresh2", "expires_in": 3600, "token_type": "Bearer"})
 		case "/api/v1/token":
 			_, _ = w.Write([]byte(`{"scopes":["all"]}`))
 		default:
+			if status := userStatus.Load(); status != 0 {
+				w.WriteHeader(int(status))
+				return
+			}
 			if r.Header.Get("Authorization") != "token fresh" {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
@@ -544,8 +588,21 @@ func TestAuthStatusVerifyRefreshesExpiredOAuthToken(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	require.NoError(t, deps.Credentials.Save(server.URL, "alice", settings.StoreFile, auth.Credential{AccessToken: "stale", RefreshToken: "refresh", ExpiresAt: time.Now().Add(-time.Hour)}))
 	configureHost(t, deps, server.URL, settings.Host{User: "alice", Users: map[string]settings.Account{"alice": {AuthMethod: settings.AuthOAuth, CredentialStore: settings.StoreFile}}})
+	for _, status := range []int32{http.StatusServiceUnavailable, http.StatusTooManyRequests, http.StatusNotFound} {
+		tokenStatus.Store(status)
+		err := Execute(context.Background(), deps, []string{"auth", "status", "--verify"})
+		require.EqualError(t, err, "1 of 1 credentials could not be checked because their instance did not answer; check --host or your network", "HTTP %d", status)
+		require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+	}
+	tokenStatus.Store(0)
+	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--verify", "--json=user,verified,error"}))
 	require.JSONEq(t, `[{"user":"alice","verified":true,"error":""}]`, out.String())
+	userStatus.Store(http.StatusTooManyRequests)
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL})
+	err := Execute(context.Background(), deps, []string{"auth", "status", "--verify"})
+	require.EqualError(t, err, "2 of 2 credentials could not be checked because their instance did not answer; check --host or your network")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 }
 
 func TestOAuthLoginOpensAuthorizationURLInBrowser(t *testing.T) {
@@ -557,6 +614,8 @@ func TestOAuthLoginOpensAuthorizationURLInBrowser(t *testing.T) {
 			require.Equal(t, "authorization_code", r.Form.Get("grant_type"))
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "access", "refresh_token": "refresh", "expires_in": 3600, "token_type": "Bearer"})
+		case "/api/v1/version":
+			_, _ = w.Write([]byte(`{"version":"1.25.0"}`))
 		case "/api/v1/user":
 			require.Equal(t, "token access", r.Header.Get("Authorization"))
 			_, _ = w.Write([]byte(`{"login":"alice"}`))
@@ -616,6 +675,20 @@ func TestOAuthLoginOpensAuthorizationURLInBrowser(t *testing.T) {
 			require.Contains(t, snapshot.Hosts.Hosts[normalized].Users, "alice")
 		})
 	}
+}
+
+func TestOAuthLoginChecksTheInstanceBeforeOpeningTheBrowser(t *testing.T) {
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	browser := &channelBrowser{opened: make(chan string, 1)}
+	deps, _, _ := terminalDeps(t)
+	deps.Browser = browser
+	err := Execute(context.Background(), deps, []string{"auth", "login", "--host", closed.URL, "--oauth", "--credential-store", "file"})
+	failure, ok := errors.AsType[*transport.RequestFailure](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, closed.URL, failure.Server)
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+	require.Empty(t, browser.opened)
 }
 
 // loginPrompter answers the interactive login and account choices, recording what it was asked.
@@ -776,6 +849,18 @@ func TestAuthStatusShowsAccountsByInstance(t *testing.T) {
 	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "token"})
 	err = Execute(context.Background(), deps, []string{"auth", "status"})
 	require.EqualError(t, err, "1 of 1 credentials cannot authenticate; set GITEA_INSTANCE_URL to the instance of GITEA_TOKEN")
+
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	deps, _, _ = testDeps(t)
+	configureAccounts(t, deps, closed.URL, "alice", "alice")
+	err = Execute(context.Background(), deps, []string{"auth", "status", "--verify"})
+	require.EqualError(t, err, "1 of 1 credentials could not be checked because their instance did not answer; check --host or your network")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "rejected", "GITEA_CLI_HOST": server.URL})
+	err = Execute(context.Background(), deps, []string{"auth", "status", "--verify"})
+	require.EqualError(t, err, "1 of 2 credentials cannot authenticate; fix or unset GITEA_TOKEN; 1 more could not be checked because their instance did not answer")
+	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
 }
 
 func TestAuthStatusWarnsWhenTheEnvironmentTokenIsAnotherAccount(t *testing.T) {
@@ -826,7 +911,7 @@ func TestAuthSwitchSelectsInstanceAndAccount(t *testing.T) {
 	require.Equal(t, "carol", active())
 	err = Execute(context.Background(), deps, []string{"auth", "switch", "--no-input"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-	require.EqualError(t, err, "name the account: gt auth switch <user> (accounts on "+instance+": alice, bob, carol)")
+	require.EqualError(t, err, "auth switch requires a user argument (accounts on "+instance+": alice, bob, carol)")
 	err = Execute(context.Background(), deps, []string{"auth", "switch", "dave"})
 	require.EqualError(t, err, `account "dave" is not logged in on `+instance+" (accounts: alice, bob, carol)")
 }
@@ -847,7 +932,9 @@ func TestAuthTokenPrintsTheCredential(t *testing.T) {
 	require.Equal(t, "env-token\n", out.String())
 	deps.Getenv = envFunc(nil)
 	configureHost(t, deps, instance, settings.Host{User: "alice", Users: map[string]settings.Account{"alice": {AuthMethod: settings.AuthHTTPSign, SSHKey: "/keys/id"}}})
-	require.EqualError(t, Execute(context.Background(), deps, []string{"auth", "token"}), "alice on "+instance+" signs requests with an SSH key and has no token")
+	err = Execute(context.Background(), deps, []string{"auth", "token"})
+	require.EqualError(t, err, "alice on "+instance+" signs requests with an SSH key and has no token")
+	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
 	require.EqualError(t, Execute(context.Background(), deps, []string{"auth", "token", "--json"}), "auth token prints the token; --json is not supported")
 }
 

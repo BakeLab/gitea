@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -23,6 +24,7 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"gitea.dev/cli/internal/version"
 )
@@ -109,10 +111,11 @@ const (
 	maxErrorMessage = 300
 )
 
-// newAPIError keeps only a bounded, printable JSON "message" field of a failed response body,
-// with the secrets marked on ctx and the passwords of URLs redacted before it is cut short.
+// newAPIError keeps only a bounded, printable JSON "message" field of a failed response body, or
+// a whole plain-text body, such as the package registry answers with, when it is short, with the
+// secrets marked on ctx and the passwords of URLs redacted before it is cut short.
 // Authentication failures and messages echoing the token keep no server text.
-func newAPIError(ctx context.Context, status int, method, endpoint, token string, data []byte) *APIError {
+func newAPIError(ctx context.Context, status int, method, endpoint, contentType, token string, data []byte) *APIError {
 	failure := &APIError{Status: status, Method: method, Endpoint: endpoint}
 	if status == http.StatusUnauthorized {
 		return failure
@@ -120,7 +123,14 @@ func newAPIError(ctx context.Context, status int, method, endpoint, token string
 	var body struct {
 		Message string `json:"message"`
 	}
-	if json.Unmarshal(data, &body) != nil || (token != "" && strings.Contains(body.Message, token)) {
+	if json.Unmarshal(data, &body) != nil {
+		mediaType, _, _ := mime.ParseMediaType(contentType)
+		if mediaType != "text/plain" || len(data) >= maxErrorBody || !utf8.Valid(data) {
+			return failure
+		}
+		body.Message = string(data)
+	}
+	if token != "" && strings.Contains(body.Message, token) {
 		return failure
 	}
 	message := strings.Join(strings.FieldsFunc(RedactSecrets(ctx, body.Message), func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) || unicode.Is(unicode.Cf, r) }), " ")
@@ -359,8 +369,8 @@ func UnboundedResponse(ctx context.Context) context.Context {
 
 // ErrTimeout is the cause of a request that ran out of the response timeout: whose answer did
 // not start, whose body stopped going out, or whose response stalled. It matches
-// context.DeadlineExceeded, so that it exits like a timeout, but tells the request apart from an
-// operation whose own deadline, such as a --timeout, expired.
+// context.DeadlineExceeded, but tells the request apart from an operation whose own deadline, such
+// as a --timeout, expired, and exits 1 rather than like such a timeout.
 var ErrTimeout error = responseTimeoutError{}
 
 type responseTimeoutError struct{}
@@ -368,6 +378,7 @@ type responseTimeoutError struct{}
 func (responseTimeoutError) Error() string        { return context.DeadlineExceeded.Error() }
 func (responseTimeoutError) Is(target error) bool { return target == context.DeadlineExceeded }
 func (responseTimeoutError) Timeout() bool        { return true }
+func (responseTimeoutError) RequestTimeout()      {}
 
 type responseTimeout struct {
 	base    http.RoundTripper

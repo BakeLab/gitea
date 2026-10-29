@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -84,6 +85,11 @@ func SetupTLS(ctx context.Context, runner Runner, dir string, local bool, instan
 		if _, err := runner.Output(ctx, dir, false, "config", scope, "--replace-all", value[0], value[1]); err != nil {
 			return err
 		}
+		if setting, ok := strings.CutPrefix(value[0], "http."); ok && !strings.HasSuffix(setting, ".sslVerify") {
+			if _, err := runner.Output(ctx, dir, false, "config", scope, "--replace-all", "gt."+setting, value[1]); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -103,6 +109,42 @@ func UnsetInsecureTLS(ctx context.Context, runner Runner, dir string, local bool
 	if failure, ok := errors.AsType[*CommandError](err); ok && failure.ExitCode == 5 { // nothing to unset
 		return nil
 	}
+	return err
+}
+
+// UnsetTLSCertificate removes the sslCert and sslKey that SetupTLS wrote for the instance, once it
+// has no client certificate. SetupTLS records what it wrote in gt.<instance>.sslCert and sslKey, so
+// a setting it did not write, or that was changed since, is kept. So are the unrecorded settings of
+// gt 0.2.0: by the time the client certificate is gone its path is too, so they cannot be told from
+// settings written by hand.
+func UnsetTLSCertificate(ctx context.Context, runner Runner, dir string, local bool, instance string) error {
+	normalized, err := settings.NormalizeHost(instance)
+	if err != nil {
+		return err
+	}
+	scope := "--global"
+	if local {
+		scope = "--local"
+	}
+	recorded := false
+	for _, key := range []string{"sslCert", "sslKey"} {
+		written, err := runner.Output(ctx, dir, false, "config", scope, "--get", "gt."+normalized+"."+key)
+		if failure, ok := errors.AsType[*CommandError](err); ok && failure.ExitCode == 1 { // not recorded
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		recorded = true
+		_, err = runner.Output(ctx, dir, false, "config", scope, "--unset-all", "http."+normalized+"."+key, "^"+regexp.QuoteMeta(written)+"$")
+		if failure, ok := errors.AsType[*CommandError](err); err != nil && (!ok || failure.ExitCode != 5) { // 5: nothing to unset
+			return err
+		}
+	}
+	if !recorded {
+		return nil
+	}
+	_, err = runner.Output(ctx, dir, false, "config", scope, "--remove-section", "gt."+normalized)
 	return err
 }
 
@@ -129,7 +171,8 @@ func tlsSettings(instance, certFile, keyFile string, insecure bool) ([][2]string
 type CredentialSetup struct {
 	Directory, Instance, Executable, User, ConfigDirectory string
 	Local                                                  bool
-	// KeepHelpers adds gt's helper after other helpers instead of resetting them for the instance.
+	// KeepHelpers adds gt's helper after other helpers instead of resetting them for the instance,
+	// replacing only a helper gt installed before.
 	KeepHelpers bool
 }
 
@@ -176,8 +219,15 @@ func SetupCredentials(ctx context.Context, runner Runner, options CredentialSetu
 		}
 	}
 	if options.KeepHelpers {
-		if slices.Contains(helpers, helper) {
+		stale := slices.ContainsFunc(helpers, func(h string) bool { return h != helper && strings.Contains(h, gtHelper) })
+		if !stale && slices.Contains(helpers, helper) {
 			return nil
+		}
+		// An earlier gt helper would answer first, as another account.
+		if stale {
+			if _, err := runner.Output(ctx, cwd, false, "config", scope, "--unset-all", prefix+"helper", gtHelper); err != nil {
+				return err
+			}
 		}
 	} else {
 		if slices.Equal(helpers, []string{"", helper}) {
@@ -191,6 +241,9 @@ func SetupCredentials(ctx context.Context, runner Runner, options CredentialSetu
 	return err
 }
 
+// gtHelper is part of every credential helper command gt installs.
+const gtHelper = " auth git-credential "
+
 // HelperScope returns where Git is configured to ask gt for credentials of instance: "local" for
 // the repository in dir, "global", or "" when it is not.
 func HelperScope(ctx context.Context, runner Runner, dir, instance string) string {
@@ -200,7 +253,7 @@ func HelperScope(ctx context.Context, runner Runner, dir, instance string) strin
 	}
 	for _, scope := range []string{"local", "global"} {
 		helpers, err := runner.Output(ctx, dir, false, "config", "--"+scope, "--get-all", "credential."+normalized+".helper")
-		if err == nil && strings.Contains(helpers, " auth git-credential ") {
+		if err == nil && strings.Contains(helpers, gtHelper) {
 			return scope
 		}
 	}

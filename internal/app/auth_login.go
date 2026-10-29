@@ -73,35 +73,35 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 				headers[name] = value
 			}
 			a.warnUnsentHeaders(cmd, headers)
-			selected, methodFlag := 0, ""
+			var methods []string
 			for _, choice := range []struct {
 				flag   string
 				chosen bool
 			}{{"--with-token", withToken}, {"--oauth", oauth}, {"--ssh-key", sshKey != ""}, {"--ssh-agent-principal", sshAgentPrincipal != ""}, {"--ssh-agent-key", sshAgentKey != ""}} {
 				if choice.chosen {
-					selected, methodFlag = selected+1, choice.flag
+					methods = append(methods, choice.flag)
 				}
 			}
-			if selected == 0 && (clientID != "" || cmd.Flags().Changed("scopes")) {
+			if len(methods) == 0 && (clientID != "" || cmd.Flags().Changed("scopes")) {
 				// --client-id and --scopes only apply to OAuth, so they choose it.
-				oauth, selected = true, 1
+				oauth, methods = true, []string{"--oauth"}
 			}
 			switch {
-			case selected > 1:
-				return clierr.Wrap(clierr.Usage, errors.New("select one of --with-token, --oauth, --ssh-key, --ssh-agent-principal or --ssh-agent-key"))
+			case len(methods) > 1:
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with %s", methods[0], methods[1]))
 			case !oauth && clientID != "":
-				return clierr.Wrap(clierr.Usage, errors.New("--client-id cannot be combined with "+methodFlag))
+				return clierr.Wrap(clierr.Usage, errors.New("--client-id cannot be combined with "+methods[0]))
 			case !oauth && cmd.Flags().Changed("scopes"):
-				return clierr.Wrap(clierr.Usage, errors.New("--scopes cannot be combined with "+methodFlag))
+				return clierr.Wrap(clierr.Usage, errors.New("--scopes cannot be combined with "+methods[0]))
 			}
 			snapshot, err := a.settings()
 			if err != nil {
 				return err
 			}
 			form, hasForm := a.deps.Prompter.(terminal.LoginForm)
-			interactive := selected == 0
+			interactive := len(methods) == 0
 			if interactive && (!hasForm || !a.policy(snapshot).CanPrompt(a.deps.Streams)) {
-				return clierr.Wrap(clierr.Usage, errors.New("select how to log in: --with-token, --oauth or --ssh-key; on a terminal, gt auth login asks"))
+				return clierr.Wrap(clierr.Usage, errors.New(commandName(cmd)+" requires --with-token, --oauth or --ssh-key when it cannot ask on a terminal"))
 			}
 			resolveHost := func(raw string) (string, error) { return settings.ResolveHost(raw, snapshot.Hosts.Hosts) }
 			instance := cmp.Or(a.options.host, a.tokenInstance())
@@ -114,7 +114,7 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 			switch {
 			case oauth:
 				answers.Method = terminal.LoginOAuth
-			case selected == 1 && !withToken:
+			case len(methods) == 1 && !withToken:
 				answers.Method = terminal.LoginSSHKey
 			default:
 				answers.Method = terminal.LoginToken
@@ -179,7 +179,14 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 					return clierr.Wrap(clierr.Usage, errors.New("OAuth authorization requires interaction; use --with-token with --no-input"))
 				}
 				clientID = cmp.Or(clientID, host.OAuthClientID, auth.DefaultClientID)
-				credential, err = auth.OAuthLogin(cmd.Context(), auth.OAuthOptions{Instance: instance, ClientID: clientID, Scopes: scopes, HTTP: a.instanceClient(instance, "", loginHost).HTTP, Authorize: func(_ context.Context, authorizationURL string) error {
+				client := a.instanceClient(instance, "", loginHost)
+				// A browser cannot report an instance that never answers; it would only wait.
+				if _, err := services.ServerVersion(cmd.Context(), client); err != nil {
+					if _, answered := errors.AsType[*transport.APIError](err); !answered {
+						return err
+					}
+				}
+				credential, err = auth.OAuthLogin(cmd.Context(), auth.OAuthOptions{Instance: instance, ClientID: clientID, Scopes: scopes, HTTP: client.HTTP, Authorize: func(_ context.Context, authorizationURL string) error {
 					// On a terminal, openBrowserShowing names the whole URL, which people can copy when
 					// no browser shows up, and the URL is printed again only when opening fails.
 					announced := a.deps.Streams.OutTTY

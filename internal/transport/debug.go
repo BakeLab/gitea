@@ -63,7 +63,7 @@ func failureMessage(req *http.Request, resp *http.Response) string {
 		io.Closer
 	}{io.MultiReader(bytes.NewReader(data), resp.Body), resp.Body}
 	token := strings.TrimPrefix(req.Header.Get("Authorization"), "token ")
-	return newAPIError(req.Context(), resp.StatusCode, req.Method, req.URL.Path, token, data).Message
+	return newAPIError(req.Context(), resp.StatusCode, req.Method, req.URL.Path, resp.Header.Get("Content-Type"), token, data).Message
 }
 
 type secrets struct{}

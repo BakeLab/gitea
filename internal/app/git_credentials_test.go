@@ -40,7 +40,7 @@ func TestSetupGitRequiresAnAccountOfTheInstance(t *testing.T) {
 	git := &fakeGit{}
 	deps.Git = git
 	err := Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", instance, "--local", "--no-input"})
-	require.EqualError(t, err, "setup-git --local must run inside a Git clone")
+	require.EqualError(t, err, "setup-git --local requires a Git clone")
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.Equal(t, []string{"rev-parse --is-inside-work-tree"}, git.calls)
 
@@ -88,6 +88,22 @@ func TestSetupGitConfiguresTheInstanceTLSSettings(t *testing.T) {
 	values, err = deps.Git.Output(context.Background(), "", false, "config", "--global", "--get-regexp", `^http\.`)
 	require.NoError(t, err)
 	require.Equal(t, prefix+"sslcert /certs/client.pem\n"+prefix+"sslkey /certs/client.key", values, "the stale sslVerify goes and the environment's is never saved")
+
+	require.NoError(t, Execute(context.Background(), deps, []string{"config", "set", "client_cert", "", "--host", instance}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", instance, "--no-input"}))
+	_, err = deps.Git.Output(context.Background(), "", false, "config", "--global", "--get-regexp", `^http\.`)
+	require.Error(t, err, "the certificate gt wrote goes with client_cert")
+	_, err = deps.Git.Output(context.Background(), "", false, "config", "--global", "--get-regexp", `^gt\.`)
+	require.Error(t, err, "and so does the record of it")
+
+	for _, setting := range [][2]string{{"sslCert", "/mine.pem"}, {"sslKey", "/mine.key"}} {
+		_, err = deps.Git.Output(context.Background(), "", false, "config", "--global", prefix+setting[0], setting[1])
+		require.NoError(t, err)
+	}
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", instance, "--no-input"}))
+	values, err = deps.Git.Output(context.Background(), "", false, "config", "--global", "--get-regexp", `^http\.`)
+	require.NoError(t, err)
+	require.Equal(t, prefix+"sslcert /mine.pem\n"+prefix+"sslkey /mine.key", values, "a certificate gt did not write is kept")
 }
 
 func TestGitCredentialHelperSelectsAccountsAndDoesNotMutateFromGit(t *testing.T) {

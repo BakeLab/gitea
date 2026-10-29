@@ -5,6 +5,7 @@ package transport
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -74,24 +75,29 @@ func TestAPIErrorIncludesOnlySanitizedServerMessage(t *testing.T) {
 	const merge = "Gitea API returned HTTP %d for POST /api/v1/repos/a/b/pulls/1/merge"
 	long := strings.Repeat("x", 400)
 	for _, tc := range []struct {
-		name, body, want string
-		status           int
+		name, body, want, contentType string
+		status                        int
 	}{
-		{"merge refusal", `{"message":"Please try again later","url":"https://leak.example/?key=abc"}`, fmt.Sprintf(merge, 405) + ": Please try again later", 405},
-		{"token scope", `{"message":"token does not have at least one of required scope(s): [read:user]"}`, "permission denied by the Gitea instance: token does not have at least one of required scope(s): [read:user]", 403},
-		{"control characters", "{\"message\":\"bad\\u001b[31m\\nnews\\u202e\"}", fmt.Sprintf(merge, 422) + ": bad [31m news", 422},
-		{"capped", `{"message":"` + long + `"}`, fmt.Sprintf(merge, 500) + ": " + long[:300] + "...", 500},
-		{"not json", `<html>key=abc</html>`, fmt.Sprintf(merge, 500), 500},
-		{"other fields", `{"errors":["abc"]}`, fmt.Sprintf(merge, 500), 500},
-		{"oversized body", `{"message":"` + strings.Repeat("y", 5000) + `"}`, fmt.Sprintf(merge, 500), 500},
-		{"token echo", `{"message":"bad token secret"}`, fmt.Sprintf(merge, 400), 400},
-		{"authentication", `{"message":"user alice not found"}`, "authentication rejected; run gt auth login", 401},
-		{"bare not found", `{"message":"not found","url":"https://leak.example/?key=abc"}`, "not found (HTTP 404 POST /api/v1/repos/a/b/pulls/1/merge)", 404},
-		{"described not found", `{"message":"label does not exist [label_id: 9]"}`, "not found (HTTP 404 POST /api/v1/repos/a/b/pulls/1/merge): label does not exist [label_id: 9]", 404},
+		{"merge refusal", `{"message":"Please try again later","url":"https://leak.example/?key=abc"}`, fmt.Sprintf(merge, 405) + ": Please try again later", "", 405},
+		{"token scope", `{"message":"token does not have at least one of required scope(s): [read:user]"}`, "permission denied by the Gitea instance: token does not have at least one of required scope(s): [read:user]", "", 403},
+		{"control characters", "{\"message\":\"bad\\u001b[31m\\nnews\\u202e\"}", fmt.Sprintf(merge, 422) + ": bad [31m news", "", 422},
+		{"capped", `{"message":"` + long + `"}`, fmt.Sprintf(merge, 500) + ": " + long[:300] + "...", "", 500},
+		{"not json", `<html>key=abc</html>`, fmt.Sprintf(merge, 500), "", 500},
+		{"other fields", `{"errors":["abc"]}`, fmt.Sprintf(merge, 500), "", 500},
+		{"oversized body", `{"message":"` + strings.Repeat("y", 5000) + `"}`, fmt.Sprintf(merge, 500), "", 500},
+		{"token echo", `{"message":"bad token secret"}`, fmt.Sprintf(merge, 400), "", 400},
+		{"authentication", `{"message":"user alice not found"}`, "authentication rejected; run gt auth login", "", 401},
+		{"bare not found", `{"message":"not found","url":"https://leak.example/?key=abc"}`, "not found (HTTP 404 POST /api/v1/repos/a/b/pulls/1/merge)", "", 404},
+		{"described not found", `{"message":"label does not exist [label_id: 9]"}`, "not found (HTTP 404 POST /api/v1/repos/a/b/pulls/1/merge): label does not exist [label_id: 9]", "", 404},
+		{"plain text", "invalid package name\n", fmt.Sprintf(merge, 400) + ": invalid package name", "text/plain;charset=utf-8", 400},
+		{"plain text token echo", "bad token secret", fmt.Sprintf(merge, 400), "text/plain", 400},
+		{"plain text capped", long, fmt.Sprintf(merge, 400) + ": " + long[:300] + "...", "text/plain", 400},
+		{"oversized plain text", strings.Repeat("y", 5000), fmt.Sprintf(merge, 400), "text/plain", 400},
+		{"html", `<html>key=abc</html>`, fmt.Sprintf(merge, 502), "text/html", 502},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Type", cmp.Or(tc.contentType, "application/json"))
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(tc.body))
 			}))

@@ -98,7 +98,7 @@ func (a *application) positionalAccount(args []string) error {
 func (a *application) chooseAccount(cmd *cobra.Command, instance string, names []string, active string) (string, error) {
 	chooser, ok := a.chooser()
 	if !ok {
-		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("name the account: gt auth switch <user> (accounts on %s: %s)", instance, strings.Join(names, ", ")))
+		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("%s requires a user argument (accounts on %s: %s)", commandName(cmd), instance, strings.Join(names, ", ")))
 	}
 	choices := make([]terminal.Choice, len(names))
 	for i, name := range names {
@@ -133,7 +133,7 @@ accounts, or is unset.`,
 			case len(t.host.Users) == 0:
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("not logged in to %s", t.Host))
 			case t.User == "":
-				return clierr.Wrap(clierr.Usage, fmt.Errorf("no active account on %s; name the account: gt auth logout <user> (accounts: %s)", t.Host, accountNames(t.host.Users)))
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("no active account on %s; %s requires a user argument (accounts: %s)", t.Host, commandName(cmd), accountNames(t.host.Users)))
 			case !exists:
 				return clierr.Wrap(clierr.Usage, t.accountError(t.User))
 			}
@@ -189,7 +189,7 @@ replaced by logging in again.`,
 				return err
 			}
 			if _, err := manager.Refresh(cmd.Context(), t.Host, t.User, a.instanceClient(t.Host, "", t.host).HTTP, true, a.deps.Now()); err != nil {
-				return clierr.Wrap(clierr.Authentication, err)
+				return err
 			}
 			a.done(cmd, "Refreshed the OAuth token of %s on %s", t.User, t.Host)
 			return nil
@@ -237,7 +237,7 @@ $ gt auth token --host gitea.com --user alice`,
 				case !exists:
 					return clierr.Wrap(clierr.Authentication, t.accountError(t.User))
 				case account.Tokenless():
-					return fmt.Errorf("%s on %s signs requests with an SSH key and has no token", t.User, t.Host)
+					return clierr.Wrap(clierr.Authentication, fmt.Errorf("%s on %s signs requests with an SSH key and has no token", t.User, t.Host))
 				}
 				manager, err := auth.NewManager(a.deps.Settings, a.deps.Credentials)
 				if err != nil {

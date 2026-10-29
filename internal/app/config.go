@@ -86,7 +86,7 @@ func (a *application) effectivePreferences(snapshot settings.Snapshot) (settings
 	}
 	if value := strings.TrimSpace(a.deps.Getenv("GITEA_CLI_HTTP_TIMEOUT")); value != "" {
 		if _, err := settings.ParseTimeout(value); err != nil {
-			return preferences, nil, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid GITEA_CLI_HTTP_TIMEOUT: %w", err))
+			return preferences, nil, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid GITEA_CLI_HTTP_TIMEOUT %q: %w", value, err))
 		}
 		preferences.HTTPTimeout = value
 		sources["http_timeout"] = "GITEA_CLI_HTTP_TIMEOUT"
@@ -343,12 +343,12 @@ Preferences:
                   comma-separated instance URLs, or HOST/OWNER such as
                   https://gitea.com/gitea, that extensions may come from; empty allows any
 
-Instance settings: user (active account), ssh_host, insecure, git_protocol, oauth_client_id,
-and headers: "Name: value" adds a header to every API request to the instance, such as an
-access proxy needs, "Name:" removes it, and a value of $NAME or ${NAME} is read from that
-environment variable when sent; client_cert and client_key name the PEM files of a TLS client
-certificate for an instance that requires one; without client_key, the key is read from
-client_cert.
+Instance settings: ssh_host, insecure, git_protocol, oauth_client_id, and headers: "Name: value"
+adds a header to every API request to the instance, such as an access proxy needs, "Name:"
+removes it, and a value of $NAME or ${NAME} is read from that environment variable when sent;
+client_cert and client_key name the PEM files of a TLS client certificate for an instance that
+requires one; without client_key, the key is read from client_cert, and clearing client_cert
+clears client_key. The active account (user) changes with gt auth switch.
 Account settings: ssh_key, ssh_agent, ssh_certificate_principal, ssh_key_fingerprint. As in Git,
 GIT_SSH_COMMAND in the environment takes precedence over ssh_key.`,
 		Example: `$ gt config set editor "code --wait"
@@ -594,9 +594,15 @@ func (a *application) setInstanceSetting(key, value string) (string, error) {
 			if err != nil {
 				return err
 			}
-			if key == "client_cert" {
+			switch {
+			case key == "client_cert":
 				host.ClientCert = path
-			} else {
+				if path == "" {
+					host.ClientKey = ""
+				}
+			case path != "" && host.ClientCert == "":
+				return clierr.Wrap(clierr.Usage, errors.New("client_key requires client_cert"))
+			default:
 				host.ClientKey = path
 			}
 		case "headers":
@@ -649,7 +655,7 @@ $ gt alias set il "issue list --assignee @me" --clobber`,
 			err := a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
 				previous = s.Preferences.Aliases[name]
 				if previous != "" && !clobber {
-					return fmt.Errorf("alias %s already expands to %q; replace it with --clobber", name, previous)
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("alias %s already expands to %q; replace it with --clobber", name, previous))
 				}
 				s.Preferences.Aliases[name] = expansion
 				return clierr.Wrap(clierr.Usage, aliases.Check(name, s.Preferences.Aliases, builtins(cmd.Root())))
@@ -672,19 +678,30 @@ $ gt alias set il "issue list --assignee @me" --clobber`,
 	group.AddCommand(set)
 	var all bool
 	remove := &cobra.Command{
-		Use: "delete [<name>...]", Short: "Delete shortcuts", ValidArgsFunction: a.completeAliases,
-		Annotations: textOutput("alias deletion does not return a resource"),
+		Use: "delete {<name>... | --all}", Short: "Delete shortcuts", ValidArgsFunction: a.completeAliases,
+		Annotations: map[string]string{"gt.confirm": "true", "gt.text": "alias deletion does not return a resource"},
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 && !all {
-				return clierr.Wrap(clierr.Usage, errors.New("name the aliases to delete, or pass --all"))
+				return clierr.Wrap(clierr.Usage, errors.New("alias delete requires alias names or --all"))
 			}
 			if len(args) > 0 && all {
 				return clierr.Wrap(clierr.Usage, errors.New("--all cannot be combined with alias names"))
 			}
 			return nil
 		},
-		Example: "$ gt alias delete il\n$ gt alias delete il review\n$ gt alias delete --all",
+		Example: "$ gt alias delete il\n$ gt alias delete il review\n$ gt alias delete --all --yes",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all {
+				s, err := a.settings()
+				if err != nil {
+					return err
+				}
+				if len(s.Preferences.Aliases) > 0 {
+					if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete all aliases?"}); err != nil {
+						return err
+					}
+				}
+			}
 			deleted := map[string]string{}
 			err := a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error {
 				names := args

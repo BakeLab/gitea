@@ -63,7 +63,11 @@ func ExitCode(err error) int {
 	if ok && typed.Code == Interrupted {
 		return Interrupted
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	_, request := errors.AsType[interface {
+		error
+		RequestTimeout()
+	}](err) // a request, not the command, ran out of time
+	if !request && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 		return Canceled
 	}
 	if ok {
