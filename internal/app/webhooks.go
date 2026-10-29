@@ -108,7 +108,7 @@ Signing secrets and authorization headers are never shown.`}
 	group.PersistentFlags().BoolVar(&scope.account, "account", false, "Manage the webhooks of your account")
 	group.PersistentFlags().BoolVar(&scope.global, "global", false, "Manage the system webhooks of the instance (administrators)")
 	_ = group.RegisterFlagCompletionFunc("org", a.completeOrgs())
-	group.AddCommand(a.webhookListCommand(&scope), a.webhookViewCommand(&scope), a.webhookChangeCommand(&scope, true), a.webhookChangeCommand(&scope, false), a.webhookDeleteCommand(&scope))
+	group.AddCommand(a.webhookListCommand(&scope), a.webhookViewCommand(&scope), a.webhookChangeCommand(&scope, true), a.webhookChangeCommand(&scope, false), a.webhookTestCommand(&scope), a.webhookDeleteCommand(&scope))
 	return jsonOutput(group, jsonFields[services.Webhook]())
 }
 
@@ -305,7 +305,7 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 			}
 		}
 		if authSources > 1 {
-			return clierr.Wrap(clierr.Usage, errors.New("choose one authorization header source or --clear-authorization"))
+			return clierr.Wrap(clierr.Usage, errors.New("--authorization-header, --authorization-header-file and --clear-authorization cannot be combined"))
 		}
 		if secretFile == "-" && authorizationFile == "-" {
 			return clierr.Wrap(clierr.Usage, errors.New("stdin can supply only one webhook credential"))
@@ -322,7 +322,7 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 		if create || cmd.Flags().Changed("events") {
 			trimNames(events)
 			if len(events) == 0 || slices.Contains(events, "") {
-				return clierr.Wrap(clierr.Usage, errors.New("--events needs at least one trigger"))
+				return clierr.Wrap(clierr.Usage, errors.New("--events requires at least one trigger"))
 			}
 			opts.Events = &events
 		}
@@ -337,7 +337,7 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 			opts.Config[key] = value
 		}
 		if create && kind == "slack" && config["channel"] == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--type slack needs a channel: --config channel=#name"))
+			return clierr.Wrap(clierr.Usage, errors.New("--type slack requires --config channel=#name"))
 		}
 		if endpoint != "" || cmd.Flags().Changed("url") {
 			if err := validateWebhookURL(endpoint); err != nil {
@@ -441,6 +441,39 @@ $ gt webhook delete 4 --org acme --yes`,
 				return err
 			}
 			return a.deleteConfirmed(cmd, webhookLabel(hook)+" from "+webhookScopeName(service.Scope), func() error { return service.Delete(cmd.Context(), id) })
+		},
+	}
+}
+
+func (a *application) webhookTestCommand(scope *webhookScope) *cobra.Command {
+	return &cobra.Command{
+		Use: "test <id>", Short: "Send a test delivery of a webhook", Args: argsExact(1), ValidArgsFunction: a.completeWebhooks(scope),
+		Long: `Ask Gitea to deliver a test push event for the latest commit of the default branch to a
+repository webhook. Gitea tests only repository webhooks, so --org, --account and --global
+cannot be used. The webhook's settings page shows the delivery and its response.`,
+		Example:     "$ gt webhook test 3\n$ gt webhook test 3 -R acme/site",
+		Annotations: textOutput("webhook test does not return a resource"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := number(args[0])
+			if err != nil {
+				return err
+			}
+			if scopes := setFlags([]string{"--org", "--account", "--global"}, scope.org != "", scope.account, scope.global); len(scopes) > 0 {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("webhook test cannot be combined with %s; Gitea tests only repository webhooks", scopes[0]))
+			}
+			_, service, err := scope.service(a, cmd)
+			if err != nil {
+				return err
+			}
+			hook, err := service.View(cmd.Context(), id)
+			if err != nil {
+				return err
+			}
+			if err := service.Test(cmd.Context(), id); err != nil {
+				return err
+			}
+			a.done(cmd, "Sent a test delivery to %s in %s", webhookLabel(hook), webhookScopeName(service.Scope))
+			return nil
 		},
 	}
 }

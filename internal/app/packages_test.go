@@ -92,7 +92,8 @@ func TestPackagesListViewDeleteLinkAndUpload(t *testing.T) {
 	run("package", "upload", "tool", "2.0.0", file)
 	require.Equal(t, map[string]string{"/api/packages/acme/generic/tool/2.0.0/tool-linux": "binary"}, uploaded)
 	require.Contains(t, requests, "DELETE /api/v1/packages/acme/generic/tool")
-	requireUsageBeforeRequests(t, "name the version to delete, or pass --all", "package", "delete", "generic", "tool")
+	requireUsageBeforeRequests(t, "package delete requires a version or --all", "package", "delete", "generic", "tool")
+	requireUsageBeforeRequests(t, "--all cannot be combined with a version", "package", "delete", "generic", "tool", "1.0.0", "--all")
 }
 
 func TestPackageUploadRefusesExistingFilesAndReportsPartialUploads(t *testing.T) {
@@ -137,6 +138,35 @@ func TestPackageUploadRefusesExistingFilesAndReportsPartialUploads(t *testing.T)
 	require.Empty(t, diagnostics.String())
 }
 
+// Gitea's package registry answers a valid token that cannot write the owner's packages with 401.
+func TestPackageUploadWithoutWriteAccessIsAPermissionError(t *testing.T) {
+	valid := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/user" && valid:
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/packages/acme/generic/tool/1.0.0/files":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("reqPackageAccess"))
+		}
+	}))
+	defer server.Close()
+	file := filepath.Join(t.TempDir(), "tool")
+	require.NoError(t, os.WriteFile(file, []byte("tool"), 0o600))
+	for _, valid = range []bool{true, false} {
+		deps, _, _ := serverDeps(t, server.URL)
+		err := Execute(context.Background(), deps, []string{"package", "upload", "tool", "1.0.0", file, "-R", "acme/tool"})
+		if valid {
+			require.EqualError(t, err, "uploading packages to acme requires write access to its packages and a token with the write:package scope")
+			require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+		} else {
+			require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
+		}
+	}
+}
+
 func TestPackageUploadRefusesAnSSHKeyAccountUpFront(t *testing.T) {
 	keyPath := writeAppTempSSHKey(t, "")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -176,14 +206,17 @@ func TestPackageLinkNamesWhatIsMissing(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	deps, _, _ := serverDeps(t, server.URL)
+	deps, _, diagnostics := serverDeps(t, server.URL)
 	run := func(args ...string) error {
 		return Execute(context.Background(), deps, append(args, "-R", "acme/tool"))
 	}
 	require.NoError(t, run("package", "link", "generic", "tool", "ACME/source"))
 	require.EqualError(t, run("package", "link", "generic", "tool", "missing"), "repository acme/missing not found")
 	require.EqualError(t, run("package", "link", "generic", "other", "source"), "package acme/generic/other not found")
-	require.EqualError(t, run("package", "unlink", "generic", "tool"), "package acme/generic/tool is not linked to a repository")
+	// Unlinking a package without a repository changes nothing, as linking it again does.
+	diagnostics.Reset()
+	require.NoError(t, run("package", "unlink", "generic", "tool"))
+	require.Equal(t, "! generic package tool is not linked to a repository\n", diagnostics.String())
 	err := run("package", "link", "generic", "tool", "bob/source")
 	require.EqualError(t, err, `a package of acme links only to a repository of acme; got "bob/source"`)
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
@@ -209,12 +242,13 @@ func TestPackageLinkOfALinkedPackage(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	deps, _, _ := serverDeps(t, server.URL)
+	deps, _, diagnostics := serverDeps(t, server.URL)
 	run := func(args ...string) error {
 		return Execute(context.Background(), deps, append(args, "-R", "acme/tool"))
 	}
 	// Linking it again to its repository changes nothing.
 	require.NoError(t, run("package", "link", "generic", "tool", "source"))
+	require.Equal(t, "! generic package tool is already linked to acme/source\n", diagnostics.String())
 	require.EqualError(t, run("package", "link", "generic", "tool", "other"), "package acme/generic/tool is already linked to acme/source; unlink it first")
 }
 

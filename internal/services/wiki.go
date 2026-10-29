@@ -172,9 +172,18 @@ func (s Wiki) disabled(ctx context.Context, err error) error {
 	return nil
 }
 
-// View retrieves and decodes a wiki page.
+// View retrieves and decodes a wiki page, also by the page path of its URL.
 func (s Wiki) View(ctx context.Context, name string) (WikiPage, error) {
-	item, err := s.lookup(ctx, name)
+	return s.checked(ctx, name, true)
+}
+
+// Find retrieves and decodes the wiki page titled name, for a change to it.
+func (s Wiki) Find(ctx context.Context, name string) (WikiPage, error) {
+	return s.checked(ctx, name, false)
+}
+
+func (s Wiki) checked(ctx context.Context, name string, slug bool) (WikiPage, error) {
+	item, err := s.lookup(ctx, name, slug)
 	if err := s.disabled(ctx, err); err != nil {
 		return WikiPage{}, err
 	}
@@ -191,25 +200,30 @@ func wikiPath(title string) string {
 	return title + ".-"
 }
 
-// atPage calls op with the path of the page titled name and, when there is no such page, with
-// name itself as the path, such as the Getting-Started of a page URL.
-func atPage[T any](name string, op func(path string) (T, error)) (T, error) {
-	result, err := op(wikiPath(name))
-	if IsNotFound(err) && wikiPath(name) != name {
-		return op(name)
-	}
-	return result, err
-}
-
-// lookup is View without the check for a disabled wiki.
-func (s Wiki) lookup(ctx context.Context, name string) (WikiPage, error) {
+// lookup retrieves the page titled name, without the check for a disabled wiki. When there is
+// none, Gitea reads name itself as a page path, such as the Getting-Started of a page URL that
+// names the page Getting Started. slug accepts that page; otherwise the error names it, since
+// name may be the title of a page that is gone and a change must not reach another page.
+func (s Wiki) lookup(ctx context.Context, name string, slug bool) (WikiPage, error) {
 	name = strings.TrimSpace(name)
-	item, err := atPage(name, func(path string) (WikiPage, error) {
+	get := func(path string) (WikiPage, error) {
 		return s.page(ctx, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiPage, *gitea.Response, error) {
 			return c.Wiki.GetPage(ctx, owner, repo, path)
 		})
-	})
-	return item, Classify(err, "wiki page", strconv.Quote(name), s.Repository)
+	}
+	item, err := get(wikiPath(name))
+	err = Classify(err, "wiki page", strconv.Quote(name), s.Repository)
+	if !IsNotFound(err) || wikiPath(name) == name {
+		return item, err
+	}
+	other, otherErr := get(name)
+	switch {
+	case otherErr != nil || other.Title != strings.ReplaceAll(name, "-", " "):
+		return item, err
+	case slug:
+		return other, nil
+	}
+	return item, fmt.Errorf("%w; did you mean %q?", err, other.Title)
 }
 
 func wikiOptions(opts WikiOptions) gitea.CreateWikiPageOptions {
@@ -233,7 +247,7 @@ func (s Wiki) Create(ctx context.Context, opts WikiOptions) (WikiPage, error) {
 // names, so both are checked first.
 func (s Wiki) Edit(ctx context.Context, name string, opts WikiOptions) (WikiPage, bool, error) {
 	name, opts.Title = strings.TrimSpace(name), strings.TrimSpace(opts.Title)
-	current, err := s.View(ctx, name)
+	current, err := s.Find(ctx, name)
 	if err != nil {
 		return WikiPage{}, false, err
 	}
@@ -242,7 +256,7 @@ func (s Wiki) Edit(ctx context.Context, name string, opts WikiOptions) (WikiPage
 		opts.Title = current.Title
 	}
 	if renamed {
-		existing, err := s.lookup(ctx, opts.Title)
+		existing, err := s.lookup(ctx, opts.Title, false)
 		if err == nil && existing.Title != current.Title {
 			return WikiPage{}, false, &ConflictError{Reason: ReasonExists, Kind: "wiki page", Key: strconv.Quote(opts.Title), Scope: s.Repository}
 		}
@@ -256,24 +270,22 @@ func (s Wiki) Edit(ctx context.Context, name string, opts WikiOptions) (WikiPage
 	return item, renamed, Classify(err, "wiki page", strconv.Quote(name), s.Repository)
 }
 
-// Delete removes a named wiki page.
-func (s Wiki) Delete(ctx context.Context, name string) error {
-	name = strings.TrimSpace(name)
-	_, err := atPage(name, func(path string) (struct{}, error) {
-		return struct{}{}, repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
-			return c.Wiki.DeletePage(ctx, owner, repo, path)
-		})
+// Delete removes the wiki page titled title, as Find returns it.
+func (s Wiki) Delete(ctx context.Context, title string) error {
+	title = strings.TrimSpace(title)
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+		return c.Wiki.DeletePage(ctx, owner, repo, wikiPath(title))
 	})
 	if err := s.disabled(ctx, err); err != nil {
 		return err
 	}
 	// Gitea fails with a server error to delete from a wiki that was never created.
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status >= http.StatusInternalServerError {
-		if _, lookupErr := s.lookup(ctx, name); IsNotFound(lookupErr) {
+		if _, lookupErr := s.lookup(ctx, title, false); IsNotFound(lookupErr) {
 			return lookupErr
 		}
 	}
-	return Classify(err, "wiki page", strconv.Quote(name), s.Repository)
+	return Classify(err, "wiki page", strconv.Quote(title), s.Repository)
 }
 
 // wikiRevisionPageSize is Gitea's default number of wiki commits per page ([git] COMMITS_RANGE_SIZE).
@@ -282,11 +294,18 @@ const wikiRevisionPageSize = 50
 // Revisions returns one server-paginated page of wiki commits and the total the server counted.
 func (s Wiki) Revisions(ctx context.Context, name string, page int) (Page[WikiRevision], error) {
 	name = strings.TrimSpace(name)
-	revisions, err := atPage(name, func(path string) (*gitea.WikiCommitList, error) {
+	get := func(title string) (*gitea.WikiCommitList, error) {
 		return repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.WikiCommitList, *gitea.Response, error) {
-			return c.Wiki.GetPageRevisions(ctx, owner, repo, path, gitea.ListWikiPageRevisionsOptions{Page: page})
+			return c.Wiki.GetPageRevisions(ctx, owner, repo, wikiPath(title), gitea.ListWikiPageRevisionsOptions{Page: page})
 		})
-	})
+	}
+	revisions, err := get(name)
+	if IsNotFound(err) && wikiPath(name) != name {
+		// The revisions do not name their page, so the page that a page path names is looked up.
+		if item, lookupErr := s.lookup(ctx, name, true); lookupErr == nil && item.Title != name {
+			revisions, err = get(item.Title)
+		}
+	}
 	if err := s.disabled(ctx, err); err != nil {
 		return Page[WikiRevision]{}, err
 	}

@@ -75,6 +75,11 @@ func TestBranchCreateAndProtectPayloads(t *testing.T) {
 
 func TestBranchCreateFromATagOrCommitSendsOldRefName(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			assert.Equal(t, "/api/v1/repos/owner/repo/commits v1.0.0", r.URL.Path+" "+r.URL.Query().Get("sha"))
+			_, _ = w.Write([]byte(`[{"sha":"abc"}]`))
+			return
+		}
 		assert.Equal(t, http.MethodPost+" /api/v1/repos/owner/repo/branches", r.Method+" "+r.URL.Path)
 		assert.Equal(t, map[string]any{"new_branch_name": "hotfix", "old_branch_name": "", "old_ref_name": "v1.0.0"}, requestJSON(t, r))
 		w.WriteHeader(http.StatusCreated)
@@ -174,13 +179,58 @@ func TestBranchProtectNamesUnknownPushers(t *testing.T) {
 	require.EqualError(t, err, `team "nosuchteam" not found`)
 }
 
-func TestBranchCreateNamesTheProtectionThatRefusesIt(t *testing.T) {
-	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"message":"PushRejected Error: exit status 1 - remote: error: Not allowed to push to protected branch rel/one To /data/acme/project.git"}`))
+func TestBranchCreateExplainsARefusal(t *testing.T) {
+	for _, tc := range []struct{ name, message, want string }{
+		{"administrator", `PushRejected Error: exit status 1 - remote: error: Not allowed to push to protected branch rel/one`, "a protection rule of acme/project refuses to create branch rel/one"},
+		// Gitea tells only administrators why it refused.
+		{"not administrator", "", "Gitea refused to create branch rel/one in acme/project without saying why (HTTP 500); a protection rule matching the name, or a pre-receive hook, may forbid it"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method + " " + r.URL.Path {
+				case "GET /api/v1/repos/acme/project/commits":
+					_, _ = w.Write([]byte(`[{"sha":"abc"}]`))
+				default:
+					w.WriteHeader(http.StatusInternalServerError)
+					_ = json.NewEncoder(w).Encode(map[string]string{"message": tc.message})
+				}
+			}))
+			for _, source := range []string{"", "main"} {
+				_, err := (Branches{Client: client}).Create(context.Background(), "acme/project", "rel/one", source)
+				require.EqualError(t, err, tc.want, source)
+			}
+		})
+	}
+}
+
+func TestBranchCreateNamesAnUnknownSourceBeforeCreating(t *testing.T) {
+	var requests []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"object does not exist [id: nope, rel_path: ]"}`))
+	}))
+	_, err := (Branches{Client: client}).Create(context.Background(), "acme/project", "hotfix", "nope")
+	require.EqualError(t, err, `branch, tag or commit "nope" not found in acme/project`)
+	require.Equal(t, []string{"GET /api/v1/repos/acme/project/commits"}, requests)
+}
+
+func TestBranchCreateInAnEmptyRepositoryAsksForACommit(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(map[string]int{http.MethodGet: http.StatusConflict, http.MethodPost: http.StatusNotFound}[r.Method])
+		_, _ = w.Write([]byte(`{"message":"Git Repository is empty."}`))
 	}))
 	for _, source := range []string{"", "main"} {
-		_, err := (Branches{Client: client}).Create(context.Background(), "acme/project", "rel/one", source)
-		require.EqualError(t, err, "a protection rule of acme/project refuses to create branch rel/one", source)
+		_, err := (Branches{Client: client}).Create(context.Background(), "acme/project", "hotfix", source)
+		require.EqualError(t, err, "acme/project is empty; push a commit first", source)
 	}
+}
+
+func TestBranchCreateNamedLikeATagNamesTheTag(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"message":"The branch with the same tag already exists."}`))
+	}))
+	_, err := (Branches{Client: client}).Create(context.Background(), "acme/project", "v6.2", "")
+	require.EqualError(t, err, `tag "v6.2" already exists in acme/project; choose another branch name`)
 }

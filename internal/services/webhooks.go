@@ -331,3 +331,18 @@ func (s Webhooks) Delete(ctx context.Context, id int64) error {
 	})
 	return s.itemError(ctx, err, id)
 }
+
+// Test asks Gitea to deliver a push event of the default branch's latest commit to a repository
+// webhook. Gitea tests no other webhooks.
+func (s Webhooks) Test(ctx context.Context, id int64) error {
+	if s.Scope.Global || s.Scope.Account || s.Scope.Organization != "" {
+		return &CapabilityError{Feature: "testing webhooks outside a repository", Reason: "Gitea tests only repository webhooks"}
+	}
+	err := repoDo(ctx, s.Client, s.Scope.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
+		return c.Hooks.TestWebhook(ctx, owner, name, id, "")
+	})
+	if empty := emptyRepository(err, s.Scope.Repository, "before testing its webhooks"); empty != nil {
+		return empty
+	}
+	return s.itemError(ctx, err, id)
+}

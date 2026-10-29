@@ -183,6 +183,15 @@ func TestWebhookEditKeepsEventGroupsNarrow(t *testing.T) {
 	require.Equal(t, []string{"pull_request", "pull_request_assign", "pull_request_comment", "pull_request_label", "pull_request_milestone", "pull_request_review", "pull_request_review_request", "pull_request_sync"}, narrowedEvents(everything))
 }
 
+func TestWebhookTestInAnEmptyRepositoryAsksForACommit(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"repository is empty"}`))
+	}))
+	err := Webhooks{Client: client, Scope: WebhookScope{Repository: "owner/repo"}}.Test(context.Background(), 15)
+	require.EqualError(t, err, "owner/repo is empty; push a commit before testing its webhooks")
+}
+
 func TestWebhookNotFoundNamesTheSelectedScope(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

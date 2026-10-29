@@ -22,7 +22,7 @@ func TestWebhookCreateValidatesEventsAndTypes(t *testing.T) {
 	}{
 		{[]string{"--events", "pushh"}, "--events must be create, delete, fork, push, issues"},
 		{[]string{"--type", "slackk"}, "--type must be gitea, gogs, slack"},
-		{[]string{"--type", "slack"}, "--type slack needs a channel: --config channel=#name"},
+		{[]string{"--type", "slack"}, "--type slack requires --config channel=#name"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			requireUsageBeforeRequests(t, tc.want, append([]string{"webhook", "create", "https://hooks.example.com/ci"}, tc.args...)...)
@@ -43,6 +43,32 @@ func TestWebhookListShowsDeliveryURLsAndSortedEvents(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"webhook", "list"}))
 	require.Equal(t, "3\tgitea\tyes\thttps://ci.example.com/hook?…\tissue_label,issues,push\n4\tslack\tno\thttps://hooks.slack.com/…\trelease\n", out.String())
 	require.NotContains(t, out.String(), "private")
+}
+
+func TestWebhookTestDeliversToARepositoryWebhook(t *testing.T) {
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/hooks/3":
+			_, _ = w.Write([]byte(`{"id":3,"type":"gitea","active":true,"events":["push"],"config":{"url":"https://ci.example.com/hook?token=private"}}`))
+		case "POST /api/v1/repos/alice/project/hooks/3/tests":
+			w.WriteHeader(http.StatusNoContent)
+		case "GET /api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	deps, out, diagnostics := repoTTYDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"webhook", "test", "3", "-R", "alice/project"}))
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/hooks/3", "POST /api/v1/repos/alice/project/hooks/3/tests"}, requests)
+	require.Empty(t, out.String())
+	require.Equal(t, "✓ Sent a test delivery to webhook 3 (https://ci.example.com/hook?…) in alice/project\n", diagnostics.String())
+	err := Execute(context.Background(), deps, []string{"webhook", "test", "4", "-R", "alice/project"})
+	require.EqualError(t, err, "webhook 4 not found in alice/project")
+	requireUsageBeforeRequests(t, "webhook test cannot be combined with --org; Gitea tests only repository webhooks", "webhook", "test", "3", "--org", "acme")
 }
 
 func TestWebhookEventsCollapseCompleteGroups(t *testing.T) {

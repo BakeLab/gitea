@@ -102,30 +102,47 @@ func (s Branches) RequireAll(ctx context.Context, repo string, branches []string
 
 // Create creates a branch from source, a branch, tag or commit, or from the default branch.
 func (s Branches) Create(ctx context.Context, repo, branch, source string) (Branch, error) {
-	// An existing branch is refused with HTTP 409 "The branch already exists", and one that a
-	// protection rule covers with a 500 that carries Git's output; a 404 can be the repository's.
-	exists := func(err error) error {
-		if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusInternalServerError && strings.Contains(apiErr.Message, "protected branch") {
-			return &RefusedError{Text: fmt.Sprintf("a protection rule of %s refuses to create branch %s", repo, branch), Err: err}
+	// Gitea answers an unknown source with a 500 that tells only administrators why.
+	if source != "" {
+		if err := requireRef(ctx, s.Client, repo, source, "branch, tag or commit"); err != nil {
+			return Branch{}, err
 		}
-		if IsNotFound(err) {
-			if repoErr := missingRepository(ctx, s.Client, repo); repoErr != nil {
-				return repoErr
-			}
-		}
-		if conflict, ok := errors.AsType[*ConflictError](Classify(err, "branch", strconv.Quote(branch), repo)); ok {
-			return conflict
-		}
-		return err
 	}
 	item, err := repoConvert(ctx, s.Client, repo, branchFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Branch, *gitea.Response, error) {
 		return c.Repositories.CreateBranch(ctx, owner, name, gitea.CreateBranchOption{BranchName: branch, OldRefName: source})
 	})
-	// Gitea answers an unknown source with a 500 instead of a 404.
-	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && source != "" && apiErr.Status == http.StatusInternalServerError && strings.Contains(apiErr.Message, "object does not exist") {
-		return Branch{}, &NotFoundError{Kind: "branch, tag or commit", Key: strconv.Quote(source), Scope: repo, Err: err}
+	// An existing branch is refused with HTTP 409 "The branch already exists", and one that a
+	// protection rule covers with a 500; a 404 can be the repository's.
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusInternalServerError {
+		return item, refusedBranch(repo, branch, apiErr)
 	}
-	return item, exists(err)
+	if empty := emptyRepository(err, repo, "first"); empty != nil {
+		return item, empty
+	}
+	if IsNotFound(err) {
+		if repoErr := missingRepository(ctx, s.Client, repo); repoErr != nil {
+			return item, repoErr
+		}
+	}
+	if conflict, ok := errors.AsType[*ConflictError](Classify(err, "branch", strconv.Quote(branch), repo)); ok {
+		if apiErr, _ := errors.AsType[*transport.APIError](err); strings.Contains(strings.ToLower(apiErr.Message), "same tag") {
+			conflict.Kind, conflict.Hint = "tag", "choose another branch name"
+		}
+		return item, conflict
+	}
+	return item, err
+}
+
+// refusedBranch explains the HTTP 500 that refused to create branch. Gitea shows the Git output
+// naming a protected branch only to administrators.
+func refusedBranch(repo, branch string, apiErr *transport.APIError) error {
+	if strings.Contains(apiErr.Message, "protected branch") {
+		return &RefusedError{Text: fmt.Sprintf("a protection rule of %s refuses to create branch %s", repo, branch), Err: apiErr}
+	}
+	if apiErr.Message != "" {
+		return apiErr
+	}
+	return &RefusedError{Text: fmt.Sprintf("Gitea refused to create branch %s in %s without saying why (HTTP 500); a protection rule matching the name, or a pre-receive hook, may forbid it", branch, repo), Err: apiErr}
 }
 
 // Rename renames a remote branch.
@@ -258,7 +275,7 @@ func (s Branches) EditProtection(ctx context.Context, repo string, rule Protecti
 	}
 	if changes.StatusChecks {
 		check := len(rule.StatusChecks) > 0
-		option.EnableStatusCheck, option.StatusCheckContexts = &check, rule.StatusChecks
+		option.EnableStatusCheck, option.StatusCheckContexts = &check, append([]string{}, rule.StatusChecks...)
 	}
 	if changes.BlockOnRejected {
 		option.BlockOnRejectedReviews = &rule.BlockOnRejected

@@ -172,6 +172,10 @@ func TestWikiAddressesPagesByTheirGiteaPath(t *testing.T) {
 	var paths []string
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.Method+" "+r.URL.EscapedPath())
+		if r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_wiki":true}`))
+			return
+		}
 		// Gitea reads Getting-Started as the title Getting Started, but Getting-Started.- as the
 		// title Getting-Started, which no page has.
 		title := map[string]string{"A B-C.-": "A B-C", "notes.md.-": "notes.md", "Plain page": "Plain page", "Getting-Started": "Getting Started", "Getting Started": "Getting Started"}[path.Base(r.URL.Path)]
@@ -193,7 +197,7 @@ func TestWikiAddressesPagesByTheirGiteaPath(t *testing.T) {
 		require.NoError(t, err, name)
 	}
 	_, _, err := service.Edit(ctx, "Getting-Started", WikiOptions{Body: "body"})
-	require.NoError(t, err)
+	require.EqualError(t, err, `wiki page "Getting-Started" not found in alice/project; did you mean "Getting Started"?`)
 	require.NoError(t, service.Delete(ctx, "A B-C"))
 	_, err = service.Revisions(ctx, "A B-C", 1)
 	require.NoError(t, err)
@@ -201,7 +205,7 @@ func TestWikiAddressesPagesByTheirGiteaPath(t *testing.T) {
 	require.Equal(t, []string{
 		"GET " + page + "A%20B-C.-", "GET " + page + "notes.md.-", "GET " + page + "Plain%20page",
 		"GET " + page + "Getting-Started.-", "GET " + page + "Getting-Started",
-		"GET " + page + "Getting-Started.-", "GET " + page + "Getting-Started", "PATCH " + page + "Getting%20Started",
+		"GET " + page + "Getting-Started.-", "GET " + page + "Getting-Started", "GET /api/v1/repos/alice/project",
 		"DELETE " + page + "A%20B-C.-",
 		"GET /api/v1/repos/alice/project/wiki/revisions/A%20B-C.-",
 	}, paths)
@@ -251,6 +255,54 @@ func TestWikiDeleteNamesAMissingPageOfAWikiNeverCreated(t *testing.T) {
 	}))
 	err := (Wiki{Client: client, Repository: "alice/project"}).Delete(context.Background(), "Home")
 	require.EqualError(t, err, `wiki page "Home" not found in alice/project`)
+}
+
+func TestWikiChangesReachOnlyThePageTheyName(t *testing.T) {
+	pages := map[string]bool{"Foo-Bar": true, "Foo Bar": true}
+	var changed []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_wiki":true}`))
+			return
+		}
+		// Gitea reads a path without the ".-" mark as a title with its spaces written as "-".
+		title, marked := strings.CutSuffix(path.Base(r.URL.Path), ".-")
+		if !marked {
+			title = strings.ReplaceAll(title, "-", " ")
+		}
+		switch {
+		case !pages[title]:
+			http.NotFound(w, r)
+		case r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]string{"title": title})
+		default:
+			changed = append(changed, r.Method+" "+title)
+			if r.Method == http.MethodDelete {
+				delete(pages, title)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"title": title})
+		}
+	}))
+	service := Wiki{Client: client, Repository: "alice/project"}
+	ctx := context.Background()
+	page, err := service.Find(ctx, "Foo-Bar")
+	require.NoError(t, err)
+	require.NoError(t, service.Delete(ctx, page.Title))
+	const missing = `wiki page "Foo-Bar" not found in alice/project; did you mean "Foo Bar"?`
+	_, err = service.Find(ctx, "Foo-Bar")
+	require.EqualError(t, err, missing)
+	require.True(t, IsNotFound(err))
+	_, _, err = service.Edit(ctx, "Foo-Bar", WikiOptions{Body: "body"})
+	require.EqualError(t, err, missing)
+	require.Error(t, service.Delete(ctx, "Foo-Bar"))
+	require.Equal(t, []string{"DELETE Foo-Bar"}, changed)
+	require.True(t, pages["Foo Bar"])
+	// Reading still follows the page path of a page URL.
+	page, err = service.View(ctx, "Foo-Bar")
+	require.NoError(t, err)
+	require.Equal(t, "Foo Bar", page.Title)
 }
 
 func TestWikiAddressesTitlesWithReservedCharacters(t *testing.T) {

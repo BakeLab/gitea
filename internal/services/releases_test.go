@@ -203,7 +203,7 @@ func TestReleaseCreateAndEditPayloads(t *testing.T) {
 	tag, title, body, yes := "v1", "Release one", "Notes", true
 	_, err := service.Create(context.Background(), ReleaseOptions{Tag: &tag, Title: &title, Body: &body, Prerelease: &yes})
 	require.NoError(t, err)
-	_, err = service.Edit(context.Background(), 7, ReleaseOptions{Title: &title, Draft: &yes})
+	_, err = service.Edit(context.Background(), Release{ID: 7}, ReleaseOptions{Title: &title, Draft: &yes})
 	require.NoError(t, err)
 	require.Len(t, payloads, 2)
 	require.Equal(t, "v1", payloads[0]["tag_name"])
@@ -316,6 +316,23 @@ func TestReleaseLookupsTellAMissingRepositoryFromAMissingRelease(t *testing.T) {
 	require.Equal(t, []string{"/api/v1/repos/alice/project/releases/tags/v9", "/api/v1/repos/alice/project"}, requests)
 }
 
+func TestReleaseTargetInAnEmptyRepositoryAsksForACommit(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"message":"Git Repository is empty."}`))
+	}))
+	tag, yes, target := "v1", true, "main"
+	_, err := Releases{Client: client, Repository: "alice/project"}.Create(context.Background(), ReleaseOptions{Tag: &tag, Title: &tag, Draft: &yes, Target: &target})
+	require.EqualError(t, err, "alice/project is empty; push a commit first")
+
+	client = newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"message":"repo is empty"}`))
+	}))
+	_, err = Releases{Client: client, Repository: "alice/project"}.Create(context.Background(), ReleaseOptions{Tag: &tag, Title: &tag})
+	require.EqualError(t, err, "alice/project is empty; push a commit first")
+}
+
 func TestReleaseDraftsRequireAnExistingTarget(t *testing.T) {
 	var requests []string
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -326,11 +343,11 @@ func TestReleaseDraftsRequireAnExistingTarget(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"sha":"abc"}]`))
 		case r.URL.Path == "/api/v1/repos/alice/project/commits":
 			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"message":"object does not exist [id: nosuch, rel_path: ]"}`))
+			_, _ = w.Write([]byte(`{"message":"object does not exist [id: ` + r.URL.Query().Get("sha") + `, rel_path: ]"}`))
 		case r.Method == http.MethodPatch:
-			// Publishing a draft whose target does not exist.
+			// Publishing a draft whose target does not exist; Gitea explains it only to administrators.
 			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"message":"object does not exist [id: gone, rel_path: ]"}`))
+			_, _ = w.Write([]byte(`{"message":""}`))
 		default:
 			_, _ = w.Write([]byte(`{"id":7,"tag_name":"v1","name":"v1","draft":true}`))
 		}
@@ -342,9 +359,43 @@ func TestReleaseDraftsRequireAnExistingTarget(t *testing.T) {
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/commits"}, requests, "no draft is created")
 	_, err = service.Create(context.Background(), ReleaseOptions{Tag: &tag, Title: &tag, Draft: &yes, Target: &branch})
 	require.NoError(t, err)
-	_, err = service.Edit(context.Background(), 7, ReleaseOptions{Target: &missing})
+	draft := Release{ID: 7, Tag: "v1", Target: "gone", Draft: true}
+	_, err = service.Edit(context.Background(), draft, ReleaseOptions{Target: &missing})
 	require.EqualError(t, err, `target "nosuch" not found in alice/project`)
 	no := false
-	_, err = service.Edit(context.Background(), 7, ReleaseOptions{Draft: &no})
+	requests = nil
+	_, err = service.Edit(context.Background(), draft, ReleaseOptions{Draft: &no})
 	require.EqualError(t, err, `target "gone" not found in alice/project`)
+	require.Equal(t, []string{"PATCH /api/v1/repos/alice/project/releases/7", "GET /api/v1/repos/alice/project/commits"}, requests)
+	// Another failure of a release that is no draft is no missing target.
+	_, err = service.Edit(context.Background(), Release{ID: 7, Target: "gone"}, ReleaseOptions{Draft: &no})
+	require.EqualError(t, err, "Gitea API returned HTTP 500 for PATCH /api/v1/repos/alice/project/releases/7")
+}
+
+func TestReleaseEditRefusesATagAnotherReleaseHas(t *testing.T) {
+	var requests []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/releases/tags/v2":
+			_, _ = w.Write([]byte(`{"id":8,"tag_name":"v2"}`))
+		case "/api/v1/repos/alice/project/releases/tags/v3":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		default:
+			_, _ = w.Write([]byte(`{"id":7,"tag_name":"v3"}`))
+		}
+	}))
+	service := Releases{Client: client, Repository: "alice/project"}
+	current := Release{ID: 7, Tag: "v1"}
+	taken, free := "v2", "v3"
+	_, err := service.Edit(context.Background(), current, ReleaseOptions{Tag: &taken})
+	require.ErrorAs(t, err, new(*ConflictError))
+	require.EqualError(t, err, "release v2 already exists in alice/project")
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/releases/tags/v2"}, requests, "nothing is changed")
+	requests = nil
+	item, err := service.Edit(context.Background(), current, ReleaseOptions{Tag: &free})
+	require.NoError(t, err)
+	require.Equal(t, "v3", item.Tag)
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/releases/tags/v3", "PATCH /api/v1/repos/alice/project/releases/7"}, requests)
 }

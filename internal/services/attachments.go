@@ -6,7 +6,6 @@ package services
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -62,42 +61,6 @@ func assetURL(attachment *gitea.Attachment) string {
 		return attachment.DownloadURL
 	}
 	return instance + "/attachments/" + url.PathEscape(attachment.UUID)
-}
-
-// uploadAttachment streams a multipart upload to an attachment collection endpoint without
-// buffering the file in memory.
-// TODO(sdk): the attachment uploads stream through a pipe, which HTTP signing has to buffer.
-func uploadAttachment(ctx context.Context, client *transport.Client, endpoint, name string, input io.Reader) (ReleaseAsset, error) {
-	body, contentType, err := fileUpload(name, input)
-	if err != nil {
-		return ReleaseAsset{}, err
-	}
-	if body == nil {
-		reader, writer := io.Pipe()
-		multipartWriter := multipart.NewWriter(writer)
-		defer reader.Close()
-		go func() {
-			part, err := multipartWriter.CreateFormFile("attachment", name)
-			if err == nil {
-				_, err = io.Copy(part, input)
-			}
-			if err == nil {
-				err = multipartWriter.Close()
-			}
-			_ = writer.CloseWithError(err)
-		}()
-		body, contentType = reader, multipartWriter.FormDataContentType()
-	}
-	response, err := client.Do(ctx, http.MethodPost, endpoint, body, http.Header{"Content-Type": {contentType}})
-	if err != nil {
-		return ReleaseAsset{}, err
-	}
-	defer response.Body.Close()
-	var attachment gitea.Attachment
-	if err := json.NewDecoder(response.Body).Decode(&attachment); err != nil {
-		return ReleaseAsset{}, decodeError(ctx, response, err)
-	}
-	return assetFrom(&attachment), nil
 }
 
 // fileUpload returns the multipart upload of input when it is a regular file, read in place from

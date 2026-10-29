@@ -142,7 +142,7 @@ $ gt release upload v1.0.0 dist/gt-linux --clobber`,
 				for _, asset := range release.Assets {
 					if asset.Name == filename(file) {
 						if !clobber {
-							return clierr.Wrap(clierr.Usage, fmt.Errorf("asset %s already exists in release %s; pass --clobber to replace it", asset.Name, release.Tag))
+							return &services.ConflictError{Reason: services.ReasonExists, Kind: "asset", Key: asset.Name, Scope: "release " + release.Tag, Hint: "pass --clobber to replace it"}
 						}
 						replaced[asset.Name] = append(replaced[asset.Name], asset)
 					}
@@ -224,9 +224,20 @@ $ gt release download v1.0.0 --archive zip`,
 				}
 				return err
 			}
+			if len(names) == 0 && len(patterns) == 0 && len(release.Assets) == 0 {
+				if release.Draft {
+					if exists, err := service.TagExists(cmd.Context(), release.Tag); err == nil && !exists {
+						return fmt.Errorf("release %s has no assets and is a draft whose tag does not exist yet; publish it to download its source code", terminal.SafeLine(release.Tag))
+					}
+				}
+				return fmt.Errorf("release %s has no assets; pass --archive zip or --archive tar.gz to download its source code", terminal.SafeLine(release.Tag))
+			}
 			assets, err := selectAssets(release, names, patterns)
 			if err != nil {
 				return err
+			}
+			if len(assets) > 1 && flags.output == "-" {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("--output - requires a single asset, but %d assets match; name one or pass --dir", len(assets)))
 			}
 			if len(assets) > 1 && flags.output != "" && !isDirectory(flags.output) {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("--output names one file, but %d assets match; pass --dir", len(assets)))
@@ -241,7 +252,7 @@ $ gt release download v1.0.0 --archive zip`,
 					return err
 				}
 				key := strings.ToLower(paths[i])
-				if first, dup := seen[key]; dup && paths[i] != "-" {
+				if first, dup := seen[key]; dup {
 					if first.Name == asset.Name {
 						return clierr.Wrap(clierr.Usage, fmt.Errorf("assets %d and %d are both named %s; download one at a time with --output", first.ID, asset.ID, terminal.SafeLine(asset.Name)))
 					}
@@ -281,9 +292,6 @@ $ gt release download v1.0.0 --archive zip`,
 // select, or every asset when there are neither, each once.
 func selectAssets(release services.Release, names, patterns []string) ([]services.ReleaseAsset, error) {
 	if len(names) == 0 && len(patterns) == 0 {
-		if len(release.Assets) == 0 {
-			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("release %s has no assets; pass --archive to download its source code", release.Tag))
-		}
 		return release.Assets, nil
 	}
 	var selected []services.ReleaseAsset
@@ -309,7 +317,7 @@ func selectAssets(release services.Release, names, patterns []string) ([]service
 			}
 		}
 		if !matched {
-			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("no asset of release %s matches %q", release.Tag, pattern))
+			return nil, fmt.Errorf("no asset of release %s matches %q", release.Tag, pattern)
 		}
 	}
 	return selected, nil
@@ -374,7 +382,7 @@ func (a *application) assetEditCommand() *cobra.Command {
 		Args:    nonBlankArgs(cobra.ExactArgs(2), "tag", "asset name"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(name) == "" {
-				return clierr.Wrap(clierr.Usage, errors.New("supply --name for asset rename"))
+				return clierr.Wrap(clierr.Usage, errors.New("release asset edit requires --name"))
 			}
 			if err := checkAssetName(cmd, name); err != nil {
 				return err
@@ -393,7 +401,7 @@ func (a *application) assetEditCommand() *cobra.Command {
 				return err
 			}
 			if slices.ContainsFunc(release.Assets, func(other services.ReleaseAsset) bool { return other.ID != asset.ID && other.Name == name }) {
-				return clierr.Wrap(clierr.Usage, fmt.Errorf("asset %s already exists in release %s; delete it first", name, release.Tag))
+				return &services.ConflictError{Reason: services.ReasonExists, Kind: "asset", Key: name, Scope: "release " + release.Tag, Hint: "delete it first"}
 			}
 			item, err := service.RenameAsset(cmd.Context(), release.ID, asset.ID, name)
 			if err != nil {

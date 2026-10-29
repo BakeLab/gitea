@@ -61,7 +61,7 @@ func TestReleaseUploadRefusesDuplicateNamesWithoutClobber(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "hello.txt")
 	require.NoError(t, os.WriteFile(file, []byte("hello"), 0o600))
 	err := Execute(context.Background(), deps, []string{"release", "asset", "upload", "v1", file, "-R", "owner/repo"})
-	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err), "%v", err)
 	require.ErrorContains(t, err, "asset hello.txt already exists in release v1; pass --clobber to replace it")
 	require.Equal(t, []string{"GET /api/v1/repos/owner/repo/releases/tags/v1"}, requests)
 	requests = nil
@@ -107,7 +107,7 @@ func TestReleaseAssetNamesCannotClash(t *testing.T) {
 	require.EqualError(t, err, `--name ".." is not a valid file name`)
 	require.Empty(t, requests)
 	err = Execute(context.Background(), deps, []string{"release", "asset", "edit", "v1", "gt-darwin", "--name", "gt-linux", "-R", "owner/repo"})
-	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err), "%v", err)
 	require.EqualError(t, err, "asset gt-linux already exists in release v1; delete it first")
 	require.Equal(t, []string{"GET /api/v1/repos/owner/repo/releases/tags/v1"}, requests)
 	// Renaming an asset to its own name, or to a free one, is fine.
@@ -182,9 +182,17 @@ func TestReleaseDownloadSelectsAssetsOfTheLatestRelease(t *testing.T) {
 	require.Equal(t, "bytes", string(content))
 	require.Equal(t, "✓ Downloaded gt-linux (5 B) to "+filepath.Join(dir, "gt-linux")+"\n✓ Downloaded gt-darwin (5 B) to "+filepath.Join(dir, "gt-darwin")+"\n", diagnostics.String())
 	err = Execute(context.Background(), deps, []string{"release", "asset", "download", "v1", "--pattern", "*.exe", "--dir", dir, "-R", "owner/repo"})
-	require.Error(t, err)
+	require.EqualError(t, err, `no asset of release v1 matches "*.exe"`)
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 	err = Execute(context.Background(), deps, []string{"release", "download", "v1", "notes.txt", "gt-linux", "-O", filepath.Join(dir, "one"), "-R", "owner/repo"})
 	require.ErrorContains(t, err, "--output names one file, but 2 assets match; pass --dir")
+	downloads = nil
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.Mkdir("-", 0o700))
+	err = Execute(context.Background(), deps, []string{"release", "download", "v1", "-O", "-", "-R", "owner/repo"})
+	require.EqualError(t, err, "--output - requires a single asset, but 3 assets match; name one or pass --dir")
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.Empty(t, downloads)
 	for _, flag := range []string{"--clobber", "--skip-existing"} {
 		err = Execute(context.Background(), deps, []string{"release", "download", "v1", "notes.txt", "-O", "-", flag, "-R", "owner/repo"})
 		require.Equal(t, clierr.Usage, clierr.ExitCode(err))
@@ -203,7 +211,7 @@ func TestReleaseDownloadArchiveOfADraftWithoutItsTag(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":2,"tag_name":"v2","draft":true}`))
 		case "/api/v1/repos/owner/repo/releases/tags/v1":
 			_, _ = w.Write([]byte(`{"id":1,"tag_name":"v1"}`))
-		case "/api/v1/repos/owner/repo/archive/v2.zip", "/api/v1/repos/owner/repo/archive/v1.zip":
+		case "/api/v1/repos/owner/repo/archive/v2.zip", "/api/v1/repos/owner/repo/archive/v1.zip", "/api/v1/repos/owner/repo/tags/v2":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"unrecognized repository reference"}`))
 		default:
@@ -217,6 +225,11 @@ func TestReleaseDownloadArchiveOfADraftWithoutItsTag(t *testing.T) {
 	require.EqualError(t, err, "release v2 is a draft whose tag does not exist yet; publish it to create the tag")
 	err = Execute(context.Background(), deps, []string{"release", "download", "v1", "--archive", "zip", "--dir", dir, "-R", "owner/repo"})
 	require.EqualError(t, err, "ref v1 not found in owner/repo")
+	err = Execute(context.Background(), deps, []string{"release", "download", "v1", "--dir", dir, "-R", "owner/repo"})
+	require.EqualError(t, err, "release v1 has no assets; pass --archive zip or --archive tar.gz to download its source code")
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+	err = Execute(context.Background(), deps, []string{"release", "download", "v2", "--dir", dir, "-R", "owner/repo"})
+	require.EqualError(t, err, "release v2 has no assets and is a draft whose tag does not exist yet; publish it to download its source code")
 }
 
 func TestReleaseDownloadCreatesDirAndRefusesDuplicateNames(t *testing.T) {

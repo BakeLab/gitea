@@ -125,6 +125,10 @@ func TestBranchProtectionOfANameWithGlobCharacters(t *testing.T) {
 
 func TestBranchCreateFromATag(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`[{"sha":"abcdef123"}]`))
+			return
+		}
 		requirePayload(t, `{"new_branch_name":"hotfix","old_ref_name":"v1.0.0"}`, r.Body)
 		_, _ = w.Write([]byte(`{"name":"hotfix","commit":{"id":"abcdef123"}}`))
 	}))
@@ -133,6 +137,51 @@ func TestBranchCreateFromATag(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "create", "hotfix", "--source", "v1.0.0", "-R", "alice/x"}))
 	require.Empty(t, out.String())
 	require.Equal(t, "✓ Created branch hotfix from v1.0.0 in alice/x at abcdef1\n", diagnostics.String())
+}
+
+func TestBranchCreateFromHEADUsesTheCommitOfTheClone(t *testing.T) {
+	const local = "1111111111111111111111111111111111111111"
+	pushed := true
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost:
+			requirePayload(t, `{"new_branch_name":"topic","old_ref_name":"`+local+`"}`, r.Body)
+			_, _ = w.Write([]byte(`{"name":"topic","commit":{"id":"` + local + `"}}`))
+		case r.URL.Path == "/api/v1/repos/alice/project/commits" && pushed:
+			require.Equal(t, local, r.URL.Query().Get("sha"))
+			_, _ = w.Write([]byte(`[{"sha":"` + local + `"}]`))
+		case r.URL.Path == "/api/v1/repos/alice/project/commits":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"object does not exist [id: ` + local + `, rel_path: ]"}`))
+		default:
+			_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	clone := map[string]string{
+		"remote": "origin", "remote get-url origin": server.URL + "/alice/project.git",
+		"rev-parse --verify --quiet --end-of-options HEAD^{commit}": local,
+		"rev-parse --verify --quiet HEAD^{commit}":                  local,
+	}
+	deps.Git = &fakeGit{results: clone}
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "create", "topic", "--source", "HEAD"}))
+	pushed = false
+	// A detached HEAD has no branch to push, and a new branch has no upstream for a bare git push.
+	err := Execute(context.Background(), deps, []string{"branch", "create", "topic", "--source", "HEAD"})
+	require.EqualError(t, Explain(context.Background(), deps, err), `branch, tag or commit "`+local+`" not found in alice/project; push a branch that has this commit first: git push origin HEAD:refs/heads/BRANCH`)
+	clone["symbolic-ref --quiet HEAD"] = "refs/heads/feat"
+	err = Execute(context.Background(), deps, []string{"branch", "create", "topic", "--source", "HEAD"})
+	require.EqualError(t, Explain(context.Background(), deps, err), `branch, tag or commit "`+local+`" not found in alice/project; push a branch that has this commit first: git push -u origin feat`)
+	// gt.repository selects the parent of a fork clone, which only the upstream remote points at.
+	delete(clone, "remote get-url origin")
+	clone["config --get gt.repository"] = server.URL + "/alice/project"
+	clone[`config --get-regexp ^remote\..*\.url$`] = "remote.origin.url " + server.URL + "/bob/project.git\nremote.upstream.url " + server.URL + "/alice/project.git"
+	err = Execute(context.Background(), deps, []string{"branch", "create", "topic", "--source", "HEAD"})
+	require.EqualError(t, Explain(context.Background(), deps, err), `branch, tag or commit "`+local+`" not found in alice/project; push a branch that has this commit first: git push -u upstream feat`)
+	clone[`config --get-regexp ^remote\..*\.url$`] = "remote.origin.url " + server.URL + "/bob/project.git"
+	err = Execute(context.Background(), deps, []string{"branch", "create", "topic", "--source", "HEAD"})
+	require.EqualError(t, Explain(context.Background(), deps, err), `branch, tag or commit "`+local+`" not found in alice/project; push a branch that has this commit to alice/project first`)
 }
 
 func TestBranchDeleteTakesSeveralBranches(t *testing.T) {
@@ -189,8 +238,14 @@ func TestBranchListPipedKeepsPlainNamesAndFullCommits(t *testing.T) {
 
 func TestBranchCreateWithAnUnknownSourceIsNotFound(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"object does not exist [id: nope, rel_path: ]"}`))
+			return
+		}
+		// Gitea tells only administrators why it could not create the branch.
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"message":"object does not exist [id: nope, rel_path: ]"}`))
+		_, _ = w.Write([]byte(`{"message":""}`))
 	}))
 	defer server.Close()
 	deps, _, _ := repoTTYDeps(t, server.URL)
@@ -220,14 +275,37 @@ func TestBranchProtectRejectsATeamOfAnotherOrganization(t *testing.T) {
 	require.EqualError(t, err, "team other/devs is not in acme, the owner of acme/x")
 }
 
-func TestBranchProtectRejectsEmptyNameLists(t *testing.T) {
+func TestBranchProtectRejectsEmptyNames(t *testing.T) {
 	for _, tc := range []struct{ flag, want string }{
-		{"--status-check=", "status check names cannot be empty"},
 		{"--status-check=ci,", "status check names cannot be empty"},
-		{"--allow-push=", "pusher names cannot be empty"},
+		{"--allow-push= ", "pusher names cannot be empty"},
 	} {
 		requireUsageBeforeRequests(t, tc.want, "branch", "protect", "main", tc.flag, "-R", "acme/x")
 	}
+}
+
+func TestBranchProtectTurnsOffPushersAndStatusChecksWithAnEmptyValue(t *testing.T) {
+	var patched bool
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/acme/x/branches/main":
+			_, _ = w.Write([]byte(`{"name":"main"}`))
+		case "POST /api/v1/repos/acme/x/branch_protections":
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"Branch protection already exist"}`))
+		case "PATCH /api/v1/repos/acme/x/branch_protections/main":
+			patched = true
+			requirePayload(t, `{"enable_push":false,"enable_push_whitelist":false,"push_whitelist_usernames":[],"push_whitelist_teams":[],"enable_status_check":false,"status_check_contexts":[]}`, r.Body)
+			_, _ = w.Write([]byte(`{"rule_name":"main"}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, _, diagnostics := repoTTYDeps(t, server.URL)
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "protect", "main", "--allow-push=", "--status-check=", "-R", "acme/x"}))
+	require.True(t, patched)
+	require.Equal(t, "✓ Updated the protection of main in acme/x\n", diagnostics.String())
 }
 
 func TestBranchProtectFailsWhenGiteaDropsPushers(t *testing.T) {

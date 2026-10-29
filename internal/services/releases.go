@@ -119,6 +119,9 @@ func (s Releases) Create(ctx context.Context, opts ReleaseOptions) (Release, err
 		// The release does not exist yet, so a 404 here names the unresolvable target, not the release.
 		return item, &NotFoundError{Kind: "target", Key: strconv.Quote(deref(opts.Target)), Scope: s.Repository, Err: err}
 	}
+	if empty := emptyRepository(err, s.Repository, "first"); empty != nil {
+		return item, empty
+	}
 	if IsNotFound(err) {
 		// Any other 404 means the repository is missing or invisible.
 		return item, Classify(err, "repository", s.Repository, "")
@@ -151,22 +154,42 @@ func (s Releases) TagCommit(ctx context.Context, tag string) (string, error) {
 	return item.Commit.SHA, nil
 }
 
-// Edit changes only supplied release fields; Gitea ignores empty text fields.
-func (s Releases) Edit(ctx context.Context, id int64, opts ReleaseOptions) (Release, error) {
+// Edit changes only supplied release fields of current; Gitea ignores empty text fields.
+func (s Releases) Edit(ctx context.Context, current Release, opts ReleaseOptions) (Release, error) {
 	if target := deref(opts.Target); target != "" {
 		if err := s.requireTarget(ctx, target); err != nil {
 			return Release{}, err
 		}
 	}
+	// Gitea fails with HTTP 500 for a tag another release has, and tells only administrators why.
+	if tag := deref(opts.Tag); tag != "" && tag != current.Tag {
+		_, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
+			return c.Releases.GetReleaseByTag(ctx, owner, repo, tag)
+		})
+		if err == nil {
+			return Release{}, &ConflictError{Reason: ReasonExists, Kind: "release", Key: tag, Scope: s.Repository}
+		}
+		if !IsNotFound(err) {
+			return Release{}, Classify(err, "release", tag, s.Repository)
+		}
+	}
 	item, err := repoConvert(ctx, s.Client, s.Repository, releaseFrom, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Release, *gitea.Response, error) {
-		return c.Releases.EditRelease(ctx, owner, repo, id, gitea.EditReleaseOption{
+		return c.Releases.EditRelease(ctx, owner, repo, current.ID, gitea.EditReleaseOption{
 			TagName: deref(opts.Tag), Target: deref(opts.Target), Title: deref(opts.Title), Note: deref(opts.Body),
 			IsDraft: opts.Draft, IsPrerelease: opts.Prerelease,
 		})
 	})
-	// Publishing a draft whose target does not exist fails with HTTP 500.
+	// Publishing a draft whose target does not exist fails with HTTP 500, which tells only
+	// administrators why. A tag that exists already is published without the target, so the
+	// target is only checked after the failure.
 	if missing := s.missingTarget(err); missing != nil {
 		return item, missing
+	}
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status >= http.StatusInternalServerError && current.Draft && opts.Draft != nil && !*opts.Draft && opts.Target == nil && current.Target != "" {
+		if missing, ok := errors.AsType[*NotFoundError](s.requireTarget(ctx, current.Target)); ok && missing.Kind == "target" {
+			missing.Err = err
+			return item, missing
+		}
 	}
 	return item, err
 }
@@ -176,13 +199,21 @@ var missingObject = regexp.MustCompile(`object does not exist \[id: ([^,\]]*)`)
 
 // requireTarget fails when target names no branch, tag or commit of the repository.
 func (s Releases) requireTarget(ctx context.Context, target string) error {
-	_, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.Commit, *gitea.Response, error) {
-		return c.Repositories.ListRepoCommits(ctx, owner, repo, gitea.ListCommitOptions{ListOptions: gitea.ListOptions{Page: 1, PageSize: 1}, SHA: target})
+	return requireRef(ctx, s.Client, s.Repository, target, "target")
+}
+
+// requireRef fails with a *NotFoundError of kind when ref names no branch, tag or commit of repo.
+func requireRef(ctx context.Context, client *transport.Client, repo, ref, kind string) error {
+	_, err := repoCall(ctx, client, repo, func(ctx context.Context, c *gitea.Client, owner, name string) ([]*gitea.Commit, *gitea.Response, error) {
+		return c.Repositories.ListRepoCommits(ctx, owner, name, gitea.ListCommitOptions{ListOptions: gitea.ListOptions{Page: 1, PageSize: 1}, SHA: ref})
 	})
-	if missing := s.missingTarget(err); missing != nil {
-		return missing
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && missingObject.MatchString(apiErr.Message) {
+		return &NotFoundError{Kind: kind, Key: strconv.Quote(ref), Scope: repo, Err: err}
 	}
-	return Classify(err, "repository", s.Repository, "")
+	if empty := emptyRepository(err, repo, "first"); empty != nil {
+		return empty
+	}
+	return Classify(err, "repository", repo, "")
 }
 
 // missingTarget returns the target that err says does not exist as a *NotFoundError, or nil.

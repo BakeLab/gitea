@@ -174,7 +174,10 @@ func (a *application) branchCreateCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "create <branch>",
 		Short: "Create a branch",
-		Long:  "Create a branch on the server from another branch, a tag or a commit; the default branch unless --source names one.",
+		Long: `Create a branch on the server from another branch, a tag or a commit; the default branch unless
+--source names one. In a clone, a --source that is no branch on the server, such as HEAD or a
+short SHA, names the commit it resolves to in the clone. gt never pushes, so push that commit
+first.`,
 		Example: `# Branch off the default branch
 $ gt branch create feature/login
 
@@ -193,7 +196,18 @@ $ gt branch create bisect --source 3f2a9c1`,
 			if err != nil {
 				return err
 			}
-			item, err := (services.Branches{Client: target.client}).Create(cmd.Context(), target.Repo, args[0], source)
+			ref := source
+			if source != "" {
+				if ref, err = a.serverRef(cmd.Context(), target, a.isCloneOf(cmd.Context(), target), source); err != nil {
+					return err
+				}
+			}
+			item, err := (services.Branches{Client: target.client}).Create(cmd.Context(), target.Repo, args[0], ref)
+			if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Kind == "branch, tag or commit" {
+				if hint := a.pushHint(cmd.Context(), target, source); hint != "" {
+					err = explain(err, "%s; %s", err, hint)
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -289,12 +303,16 @@ func (a *application) branchProtectCommand() *cobra.Command {
 glob. By default nobody can push directly and pull requests need one approving review.
 
 When a branch or pattern has a rule already, change only the settings the flags name and keep
-the others; --allow-push replaces those who may push directly.`,
+the others; --allow-push replaces those who may push directly. An empty --allow-push= lets
+nobody push directly again, and an empty --status-check= stops requiring status checks.`,
 		Example: `# Require two approvals and passing CI on main
 $ gt branch protect main --required-approvals 2 --status-check ci/build
 
 # Let the release team push to every release branch
-$ gt branch protect --pattern 'release/*' --allow-push acme/release`,
+$ gt branch protect --pattern 'release/*' --allow-push acme/release
+
+# Stop requiring status checks on main
+$ gt branch protect main --status-check=`,
 		Annotations: textOutput("branch protect does not return a resource"),
 		Args: func(cmd *cobra.Command, args []string) error {
 			if pattern != "" {
@@ -316,10 +334,7 @@ $ gt branch protect --pattern 'release/*' --allow-push acme/release`,
 				flag, kind string
 				list       []string
 			}{{"allow-push", "pusher", pushers}, {"status-check", "status check", rule.StatusChecks}} {
-				// An empty value, as in --status-check=, parses to no names at all.
-				if cmd.Flags().Changed(names.flag) && len(names.list) == 0 {
-					return clierr.Wrap(clierr.Usage, fmt.Errorf("%s names cannot be empty", names.kind))
-				}
+				// An empty value, as in --status-check=, parses to no names at all and turns the setting off.
 				if err := requireNames(names.kind, "", names.list); err != nil {
 					return err
 				}

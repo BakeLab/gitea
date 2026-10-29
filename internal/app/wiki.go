@@ -304,7 +304,7 @@ func (a *application) wikiBody(cmd *cobra.Command, editor bool, initial string) 
 		return a.editDraft(cmd, initial)
 	}
 	if !a.canPrompt() {
-		return terminal.Draft{}, errMissingBody
+		return terminal.Draft{}, missingBody(cmd)
 	}
 	return a.bodyEditor(cmd, terminal.BodyTitle)(cmd.Context(), initial)
 }
@@ -327,7 +327,7 @@ $ gt wiki edit Home --editor`,
 			}
 			changed := cmd.Flags().Changed
 			if !changed("title") && !changed("body") && !changed("body-file") && !content.editor {
-				return clierr.Wrap(clierr.Usage, errors.New("supply --title, --body, --body-file or --editor"))
+				return clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --title or --body (see --help)"))
 			}
 			if changed("title") && strings.TrimSpace(content.title) == "" {
 				return clierr.Wrap(clierr.Usage, errors.New("wiki title cannot be empty"))
@@ -345,7 +345,7 @@ $ gt wiki edit Home --editor`,
 			}
 			service := services.Wiki{Client: target.client, Repository: target.Repo}
 			if content.editor || (!changed("body") && !changed("body-file")) {
-				current, err := service.View(cmd.Context(), args[0])
+				current, err := service.Find(cmd.Context(), args[0])
 				if err != nil {
 					return err
 				}
@@ -364,7 +364,7 @@ $ gt wiki edit Home --editor`,
 				return err
 			}
 			if renamed {
-				a.done(cmd, "Renamed wiki page %q to %q in %s", args[0], item.Title, target.Repo)
+				a.done(cmd, "Renamed wiki page %q to %q in %s", strings.TrimSpace(args[0]), item.Title, target.Repo)
 			} else {
 				a.done(cmd, "Edited wiki page %q in %s", item.Title, target.Repo)
 			}
@@ -388,10 +388,13 @@ func (a *application) wikiDeleteCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			subject := "wiki page " + strconv.Quote(args[0]) + " from " + target.Repo
-			return a.deleteConfirmed(cmd, subject, func() error {
-				return (services.Wiki{Client: target.client, Repository: target.Repo}).Delete(cmd.Context(), args[0])
-			})
+			service := services.Wiki{Client: target.client, Repository: target.Repo}
+			page, err := service.Find(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			subject := "wiki page " + strconv.Quote(page.Title) + " from " + target.Repo
+			return a.deleteConfirmed(cmd, subject, func() error { return service.Delete(cmd.Context(), page.Title) })
 		},
 	}
 	command.ValidArgsFunction = a.completeWikiPages()

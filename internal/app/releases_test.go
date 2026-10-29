@@ -208,9 +208,17 @@ func TestReleaseCreateTagsTheCommitOfTheClone(t *testing.T) {
 	const local, server = "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"
 	var requests []string
 	var target any
+	pushed := true
 	api := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/git/commits/" + local:
+			if !pushed {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"object does not exist [id: ` + local + `, rel_path: ]"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"sha":"` + local + `"}`))
 		case "/api/v1/repos/alice/project":
 			_, _ = w.Write([]byte(`{"full_name":"alice/project","default_branch":"main"}`))
 		case "/api/v1/repos/alice/project/branches/main":
@@ -237,7 +245,16 @@ func TestReleaseCreateTagsTheCommitOfTheClone(t *testing.T) {
 	// Without --target, Gitea would tag the head of the default branch, which is not the local HEAD.
 	err := Execute(context.Background(), deps, []string{"release", "create", "v1"})
 	require.EqualError(t, err, "tag v1 not found in alice/project, and Gitea would create it at main (2222222), not at HEAD (1111111); pass --target HEAD to create it at HEAD, or --target main")
-	require.Equal(t, []string{"GET /api/v1/repos/alice/project/tags/v1", "GET /api/v1/repos/alice/project", "GET /api/v1/repos/alice/project/branches/main"}, requests)
+	require.Equal(t, []string{"GET /api/v1/repos/alice/project/tags/v1", "GET /api/v1/repos/alice/project", "GET /api/v1/repos/alice/project/branches/main", "GET /api/v1/repos/alice/project/git/commits/" + local}, requests)
+	// --target HEAD would fail while HEAD is not on the server.
+	pushed = false
+	err = Execute(context.Background(), deps, []string{"release", "create", "v1"})
+	require.EqualError(t, err, "tag v1 not found in alice/project, and Gitea would create it at main (2222222), not at HEAD (1111111); push HEAD first (git push origin HEAD:refs/heads/BRANCH), then pass --target HEAD to create it at HEAD, or --target main")
+	clone["symbolic-ref --quiet HEAD"] = "refs/heads/feat"
+	err = Execute(context.Background(), deps, []string{"release", "create", "v1"})
+	require.EqualError(t, err, "tag v1 not found in alice/project, and Gitea would create it at main (2222222), not at HEAD (1111111); push HEAD first (git push -u origin feat), then pass --target HEAD to create it at HEAD, or --target main")
+	delete(clone, "symbolic-ref --quiet HEAD")
+	pushed = true
 	// Revisions Gitea would resolve on the server name the commit of the clone; a server branch stays.
 	for ref, want := range map[string]string{"HEAD": local, "1111111": local, "main": "main"} {
 		require.NoError(t, Execute(context.Background(), deps, []string{"release", "create", "v1", "--target", ref}), ref)
@@ -255,6 +272,64 @@ func TestReleaseCreateTagsTheCommitOfTheClone(t *testing.T) {
 	})
 	require.NoError(t, Execute(context.Background(), deps, []string{"release", "create"}))
 	require.Equal(t, server, target)
+}
+
+func TestReleaseEditTargetsTheCommitOfTheClone(t *testing.T) {
+	const local = "1111111111111111111111111111111111111111"
+	var target any
+	pushed := true
+	api := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/releases/tags/v1":
+			_, _ = w.Write([]byte(`{"id":5,"tag_name":"v1","target_commitish":"main","draft":true}`))
+		case "GET /api/v1/repos/alice/project/branches/main":
+			_, _ = w.Write([]byte(`{"name":"main"}`))
+		case "GET /api/v1/repos/alice/project/commits":
+			if !pushed {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"object does not exist [id: ` + r.URL.Query().Get("sha") + `, rel_path: ]"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`[]`))
+		case "PATCH /api/v1/repos/alice/project/releases/5":
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			target = body["target_commitish"]
+			_, _ = w.Write([]byte(`{"id":5,"tag_name":"v1"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+	deps, _, _ := serverDeps(t, api.URL)
+	deps.Git = &fakeGit{results: map[string]string{
+		"remote": "origin", "remote get-url origin": api.URL + "/alice/project.git",
+		"rev-parse --verify --quiet --end-of-options HEAD^{commit}":    local,
+		"rev-parse --verify --quiet --end-of-options 1111111^{commit}": local,
+		"rev-parse --verify --quiet --end-of-options main^{commit}":    local,
+		"rev-parse --verify --quiet HEAD^{commit}":                     local,
+	}}
+	for ref, want := range map[string]string{"HEAD": local, "1111111": local, "main": "main"} {
+		require.NoError(t, Execute(context.Background(), deps, []string{"release", "edit", "v1", "--target", ref}), ref)
+		require.Equal(t, want, target, ref)
+	}
+	const unpushed = `release v1: target "` + local + `" not found in alice/project; push a branch that has this commit first: git push origin HEAD:refs/heads/BRANCH`
+	pushed = false
+	err := Execute(context.Background(), deps, []string{"release", "edit", "v1", "--target", "HEAD"})
+	require.EqualError(t, Explain(context.Background(), deps, err), unpushed)
+	pushed = true
+	// A target typed into the form resolves the same way.
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	deps.ReleaseForm = releaseFormFunc(func(_ string, current terminal.ReleaseFormValues) (terminal.ReleaseFormValues, error) {
+		current.Target = "HEAD"
+		return current, nil
+	})
+	target = nil
+	require.NoError(t, Execute(context.Background(), deps, []string{"release", "edit", "v1"}))
+	require.Equal(t, local, target)
+	pushed = false
+	err = Execute(context.Background(), deps, []string{"release", "edit", "v1"})
+	require.EqualError(t, Explain(context.Background(), deps, err), unpushed)
 }
 
 type releaseFormFunc func(heading string, current terminal.ReleaseFormValues) (terminal.ReleaseFormValues, error)

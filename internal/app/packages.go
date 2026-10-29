@@ -169,8 +169,11 @@ $ gt package delete generic tool --all --yes`,
 			if len(args) == 3 {
 				version = args[2]
 			}
-			if (version == "") != all {
-				return clierr.Wrap(clierr.Usage, errors.New("name the version to delete, or pass --all to delete every version"))
+			switch {
+			case version != "" && all:
+				return clierr.Wrap(clierr.Usage, errors.New("--all cannot be combined with a version"))
+			case version == "" && !all:
+				return clierr.Wrap(clierr.Usage, errors.New("package delete requires a version or --all"))
 			}
 			_, s, err := service(cmd)
 			if err != nil {
@@ -208,12 +211,17 @@ func (a *application) packageLinkCommand(service packageService, link bool) *cob
 					repository = name
 				}
 			}
-			if err := s.Link(cmd.Context(), args[0], args[1], repository); err != nil {
+			changed, err := s.Link(cmd.Context(), args[0], args[1], repository)
+			switch {
+			case err != nil:
 				return err
-			}
-			if link {
+			case link && !changed:
+				a.warn(cmd, "%s package %s is already linked to %s/%s", args[0], args[1], s.Owner, repository)
+			case link:
 				a.done(cmd, "Linked %s package %s to %s/%s", args[0], args[1], s.Owner, repository)
-			} else {
+			case !changed:
+				a.warn(cmd, "%s package %s is not linked to a repository", args[0], args[1])
+			default:
 				a.done(cmd, "Unlinked %s package %s from its repository", args[0], args[1])
 			}
 			return nil

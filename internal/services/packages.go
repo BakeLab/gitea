@@ -113,8 +113,10 @@ func (s Packages) Delete(ctx context.Context, kind, name, version string) error 
 	return Classify(err, "package", s.key(kind, name, version), "")
 }
 
-// Link links a package to a repository of its owner, or with repository empty unlinks it.
-func (s Packages) Link(ctx context.Context, kind, name, repository string) error {
+// Link links a package to a repository of its owner, or with repository empty unlinks it. It
+// reports false without a change when the package is linked to that repository already, or when
+// it is to be unlinked and has no repository.
+func (s Packages) Link(ctx context.Context, kind, name, repository string) (bool, error) {
 	err := do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		if repository == "" {
 			return c.Packages.UnlinkPackage(ctx, s.Owner, kind, name)
@@ -123,22 +125,23 @@ func (s Packages) Link(ctx context.Context, kind, name, repository string) error
 	})
 	apiErr, ok := errors.AsType[*transport.APIError](err)
 	switch {
+	case err == nil:
+		return true, nil
 	case ok && apiErr.Status == http.StatusNotFound && strings.Contains(apiErr.Message, "repository does not exist"):
-		return &NotFoundError{Kind: "repository", Key: s.Owner + "/" + repository, Err: err}
+		return false, &NotFoundError{Kind: "repository", Key: s.Owner + "/" + repository, Err: err}
 	case ok && apiErr.Status == http.StatusBadRequest && repository == "":
 		// Gitea answers "invalid argument" for a package without a repository.
-		return fmt.Errorf("package %s is not linked to a repository", s.key(kind, name, ""))
+		return false, nil
 	case ok && apiErr.Status == http.StatusBadRequest:
-		// It answers the same for a package that is linked already; linking it again to its
-		// repository changes nothing.
+		// It answers the same for a package that is linked already.
 		if p, viewErr := s.View(ctx, kind, name, ""); viewErr == nil && p.Repository != "" {
 			if strings.EqualFold(p.Repository, s.Owner+"/"+repository) {
-				return nil
+				return false, nil
 			}
-			return fmt.Errorf("package %s is already linked to %s; unlink it first", s.key(kind, name, ""), p.Repository)
+			return false, fmt.Errorf("package %s is already linked to %s; unlink it first", s.key(kind, name, ""), p.Repository)
 		}
 	}
-	return Classify(err, "package", s.key(kind, name, ""), "")
+	return false, Classify(err, "package", s.key(kind, name, ""), "")
 }
 
 // CheckGenericUpload refuses to upload files to a version of a generic package that holds a file
@@ -172,6 +175,11 @@ func (s Packages) UploadGeneric(ctx context.Context, name, version, file string,
 	})
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && apiErr.Status == http.StatusConflict {
 		return genericFileExists(name, version, file, err)
+	}
+	if IsUnauthorized(err) {
+		if _, accountErr := CurrentAccount(ctx, s.Client); accountErr == nil { // the registry answers a valid token without access with 401
+			return &RefusedError{Text: "uploading packages to " + s.Owner + " requires write access to its packages and a token with the write:package scope"}
+		}
 	}
 	return Classify(err, "package file", s.key("generic", name, version)+"/"+file, "")
 }

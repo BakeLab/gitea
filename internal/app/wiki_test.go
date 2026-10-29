@@ -40,7 +40,7 @@ func TestWikiEditRenamesAndKeepsTheContent(t *testing.T) {
 	require.Empty(t, out.String())
 	require.Equal(t, "✓ Renamed wiki page \"Old Title\" to \"New Title\" in alice/x\n", diagnostics.String())
 	err := Execute(context.Background(), deps, []string{"wiki", "edit", "Home", "-R", "alice/x"})
-	require.ErrorContains(t, err, "supply --title, --body, --body-file or --editor")
+	require.ErrorContains(t, err, "nothing to edit; pass a flag such as --title or --body (see --help)")
 }
 
 func TestWikiListLimitsPagesOnTheClient(t *testing.T) {
@@ -185,7 +185,7 @@ func TestWikiEditRefusesToOverwriteOrCreate(t *testing.T) {
 			_, _ = w.Write([]byte(`{"title":"Draft","content_base64":"ZHJhZnQ="}`))
 		case r.URL.Path == "/api/v1/repos/alice/x/wiki/page/Page B":
 			_, _ = w.Write([]byte(`{"title":"Page B","content_base64":"Yg=="}`))
-		case r.URL.Path == "/api/v1/repos/alice/x/wiki/page/Getting-Started":
+		case r.URL.Path == "/api/v1/repos/alice/x/wiki/page/Getting-Started", r.URL.Path == "/api/v1/repos/alice/x/wiki/page/Getting Started":
 			_, _ = w.Write([]byte(`{"title":"Getting Started","content_base64":"Zw=="}`))
 		default:
 			http.NotFound(w, r)
@@ -198,8 +198,11 @@ func TestWikiEditRefusesToOverwriteOrCreate(t *testing.T) {
 	err = Execute(context.Background(), deps, []string{"wiki", "edit", "Drfat", "--body", "x", "-R", "alice/x", "--no-input"})
 	require.ErrorContains(t, err, `wiki page "Drfat" not found`)
 	require.Zero(t, patched, "neither refused edit may reach the PATCH")
-	// Editing by the URL slug is not a rename.
-	require.NoError(t, Execute(context.Background(), deps, []string{"wiki", "edit", "Getting-Started", "--body", "x", "-R", "alice/x", "--no-input"}))
+	// The page path of a page URL may name another page than the title it reads as.
+	err = Execute(context.Background(), deps, []string{"wiki", "edit", "Getting-Started", "--body", "x", "-R", "alice/x", "--no-input"})
+	require.EqualError(t, err, `wiki page "Getting-Started" not found in alice/x; did you mean "Getting Started"?`)
+	require.Zero(t, patched)
+	require.NoError(t, Execute(context.Background(), deps, []string{"wiki", "edit", "Getting Started", "--body", "x", "-R", "alice/x", "--no-input"}))
 	require.Equal(t, "✓ Edited wiki page \"Getting Started\" in alice/x\n", diagnostics.String())
 	require.Equal(t, 1, patched)
 }

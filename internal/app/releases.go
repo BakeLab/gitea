@@ -288,11 +288,11 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 				return err
 			}
 			// Only the clone of the selected repository says anything about its tags and commits.
-			remote := a.cloneRemote(cmd.Context(), target)
+			remote, clone := a.cloneRemote(cmd.Context(), target)
 			prompted := false
 			if form {
 				initial := terminal.ReleaseFormValues{Editor: a.editorCommand()}
-				if remote != "" {
+				if clone {
 					initial.Target = "HEAD" // the commit of the clone, not whatever the default branch is at
 				}
 				values, err := a.deps.ReleaseForm.EditRelease(cmd.Context(), "", initial)
@@ -312,14 +312,10 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 			title := cmp.Or(fields.title, fields.tag)
 			opts.Tag, opts.Title, opts.Draft, opts.Prerelease = &fields.tag, &title, &fields.draft, &fields.prerelease
 			service := services.Releases{Client: target.client, Repository: target.Repo}
-			if opts.Target != nil {
-				resolved, err := a.releaseTarget(cmd.Context(), target, remote, fields.target)
-				if err != nil {
-					return err
-				}
-				opts.Target = &resolved
+			if err := a.resolveReleaseTarget(cmd.Context(), target, clone, &opts); err != nil {
+				return err
 			}
-			if err := a.checkReleaseTag(cmd.Context(), target, service, remote, fields.tag, opts.Target != nil, verifyTag); err != nil {
+			if err := a.checkReleaseTag(cmd.Context(), target, service, clone, remote, fields.tag, opts.Target != nil, verifyTag); err != nil {
 				return err
 			}
 			if fields.editor {
@@ -334,12 +330,7 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 				}
 			}
 			item, err := service.Create(cmd.Context(), opts)
-			if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Kind == "target" {
-				if hint := a.pushHint(cmd.Context(), target, fields.target); hint != "" {
-					err = explain(err, "%s; %s", err, hint)
-				}
-			}
-			if err != nil {
+			if err = a.explainTarget(cmd.Context(), target, err, fields.target); err != nil {
 				return err
 			}
 			kind := "release"
@@ -365,8 +356,8 @@ $ gt release create v1.1.0-rc1 --target release/1.1 --draft --prerelease --title
 // instead of from the local commit: a tag that only exists locally is refused unless --target
 // names where to create it, a new tag without --target is refused unless HEAD is the head of the
 // default branch, and --verify-tag refuses any tag the server lacks.
-func (a *application) checkReleaseTag(ctx context.Context, t target, service services.Releases, remote, tag string, hasTarget, verify bool) error {
-	if !verify && (remote == "" || hasTarget) {
+func (a *application) checkReleaseTag(ctx context.Context, t target, service services.Releases, clone bool, remote, tag string, hasTarget, verify bool) error {
+	if !verify && (!clone || hasTarget) {
 		return nil
 	}
 	exists, err := service.TagExists(ctx, tag)
@@ -375,8 +366,8 @@ func (a *application) checkReleaseTag(ctx context.Context, t target, service ser
 	}
 	missing := services.NotFound("tag", tag, t.Repo)
 	switch {
-	case remote != "" && a.localRefExists(ctx, "refs/tags/"+tag):
-		hint := "push it first: git push " + remote + " " + tag
+	case clone && a.localRefExists(ctx, "refs/tags/"+tag):
+		hint := pushRefAdvice(t, remote, tag)
 		if !verify {
 			hint += ", or pass --target to create it on the server"
 		}
@@ -399,14 +390,45 @@ func (a *application) checkReleaseTag(ctx context.Context, t target, service ser
 	if err != nil {
 		return err
 	}
-	return explain(missing, "%s, and Gitea would create it at %s (%s), not at HEAD (%s); pass --target HEAD to create it at HEAD, or --target %s",
-		missing, repository.DefaultBranch, shortSHA(branch.SHA), shortSHA(head), repository.DefaultBranch)
+	advice := "pass --target HEAD to create it at HEAD"
+	if _, err := (services.Repositories{Client: t.client}).Commit(ctx, t.Repo, head); services.IsNotFound(err) {
+		advice = "push HEAD to " + t.Repo + " first, then pass --target HEAD to create it at HEAD"
+		if command := a.pushCommitCommand(ctx, remote, "HEAD"); command != "" {
+			advice = "push HEAD first (" + command + "), then pass --target HEAD to create it at HEAD"
+		}
+	} else if err != nil {
+		return err
+	}
+	return explain(missing, "%s, and Gitea would create it at %s (%s), not at HEAD (%s); %s, or --target %s",
+		missing, repository.DefaultBranch, shortSHA(branch.SHA), shortSHA(head), advice, repository.DefaultBranch)
 }
 
-// releaseTarget resolves a --target that Gitea would resolve on the server, such as HEAD or a
+// resolveReleaseTarget points opts.Target at what serverRef resolves it to.
+func (a *application) resolveReleaseTarget(ctx context.Context, t target, clone bool, opts *services.ReleaseOptions) error {
+	if opts.Target == nil {
+		return nil
+	}
+	resolved, err := a.serverRef(ctx, t, clone, *opts.Target)
+	if err == nil {
+		opts.Target = &resolved
+	}
+	return err
+}
+
+// explainTarget adds a pushHint for ref to an error about a target the server lacks.
+func (a *application) explainTarget(ctx context.Context, t target, err error, ref string) error {
+	if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Kind == "target" {
+		if hint := a.pushHint(ctx, t, ref); hint != "" {
+			return explain(err, "%s; %s", err, hint)
+		}
+	}
+	return err
+}
+
+// serverRef resolves a ref that Gitea would resolve on the server, such as HEAD or a
 // short SHA, to the commit it names in the clone; a branch of the server stays as it is.
-func (a *application) releaseTarget(ctx context.Context, t target, remote, ref string) (string, error) {
-	if isFullSHA(ref) || remote == "" {
+func (a *application) serverRef(ctx context.Context, t target, clone bool, ref string) (string, error) {
+	if isFullSHA(ref) || !clone {
 		return ref, nil
 	}
 	sha := a.localCommit(ctx, ref)
@@ -428,19 +450,42 @@ func (a *application) releaseTarget(ctx context.Context, t target, remote, ref s
 
 // pushHint tells how to publish a ref that only the local clone has, or returns "".
 func (a *application) pushHint(ctx context.Context, t target, ref string) string {
-	remote := a.cloneRemote(ctx, t)
-	if remote == "" {
+	remote, clone := a.cloneRemote(ctx, t)
+	if !clone {
 		return ""
 	}
 	for _, prefix := range []string{"refs/tags/", "refs/heads/"} {
 		if a.localRefExists(ctx, prefix+ref) {
-			return "push it first: git push " + remote + " " + ref
+			return pushRefAdvice(t, remote, ref)
 		}
 	}
-	if ref != "" && a.localRefExists(ctx, ref+"^{commit}") {
-		return "push the branch that has this commit first: git push " + remote
+	if ref == "" || !a.localRefExists(ctx, ref+"^{commit}") {
+		return ""
 	}
-	return ""
+	if command := a.pushCommitCommand(ctx, remote, ref); command != "" {
+		return "push a branch that has this commit first: " + command
+	}
+	return "push a branch that has this commit to " + t.Repo + " first"
+}
+
+// pushRefAdvice tells how to push the local branch or tag ref to t through remote, if known.
+func pushRefAdvice(t target, remote, ref string) string {
+	if remote == "" {
+		return "push it to " + t.Repo + " first"
+	}
+	return "push it first: git push " + remote + " " + ref
+}
+
+// pushCommitCommand returns the Git command that pushes the commit ref to a branch of remote: the
+// checked-out branch when it holds ref, else a new one. It is "" when no remote is known.
+func (a *application) pushCommitCommand(ctx context.Context, remote, ref string) string {
+	if remote == "" {
+		return ""
+	}
+	if branch, err := a.currentBranch(ctx); err == nil && (ref == "HEAD" || a.localCommit(ctx, ref) == a.localCommit(ctx, "HEAD")) {
+		return "git push -u " + remote + " " + branch
+	}
+	return "git push " + remote + " " + ref + ":refs/heads/BRANCH"
 }
 
 // localRefExists reports whether the working directory's checkout resolves ref.
@@ -449,21 +494,25 @@ func (a *application) localRefExists(ctx context.Context, ref string) bool {
 	return err == nil
 }
 
-// cloneRemote returns the Git remote of the working directory that points at the target
-// repository, also when --repo selected it, or "" when the working directory is no clone of it.
-func (a *application) cloneRemote(ctx context.Context, t target) string {
+// cloneRemote reports whether the working directory is a clone of the target repository, also
+// when --repo or gt.repository selected it, and returns its Git remote that points at the
+// repository, or "" when none does.
+func (a *application) cloneRemote(ctx context.Context, t target) (string, bool) {
 	if remote, ok := strings.CutPrefix(t.RepoSource, "remote "); ok {
-		return remote
-	}
-	if t.repoFromClone() {
-		return cmp.Or(a.options.remote, "origin")
+		return remote, true
 	}
 	for _, remote := range a.gitRemotes(ctx) {
 		if t.ownsRemote(remote[1]) {
-			return remote[0]
+			return remote[0], true
 		}
 	}
-	return ""
+	return "", t.repoFromClone()
+}
+
+// isCloneOf reports whether the working directory is a clone of the target repository.
+func (a *application) isCloneOf(ctx context.Context, t target) bool {
+	_, clone := a.cloneRemote(ctx, t)
+	return clone
 }
 
 // rejectSwitchValue refuses the old gt syntax "--draft false": a switch reads no value, so the
@@ -491,7 +540,9 @@ func (a *application) releaseEditCommand() *cobra.Command {
 		Use:   "edit <tag>...",
 		Short: "Edit releases",
 		Long: `Edit the title, notes, tag, target, draft or prerelease state of releases. Without flags on a
-terminal, a form starts from the current values of each release and only what it changes is sent.`,
+terminal, a form starts from the current values of each release and only what it changes is sent.
+In a clone, a target that is no branch on the server, such as HEAD or a short SHA, names the commit
+it resolves to in the clone.`,
 		Example: `# Edit a release in a form
 $ gt release edit v1.0.0
 
@@ -525,15 +576,19 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 			}
 			form := !localFlagsChanged(cmd) && a.canPrompt() && a.deps.ReleaseForm != nil
 			if !form && !fields.editor && opts == (services.ReleaseOptions{}) {
-				return clierr.Wrap(clierr.Usage, errors.New("supply release fields to edit"))
+				return clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --title or --notes (see --help)"))
 			}
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {
 				return err
 			}
 			service := services.Releases{Client: target.client, Repository: target.Repo}
+			clone := a.isCloneOf(cmd.Context(), target)
 			if form {
-				return a.editReleasesInteractively(cmd, target, service, args)
+				return a.editReleasesInteractively(cmd, target, service, clone, args)
+			}
+			if err := a.resolveReleaseTarget(cmd.Context(), target, clone, &opts); err != nil {
+				return err
 			}
 			if fields.editor {
 				item, err := service.View(cmd.Context(), args[0])
@@ -557,7 +612,8 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 				if err := keepReleaseCommit(cmd.Context(), service, item, &opts); err != nil {
 					return item, err
 				}
-				return service.Edit(cmd.Context(), item.ID, opts)
+				edited, err := service.Edit(cmd.Context(), item, opts)
+				return edited, a.explainTarget(cmd.Context(), target, err, cmp.Or(fields.target, item.Target))
 			}, func(item services.Release) string { return "Edited release " + item.Tag + " in " + target.Repo })
 		},
 	}
@@ -567,7 +623,7 @@ $ gt release edit v1.0.0-rc1 v1.0.0-rc2 --prerelease=false`,
 	return command
 }
 
-func (a *application) editReleasesInteractively(cmd *cobra.Command, target target, service services.Releases, tags []string) error {
+func (a *application) editReleasesInteractively(cmd *cobra.Command, target target, service services.Releases, clone bool, tags []string) error {
 	results, failures := applyBatch(cmd, tags, func(tag string) string { return "release " + tag }, func(tag string) (services.Release, error) {
 		item, err := service.View(cmd.Context(), tag)
 		if err != nil {
@@ -586,13 +642,16 @@ func (a *application) editReleasesInteractively(cmd *cobra.Command, target targe
 			a.warn(cmd, "No changes to release %s in %s", item.Tag, target.Repo)
 			return item, nil
 		}
+		if err := a.resolveReleaseTarget(cmd.Context(), target, clone, &opts); err != nil {
+			return item, err
+		}
 		if err := keepReleaseCommit(cmd.Context(), service, item, &opts); err != nil {
 			return item, err
 		}
-		if item, err = service.Edit(cmd.Context(), item.ID, opts); err == nil {
+		if item, err = service.Edit(cmd.Context(), item, opts); err == nil {
 			a.done(cmd, "Edited release %s in %s", item.Tag, target.Repo)
 		}
-		return item, err
+		return item, a.explainTarget(cmd.Context(), target, err, values.Target)
 	}, nil)
 	return errors.Join(append(failures, writeBatchJSON(a, cmd, len(tags), results))...)
 }
@@ -678,7 +737,7 @@ func (a *application) releasePublishCommand() *cobra.Command {
 					return item, nil
 				}
 				published := false
-				if item, err = service.Edit(cmd.Context(), item.ID, services.ReleaseOptions{Draft: &published}); err == nil {
+				if item, err = service.Edit(cmd.Context(), item, services.ReleaseOptions{Draft: &published}); err == nil {
 					a.done(cmd, "Published release %s in %s", item.Tag, target.Repo)
 				}
 				return item, err
