@@ -131,6 +131,69 @@ func (s Comments) UploadAttachment(ctx context.Context, id int64, name string, i
 	return IssueAttachment(asset), err
 }
 
+// Attachments paginates the unpaginated attachments of comment id locally.
+func (s Comments) Attachments(ctx context.Context, id int64, limit, page int) (Page[IssueAttachment], error) {
+	attachments, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.Attachment, *gitea.Response, error) {
+		return c.Issues.ListIssueCommentAttachments(ctx, owner, repo, id)
+	})
+	if err != nil {
+		return Page[IssueAttachment]{}, repositoryItemError(ctx, s.Client, s.Repository, err, "comment", strconv.FormatInt(id, 10))
+	}
+	return attachmentPage(attachments, limit, page)
+}
+
+// Attachment retrieves metadata for one attachment of comment id.
+func (s Comments) Attachment(ctx context.Context, id, attachmentID int64) (IssueAttachment, error) {
+	attachment, err := s.attachment(ctx, id, attachmentID)
+	if err != nil {
+		return IssueAttachment{}, err
+	}
+	return IssueAttachment(assetFrom(attachment)), nil
+}
+
+func (s Comments) attachment(ctx context.Context, id, attachmentID int64) (*gitea.Attachment, error) {
+	attachment, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Attachment, *gitea.Response, error) {
+		return c.Issues.GetIssueCommentAttachment(ctx, owner, repo, id, attachmentID)
+	})
+	return attachment, s.attachmentError(err, id, attachmentID)
+}
+
+// attachmentError names the attachment of comment id in a failure; Gitea answers 404 both for a
+// missing comment and a missing attachment.
+func (s Comments) attachmentError(err error, id, attachmentID int64) error {
+	return Classify(err, "attachment", strconv.FormatInt(attachmentID, 10), fmt.Sprintf("comment %d on %s", id, s.Repository))
+}
+
+// RenameAttachment changes the filename of an attachment of comment id without replacing its content.
+func (s Comments) RenameAttachment(ctx context.Context, id, attachmentID int64, name string) (IssueAttachment, error) {
+	attachment, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Attachment, *gitea.Response, error) {
+		return c.Issues.EditIssueCommentAttachment(ctx, owner, repo, id, attachmentID, gitea.EditAttachmentOptions{Name: name})
+	})
+	if err != nil {
+		return IssueAttachment{}, s.attachmentError(err, id, attachmentID)
+	}
+	return IssueAttachment(assetFrom(attachment)), nil
+}
+
+// DeleteAttachment removes one attachment from comment id.
+func (s Comments) DeleteAttachment(ctx context.Context, id, attachmentID int64) error {
+	return s.attachmentError(repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+		return c.Issues.DeleteIssueCommentAttachment(ctx, owner, repo, id, attachmentID)
+	}), id, attachmentID)
+}
+
+// DownloadAttachment retrieves the metadata of an attachment of comment id and returns a function
+// that opens its content, as Issues.DownloadAttachment does.
+func (s Comments) DownloadAttachment(ctx context.Context, id, attachmentID int64) (IssueAttachment, func() (io.ReadCloser, error), error) {
+	attachment, err := s.attachment(ctx, id, attachmentID)
+	if err != nil {
+		return IssueAttachment{}, nil, err
+	}
+	return IssueAttachment(assetFrom(attachment)), func() (io.ReadCloser, error) {
+		return downloadAttachment(ctx, s.Client, attachment)
+	}, nil
+}
+
 // Delete removes a repository comment.
 func (s Comments) Delete(ctx context.Context, id int64) error {
 	status := 0

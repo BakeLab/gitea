@@ -20,6 +20,10 @@ func (s Issues) Attachments(ctx context.Context, number int64, limit, page int) 
 	if err != nil {
 		return Page[IssueAttachment]{}, s.issueError(ctx, err, number)
 	}
+	return attachmentPage(attachments, limit, page)
+}
+
+func attachmentPage(attachments []*gitea.Attachment, limit, page int) (Page[IssueAttachment], error) {
 	items, err := pageOf(attachments, limit, page)
 	if err != nil {
 		return Page[IssueAttachment]{}, err

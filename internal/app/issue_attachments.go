@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,8 +21,8 @@ import (
 )
 
 // attachmentName names an attachment in messages: "attachment 9 (log.txt) on alice/x#1".
-func attachmentName(t target, n int64, item services.IssueAttachment) string {
-	return fmt.Sprintf("attachment %d (%s) on %s#%d", item.ID, item.Name, t.Repo, n)
+func attachmentName(item services.IssueAttachment, where string) string {
+	return fmt.Sprintf("attachment %d (%s) on %s", item.ID, item.Name, where)
 }
 
 // attachmentRow is one row of the attachment list; piped output carries exact byte counts and the URL.
@@ -52,53 +53,107 @@ func attachmentView(item services.IssueAttachment, d terminal.Display) terminal.
 	}
 }
 
+// attachmentStore is the attachment collection of an issue or pull request, keyed by its number,
+// or of a comment, keyed by its ID.
+type attachmentStore interface {
+	Attachments(ctx context.Context, owner int64, limit, page int) (services.Page[services.IssueAttachment], error)
+	Attachment(ctx context.Context, owner, id int64) (services.IssueAttachment, error)
+	UploadAttachment(ctx context.Context, owner int64, name string, input io.Reader) (services.IssueAttachment, error)
+	RenameAttachment(ctx context.Context, owner, id int64, name string) (services.IssueAttachment, error)
+	DeleteAttachment(ctx context.Context, owner, id int64) error
+	DownloadAttachment(ctx context.Context, owner, id int64) (services.IssueAttachment, func() (io.ReadCloser, error), error)
+}
+
+// attachmentParent is what an attachment command group attaches files to.
+type attachmentParent struct {
+	short, long, operand, noun, group, example string
+	annotations                                map[string]string
+	complete                                   cobra.CompletionFunc
+	// resolve returns the repository, the key the store takes and the name messages use.
+	resolve func(cmd *cobra.Command, raw string) (target, int64, string, error)
+	store   func(t target) attachmentStore
+}
+
 func (a *application) issueAttachmentCommand(kind refKind) *cobra.Command {
 	words := commentWords(kind)
-	group := &cobra.Command{Use: "attachment", Short: "Manage the attachments of " + kind.noun() + "s", Long: fmt.Sprintf(`List, view, upload, download, rename and delete the files attached to %s. Attachments
-are addressed by the %s number and the attachment ID that attachment list shows.`, kind.article(), kind.noun())}
-	annotations := map[string]string{"gt.arguments": words.arguments}
-	discussionTarget := func(cmd *cobra.Command, raw string) (target, int64, error) {
-		t, n, err := a.resolveRef(cmd, raw, kind)
-		if err == nil && kind == pullRef {
-			err = requirePull(cmd, t, n)
+	return a.attachmentCommand(attachmentParent{
+		short: "Manage the attachments of " + kind.noun() + "s", long: fmt.Sprintf(`List, view, upload, download, rename and delete the files attached to %s. Attachments
+are addressed by the %s number and the attachment ID that attachment list shows.`, kind.article(), kind.noun()),
+		operand: "{<number> | <url>}", noun: kind.noun(), group: words.group + " attachment", example: words.example,
+		annotations: map[string]string{"gt.arguments": words.arguments}, complete: a.completeDiscussions(kind),
+		resolve: func(cmd *cobra.Command, raw string) (target, int64, string, error) {
+			t, n, err := a.resolveRef(cmd, raw, kind)
+			if err == nil && kind == pullRef {
+				err = requirePull(cmd, t, n)
+			}
+			return t, n, fmt.Sprintf("%s#%d", t.Repo, n), err
+		},
+		store: func(t target) attachmentStore { return services.Issues{Client: t.client, Repository: t.Repo} },
+	})
+}
+
+func (a *application) commentAttachmentCommand(kind refKind) *cobra.Command {
+	return a.attachmentCommand(attachmentParent{
+		short: "Manage the attachments of comments", long: `List, view, upload, download, rename and delete the files attached to a comment. Attachments
+are addressed by the comment ID that comment list shows and the attachment ID that attachment
+list shows.`,
+		operand: "<comment-id>", noun: "comment ID", group: commentWords(kind).group + " comment attachment", example: "81", complete: cobra.NoFileCompletions,
+		resolve: func(cmd *cobra.Command, raw string) (target, int64, string, error) {
+			// An inline review comment cannot be fetched, but its attachments can.
+			t, comment, err := a.comment(cmd, raw, kind, true)
+			return t, comment.ID, commentName(t, comment), err
+		},
+		store: func(t target) attachmentStore { return services.Comments{Client: t.client, Repository: t.Repo} },
+	})
+}
+
+func (a *application) attachmentCommand(parent attachmentParent) *cobra.Command {
+	group := &cobra.Command{Use: "attachment", Short: parent.short, Long: parent.long}
+	operand := parent.operand
+	example := func(subcommand, rest string) string {
+		return fmt.Sprintf("$ gt %s %s %s%s", parent.group, subcommand, parent.example, rest)
+	}
+	annotations := func(extra map[string]string) map[string]string {
+		result := maps.Clone(parent.annotations)
+		if result == nil {
+			result = map[string]string{}
 		}
-		return t, n, err
+		maps.Copy(result, extra)
+		return result
 	}
 	// attachmentArgs checks the attachment ID before any request.
-	attachmentArgs := func(cmd *cobra.Command, args []string) (target, int64, int64, error) {
+	attachmentArgs := func(cmd *cobra.Command, args []string) (target, int64, int64, string, error) {
 		id, err := number(args[1])
 		if err != nil {
-			return target{}, 0, 0, err
+			return target{}, 0, 0, "", err
 		}
-		t, n, err := discussionTarget(cmd, args[0])
-		return t, n, id, err
+		t, owner, where, err := parent.resolve(cmd, args[0])
+		return t, owner, id, where, err
 	}
-	completeFirst := a.completeDiscussions(kind)
 
 	var limit, page int
-	list := &cobra.Command{Use: "list {<number> | <url>}", Short: "List attachments", Example: fmt.Sprintf("$ gt %s attachment list %s", words.group, words.example), Annotations: annotations, Args: argsExact(1), ValidArgsFunction: completeFirst, RunE: func(cmd *cobra.Command, args []string) error {
-		t, n, err := discussionTarget(cmd, args[0])
+	list := &cobra.Command{Use: "list " + operand, Short: "List attachments", Example: example("list", ""), Annotations: annotations(nil), Args: argsExact(1), ValidArgsFunction: parent.complete, RunE: func(cmd *cobra.Command, args []string) error {
+		t, owner, where, err := parent.resolve(cmd, args[0])
 		if err != nil {
 			return err
 		}
-		items, err := (services.Issues{Client: t.client, Repository: t.Repo}).Attachments(cmd.Context(), n, limit, page)
+		items, err := parent.store(t).Attachments(cmd.Context(), owner, limit, page)
 		if err != nil {
 			return err
 		}
-		where := fmt.Sprintf("on %s#%d", t.Repo, n)
 		return writeTable(a, cmd, items.Items, listSpec[services.IssueAttachment]{
 			Columns: []terminal.Column{{Header: "ID"}, {Header: "Name", Flex: true}, {Header: "Size"}, {Header: "Downloads"}, {Header: "Created"}, {Header: "URL", PipedOnly: true}},
-			Row:     a.attachmentRow, Empty: "no attachments " + where, Context: "attachments " + where,
+			Row:     a.attachmentRow, Empty: "no attachments on " + where, Context: "attachments on " + where,
 		}, servicePage(items, page))
 	}}
 	pageFlags(list, &limit, &page)
 
-	view := &cobra.Command{Use: "view {<number> | <url>} <attachment-id>", Short: "View an attachment", Example: fmt.Sprintf("$ gt %s attachment view %s 9", words.group, words.example), Annotations: annotations, Args: argsExact(2), ValidArgsFunction: completeFirst, RunE: func(cmd *cobra.Command, args []string) error {
-		t, n, id, err := attachmentArgs(cmd, args)
+	view := &cobra.Command{Use: "view " + operand + " <attachment-id>", Short: "View an attachment", Example: example("view", " 9"), Annotations: annotations(nil), Args: argsExact(2), ValidArgsFunction: parent.complete, RunE: func(cmd *cobra.Command, args []string) error {
+		t, owner, id, _, err := attachmentArgs(cmd, args)
 		if err != nil {
 			return err
 		}
-		item, err := (services.Issues{Client: t.client, Repository: t.Repo}).Attachment(cmd.Context(), n, id)
+		item, err := parent.store(t).Attachment(cmd.Context(), owner, id)
 		if err != nil {
 			return err
 		}
@@ -107,8 +162,8 @@ are addressed by the %s number and the attachment ID that attachment list shows.
 	}}
 
 	var uploadName string
-	upload := &cobra.Command{Use: "upload {<number> | <url>} <file>", Short: "Attach a file", Example: fmt.Sprintf(`$ gt %[1]s attachment upload %[2]s crash.log
-$ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.group, words.example), Annotations: annotations, Args: nonBlankArgs(cobra.ExactArgs(2), kind.noun(), "file"), ValidArgsFunction: pathArgs(1, false, completeFiles, completeFirst), RunE: func(cmd *cobra.Command, args []string) error {
+	upload := &cobra.Command{Use: "upload " + operand + " <file>", Short: "Attach a file", Example: fmt.Sprintf(`$ gt %[1]s upload %[2]s crash.log
+$ gt %[1]s upload %[2]s screenshot.png --name before.png`, parent.group, parent.example), Annotations: annotations(nil), Args: nonBlankArgs(cobra.ExactArgs(2), parent.noun, "file"), ValidArgsFunction: pathArgs(1, false, completeFiles, parent.complete), RunE: func(cmd *cobra.Command, args []string) error {
 		name := uploadName
 		if cmd.Flags().Changed("name") && strings.TrimSpace(name) == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--name cannot be empty"))
@@ -121,65 +176,65 @@ $ gt %[1]s attachment upload %[2]s screenshot.png --name before.png`, words.grou
 		if err != nil {
 			return err
 		}
-		t, n, err := discussionTarget(cmd, args[0])
+		t, owner, where, err := parent.resolve(cmd, args[0])
 		if err != nil {
 			return err
 		}
-		item, err := (services.Issues{Client: t.client, Repository: t.Repo}).UploadAttachment(cmd.Context(), n, name, files[0])
+		item, err := parent.store(t).UploadAttachment(cmd.Context(), owner, name, files[0])
 		if err != nil {
 			return err
 		}
-		a.done(cmd, "Uploaded %s (%s) to %s#%d", item.Name, terminal.Bytes(item.Size), t.Repo, n)
+		a.done(cmd, "Uploaded %s (%s) to %s", item.Name, terminal.Bytes(item.Size), where)
 		return a.created(cmd, item, item.URL)
 	}}
 	upload.Flags().StringVar(&uploadName, "name", "", "File `name` of the attachment (default: the local file name)")
 
 	var newName string
-	edit := &cobra.Command{Use: "edit {<number> | <url>} <attachment-id>", Short: "Rename an attachment", Example: fmt.Sprintf("$ gt %s attachment edit %s 9 --name crash-2026-10-11.log", words.group, words.example), Annotations: annotations, Args: argsExact(2), ValidArgsFunction: completeFirst, RunE: func(cmd *cobra.Command, args []string) error {
+	edit := &cobra.Command{Use: "edit " + operand + " <attachment-id>", Short: "Rename an attachment", Example: example("edit", " 9 --name crash-2026-10-11.log"), Annotations: annotations(nil), Args: argsExact(2), ValidArgsFunction: parent.complete, RunE: func(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(newName) == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("supply a nonempty --name"))
 		}
-		t, n, id, err := attachmentArgs(cmd, args)
+		t, owner, id, where, err := attachmentArgs(cmd, args)
 		if err != nil {
 			return err
 		}
-		item, err := (services.Issues{Client: t.client, Repository: t.Repo}).RenameAttachment(cmd.Context(), n, id, newName)
+		item, err := parent.store(t).RenameAttachment(cmd.Context(), owner, id, newName)
 		if err != nil {
 			return err
 		}
-		a.done(cmd, "Renamed %s", attachmentName(t, n, item))
+		a.done(cmd, "Renamed %s", attachmentName(item, where))
 		return a.jsonResult(cmd, item)
 	}}
 	edit.Flags().StringVar(&newName, "name", "", "New file `name`")
 
-	remove := &cobra.Command{Use: "delete {<number> | <url>} <attachment-id>", Short: "Delete an attachment", Example: fmt.Sprintf("$ gt %s attachment delete %s 9 --yes", words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments, "gt.confirm": "true", "gt.text": "attachment deletion does not return a resource"}, Args: argsExact(2), ValidArgsFunction: completeFirst, RunE: func(cmd *cobra.Command, args []string) error {
-		t, n, id, err := attachmentArgs(cmd, args)
+	remove := &cobra.Command{Use: "delete " + operand + " <attachment-id>", Short: "Delete an attachment", Example: example("delete", " 9 --yes"), Annotations: annotations(map[string]string{"gt.confirm": "true", "gt.text": "attachment deletion does not return a resource"}), Args: argsExact(2), ValidArgsFunction: parent.complete, RunE: func(cmd *cobra.Command, args []string) error {
+		t, owner, id, where, err := attachmentArgs(cmd, args)
 		if err != nil {
 			return err
 		}
-		service := services.Issues{Client: t.client, Repository: t.Repo}
-		item, err := service.Attachment(cmd.Context(), n, id)
+		store := parent.store(t)
+		item, err := store.Attachment(cmd.Context(), owner, id)
 		if err != nil {
 			return err
 		}
-		return a.deleteConfirmed(cmd, attachmentName(t, n, item), func() error { return service.DeleteAttachment(cmd.Context(), n, id) })
+		return a.deleteConfirmed(cmd, attachmentName(item, where), func() error { return store.DeleteAttachment(cmd.Context(), owner, id) })
 	}}
 
 	var destination downloadFlags
-	download := &cobra.Command{Use: "download {<number> | <url>} <attachment-id>", Short: "Download an attachment", Long: `Download an attachment into the current directory under its own name, or where -O/--output
+	download := &cobra.Command{Use: "download " + operand + " <attachment-id>", Short: "Download an attachment", Long: `Download an attachment into the current directory under its own name, or where -O/--output
 or -D/--dir say. An existing file is kept unless --clobber replaces it or --skip-existing
-skips the download.`, Example: fmt.Sprintf(`$ gt %[1]s attachment download %[2]s 9
-$ gt %[1]s attachment download %[2]s 9 --output crash.log --clobber
+skips the download.`, Example: fmt.Sprintf(`$ gt %[1]s download %[2]s 9
+$ gt %[1]s download %[2]s 9 --output crash.log --clobber
 # Write the file to standard output
-$ gt %[1]s attachment download %[2]s 9 -O - | less`, words.group, words.example), Annotations: map[string]string{"gt.arguments": words.arguments, "gt.text": "attachment downloads are binary"}, Args: argsExact(2), ValidArgsFunction: completeFirst, RunE: func(cmd *cobra.Command, args []string) error {
+$ gt %[1]s download %[2]s 9 -O - | less`, parent.group, parent.example), Annotations: annotations(map[string]string{"gt.text": "attachment downloads are binary"}), Args: argsExact(2), ValidArgsFunction: parent.complete, RunE: func(cmd *cobra.Command, args []string) error {
 		if err := destination.validate(); err != nil {
 			return err
 		}
-		t, n, id, err := attachmentArgs(cmd, args)
+		t, owner, id, where, err := attachmentArgs(cmd, args)
 		if err != nil {
 			return err
 		}
-		item, open, err := (services.Issues{Client: t.client, Repository: t.Repo}).DownloadAttachment(cmd.Context(), n, id)
+		item, open, err := parent.store(t).DownloadAttachment(cmd.Context(), owner, id)
 		if err != nil {
 			return err
 		}
@@ -188,7 +243,7 @@ $ gt %[1]s attachment download %[2]s 9 -O - | less`, words.group, words.example)
 		case err != nil:
 			return err
 		case skip:
-			a.warn(cmd, "Skipped %s: %s exists", attachmentName(t, n, item), path)
+			a.warn(cmd, "Skipped %s: %s exists", attachmentName(item, where), path)
 			return nil
 		}
 		body, err := open()

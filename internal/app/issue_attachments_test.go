@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -185,4 +186,67 @@ func TestAttachmentListViewAndDownloadOrdering(t *testing.T) {
 func firstLine(s string) string {
 	line, _, _ := strings.Cut(s, "\n")
 	return line + "\n"
+}
+
+func TestCommentAttachmentCommands(t *testing.T) {
+	var mutations []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/issues/comments/81":
+			_, _ = w.Write([]byte(`{"id":81,"body":"x","issue_url":"https://example.org/alice/project/issues/1"}`))
+		case "GET /api/v1/repos/alice/project/issues/comments/82":
+			_, _ = w.Write([]byte(`{"id":82,"body":"x","pull_request_url":"https://example.org/alice/project/pulls/2"}`))
+		case "GET /api/v1/repos/alice/project/issues/comments/81/assets":
+			_, _ = w.Write([]byte(`[{"id":9,"name":"crash.log"},{"id":10,"name":"b.log"}]`))
+		case "GET /api/v1/repos/alice/project/issues/comments/81/assets/9":
+			_, _ = w.Write([]byte(`{"id":9,"name":"crash.log","size":5,"uuid":"abc"}`))
+		case "GET /api/v1/repos/alice/project/issues/comments/81/assets/404":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"attachment not found"}`))
+		case "GET /attachments/abc":
+			_, _ = w.Write([]byte("hello"))
+		case "PATCH /api/v1/repos/alice/project/issues/comments/81/assets/9":
+			mutations = append(mutations, r.Method)
+			_, _ = w.Write([]byte(`{"id":9,"name":"renamed.log"}`))
+		case "DELETE /api/v1/repos/alice/project/issues/comments/81/assets/9":
+			mutations = append(mutations, r.Method)
+			w.WriteHeader(http.StatusNoContent)
+		case "POST /api/v1/repos/alice/project/issues/comments/81/assets":
+			mutations = append(mutations, r.Method)
+			_, _ = w.Write([]byte(`{"id":11,"name":"new.log","size":3}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, out, diagnostics := serverDeps(t, server.URL)
+	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
+	plainOutput(t, deps)
+	run := func(args ...string) error {
+		out.Reset()
+		diagnostics.Reset()
+		deps.Streams.OutTTY = !slices.Contains(args, "-")
+		return Execute(context.Background(), deps, append(append([]string{"issue", "comment", "attachment"}, args...), "-R", "alice/project", "--no-input"))
+	}
+	require.NoError(t, run("list", "81", "--limit=1", "--page=2", "--json=id,name"))
+	require.JSONEq(t, `[{"id":10,"name":"b.log"}]`, out.String())
+	require.NoError(t, run("view", "81", "9", "--json=name"))
+	require.JSONEq(t, `{"name":"crash.log"}`, out.String())
+	require.EqualError(t, run("view", "81", "404"), "attachment 404 not found in comment 81 on alice/project")
+	t.Chdir(t.TempDir())
+	require.NoError(t, run("download", "81", "9", "-O", "-"))
+	require.Equal(t, "hello", out.String())
+	require.NoError(t, os.WriteFile("new.log", []byte("new"), 0o600))
+	require.NoError(t, run("upload", "81", "new.log"))
+	require.Equal(t, "✓ Uploaded new.log (3 B) to comment 81 on alice/project#1\n", diagnostics.String())
+	require.NoError(t, run("edit", "81", "9", "--name", "renamed.log"))
+	require.Equal(t, "✓ Renamed attachment 9 (renamed.log) on comment 81 on alice/project#1\n", diagnostics.String())
+	require.EqualError(t, run("delete", "81", "9"), "confirmation required to delete attachment 9 (crash.log) on comment 81 on alice/project#1; rerun with --yes")
+	require.NoError(t, run("delete", "81", "9", "--yes"))
+	require.Equal(t, []string{http.MethodPost, http.MethodPatch, http.MethodDelete}, mutations)
+
+	// pr commands refuse a comment on an issue before touching its attachments.
+	err := Execute(context.Background(), deps, []string{"pr", "comment", "attachment", "delete", "81", "9", "-R", "alice/project", "--yes"})
+	require.EqualError(t, err, "comment 81 in alice/project is on an issue, not a pull request; use gt issue comment attachment delete 81")
+	require.Len(t, mutations, 3)
 }

@@ -309,7 +309,8 @@ func (a *application) commentCommand(kind refKind) *cobra.Command {
 	group := &cobra.Command{Use: "comment " + operand, Short: "Add a comment to " + kind.article(), Long: fmt.Sprintf(`Add a comment to %[1]s, or edit or delete your last comment on it.
 
 Without --body, --body-file or --editor, the configured editor opens, or a multi-line prompt
-asks for the comment. The subcommands list, view, edit and delete comments by their ID.`, kind.article()), Example: fmt.Sprintf(`$ gt %[1]s comment %[2]s --body "Fixed in #14"
+asks for the comment. The subcommands list, view, edit and delete comments by their ID, and
+attachment manages the files attached to them.`, kind.article()), Example: fmt.Sprintf(`$ gt %[1]s comment %[2]s --body "Fixed in #14"
 $ gt %[1]s comment %[2]s --edit-last --body "Fixed in #15"
 $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[string]string{"gt.arguments": arguments, "gt.confirm": "true"}, Args: commentArgs(kind), RunE: func(cmd *cobra.Command, args []string) error {
 		// Without flags, the group shows its help; a pr comment then is on the current branch's.
@@ -431,7 +432,7 @@ $ gt %[1]s comment edit 81`, words.group), Args: argsExact(1), RunE: func(cmd *c
 		}
 		return a.deleteComment(cmd, t, comment)
 	}}
-	group.AddCommand(list, view, create, edit, remove)
+	group.AddCommand(list, view, create, edit, remove, a.commentAttachmentCommand(kind))
 	return jsonOutput(group, jsonFields[services.Comment]())
 }
 
