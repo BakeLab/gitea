@@ -6,10 +6,13 @@ package app
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/settings"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -133,6 +136,7 @@ func TestPullSelectorDefaultsToTheCheckedOutBranch(t *testing.T) {
 		{"upstream owner tells forks apart", branch("dup", map[string]string{"remote": "pulls/carol/project", "merge": "refs/heads/dup"}), 21, ""},
 		{"local branch name", branch("feat/two", nil), 4, ""},
 		{"pr/N branch", branch("pr/99", nil), 99, ""},
+		{"pr/N branch recording another pull request", branch("pr/2", map[string]string{"gitea-cli-pr": "30", "gitea-cli-base-remote": "origin"}), 30, ""},
 		{"fork pull request from a branch named like the local one", branch("main", map[string]string{"remote": "origin", "merge": "refs/heads/main"}), 0, `no open pull request for branch "main" in alice/project; pass a number, URL or branch`},
 		{"no pull request", branch("main", nil), 0, `no open pull request for branch "main" in alice/project; pass a number, URL or branch`},
 		{"same-named fork branch is ignored", branch("dup", nil), 20, ""},
@@ -151,9 +155,11 @@ func TestPullSelectorDefaultsToTheCheckedOutBranch(t *testing.T) {
 	}
 	a, _ := refApplication(t, branch("feat/two", nil))
 	a.options.repo = "alice/project"
-	_, _, err := a.pullSelector(commandContext(), nil)
+	cmd := commandContext()
+	cmd.Use = "update-branch"
+	_, _, err := a.pullSelector(cmd, nil)
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
-	require.EqualError(t, err, "pass a pull request number, URL or branch with --repo")
+	require.EqualError(t, err, "update-branch requires a pull request number, URL or branch with --repo")
 }
 
 func TestPullSelectorAcceptsNumbersURLsAndBranches(t *testing.T) {
@@ -196,10 +202,26 @@ func TestResolveRefSelectsTheReferencedRepository(t *testing.T) {
 	require.Equal(t, "bob/tool", resolved.Repo)
 	require.Equal(t, serverURL, resolved.Host)
 
-	resolved, numbers, err := a.resolveRefs(commandContext(), []string{"bob/tool#1", "#2", serverURL + "/bob/tool/issues/3"}, issueRef)
-	require.NoError(t, err)
+	mixed := []string{"bob/tool#1", "#2", serverURL + "/bob/tool/issues/3"}
+	requireBareRefAdvice(t, a, mixed, "#2 cannot be combined with "+serverURL+"/bob/tool/issues/3; qualify it as bob/tool#2, or run a separate command for alice/project#2", "GITEA_CLI_REPO")
+	environment := a.deps.Getenv
+	a.deps.Getenv = serverEnv(serverURL, nil)
+	fake := a.deps.Git.(*fakeGit)
+	fake.results["remote"] = "origin"
+	requireBareRefAdvice(t, a, []string{"2", "bob/tool#1"}, "2 cannot be combined with bob/tool#1; qualify it as bob/tool#2, or run a separate command for alice/project#2", "a clone of another repository")
+	for _, origin := range []string{serverURL + "/bob/tool.git", "https://github.com/foo/bar.git", "ssh://git@127.0.0.1:2222/alice/project.git"} {
+		fake.results["remote get-url origin"] = origin
+		resolved, numbers, err := a.resolveRefs(commandContext(), []string{"2", "bob/tool#1"}, issueRef)
+		require.NoError(t, err, "a clone of %s, the referenced repository or one gt cannot act on", origin)
+		require.Equal(t, []int64{2, 1}, numbers)
+		require.Equal(t, "bob/tool", resolved.Repo)
+	}
+	delete(fake.results, "remote")
+	resolved, numbers, err := a.resolveRefs(commandContext(), mixed, issueRef)
+	require.NoError(t, err, "outside a clone")
 	require.Equal(t, []int64{1, 2, 3}, numbers)
 	require.Equal(t, "bob/tool", resolved.Repo)
+	a.deps.Getenv = environment
 
 	for _, second := range []string{"alice/project#2", "alice/project#1"} {
 		_, _, err = a.resolveRefs(commandContext(), []string{"bob/tool#1", second}, issueRef)
@@ -222,6 +244,67 @@ func TestResolveRefSelectsTheReferencedRepository(t *testing.T) {
 	_, _, err = a.resolveRef(commandContext(), serverURL+"/bob/tool/issues/1", issueRef)
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.ErrorContains(t, err, `invalid repository "not a repo"`)
+}
+
+// requireBareRefAdvice checks that raws are refused with want, and that following either
+// suggestion resolves: the qualified number in its place, or the other one on its own.
+func requireBareRefAdvice(t *testing.T, a *application, raws []string, want, msg string) {
+	t.Helper()
+	_, _, err := a.resolveRefs(commandContext(), raws, issueRef)
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), msg)
+	require.EqualError(t, err, want, msg)
+	bare, advice, _ := strings.Cut(err.Error(), " cannot be combined with ")
+	_, advice, _ = strings.Cut(advice, "; qualify it as ")
+	qualified, separate, _ := strings.Cut(advice, ", or run a separate command for ")
+	followed := slices.Clone(raws)
+	followed[slices.Index(raws, bare)] = qualified
+	referenced, _, err := a.resolveRefs(commandContext(), followed, issueRef)
+	require.NoError(t, err, msg)
+	other, _, err := a.resolveRef(commandContext(), separate, issueRef)
+	require.NoError(t, err, msg)
+	require.NotEqual(t, referenced.Host+"/"+referenced.Repo, other.Host+"/"+other.Repo, msg)
+}
+
+func TestBareRefAdviceNamesAnotherInstance(t *testing.T) {
+	servers := make([]*httptest.Server, 2)
+	for i := range servers {
+		servers[i] = newAuthenticatedServer(http.NotFoundHandler())
+		t.Cleanup(servers[i].Close)
+	}
+	defaultURL, cloneURL := servers[0].URL, servers[1].URL
+	a, _ := refApplicationWith(t, defaultURL, map[string]string{"remote": "origin", "remote get-url origin": cloneURL + "/alice/project.git"})
+	a.deps.Getenv = envFunc(nil)
+	configureAccounts(t, a.deps, defaultURL, "alice", "alice")
+	configureAccounts(t, a.deps, cloneURL, "alice", "alice")
+	require.NoError(t, a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error { s.Preferences.DefaultHost = defaultURL; return nil }))
+	bare := strings.TrimPrefix(cloneURL, "http://")
+	requireBareRefAdvice(t, a, []string{"bob/tool#1", "2"}, "2 cannot be combined with bob/tool#1; qualify it as bob/tool#2, or run a separate command for "+bare+"/alice/project#2", "a clone on another instance")
+}
+
+func TestInferredRepositoryCommandNamesTheInstanceOfTheClone(t *testing.T) {
+	servers := make([]*httptest.Server, 2)
+	for i := range servers {
+		servers[i] = newAuthenticatedServer(http.NotFoundHandler())
+		t.Cleanup(servers[i].Close)
+	}
+	defaultURL, cloneURL := servers[0].URL, servers[1].URL
+	a, _ := refApplicationWith(t, defaultURL, map[string]string{"remote": "origin", "remote get-url origin": cloneURL + "/alice/project.git"})
+	a.deps.Getenv = envFunc(nil)
+	configureAccounts(t, a.deps, defaultURL, "alice", "alice")
+	configureAccounts(t, a.deps, cloneURL, "alice", "alice")
+	require.NoError(t, a.deps.Settings.Update(settings.TargetPreferences, func(s *settings.Snapshot) error { s.Preferences.DefaultHost = defaultURL; return nil }))
+	resolved, err := a.resolve(context.Background(), true)
+	require.NoError(t, err)
+	a.options.yes = true
+	_, err = a.inferredRepository(resolved, "delete", true)
+	require.ErrorContains(t, err, ": gt repo delete "+cloneURL+"/alice/project --yes", "alice/project alone would delete the repository of that name on the default instance")
+
+	configureAccounts(t, a.deps, cloneURL, "alice", "alice", "bob")
+	a.options.user, a.options.sudo = "bob", "carol"
+	resolved, err = a.resolve(context.Background(), true)
+	require.NoError(t, err)
+	_, err = a.inferredRepository(resolved, "archive", true)
+	require.ErrorContains(t, err, ": gt repo archive "+cloneURL+"/alice/project --user bob --sudo carol --yes", "without them the command would run as alice")
 }
 
 func TestExpandMeUsesTheLoginTeaActsAs(t *testing.T) {

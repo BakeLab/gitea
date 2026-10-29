@@ -131,7 +131,12 @@ $ gt browse --no-browser docs/README.md`,
 				// Gitea sends /issues/N of a pull request to an external issue tracker, and /pulls/N of an
 				// issue to /issues/N: /pulls/N is right but where pull requests are turned off.
 				kind := "/pulls/"
-				if found, err := (services.Issues{Client: client, Repository: t.Repo}).Kind(cmd.Context(), number); err == nil && found == services.KindIssue {
+				found, kindErr := (services.Issues{Client: client, Repository: t.Repo}).Find(cmd.Context(), number)
+				missing, _ := errors.AsType[*services.NotFoundError](kindErr)
+				switch {
+				case missing != nil && (t.client != nil || missing.Kind != "repository"): // Without an account, a private repository looks missing.
+					return kindErr
+				case kindErr == nil && found == services.KindIssue:
 					kind = "/issues/"
 				}
 				link += kind + strconv.FormatInt(number, 10)
@@ -142,7 +147,7 @@ $ gt browse --no-browser docs/README.md`,
 				case commit != "":
 					sha := commit
 					if !commitSHA.MatchString(sha) {
-						if a.cloneRemote(cmd.Context(), t) == "" {
+						if !a.isCloneOf(cmd.Context(), t) {
 							return clierr.Wrap(clierr.Usage, fmt.Errorf("--commit without a SHA requires a clone of %s", t.Repo))
 						}
 						if sha, err = a.gitProbe().Output(cmd.Context(), a.options.cwd, false, "rev-parse", "--verify", "--quiet", commit+"^{commit}"); err != nil || sha == "" {
@@ -189,22 +194,30 @@ $ gt browse --no-browser docs/README.md`,
 }
 
 // spacedCommit takes the commit of "--commit SHA" or "--commit REF" from args, where the optional
-// value of --commit leaves it. A REF is one of the clone that is not also a path.
+// value of --commit leaves it, before or after the path. A REF is one of the clone that is not also
+// a path.
 func (a *application) spacedCommit(cmd *cobra.Command, commit string, args []string) (string, []string) {
 	flag := cmd.Flags().Lookup("commit")
-	if !flag.Changed || commit != flag.NoOptDefVal || len(args) == 0 {
+	if !flag.Changed || commit != flag.NoOptDefVal {
 		return commit, args
 	}
-	if commitSHA.MatchString(args[0]) {
-		return args[0], args[1:]
-	}
-	if _, err := os.Lstat(filepath.Join(a.options.cwd, args[0])); !errors.Is(err, os.ErrNotExist) || issueNumber.MatchString(args[0]) {
-		return commit, args
-	}
-	if sha, err := a.gitProbe().Output(cmd.Context(), a.options.cwd, false, "rev-parse", "--verify", "--quiet", args[0]+"^{commit}"); err == nil && sha != "" {
-		return args[0], args[1:]
+	for i, arg := range args[:min(len(args), 2)] {
+		if a.isSpacedCommit(cmd, arg) {
+			return arg, slices.Delete(slices.Clone(args), i, i+1)
+		}
 	}
 	return commit, args
+}
+
+func (a *application) isSpacedCommit(cmd *cobra.Command, arg string) bool {
+	if commitSHA.MatchString(arg) {
+		return true
+	}
+	if _, err := os.Lstat(filepath.Join(a.options.cwd, arg)); !errors.Is(err, os.ErrNotExist) || issueNumber.MatchString(arg) {
+		return false
+	}
+	sha, err := a.gitProbe().Output(cmd.Context(), a.options.cwd, false, "rev-parse", "--verify", "--quiet", arg+"^{commit}")
+	return err == nil && sha != ""
 }
 
 // repositoryPath resolves a path argument of gt browse against the repository root: relative to
@@ -214,7 +227,7 @@ func (a *application) repositoryPath(cmd *cobra.Command, t target, raw string) s
 		return ""
 	}
 	p := filepath.ToSlash(raw)
-	if !path.IsAbs(p) && t.repoFromClone() {
+	if !path.IsAbs(p) && a.isCloneOf(cmd.Context(), t) {
 		prefix, _ := a.gitProbe().Output(cmd.Context(), a.options.cwd, false, "rev-parse", "--show-prefix")
 		p = path.Join(prefix, p)
 	}

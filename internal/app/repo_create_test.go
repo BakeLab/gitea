@@ -81,6 +81,11 @@ func TestRepositoryCreateForTheActingAccount(t *testing.T) {
 	var requests []string
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path+" "+r.Header.Get("Sudo"))
+		if strings.HasSuffix(r.URL.Path, "/generate") {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"this is not a template repo"}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"full_name":"owner/project"}`))
 	}))
 	defer server.Close()
@@ -97,6 +102,8 @@ func TestRepositoryCreateForTheActingAccount(t *testing.T) {
 		require.NoError(t, Execute(context.Background(), deps, append(test.args, "--no-input")))
 		require.Equal(t, []string{test.want}, requests, "%v", test.args)
 	}
+	err := Execute(context.Background(), deps, []string{"repo", "create", "project", "--org", "acme", "--template", "alice/plain", "--no-input"})
+	require.EqualError(t, err, "--template requires a template repository; mark it with gt repo edit alice/plain --as-template")
 }
 
 func TestRepositoryCreateClonesNewRepository(t *testing.T) {
@@ -180,10 +187,10 @@ func TestRepositoryCreateInteractiveForm(t *testing.T) {
 		return terminal.RepoFormValues{}, nil
 	})
 	err := Execute(context.Background(), deps, []string{"repo", "create", "--no-input"})
-	require.EqualError(t, err, "missing required input: Repository name (pass it as an argument)")
+	require.EqualError(t, err, "repo create requires a repository name argument")
 	requests = nil
 	err = Execute(context.Background(), deps, []string{"repo", "create", "--license", "MIT"})
-	require.EqualError(t, err, "initial content and default branch options require --auto-init")
+	require.EqualError(t, err, "--license requires --auto-init")
 	require.Empty(t, requests)
 }
 

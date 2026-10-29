@@ -5,6 +5,7 @@ package app
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -124,10 +125,11 @@ func (a *application) repoCloneCommand() *cobra.Command {
 		Short: "Clone a repository locally",
 		Long: `Clone a repository with gt's credentials, over the protocol of a URL argument, else the
 configured Git protocol. Git flags can follow --. A fork's parent is added as the "upstream"
-remote, and gt commands in the clone then target the parent. A pull mirror's source is added as
-the "source" remote; gt commands keep targeting the mirror. An HTTPS clone keeps the instance's
-stored TLS client certificate and --insecure setting in its Git configuration;
-GITEA_INSTANCE_INSECURE applies to the clone only.`,
+remote (or the --upstream-remote-name one), and gt commands in the clone then target the parent;
+with remote names other than upstream and origin, it is saved as with gt repo set-default. A pull
+mirror's source is added as the "source" remote; gt commands keep targeting the mirror. An HTTPS
+clone keeps the instance's stored TLS client certificate and --insecure setting in its Git
+configuration; GITEA_INSTANCE_INSECURE applies to the clone only.`,
 		Example: `# Clone a repository into ./project
 $ gt repo clone alice/project
 
@@ -155,8 +157,10 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 					return clierr.Wrap(clierr.Usage, errors.New("--no-upstream cannot be combined with --upstream-remote-name"))
 				}
 				opts.upstream = ""
+			} else if err := a.checkUpstreamRemoteName(cmd, opts); err != nil {
+				return err
 			}
-			a.options.repo = args[0]
+			a.options.repo, a.options.repoArgument, a.options.ignoresRemote = args[0], true, true
 			t, err := a.resolve(cmd.Context(), true)
 			// An SSH URL on the web host of an instance without ssh_host is cloned when the API
 			// confirms its SSH endpoint.
@@ -176,6 +180,11 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 			}
 			if unknownSSH != nil && apiSSHEndpoint(item.SSHURL) != unknownSSH.Endpoint {
 				return clierr.Wrap(clierr.Usage, unknownSSH)
+			}
+			if item.Fork && item.Parent != nil && opts.upstream != "" && !cmd.Flags().Changed("upstream-remote-name") {
+				if origin := a.cloneRemoteName(cmd.Context(), opts.gitFlags); origin == opts.upstream {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("cloning the fork as Git remote %s requires another --upstream-remote-name", origin))
+				}
 			}
 			if len(args) == 2 {
 				opts.directory = args[1]
@@ -198,6 +207,61 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 	return command
 }
 
+// checkUpstreamRemoteName refuses an --upstream-remote-name that Git rejects, or that the given
+// one names the fork itself.
+func (a *application) checkUpstreamRemoteName(cmd *cobra.Command, opts cloneOptions) error {
+	if opts.upstream == "" {
+		return clierr.Wrap(clierr.Usage, errors.New("--upstream-remote-name requires a name; use --no-upstream"))
+	}
+	if err := validateRemoteName("upstream-remote-name", opts.upstream); err != nil {
+		return err
+	}
+	if !cmd.Flags().Changed("upstream-remote-name") {
+		return nil // The default only matters for a fork, which is known once the repository is.
+	}
+	if origin := a.cloneRemoteName(cmd.Context(), opts.gitFlags); opts.upstream == origin {
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("--upstream-remote-name cannot be the fork's remote name %s", origin))
+	}
+	return nil
+}
+
+// cloneRemoteName is the name git clone gives the remote of the cloned repository: that of -o in
+// gitFlags, else clone.defaultRemoteName of -c in gitFlags or of the configuration, else origin.
+func (a *application) cloneRemoteName(ctx context.Context, gitFlags []string) string {
+	var origin, configured string
+	for i := 0; i < len(gitFlags); i++ {
+		var option, value string
+		switch flag := gitFlags[i]; {
+		case slices.Contains([]string{"-o", "--origin", "-c", "--config"}, flag) && i+1 < len(gitFlags):
+			i++
+			option, value = flag, gitFlags[i]
+		case strings.HasPrefix(flag, "--origin="), strings.HasPrefix(flag, "--config="):
+			option, value, _ = strings.Cut(flag, "=")
+		case strings.HasPrefix(flag, "-o"), strings.HasPrefix(flag, "-c"):
+			option, value = flag[:2], flag[2:]
+		}
+		switch option {
+		case "-o", "--origin":
+			origin = value
+		case "-c", "--config":
+			if key, name, ok := strings.Cut(value, "="); ok && strings.EqualFold(key, "clone.defaultRemoteName") {
+				configured = name
+			}
+		}
+	}
+	if origin != "" || configured != "" {
+		return cmp.Or(origin, configured)
+	}
+	// git clone reads no configuration of the repository it may run in.
+	scoped, _ := a.gitProbe().Output(ctx, a.options.cwd, false, "config", "--show-scope", "--get-all", "clone.defaultRemoteName")
+	for line := range strings.Lines(scoped) {
+		if scope, name, ok := strings.Cut(strings.TrimSuffix(line, "\n"), "\t"); ok && scope != "local" && scope != "worktree" {
+			configured = name
+		}
+	}
+	return cmp.Or(configured, "origin")
+}
+
 func (a *application) repoForkCommand() *cobra.Command {
 	var opts services.ForkOptions
 	var clone, addRemote bool
@@ -208,10 +272,10 @@ func (a *application) repoForkCommand() *cobra.Command {
 		Long: `Fork a repository for your account, or into an organization with --org. An existing fork is
 reported instead of failing.
 
---clone clones the fork (Git flags can follow --). Inside a clone of the repository, --remote adds
-the fork as "origin" and renames the current "origin" to "upstream".`,
+--clone clones the fork (Git flags can follow --). Inside a clone of the repository, --add-remote
+adds the fork as "origin" and renames the current "origin" to "upstream".`,
 		Example: `# Fork the repository of the current clone and add the fork as origin
-$ gt repo fork --remote
+$ gt repo fork --add-remote
 
 # Fork a repository into an organization under another name
 $ gt repo fork alice/project --org acme --fork-name project-fork
@@ -225,11 +289,11 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 			args, gitFlags := args[:at], args[at:]
 			switch {
 			case clone && addRemote:
-				return clierr.Wrap(clierr.Usage, errors.New("--clone cannot be combined with --remote"))
+				return clierr.Wrap(clierr.Usage, errors.New("--clone cannot be combined with --add-remote"))
 			case len(gitFlags) > 0 && !clone:
 				return clierr.Wrap(clierr.Usage, errors.New("Git flags after -- require --clone"))
 			case cmd.Flags().Changed("remote-name") && !addRemote:
-				return clierr.Wrap(clierr.Usage, errors.New("--remote-name requires --remote"))
+				return clierr.Wrap(clierr.Usage, errors.New("--remote-name requires --add-remote"))
 			}
 			if err := validateRemoteName("remote-name", remoteName); err != nil {
 				return err
@@ -238,6 +302,9 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 				if err := validateRepositoryName(opts.Name); err != nil {
 					return err
 				}
+			}
+			if clone && a.cloneRemoteName(cmd.Context(), gitFlags) == "upstream" {
+				return clierr.Wrap(clierr.Usage, errors.New("repo fork --clone requires a Git remote name for the fork other than upstream, the name of its parent's remote"))
 			}
 			if err := a.repositoryArgument(args); err != nil {
 				return err
@@ -285,7 +352,7 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 	command.Flags().StringVar(&opts.Organization, "org", "", "Fork into this organization")
 	command.Flags().StringVar(&opts.Name, "fork-name", "", "Name of the fork (default: the repository's name)")
 	command.Flags().BoolVar(&clone, "clone", false, "Clone the fork")
-	command.Flags().BoolVar(&addRemote, "remote", false, "Add the fork as a remote of the current clone")
+	command.Flags().BoolVar(&addRemote, "add-remote", false, "Add the fork as a remote of the current clone")
 	command.Flags().StringVar(&remoteName, "remote-name", "origin", "Name of the fork's remote")
 	_ = command.RegisterFlagCompletionFunc("org", a.completeOrgs())
 	command.ValidArgsFunction = a.completeRepos()
@@ -298,11 +365,23 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 // of it by owner, such as the fork of an earlier run.
 func (a *application) checkForkRemote(cmd *cobra.Command, t target, name, owner string) (rename bool, current string, err error) {
 	ctx := cmd.Context()
+	notAClone := clierr.Wrap(clierr.Usage, fmt.Errorf("--add-remote requires a Git clone of %s", t.Repo))
 	if !a.insideClone(ctx) {
-		return false, "", clierr.Wrap(clierr.Usage, fmt.Errorf("--remote must run inside a Git clone of %s", t.Repo))
+		return false, "", notAClone
 	}
-	existing, err := a.gitProbe().Output(ctx, a.options.cwd, false, "remote", "get-url", name)
+	probe := func(args ...string) (string, error) { return a.gitProbe().Output(ctx, a.options.cwd, false, args...) }
+	cloned := func() bool {
+		remotes, _ := probe("remote")
+		return slices.ContainsFunc(strings.Fields(remotes), func(remote string) bool {
+			url, err := probe("remote", "get-url", remote)
+			return err == nil && t.ownsRemote(url)
+		})
+	}
+	existing, err := probe("remote", "get-url", name)
 	if err != nil {
+		if !cloned() {
+			return false, "", notAClone
+		}
 		return false, "", nil
 	}
 	if t.ownsRemote(existing) {
@@ -324,6 +403,9 @@ func (a *application) checkForkRemote(cmd *cobra.Command, t target, name, owner 
 		if err == nil && fork.Parent != nil && strings.EqualFold(fork.Parent.FullName, t.Repo) {
 			return false, repo, nil
 		}
+	}
+	if !cloned() {
+		return false, "", notAClone
 	}
 	pointsTo := settings.WithoutCredentials(existing)
 	if onInstance {
@@ -347,6 +429,9 @@ func (a *application) addForkRemote(cmd *cobra.Command, t target, fork services.
 	if rename {
 		if _, err := a.git(ctx, "remote", "rename", "--", name, "upstream"); err != nil {
 			return fmt.Errorf("forked to %s, but could not rename Git remote %s to upstream: %w", fork.FullName, name, err)
+		}
+		if err := git.RenameBaseRemote(ctx, a.gitProbe(), a.options.cwd, name, "upstream"); err != nil {
+			return fmt.Errorf("renamed Git remote %s to upstream, but could not update the branches that pr commands recorded for it: %w", name, err)
 		}
 		a.done(cmd, "Renamed Git remote %s to upstream", name)
 	}
@@ -483,6 +568,12 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 				if _, err := a.gitIn(cmd.Context(), clone, "config", "branch."+branch+"."+setting[0], setting[1]); err != nil {
 					return clone, fmt.Errorf("cloned the fork and added %s, but could not configure branch tracking: %w", opts.upstream, err)
 				}
+			}
+		}
+		// Discovery tells the parent from the fork by the names upstream and origin only.
+		if opts.upstream != "upstream" || origin != "origin" {
+			if _, err := a.gitIn(cmd.Context(), clone, "config", "--local", "gt.repository", t.Host+"/"+item.Parent.FullName); err != nil {
+				return clone, fmt.Errorf("cloned the fork and added %s, but could not save it as the default repository: %w", opts.upstream, err)
 			}
 		}
 		a.done(cmd, "Added remote %s for %s; gt commands in the clone target it (change with gt repo set-default)", opts.upstream, item.Parent.FullName)

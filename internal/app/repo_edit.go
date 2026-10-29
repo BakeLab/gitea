@@ -136,7 +136,7 @@ $ gt repo edit --allow-manual-merge`,
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("a repository has at most %d topics, got %d to add", maxTopics, len(addTopics)))
 			}
 			if options == (services.RepositoryEdit{}) && len(addTopics)+len(removeTopics) == 0 {
-				return clierr.Wrap(clierr.Usage, errors.New("supply a setting to change; see gt repo edit --help"))
+				return clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --description (see --help)"))
 			}
 			t, err := a.resolve(cmd.Context(), true)
 			if err != nil {

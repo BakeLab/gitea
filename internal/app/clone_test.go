@@ -9,10 +9,13 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/git/gittest"
 	"gitea.dev/cli/internal/settings"
 
 	"github.com/stretchr/testify/require"
@@ -108,6 +111,7 @@ func TestCloneAddsUpstreamRemoteForForks(t *testing.T) {
 	cwd := t.TempDir()
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "destination", "--cwd", cwd, "--no-input", "--json=id,full_name,fork"}))
 	require.Equal(t, []string{
+		"config --show-scope --get-all clone.defaultRemoteName",
 		prefix + "clone -- " + remote + " destination",
 		"remote",
 		"remote add -- upstream " + parent,
@@ -117,7 +121,7 @@ func TestCloneAddsUpstreamRemoteForForks(t *testing.T) {
 		"config branch.main.pushRemote origin",
 	}, runner.calls)
 	clone := filepath.Join(cwd, "destination")
-	require.Equal(t, []string{cwd, clone, clone, clone, clone, clone, clone}, runner.dirs)
+	require.Equal(t, []string{cwd, cwd, clone, clone, clone, clone, clone, clone}, runner.dirs)
 	require.JSONEq(t, `{"id":8,"full_name":"bob/project","fork":true}`, out.String())
 }
 
@@ -173,7 +177,8 @@ func TestCloneUsesTheInstanceTLSSettings(t *testing.T) {
 	prefix := "-c http." + server.URL + ".sslCert=/certs/client.pem -c http." + server.URL + ".sslKey=/certs/client.pem -c http." + server.URL + ".sslVerify=false "
 	clone := prefix + credentialCall(t, deps, server.URL, "alice", "clone", "--", server.URL+"/alice/project.git", "project")
 	persist := "config --local --replace-all http." + server.URL + "."
-	persisted := []string{persist + "sslCert /certs/client.pem", persist + "sslKey /certs/client.pem", persist + "sslVerify false"}
+	record := "config --local --replace-all gt." + server.URL + "."
+	persisted := []string{persist + "sslCert /certs/client.pem", record + "sslCert /certs/client.pem", persist + "sslKey /certs/client.pem", record + "sslKey /certs/client.pem", persist + "sslVerify false"}
 	runner := &fakeGit{results: map[string]string{clone: ""}}
 	for _, call := range persisted {
 		runner.results[call] = ""
@@ -192,7 +197,7 @@ func TestCloneUsesTheInstanceTLSSettings(t *testing.T) {
 	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_INSTANCE_INSECURE": "true"})
 	runner.calls = nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "alice/project"}))
-	require.Equal(t, append([]string{clone}, persisted[:2]...), runner.calls, "GITEA_INSTANCE_INSECURE applies to the clone only")
+	require.Equal(t, append([]string{clone}, persisted[:4]...), runner.calls, "GITEA_INSTANCE_INSECURE applies to the clone only")
 }
 
 func TestSSHURLCloneWithOnlyAnEnvironmentToken(t *testing.T) {
@@ -289,11 +294,11 @@ func TestClonePassesGitFlagsAndNamesTheUpstreamRemote(t *testing.T) {
 	shallow := credentialCall(t, deps, server.URL, "alice", "clone", "--depth", "1", "--branch", "dev", "--", server.URL+"/bob/project.git", "project")
 	runner := &fakeGit{results: map[string]string{
 		clone: "", shallow: "", "remote": "fork", "remote add -- parent " + parent: "", fetch: "", "config branch.main.remote parent": "",
-		"config branch.main.merge refs/heads/main": "", "config branch.main.pushRemote fork": "",
+		"config branch.main.merge refs/heads/main": "", "config branch.main.pushRemote fork": "", "config --local gt.repository " + server.URL + "/alice/project": "",
 	}}
 	deps.Git = runner
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "-u", "parent", "--depth", "1", "--", "--branch", "dev"}))
-	require.Equal(t, []string{shallow, "remote", "remote add -- parent " + parent, fetch, "config branch.main.remote parent", "config branch.main.merge refs/heads/main", "config branch.main.pushRemote fork"}, runner.calls)
+	require.Equal(t, []string{"config --show-scope --get-all clone.defaultRemoteName", shallow, "remote", "remote add -- parent " + parent, fetch, "config branch.main.remote parent", "config branch.main.merge refs/heads/main", "config branch.main.pushRemote fork", "config --local gt.repository " + server.URL + "/alice/project"}, runner.calls)
 	require.Equal(t, "✓ Cloned bob/project into project\n✓ Added remote parent for alice/project; gt commands in the clone target it (change with gt repo set-default)\n", diagnostics.String())
 	runner.calls = nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "--no-upstream", "--", "--branch", "dev"}))
@@ -304,9 +309,85 @@ func TestClonePassesGitFlagsAndNamesTheUpstreamRemote(t *testing.T) {
 	runner.results[bare], runner.results[fetch] = "", ""
 	runner.calls, runner.dirs = nil, nil
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "-u", "parent", "--", "--bare"}))
-	require.Equal(t, bare, runner.calls[0])
-	for _, dir := range runner.dirs[1:] {
+	require.Equal(t, bare, runner.calls[1])
+	for _, dir := range runner.dirs[2:] {
 		require.Equal(t, "project.git", filepath.Base(dir))
 	}
 	require.ErrorContains(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "a", "b"}), "too many arguments")
+}
+
+// localClone clones by initializing the clone with its origin and fetches nothing, so that the
+// clone's remaining Git configuration runs for real.
+type localClone struct{ git.System }
+
+func (r localClone) Output(ctx context.Context, dir string, prompt bool, args ...string) (string, error) {
+	switch {
+	case slices.Contains(args, "clone"):
+		clone := filepath.Join(dir, args[len(args)-1])
+		if _, err := r.System.Output(ctx, dir, false, "init", "--quiet", "--", clone); err != nil {
+			return "", err
+		}
+		return r.System.Output(ctx, clone, false, "remote", "add", "origin", args[len(args)-2])
+	case slices.Contains(args, "fetch"):
+		return "", nil
+	}
+	return r.System.Output(ctx, dir, prompt, args...)
+}
+
+func TestCloneWithAnotherUpstreamNameTargetsTheParent(t *testing.T) {
+	gittest.Isolate(t)
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = w.Write([]byte(`{"full_name":"alice/project"}`))
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"name":"project","full_name":"bob/project","fork":true,"clone_url":"http://%[1]s/bob/project.git","parent":{"full_name":"alice/project","default_branch":"main","clone_url":"http://%[1]s/alice/project.git"}}`, r.Host)
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	deps.Git = localClone{}
+	cwd := t.TempDir()
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", "bob/project", "-u", "parent", "--cwd", cwd}))
+	clone := filepath.Join(cwd, "project")
+	// A branch pushed to the fork tracks origin.
+	for _, args := range [][]string{{"config", "branch.feature.remote", "origin"}, {"symbolic-ref", "HEAD", "refs/heads/feature"}} {
+		_, err := deps.Git.Output(context.Background(), clone, false, args...)
+		require.NoError(t, err)
+	}
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "view", "--cwd", clone, "--json=full_name"}))
+	require.JSONEq(t, `{"full_name":"alice/project"}`, out.String())
+}
+
+func TestCloneChecksTheForkRemoteNameOnceTheForkIsKnown(t *testing.T) {
+	gittest.Isolate(t)
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/alice/project" {
+			_, _ = fmt.Fprintf(w, `{"name":"project","full_name":"alice/project","clone_url":"http://%s/alice/project.git"}`, r.Host)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"name":"project","full_name":"bob/project","fork":true,"clone_url":"http://%[1]s/bob/project.git","parent":{"full_name":"alice/project","default_branch":"main","clone_url":"http://%[1]s/alice/project.git"}}`, r.Host)
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Git = localClone{}
+	cwd := t.TempDir()
+	clone := func(repo, directory string, gitFlags ...string) error {
+		return Execute(context.Background(), deps, append([]string{"repo", "clone", repo, directory, "--cwd", cwd, "--"}, gitFlags...))
+	}
+	require.NoError(t, clone("alice/project", "plain", "-o", "upstream"))
+	gitIn := func(args ...string) {
+		_, err := deps.Git.Output(context.Background(), cwd, false, args...)
+		require.NoError(t, err)
+	}
+	gitIn("init", "--quiet")
+	gitIn("config", "--local", "clone.defaultRemoteName", "upstream")
+	require.NoError(t, clone("bob/project", "fork"), "git clone ignores the configuration of the repository it runs in")
+	gitIn("config", "--global", "clone.defaultRemoteName", "upstream")
+	for directory, gitFlags := range map[string][]string{"flag": {"-o", "upstream"}, "config-flag": {"-c", "clone.defaultRemoteName=upstream"}, "configured": nil} {
+		err := clone("bob/project", directory, gitFlags...)
+		require.EqualError(t, err, "cloning the fork as Git remote upstream requires another --upstream-remote-name", directory)
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+		require.NoDirExists(t, filepath.Join(cwd, directory))
+	}
 }

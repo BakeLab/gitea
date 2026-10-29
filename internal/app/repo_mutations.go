@@ -24,17 +24,35 @@ func (a *application) addRepositoryMutations(group *cobra.Command) {
 // cloneArguments documents the <repository> argument of repo clone, which is required.
 const cloneArguments = "A repository can be supplied as NAME (one of yours), OWNER/NAME, HOST/OWNER/NAME or a URL."
 
-// inferredRepository words where a repository that no argument or --repo named came from, as in
+// inferredRepository words where a repository that no argument, --repo or GITEA_CLI_REPO named came from, as in
 // " (from git remote upstream)", for confirmations. Irreversible commands refuse --yes for it.
 func (a *application) inferredRepository(t target, verb string, refuseYes bool) (string, error) {
-	if t.RepoSource == "--repo" {
+	switch t.RepoSource {
+	case "--repo", "argument", "GITEA_CLI_REPO":
 		return "", nil
 	}
 	source := strings.Replace(t.RepoSource, "remote ", "git remote ", 1)
 	if refuseYes && a.options.yes {
-		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("--yes requires an explicit repository, not one inferred from %s: gt repo %s %s --yes", source, verb, t.Repo))
+		return "", clierr.Wrap(clierr.Usage, fmt.Errorf("--yes requires an explicit repository, not one inferred from %s: gt repo %s %s --yes", source, verb, a.explicitRepository(t)))
 	}
 	return " (from " + source + ")", nil
+}
+
+// explicitRepository names t's repository for a suggested command that acts on the same one: as
+// HOST/OWNER/REPO off the default instance, since OWNER/REPO alone names the default instance's,
+// and with the --user and --sudo that select the account.
+func (a *application) explicitRepository(t target) string {
+	repository := t.Repo
+	if t.Host != "" && !a.isDefaultHost(t.Host) {
+		repository = strings.TrimSuffix(t.Host, "/") + "/" + t.Repo
+	}
+	if t.explicitUser() {
+		repository += " --user " + t.User
+	}
+	if a.options.sudo != "" {
+		repository += " --sudo " + a.options.sudo
+	}
+	return repository
 }
 
 // repoArchiveCommand builds repo archive, or repo unarchive.
@@ -178,7 +196,10 @@ func (a *application) repoRenameCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "rename <new-name>",
 		Short: "Rename a repository",
-		Long:  "Rename a repository; its owner stays the same. Git remotes keep working through Gitea's redirect from the old name, but gt commands do not;\na default repository saved with gt repo set-default is updated.",
+		Long: `Rename a repository; its owner stays the same. The Git remote that selected the repository, or
+the first remote pointing to it when gt repo set-default selected it, and a default repository saved
+with gt repo set-default for it, are updated. Other Git remotes keep working through Gitea's redirect
+from the old name, but gt commands there do not.`,
 		Example: `# Rename the repository of the current clone
 $ gt repo rename new-name
 
@@ -219,13 +240,54 @@ $ gt repo rename new-name -R alice/old-name`,
 	}
 }
 
-// repositoryMoved points the default repository of the clone, when it selected t, to fullName,
-// the new name of t's repository, and warns about a Git remote that still uses the old one.
+// repositoryMoved points the Git remote of the clone that selected t, or the first one pointing to t
+// when its default repository did, and that default repository when it names t, to fullName, the new
+// name of t's repository.
 func (a *application) repositoryMoved(cmd *cobra.Command, t target, fullName string) {
-	if remote, ok := strings.CutPrefix(t.RepoSource, "remote "); ok {
-		a.warn(cmd, "Git remote %s still points to %s; update it with git remote set-url", remote, t.Repo)
-	}
+	ctx := cmd.Context()
+	remote, ok := strings.CutPrefix(t.RepoSource, "remote ")
 	if t.RepoSource == "git config gt.repository" {
+		for _, candidate := range a.gitRemotes(ctx) {
+			if t.ownsRemote(candidate[1]) {
+				remote, ok = candidate[0], true
+				break
+			}
+		}
+	}
+	if ok {
+		probe := func(args ...string) (string, error) { return a.gitProbe().Output(ctx, a.options.cwd, false, args...) }
+		// The configured URL keeps a url.<base>.insteadOf shorthand; one that hides the repository's
+		// owner is replaced by the URL Git expands it to.
+		moved := func(key string, getURL ...string) (string, bool) {
+			raw, err := probe("config", "--get", "remote."+remote+"."+key)
+			if err != nil {
+				return "", false
+			}
+			if moved, ok := movedRemoteURL(raw, t.Repo, fullName); ok {
+				return moved, true
+			}
+			expanded, err := probe(append(append([]string{"remote", "get-url"}, getURL...), remote)...)
+			moved, ok := movedRemoteURL(expanded, t.Repo, fullName)
+			return moved, err == nil && ok
+		}
+		if push, ok := moved("pushurl", "--push"); ok {
+			if _, err := a.git(ctx, "remote", "set-url", "--push", "--", remote, push); err != nil {
+				a.warn(cmd, "Git remote %s still pushes to %s; update it with git remote set-url --push", remote, t.Repo)
+			}
+		}
+		url, ok := moved("url")
+		var err error
+		if ok {
+			_, err = a.git(ctx, "remote", "set-url", "--", remote, url)
+		}
+		if err != nil || !ok {
+			a.warn(cmd, "Git remote %s still points to %s; update it with git remote set-url", remote, t.Repo)
+		} else {
+			a.done(cmd, "Updated Git remote %s to %s", remote, fullName)
+		}
+	}
+	saved, _ := a.gitProbe().Output(cmd.Context(), a.options.cwd, false, "config", "--local", "--get", "gt.repository")
+	if t.RepoSource == "git config gt.repository" || strings.EqualFold(saved, t.Host+"/"+t.Repo) {
 		// gt's own setting; the old name would fail with HTTP 301 from now on.
 		if _, err := a.git(cmd.Context(), "config", "--local", "gt.repository", t.Host+"/"+fullName); err != nil {
 			a.warn(cmd, "gt.repository still points to %s; update it with gt repo set-default %s", t.Repo, fullName)
@@ -233,6 +295,20 @@ func (a *application) repositoryMoved(cmd *cobra.Command, t target, fullName str
 			a.done(cmd, "Updated the default repository of this clone to %s", fullName)
 		}
 	}
+}
+
+// movedRemoteURL returns raw, a Git remote URL of repository old, for repository fullName instead,
+// keeping its protocol, host and .git suffix.
+func movedRemoteURL(raw, old, fullName string) (string, bool) {
+	base, suffix := strings.TrimSuffix(raw, "/"), ""
+	if trimmed, ok := strings.CutSuffix(base, ".git"); ok {
+		base, suffix = trimmed, ".git"
+	}
+	at := len(base) - len(old)
+	if at < 1 || !strings.EqualFold(base[at:], old) || !strings.ContainsRune("/:", rune(base[at-1])) {
+		return "", false
+	}
+	return base[:at] + fullName + suffix, true
 }
 
 func (a *application) repoTransferCommand() *cobra.Command {

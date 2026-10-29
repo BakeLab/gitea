@@ -158,11 +158,13 @@ func (a *application) resolveRef(cmd *cobra.Command, raw string, kind refKind) (
 }
 
 // resolveRefs is resolveRef for several references, which must name the same repository and
-// distinct numbers.
+// distinct numbers. N and #N next to a reference that names a repository are in that one, unless
+// gt targets another repository otherwise.
 func (a *application) resolveRefs(cmd *cobra.Command, raws []string, kind refKind) (target, []int64, error) {
 	numbers := make([]int64, len(raws))
 	var selected ref
-	source := ""
+	var source, bare string
+	var bareNumber int64
 	for i, raw := range raws {
 		parsed, err := parseRef(raw, kind)
 		if errors.Is(err, errNotRef) {
@@ -179,6 +181,9 @@ func (a *application) resolveRefs(cmd *cobra.Command, raws []string, kind refKin
 		}
 		numbers[i] = parsed.Number
 		if parsed.Repo == "" {
+			if bare == "" {
+				bare, bareNumber = raw, parsed.Number
+			}
 			continue
 		}
 		// A reference without an instance must not replace one that names it, whatever the order.
@@ -186,8 +191,61 @@ func (a *application) resolveRefs(cmd *cobra.Command, raws []string, kind refKin
 			selected, source = parsed, raw
 		}
 	}
+	if bare != "" && selected.Repo != "" {
+		if err := a.bareRefsAgree(cmd.Context(), bare, bareNumber, selected.Repo, source); err != nil {
+			return target{}, nil, err
+		}
+	}
 	t, err := a.resolveRequest(cmd.Context(), targetRequest{requireRepo: true, authenticate: true, repo: selected.Repo, repoSource: source})
 	return t, numbers, err
+}
+
+// bareRefsAgree rejects the bare number of bare next to source, a reference to repo, when gt
+// targets another repository otherwise, as GITEA_CLI_REPO or a clone on an instance gt can act on
+// does; --repo must agree with source anyway.
+func (a *application) bareRefsAgree(ctx context.Context, bare string, number int64, repo, source string) error {
+	if a.options.repo != "" {
+		return nil
+	}
+	s, err := a.settings()
+	if err != nil {
+		return nil // Resolution reports broken settings.
+	}
+	hosts, err := a.repositoryHosts(s.Hosts.Hosts)
+	if err != nil {
+		return nil // Resolution reports a bad --host.
+	}
+	otherwise := a.deps.Getenv("GITEA_CLI_REPO")
+	if otherwise == "" {
+		otherwise, _ = a.discoverRepository(ctx, &target{}, s)
+		// Resolution reports a remote gt cannot act on; the reference may well be meant instead.
+		if parsed, err := settings.ParseRepository(otherwise, hosts); err != nil || (parsed.Host != "" && !a.canActOn(parsed.Host, hosts)) {
+			return nil
+		}
+	}
+	if otherwise == "" || a.sameRepository(otherwise, repo) {
+		return nil
+	}
+	return clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with %s; qualify it as %s, or run a separate command for %s",
+		bare, source, a.qualifiedRef(repo, number, hosts), a.qualifiedRef(otherwise, number, hosts)))
+}
+
+// qualifiedRef returns the reference to number in the repository argument raw: OWNER/REPO#N, with
+// the host when raw is on an instance other than the default one.
+func (a *application) qualifiedRef(raw string, number int64, hosts map[string]settings.Host) string {
+	parsed, err := settings.ParseRepository(raw, hosts)
+	if err != nil {
+		return fmt.Sprintf("%s#%d", raw, number)
+	}
+	short := fmt.Sprintf("%s#%d", parsed.Slug(), number)
+	if parsed.Host == "" || a.isDefaultHost(parsed.Host) {
+		return short
+	}
+	_, bare, _ := strings.Cut(parsed.Host, "://")
+	if again, err := settings.ParseRepository(bare+"/"+parsed.Slug(), hosts); err == nil && again.Host == parsed.Host {
+		return bare + "/" + short
+	}
+	return fmt.Sprintf("%s/%s/issues/%d", parsed.Host, parsed.Slug(), number) // The bare host is ambiguous or takes another scheme.
 }
 
 // sameRepository reports whether two repository arguments name the same repository.
@@ -238,7 +296,7 @@ func (a *application) selectPull(cmd *cobra.Command, args []string, closed bool)
 	if len(args) == 0 {
 		// The checked-out branch says nothing about a repository chosen with --repo.
 		if a.options.repo != "" {
-			return target{}, 0, clierr.Wrap(clierr.Usage, errors.New("pass a pull request number, URL or branch with --repo"))
+			return target{}, 0, clierr.Wrap(clierr.Usage, fmt.Errorf("%s requires a pull request number, URL or branch with --repo", commandName(cmd)))
 		}
 		return a.currentPull(cmd.Context(), closed)
 	}
@@ -279,8 +337,8 @@ func (a *application) selectPull(cmd *cobra.Command, args []string, closed bool)
 
 // currentPull finds the pull request of the checked-out branch: the one pr checkout recorded
 // while it is open, else the open pull request whose head is the branch's upstream (and the
-// upstream remote's owner), else one of this repository whose head has the local branch's name, else N from a pr/N
-// branch, else the recorded pull request even though it is no longer open. With closed, the
+// upstream remote's owner), else one of this repository whose head has the local branch's name, else the
+// recorded pull request even though it is no longer open, else N from a pr/N branch that records none. With closed, the
 // newest closed or merged pull request for the branch comes last.
 func (a *application) currentPull(ctx context.Context, closed bool) (target, int64, error) {
 	branch, err := git.CurrentBranchConfig(ctx, a.gitProbe(), a.options.cwd)
@@ -323,13 +381,14 @@ func (a *application) currentPull(ctx context.Context, closed bool) (target, int
 	if n, err := pullForBranch(own, "", branch.Name, t.Repo); n > 0 || err != nil {
 		return t, n, err
 	}
-	if number, ok := strings.CutPrefix(branch.Name, "pr/"); ok {
+	if recorded > 0 {
+		return t, recorded, nil
+	}
+	// Once the branch records a pull request, pr/N may name one this branch no longer pushes to.
+	if number, ok := strings.CutPrefix(branch.Name, "pr/"); ok && branch.PullNumber == 0 {
 		if n, err := strconv.ParseInt(number, 10, 64); err == nil && n > 0 {
 			return t, n, nil
 		}
-	}
-	if recorded > 0 {
-		return t, recorded, nil
 	}
 	if closed {
 		// Same matching as above: the upstream's owner first, then the repository's own branches.

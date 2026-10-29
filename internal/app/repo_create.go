@@ -205,6 +205,9 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 		f.templateOpts.Name, f.templateOpts.Owner, f.templateOpts.Description = f.opts.Name, f.org, f.opts.Description
 		f.templateOpts.Private, f.templateOpts.DefaultBranch = f.opts.Private, f.opts.DefaultBranch
 		item, err = service.Generate(cmd.Context(), target.Repo, f.templateOpts)
+		if _, ok := errors.AsType[*services.NotTemplateError](err); ok {
+			return fmt.Errorf("--template requires a template repository; mark it with gt repo edit %s --as-template", target.Repo)
+		}
 	} else {
 		item, err = service.Create(cmd.Context(), f.org, f.opts)
 	}
@@ -272,20 +275,24 @@ func validateRepositoryDescription(description string) error {
 // validateCreateFlags rejects combinations of repo create flags that cannot work, before any request.
 func validateCreateFlags(cmd *cobra.Command, opts services.RepositoryOptions, org, team, template, localSource string, clone bool) error {
 	changed := func(names ...string) bool { return slices.ContainsFunc(names, cmd.Flags().Changed) }
+	initial := setFlags([]string{"--gitignores", "--license", "--readme", "--default-branch"}, opts.Gitignores != "", opts.License != "", opts.Readme != "", opts.DefaultBranch != "")
+	publish := setFlags([]string{"--push", "--remote-name"}, changed("push"), changed("remote-name"))
 	switch {
 	case changed("team") && (org == "" || strings.TrimSpace(team) == ""):
 		return clierr.Wrap(clierr.Usage, errors.New("--team requires --org and a team name"))
 	case changed("template") && template == "":
 		return clierr.Wrap(clierr.Usage, errors.New("--template requires owner/repo or a repository URL"))
-	case template == "" && (opts.Gitignores != "" || opts.License != "" || opts.Readme != "" || opts.DefaultBranch != "") && !opts.AutoInit:
-		return clierr.Wrap(clierr.Usage, errors.New("initial content and default branch options require --auto-init"))
+	case template == "" && len(initial) > 0 && !opts.AutoInit:
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s requires --auto-init", initial[0]))
 	case template != "" && changed("auto-init", "label-template", "gitignores", "license", "readme", "as-template", "trust-model", "object-format"):
 		return clierr.Wrap(clierr.Usage, errors.New("repository initialization options cannot be combined with --template"))
 	case template == "" && changed("copy-content", "copy-git-hooks", "copy-avatar", "copy-labels", "copy-topics", "copy-webhooks"):
 		return clierr.Wrap(clierr.Usage, errors.New("copy options require --template owner/repo"))
 	case localSource != "" && (clone || template != "" || opts.AutoInit):
 		return clierr.Wrap(clierr.Usage, errors.New("--source publishes a local repository; it cannot be combined with --clone, --template or --auto-init"))
-	case localSource == "" && changed("push", "remote-name"):
+	case localSource == "" && len(publish) == 1:
+		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s requires --source", publish[0]))
+	case localSource == "" && len(publish) > 1:
 		return clierr.Wrap(clierr.Usage, errors.New("--push and --remote-name require --source"))
 	}
 	if err := validateRepositoryDescription(opts.Description); err != nil {

@@ -97,12 +97,12 @@ func (a *application) environmentHosts(hosts map[string]settings.Host) (map[stri
 	host := hosts[instance]
 	if insecure != "" {
 		if host.Insecure, err = strconv.ParseBool(insecure); err != nil {
-			return nil, clierr.Wrap(clierr.Usage, errors.New("GITEA_INSTANCE_INSECURE must be true or false"))
+			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid GITEA_INSTANCE_INSECURE %q: it must be true or false", insecure))
 		}
 	}
 	if sshHost != "" {
 		if _, err := settings.SSHEndpoint(sshHost); err != nil {
-			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid GITEA_INSTANCE_SSH_HOST: %w", err))
+			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid GITEA_INSTANCE_SSH_HOST %q: %w", sshHost, err))
 		}
 		host.SSHHost = sshHost
 	}
@@ -246,7 +246,7 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 		}
 		credential, err := a.loadCredential(ctx, t, account, req.offline && !req.refresh)
 		if err != nil {
-			return t, clierr.Wrap(clierr.Authentication, err)
+			return t, err
 		}
 		token = credential.AccessToken
 	}
@@ -340,7 +340,7 @@ func (a *application) loadCredential(ctx context.Context, t target, account sett
 		if err == nil && !credential.ExpiresAt.IsZero() && !a.deps.Now().Before(credential.ExpiresAt) {
 			err = errors.New("access token expired")
 		}
-		return credential, err
+		return credential, clierr.Wrap(clierr.Authentication, err)
 	}
 	return a.refreshedCredential(ctx, t.Host, t.User, t.host)
 }
@@ -354,14 +354,14 @@ func (a *application) repositorySource(ctx context.Context, t *target, s setting
 		}
 		if a.options.repo != "" && !a.namesInstance(req.repo) && a.namesInstance(a.options.repo) {
 			// The argument agrees with --repo and only lacks its instance.
-			t.RepoSource = "--repo"
+			t.RepoSource = a.repoOptionSource()
 			return a.options.repo, nil
 		}
 		t.RepoSource = req.repoSource
 		return req.repo, nil
 	}
 	if a.options.repo != "" {
-		t.RepoSource = "--repo"
+		t.RepoSource = a.repoOptionSource()
 		return a.options.repo, nil
 	}
 	if raw := a.deps.Getenv("GITEA_CLI_REPO"); raw != "" {
@@ -372,6 +372,14 @@ func (a *application) repositorySource(ctx context.Context, t *target, s setting
 		return "", nil
 	}
 	return a.discoverRepository(ctx, t, s)
+}
+
+// repoOptionSource names what set the selected repository: --repo, or a command's repository argument.
+func (a *application) repoOptionSource() string {
+	if a.options.repoArgument {
+		return "argument"
+	}
+	return "--repo"
 }
 
 // discoverRepository returns the raw repository of the clone in the working directory: the --remote
@@ -418,7 +426,10 @@ func (a *application) discoverRepository(ctx context.Context, t *target, s setti
 	raw, known := urls[remote]
 	if !known {
 		if raw, err = probe("remote", "get-url", remote); err != nil {
-			if a.options.remote != "" {
+			switch {
+			case a.options.remote != "" && !a.insideClone(ctx):
+				return "", clierr.Wrap(clierr.Usage, errors.New("--remote requires a Git clone"))
+			case a.options.remote != "":
 				return "", clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %q does not exist", remote))
 			}
 			return "", fmt.Errorf("cannot read the URL of Git remote %q: %w", remote, err)
@@ -426,7 +437,23 @@ func (a *application) discoverRepository(ctx context.Context, t *target, s setti
 		raw = settings.WithoutCredentials(raw)
 	}
 	t.RepoSource = "remote " + remote
+	if raw == "" { // WithoutCredentials drops an unparseable URL with credentials whole
+		return "", a.remoteRepositoryError(remote, "")
+	}
 	return raw, nil
+}
+
+// remoteRepositoryError tells that the discovered Git remote, whose URL is raw, names no repository.
+func (a *application) remoteRepositoryError(remote, raw string) error {
+	remote = strconv.Quote(remote)
+	if raw != "" {
+		remote += " (" + raw + ")"
+	}
+	fix := "pass --repo OWNER/REPO or --remote NAME"
+	if a.options.remote != "" {
+		fix = "pass --repo OWNER/REPO"
+	}
+	return clierr.Wrap(clierr.Usage, fmt.Errorf("Git remote %s names no Gitea repository; %s", remote, fix))
 }
 
 // canActOn reports whether gt can use a discovered remote on instance: it is the --host instance,
@@ -490,9 +517,17 @@ func (a *application) selectRepository(ctx context.Context, t *target, s setting
 	}
 	ref, err := settings.ParseRepository(raw, configured)
 	if err != nil {
-		return clierr.Wrap(clierr.Usage, a.environmentSSHRemote(err, raw, configured))
+		err = a.environmentSSHRemote(err, raw, configured)
+		_, isSSH := errors.AsType[*settings.SSHRemoteError](err)
+		if remote, ok := strings.CutPrefix(t.RepoSource, "remote "); ok && !isSSH {
+			return a.remoteRepositoryError(remote, raw)
+		}
+		return clierr.Wrap(clierr.Usage, err)
 	}
 	if ref.Owner == "" && ref.Host == "" && a.isGitRemote(ctx, ref.Name) {
+		if a.options.ignoresRemote {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid repository %q: use OWNER/REPO, HOST/OWNER/REPO or a URL", raw))
+		}
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid repository %q: use OWNER/REPO, HOST/OWNER/REPO or a URL; did you mean --remote %s?", raw, ref.Name))
 	}
 	t.Repo = ref.Slug()
@@ -601,7 +636,7 @@ func (a *application) defaultHost(t *target, s settings.Snapshot) error {
 	}
 	if t.Host == "" {
 		if len(candidates) == 0 {
-			return clierr.Wrap(clierr.Usage, errors.New("no instance selected: log in with gt auth login, or pass --host"))
+			return clierr.Wrap(clierr.Authentication, errors.New("no instance selected; log in with gt auth login, or pass --host"))
 		}
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("instance required: select --host or set default_host (instances: %s)", strings.Join(slices.Sorted(maps.Keys(candidates)), ", ")))
 	}
@@ -693,6 +728,9 @@ func (t target) accountError(user string) error {
 func describeSource(source string) string {
 	if remote, ok := strings.CutPrefix(source, "remote "); ok {
 		return "git remote " + strconv.Quote(remote)
+	}
+	if source == "argument" {
+		return "the repository argument"
 	}
 	return source
 }

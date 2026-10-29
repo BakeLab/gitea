@@ -30,7 +30,7 @@ func (a *application) repositoryArgument(args []string) error {
 	if a.options.repo != "" {
 		return clierr.Wrap(clierr.Usage, errors.New("a repository argument cannot be combined with --repo"))
 	}
-	a.options.repo = args[0]
+	a.options.repo, a.options.repoArgument = args[0], true
 	return nil
 }
 
@@ -40,7 +40,7 @@ func (a *application) rejectRepoFlag(cmd *cobra.Command, suggest func(owner stri
 	if a.options.repo == "" {
 		return nil
 	}
-	text := "--repo is not used by " + strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()+" ")
+	text := "--repo is not used by " + commandName(cmd)
 	if ref, err := settings.ParseRepository(a.options.repo, nil); err == nil && ref.Owner != "" {
 		text += "; did you mean: " + suggest(ref.Owner)
 	}
@@ -65,9 +65,13 @@ func (a *application) repoSetDefaultCommand() *cobra.Command {
 		Use:   "set-default [<repository>]",
 		Short: "Set the default repository for this clone",
 		Long: `Set the repository that gt commands use in the current Git clone instead of the one of its Git
-remotes (saved as gt.repository in the clone's Git configuration).`,
+remotes (saved as gt.repository in the clone's Git configuration). With --remote, it saves the
+repository of that Git remote.`,
 		Example: `# Make gt commands in this clone use the fork's parent
 $ gt repo set-default alice/project
+
+# Save the repository of the upstream remote
+$ gt repo set-default --remote upstream
 
 # Show the saved repository
 $ gt repo set-default --view
@@ -75,7 +79,7 @@ $ gt repo set-default --view
 # Go back to the repository of the Git remotes
 $ gt repo set-default --unset`,
 		Annotations: map[string]string{"gt.arguments": `A repository can be supplied as NAME (one of yours), OWNER/NAME, HOST/OWNER/NAME or a URL.
-Without an argument, a terminal asks for one of the repositories of the clone's Git remotes.`, "gt.text": "set-default configures Git"},
+Without an argument or --remote, a terminal asks for one of the repositories of the clone's Git remotes.`, "gt.text": "set-default configures Git"},
 		Args: nonBlankArgs(cobra.MaximumNArgs(1), "repository"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
@@ -83,10 +87,16 @@ Without an argument, a terminal asks for one of the repositories of the clone's 
 				return clierr.Wrap(clierr.Usage, errors.New("--view cannot be combined with --unset"))
 			case (view || unset) && len(args) > 0:
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with a repository argument", setFlags([]string{"--view", "--unset"}, view, unset)[0]))
+			case a.options.remote != "" && (len(args) > 0 || a.options.repo != ""):
+				return clierr.Wrap(clierr.Usage, errors.New("--remote cannot be combined with a repository argument or --repo"))
+			case a.options.remote != "" && (view || unset):
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("--remote cannot be combined with %s", setFlags([]string{"--view", "--unset"}, view, unset)[0]))
+			case a.options.remote != "" && a.deps.Getenv("GITEA_CLI_REPO") != "":
+				return clierr.Wrap(clierr.Usage, errors.New("--remote cannot be combined with GITEA_CLI_REPO"))
 			}
 			ctx := cmd.Context()
 			if !a.insideClone(ctx) {
-				return clierr.Wrap(clierr.Usage, errors.New("set-default must run inside a Git clone"))
+				return clierr.Wrap(clierr.Usage, errors.New("repo set-default requires a Git clone"))
 			}
 			saved, _ := a.gitProbe().Output(ctx, a.options.cwd, false, "config", "--local", "--get", "gt.repository")
 			switch {
@@ -106,7 +116,7 @@ Without an argument, a terminal asks for one of the repositories of the clone's 
 				a.done(cmd, "Removed the default repository %s from this clone", saved)
 				return nil
 			}
-			if len(args) == 0 && a.options.repo == "" {
+			if len(args) == 0 && a.options.repo == "" && a.options.remote == "" {
 				chosen, err := a.chooseRemoteRepository(ctx)
 				if err != nil {
 					return err

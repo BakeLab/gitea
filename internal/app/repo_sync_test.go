@@ -134,7 +134,7 @@ func TestRepoSyncOutsideACloneExplainsWhatItNeeds(t *testing.T) {
 	deps.Git = &syncGit{}
 	err := Execute(context.Background(), deps, []string{"repo", "sync", "-R", "alice/project", "-b", "main"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
-	require.ErrorContains(t, err, "repo sync needs a Git clone of alice/project; run it inside one, or pass a fork to update it on the server")
+	require.ErrorContains(t, err, "repo sync requires a Git clone of alice/project; run it inside one, or pass a fork to update it on the server")
 }
 
 func TestRepoSyncOnTheServerIgnoresARemotePreferenceForAnotherRepository(t *testing.T) {

@@ -67,7 +67,7 @@ $ gt repo sync bob/project`,
 			case errors.Is(err, errNoMatchingRemote) && len(args) > 0:
 				return a.syncOnServer(cmd, target, branch)
 			case !inside:
-				return clierr.Wrap(clierr.Usage, fmt.Errorf("repo sync needs a Git clone of %s; run it inside one, or pass a fork to update it on the server: gt repo sync OWNER/REPO", target.Repo))
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("repo sync requires a Git clone of %s; run it inside one, or pass a fork to update it on the server: gt repo sync OWNER/REPO", target.Repo))
 			case errors.Is(err, errNoMatchingRemote):
 				return clierr.Wrap(clierr.Usage, errors.New("no Git remote of this clone points to "+target.Repo+"; add one with git remote add, or pass --remote"))
 			case err != nil:

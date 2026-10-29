@@ -144,6 +144,12 @@ func TestRepoSetDefaultValidatesTheRepository(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "set-default"}))
 	require.Equal(t, []terminal.Choice{{Label: "alice/project (origin)", Value: server.URL + "/alice/project"}}, prompter.choices)
 	require.Contains(t, runner.calls, saved)
+	// --remote saves the repository of that remote without asking.
+	deps, _, _ = repoTTYDeps(t, server.URL)
+	runner = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote get-url upstream": server.URL + "/alice/project.git", saved: ""}}
+	deps.Git = runner
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "set-default", "--remote", "upstream"}))
+	require.Contains(t, runner.calls, saved)
 }
 
 func TestRepoSetDefaultViewAndUnset(t *testing.T) {
@@ -168,7 +174,7 @@ func TestRepoSetDefaultViewAndUnset(t *testing.T) {
 	require.Equal(t, "! No default repository is set for this clone; set one with gt repo set-default OWNER/REPO\n! No default repository is set for this clone\n", diagnostics.String())
 	deps.Git = &fakeGit{}
 	err := Execute(context.Background(), deps, []string{"repo", "set-default", "-v"})
-	require.ErrorContains(t, err, "set-default must run inside a Git clone")
+	require.ErrorContains(t, err, "repo set-default requires a Git clone")
 }
 
 func TestRepoViewOfAnEmptyRepositorySkipsTheReadme(t *testing.T) {

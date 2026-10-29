@@ -19,11 +19,16 @@ import (
 )
 
 func validateMigrationURL(raw string) error {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || (parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "git") {
-		return clierr.Wrap(clierr.Usage, errors.New("clone URL must be an HTTP(S) or git URL without embedded credentials; server filesystem paths are not supported"))
+	if !migrationURL(raw) {
+		return clierr.Wrap(clierr.Usage, errors.New("clone URL must be an HTTP(S) or git URL without embedded credentials; for a path on the Gitea server, use --server-path"))
 	}
 	return nil
+}
+
+// migrationURL reports whether raw is an HTTP(S) or git URL without embedded credentials.
+func migrationURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Hostname() != "" && parsed.User == nil && parsed.Fragment == "" && (parsed.Scheme == "http" || parsed.Scheme == "https" || parsed.Scheme == "git")
 }
 
 // migrationName derives a repository name from the last segment of a clone URL or server path.
@@ -191,10 +196,8 @@ func validateMigrationFlags(cmd *cobra.Command, opts services.RepositoryMigratio
 	case passwordFile == "-" && tokenFile == "-":
 		return clierr.Wrap(clierr.Usage, errors.New("stdin can supply only one source credential"))
 	}
-	if opts.LFSEndpoint != "" {
-		if err := validateMigrationURL(opts.LFSEndpoint); err != nil {
-			return err
-		}
+	if opts.LFSEndpoint != "" && !migrationURL(opts.LFSEndpoint) {
+		return clierr.Wrap(clierr.Usage, errors.New("--lfs-endpoint must be an HTTP(S) or git URL without embedded credentials"))
 	}
 	if opts.MirrorInterval != "" {
 		interval, err := time.ParseDuration(opts.MirrorInterval)

@@ -215,11 +215,13 @@ func TestEnvironmentTokenCannotCrossInstances(t *testing.T) {
 }
 
 func TestEnvironmentTokenWithoutItsInstanceNamesTheVariables(t *testing.T) {
-	deps, _, _ := testDeps(t)
+	deps, out, _ := testDeps(t)
 	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "secret"})
 	err := Execute(context.Background(), deps, []string{"api", "user"})
 	require.EqualError(t, err, "GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance")
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "status", "--json"}))
+	require.Contains(t, out.String(), `"error":"GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance"`)
 	// --host never names the token's instance: a credential helper always passes one.
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("the token reached --host") }))
 	defer server.Close()
@@ -371,7 +373,7 @@ func TestRepositoryDiscoveryFindsGiteaRemoteBesideAnotherForge(t *testing.T) {
 	deps.Git = &fakeGit{results: map[string]string{"remote": "gitea\norigin", "remote get-url origin": "https://github.com/example/project.git", "remote get-url gitea": server.URL + "/alice/project.git"}}
 	err := Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "--remote", "origin"})
 	require.ErrorContains(t, err, `no account for https://github.com (instance from git remote "origin")`)
-	deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": "https://gitea.com/carol/project.git"}}
+	deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote": "origin", "remote get-url origin": "https://gitea.com/carol/project.git"}}
 	err = Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "--remote", "origin", "--host", server.URL})
 	require.EqualError(t, err, "--host "+server.URL+" does not match the instance https://gitea.com of remote origin")
 	err = Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "-R", "https://gitea.com/carol/project", "--host", server.URL})
@@ -379,6 +381,10 @@ func TestRepositoryDiscoveryFindsGiteaRemoteBesideAnotherForge(t *testing.T) {
 	err = Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "--remote", "nope"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
 	require.EqualError(t, err, `Git remote "nope" does not exist`)
+	deps.Git = &fakeGit{}
+	err = Execute(context.Background(), deps, []string{"repo", "view", "--no-input", "--remote", "origin"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.EqualError(t, err, "--remote requires a Git clone")
 	deps.Git = &fakeGit{results: map[string]string{"remote": ""}}
 	err = Execute(context.Background(), deps, []string{"repo", "view", "--no-input"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
@@ -421,6 +427,31 @@ func TestRepositoryNamedLikeAGitRemoteSuggestsRemote(t *testing.T) {
 	require.EqualError(t, err, `invalid repository "origin": use OWNER/REPO, HOST/OWNER/REPO or a URL; did you mean --remote origin?`)
 	err = Execute(context.Background(), deps, []string{"issue", "list", "-R", "a/b/c/d"})
 	require.EqualError(t, err, `invalid repository "a/b/c/d": use OWNER/REPO, HOST/OWNER/REPO or a URL`)
+	// repo clone never reads --remote.
+	err = Execute(context.Background(), deps, []string{"repo", "clone", "origin"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.EqualError(t, err, `invalid repository "origin": use OWNER/REPO, HOST/OWNER/REPO or a URL`)
+}
+
+func TestDiscoveredRemoteThatNamesNoRepositoryNamesTheRemote(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	for url, want := range map[string]string{
+		"/some/local/path":          `Git remote "origin" (/some/local/path) names no Gitea repository; pass --repo OWNER/REPO or --remote NAME`,
+		"ftp://127.0.0.1/o/r":       `Git remote "origin" (ftp://127.0.0.1/o/r) names no Gitea repository; pass --repo OWNER/REPO or --remote NAME`,
+		"ssh://git@127.0.0.1:x/o/r": `Git remote "origin" names no Gitea repository; pass --repo OWNER/REPO or --remote NAME`,
+	} {
+		deps, _, _ := testDeps(t)
+		deps.Getenv = serverEnv(server.URL, nil)
+		deps.Git = &fakeGit{results: map[string]string{"remote": "origin", "remote get-url origin": url}}
+		err := Execute(context.Background(), deps, []string{"repo", "view"})
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err), url)
+		require.EqualError(t, err, want, url)
+		err = Execute(context.Background(), deps, []string{"repo", "view", "--remote", "origin"})
+		require.EqualError(t, err, strings.TrimSuffix(want, " or --remote NAME"), url)
+	}
 }
 
 func TestAccountErrorsNameTheInstanceAndAccounts(t *testing.T) {
@@ -437,6 +468,7 @@ func TestAccountErrorsNameTheInstanceAndAccounts(t *testing.T) {
 		{"unknown --user", []string{"alice", "bob"}, "alice", []string{"-R", "alice/project", "--user", "nobody"}, nil, `account "nobody" is not logged in on https://example.org (accounts: alice, bob)`},
 		{"unknown --user without accounts", nil, "", []string{"-R", "alice/project", "--user", "nobody", "--host", instance}, nil, `account "nobody" is not logged in on https://example.org; run gt auth login --host https://example.org`},
 		{"no active account", []string{"alice", "bob"}, "", []string{"-R", "alice/project"}, nil, "no active account on https://example.org (accounts: alice, bob); pass --user or run gt auth switch"},
+		{"no instance at all", nil, "", []string{"-R", "alice/project"}, nil, "no instance selected; log in with gt auth login, or pass --host"},
 		{"instance from a remote", []string{"alice"}, "alice", nil, remote, `no account for https://gitea.com (instance from git remote "origin"); run gt auth login --host https://gitea.com, or use -R to target another repository`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -452,6 +484,9 @@ func TestAccountErrorsNameTheInstanceAndAccounts(t *testing.T) {
 			require.EqualError(t, err, tc.want)
 		})
 	}
+	deps, _, _ := testDeps(t)
+	err := Execute(context.Background(), deps, []string{"repo", "view", "https://gitea.com/alice/project", "--no-input"})
+	require.EqualError(t, err, "no account for https://gitea.com (instance from the repository argument); run gt auth login --host https://gitea.com, or use -R to target another repository")
 }
 
 func TestRepositoryDiscoveryOutsideCheckoutWritesNoGitDiagnostics(t *testing.T) {
@@ -510,6 +545,9 @@ func TestRepositoryFlagNamedLikeADirectoryIsAmbiguous(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "view", "-R", "alice/project", "--cwd", dir, "--no-input", "--json=full_name"}))
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "view", "-R", "other", "--cwd", dir, "--no-input", "--json=full_name"}))
 	require.Contains(t, out.String(), "alice/other")
+	// A positional NAME is never meant as a checkout, as after gt repo clone NAME.
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "view", "project", "--cwd", dir, "--no-input", "--json=full_name"}))
+	require.Contains(t, out.String(), "alice/project")
 }
 
 func TestHTTPTimeoutBoundsEachAPIRequest(t *testing.T) {

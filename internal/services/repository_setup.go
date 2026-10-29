@@ -5,7 +5,9 @@ package services
 
 import (
 	"context"
+	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"gitea.dev/cli/internal/transport"
@@ -26,6 +28,16 @@ type RepositoryTemplateOptions struct {
 	Topics        bool   `json:"topics"`
 	Webhooks      bool   `json:"webhooks"`
 }
+
+// NotTemplateError reports a source of Generate that is not marked as a template repository.
+type NotTemplateError struct {
+	Repository string
+	Err        error
+}
+
+func (e *NotTemplateError) Error() string { return e.Repository + " is not a template repository" }
+
+func (e *NotTemplateError) Unwrap() error { return e.Err }
 
 // Generate creates a repository from a template on the selected instance.
 func (s Repositories) Generate(ctx context.Context, source string, opts RepositoryTemplateOptions) (Repository, error) {
@@ -49,6 +61,9 @@ func (s Repositories) Generate(ctx context.Context, source string, opts Reposito
 				return Repository{}, &NotFoundError{Kind: "template repository", Key: source, Err: err}
 			}
 			return Repository{}, &NotFoundError{Kind: "organization", Key: strconv.Quote(opts.Owner), Err: err}
+		}
+		if apiErr, ok := errors.AsType[*transport.APIError](err); ok && strings.Contains(apiErr.Message, "not a template") {
+			return Repository{}, &NotTemplateError{Repository: source, Err: err}
 		}
 		return Repository{}, Classify(err, "repository", "", "")
 	}

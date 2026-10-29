@@ -9,10 +9,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/git/gittest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -46,6 +49,10 @@ func TestRepoDeleteAndArchiveRequireExplicitRepositoryWithYes(t *testing.T) {
 	require.Equal(t, []string{"DELETE /api/v1/repos/alice/project"}, requests)
 	require.Empty(t, out.String())
 	require.Equal(t, "✓ Deleted repository alice/project\n", diagnostics.String())
+	// Scripts set GITEA_CLI_REPO deliberately, so it names the repository like --repo.
+	deps.Getenv, requests = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"}), nil
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "delete", "--yes"}))
+	require.Equal(t, []string{"DELETE /api/v1/repos/alice/project"}, requests)
 }
 
 func TestRepoDeleteAsksToTypeTheRepositoryName(t *testing.T) {
@@ -144,6 +151,108 @@ func TestRepoRenameHintsAtTheRemote(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rename", "renamed", "--yes"}))
 	require.Empty(t, out.String())
 	require.Equal(t, "✓ Renamed repository alice/project to alice/renamed\n! Git remote origin still points to alice/project; update it with git remote set-url\n", diagnostics.String())
+	// The remote that selected the repository follows the rename, over the same protocol.
+	for _, url := range []string{"ssh://git@gitea.test:2222/alice/project.git", server.URL + "/alice/project"} {
+		diagnostics.Reset()
+		deps.Getenv = serverEnv(server.URL, map[string]string{"TERM": "dumb", "GITEA_INSTANCE_SSH_HOST": "gitea.test:2222"})
+		moved := strings.Replace(url, "alice/project", "alice/renamed", 1)
+		deps.Git = &fakeGit{results: map[string]string{
+			"symbolic-ref --quiet HEAD":         "main",
+			"config --get branch.main.remote":   "origin",
+			"remote get-url origin":             url,
+			"config --get remote.origin.url":    url,
+			"remote set-url -- origin " + moved: "",
+		}}
+		require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rename", "renamed", "--yes"}), url)
+		require.Equal(t, "✓ Renamed repository alice/project to alice/renamed\n✓ Updated Git remote origin to alice/renamed\n", diagnostics.String(), url)
+	}
+}
+
+func TestRepoRenameKeepsInsteadOfAndMovesThePushURL(t *testing.T) {
+	gittest.Isolate(t)
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"renamed","full_name":"alice/renamed"}`))
+	}))
+	defer server.Close()
+	for push, want := range map[string]string{
+		"ssh://git@gitea.test/alice/project.git": "ssh://git@gitea.test/alice/renamed.git",
+		"ssh://git@gitea.test/carol/mirror.git":  "ssh://git@gitea.test/carol/mirror.git",
+	} {
+		dir := t.TempDir()
+		for _, args := range [][]string{
+			{"init", "--quiet"},
+			{"config", "url." + server.URL + "/.insteadOf", "gt:"},
+			{"remote", "add", "origin", "gt:alice/project.git"},
+			{"config", "remote.origin.pushurl", push},
+		} {
+			out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+			require.NoError(t, err, string(out))
+		}
+		deps, _, diagnostics := repoTTYDeps(t, server.URL)
+		deps.Git = git.System{}
+		require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rename", "renamed", "--yes", "--cwd", dir}))
+		require.Equal(t, "✓ Renamed repository alice/project to alice/renamed\n✓ Updated Git remote origin to alice/renamed\n", diagnostics.String())
+		for key, value := range map[string]string{"remote.origin.url": "gt:alice/renamed.git", "remote.origin.pushurl": want} {
+			out, err := exec.Command("git", "-C", dir, "config", "--get", key).Output()
+			require.NoError(t, err)
+			require.Equal(t, value, strings.TrimSpace(string(out)), key)
+		}
+	}
+}
+
+func TestRepoRenameExpandsAnOwnerShorthandAndUpdatesTheDefaultRepository(t *testing.T) {
+	gittest.Isolate(t)
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"renamed","full_name":"alice/renamed"}`))
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"config", "url." + server.URL + "/alice/.insteadOf", "me:"},
+		{"remote", "add", "origin", "me:project.git"},
+		{"config", "remote.origin.pushurl", server.URL + "/alice/project.git"},
+		{"config", "gt.repository", server.URL + "/alice/project"},
+	} {
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	deps, _, diagnostics := repoTTYDeps(t, server.URL)
+	deps.Git = git.System{}
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rename", "renamed", "--yes", "--remote", "origin", "--cwd", dir}))
+	require.Equal(t, "✓ Renamed repository alice/project to alice/renamed\n✓ Updated Git remote origin to alice/renamed\n✓ Updated the default repository of this clone to alice/renamed\n", diagnostics.String())
+	for key, value := range map[string]string{"remote.origin.url": server.URL + "/alice/renamed.git", "remote.origin.pushurl": server.URL + "/alice/renamed.git", "gt.repository": server.URL + "/alice/renamed"} {
+		out, err := exec.Command("git", "-C", dir, "config", "--get", key).Output()
+		require.NoError(t, err)
+		require.Equal(t, value, strings.TrimSpace(string(out)), key)
+	}
+}
+
+func TestRepoRenameMovesTheRemoteOfTheDefaultRepository(t *testing.T) {
+	gittest.Isolate(t)
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"renamed","full_name":"alice/renamed"}`))
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"remote", "add", "origin", server.URL + "/bob/project.git"},
+		{"remote", "add", "parent", server.URL + "/alice/project.git"},
+		{"config", "gt.repository", server.URL + "/alice/project"},
+	} {
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	deps, _, diagnostics := repoTTYDeps(t, server.URL)
+	deps.Git = git.System{}
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "rename", "renamed", "--yes", "--cwd", dir}))
+	require.Equal(t, "✓ Renamed repository alice/project to alice/renamed\n✓ Updated Git remote parent to alice/renamed\n✓ Updated the default repository of this clone to alice/renamed\n", diagnostics.String())
+	for key, value := range map[string]string{"remote.origin.url": server.URL + "/bob/project.git", "remote.parent.url": server.URL + "/alice/renamed.git", "gt.repository": server.URL + "/alice/renamed"} {
+		out, err := exec.Command("git", "-C", dir, "config", "--get", key).Output()
+		require.NoError(t, err)
+		require.Equal(t, value, strings.TrimSpace(string(out)), key)
+	}
 }
 
 func TestRepoForkReportsAnExistingFork(t *testing.T) {
@@ -194,6 +303,10 @@ func TestRepoForkRefusesTheOwnersRepository(t *testing.T) {
 	require.Empty(t, requests)
 	require.NoError(t, Execute(context.Background(), deps, []string{"--sudo", "bob", "repo", "fork", "alice/project"}))
 	require.Equal(t, []string{"POST /api/v1/repos/alice/project/forks bob"}, requests)
+	// The global --remote selects the repository to fork.
+	deps.Git, requests = &fakeGit{results: map[string]string{"remote get-url upstream": server.URL + "/carol/project.git"}}, nil
+	require.NoError(t, Execute(context.Background(), deps, []string{"--remote", "upstream", "repo", "fork"}))
+	require.Equal(t, []string{"POST /api/v1/repos/carol/project/forks "}, requests)
 }
 
 func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
@@ -221,19 +334,20 @@ func TestRepoForkAddsTheForkAsOrigin(t *testing.T) {
 		"remote add -- origin " + fork:     "",
 	}}
 	deps.Git = runner
-	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"}))
-	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", "remote get-url upstream", "remote rename -- origin upstream", "remote add -- origin " + fork}, runner.calls)
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--add-remote"}))
+	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin", "remote get-url upstream", "remote rename -- origin upstream", `config --get-regexp ^branch\..*\.gitea-cli-base-remote$`, "remote add -- origin " + fork}, runner.calls)
 	require.Equal(t, "✓ Forked bob/project to alice/mine\n✓ Renamed Git remote origin to upstream\n✓ Added Git remote origin for alice/mine\n", diagnostics.String())
 	require.Equal(t, "https://gitea.test/alice/mine\n", out.String())
 	// A second run finds origin pointing to the fork.
 	runner.results["remote get-url origin"], runner.calls = fork, nil
 	diagnostics.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--add-remote"}))
 	require.Equal(t, []string{"rev-parse --is-inside-work-tree", "remote get-url origin"}, runner.calls)
 	require.Equal(t, "✓ Forked bob/project to alice/mine\n! Git remote origin already points to alice/mine\n", diagnostics.String())
 	// Another repository of the fork owner is refused before forking.
 	runner.results["remote get-url origin"], requests = server.URL+"/alice/other.git", nil
-	err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--remote"})
+	runner.results["remote"], runner.results["remote get-url upstream"] = "origin\nupstream", server.URL+"/bob/project.git"
+	err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--fork-name", "mine", "--add-remote"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
 	require.EqualError(t, err, "Git remote origin points to alice/other; pass --remote-name")
 	require.Equal(t, []string{"GET /api/v1/repos/alice/other"}, requests)
@@ -244,25 +358,33 @@ func TestRepoForkRemoteChecksTheCloneBeforeForking(t *testing.T) {
 		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 	}))
 	defer server.Close()
-	for name, results := range map[string]map[string]string{
-		"outside a clone":         {"rev-parse --is-inside-work-tree": "false"},
-		"origin points elsewhere": {"rev-parse --is-inside-work-tree": "true", "remote get-url origin": server.URL + "/carol/other.git"},
-	} {
-		deps, _, _ := serverDeps(t, server.URL)
-		deps.Git = &fakeGit{results: results}
-		err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--remote"})
-		require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%s: %v", name, err)
-	}
 	deps, _, _ := serverDeps(t, server.URL)
-	deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote get-url origin": "https://alice:secret@github.com/alice/project.git"}}
-	err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--remote"})
+	deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote get-url origin": server.URL + "/carol/other.git"}}
+	err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--add-remote"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	// A clone of another repository gets no fork of bob/project, whatever the remote name.
+	for name, results := range map[string]map[string]string{
+		"outside a clone":      {"rev-parse --is-inside-work-tree": "false"},
+		"unrelated clone":      {"rev-parse --is-inside-work-tree": "true", "remote": "origin", "remote get-url origin": server.URL + "/carol/other.git"},
+		"clone with no remote": {"rev-parse --is-inside-work-tree": "true", "remote": ""},
+	} {
+		for _, remoteName := range []string{"fork", "origin"} {
+			deps, _, _ := serverDeps(t, server.URL)
+			deps.Git = &fakeGit{results: results}
+			err := Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--add-remote", "--remote-name", remoteName})
+			require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%s: %v", name, err)
+			require.EqualError(t, err, "--add-remote requires a Git clone of bob/project", name, remoteName)
+		}
+	}
+	deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote": "origin\nupstream", "remote get-url origin": "https://alice:secret@github.com/alice/project.git", "remote get-url upstream": server.URL + "/bob/project.git"}}
+	err = Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--add-remote"})
 	require.EqualError(t, err, "Git remote origin points to https://github.com/alice/project.git; pass --remote-name")
 	deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote get-url origin": server.URL + "/bob/project.git", "remote get-url upstream": server.URL + "/carol/project.git"}}
-	err = Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--remote"})
+	err = Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--add-remote"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
 	require.EqualError(t, err, "Git remote origin points to bob/project and cannot be renamed to upstream, which exists; pass --remote-name")
 	deps.Git = &fakeGit{results: map[string]string{"rev-parse --is-inside-work-tree": "true", "remote get-url upstream": server.URL + "/bob/project.git"}}
-	err = Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--remote", "--remote-name", "upstream"})
+	err = Execute(context.Background(), deps, []string{"repo", "fork", "bob/project", "--add-remote", "--remote-name", "upstream"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
 	require.EqualError(t, err, "Git remote upstream points to bob/project; pass another --remote-name")
 }
