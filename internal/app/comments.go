@@ -54,6 +54,11 @@ func discussion(cmd *cobra.Command, t target, n int64, kind refKind) (services.I
 	return item, err
 }
 
+// commandName names cmd in messages, without the root command: "pr list".
+func commandName(cmd *cobra.Command) string {
+	return strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()+" ")
+}
+
 // issueCommandPath names the issue command that matches a pr command, such as "gt issue comment".
 func issueCommandPath(cmd *cobra.Command) string {
 	return strings.Replace(cmd.CommandPath(), " pr ", " issue ", 1)
@@ -103,7 +108,7 @@ func (a *application) validateComment(cmd *cobra.Command, f *commentFlags, needs
 	case given && strings.TrimSpace(f.body) == "":
 		return clierr.Wrap(clierr.Usage, errors.New("comment body cannot be empty"))
 	case needsText && !given && !f.useEditor && !a.canPrompt():
-		return errMissingBody
+		return missingBody(cmd)
 	}
 	return nil
 }
@@ -133,7 +138,7 @@ func (a *application) readComment(cmd *cobra.Command, f commentFlags, initial st
 // promptComment asks for a comment in the configured editor, or in a multi-line field without one.
 func (a *application) promptComment(cmd *cobra.Command, initial string) (string, terminal.Draft, error) {
 	if !a.canPrompt() {
-		return "", terminal.Draft{}, errMissingBody
+		return "", terminal.Draft{}, missingBody(cmd)
 	}
 	draft, err := a.bodyEditor(cmd, commentTitle)(cmd.Context(), initial)
 	return draft.Body, draft, err
@@ -205,7 +210,7 @@ func (a *application) comment(cmd *cobra.Command, arg string, kind refKind, chan
 func (a *application) editComment(cmd *cobra.Command, t target, comment services.Comment, f commentFlags) (runErr error) {
 	// An inline review comment is not fetched, so there is no text to start from.
 	if comment.Author == "" && !cmd.Flags().Changed("body") && !cmd.Flags().Changed("body-file") {
-		return clierr.Wrap(clierr.Usage, errors.New("an inline review comment cannot be prefilled; supply --body or --body-file"))
+		return clierr.Wrap(clierr.Usage, errors.New("editing an inline review comment requires --body or --body-file; it cannot be prefilled"))
 	}
 	body, draft, err := a.readComment(cmd, f, comment.Body)
 	defer finishDraft(&draft, &runErr)
@@ -319,14 +324,14 @@ $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[st
 		if editLast && deleteLast {
 			return clierr.Wrap(clierr.Usage, errors.New("--edit-last cannot be combined with --delete-last"))
 		}
-		if deleteLast && (cmd.Flags().Changed("body") || cmd.Flags().Changed("body-file") || flags.useEditor) {
-			return clierr.Wrap(clierr.Usage, errors.New("--delete-last takes no comment text"))
+		if text := setFlags([]string{"--body", "--body-file", "--editor"}, cmd.Flags().Changed("body"), cmd.Flags().Changed("body-file"), flags.useEditor); deleteLast && len(text) > 0 {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--delete-last cannot be combined with %s", text[0]))
 		}
-		if (editLast || deleteLast) && len(flags.attachments) > 0 {
-			return clierr.Wrap(clierr.Usage, errors.New("--attachment only attaches files to a new comment"))
+		if last := setFlags([]string{"--edit-last", "--delete-last"}, editLast, deleteLast); len(last) > 0 && len(flags.attachments) > 0 {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--attachment cannot be combined with %s", last[0]))
 		}
 		if deleteLast && a.options.json != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("comment deletion does not return a resource; --json and --jq are not supported"))
+			return clierr.Wrap(clierr.Usage, errors.New("--delete-last cannot be combined with --json or --jq"))
 		}
 		if err := a.validateComment(cmd, &flags, !deleteLast); err != nil {
 			return err

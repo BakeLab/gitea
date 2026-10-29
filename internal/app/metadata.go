@@ -40,7 +40,7 @@ func (a *application) milestoneListCommand(service milestoneService) *cobra.Comm
 	var limit, page int
 	var state string
 	cmd := &cobra.Command{Use: "list", Short: "List milestones", Long: "List the milestones of a repository: open ones first, then by due date.", Example: `$ gt milestone list
-$ gt milestone list --state all --json title,due_on,open_issues,closed_issues`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+$ gt milestone list --state all --json title,due_date,open_issues,closed_issues`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
 		s, t, err := service(cmd)
 		if err != nil {
 			return err

@@ -138,6 +138,30 @@ func TestMilestoneIssueCommandsSelectByName(t *testing.T) {
 	require.ErrorContains(t, err, "milestone title or ID cannot be empty")
 }
 
+func TestMilestoneIssueFailsWhatGiteaLeftOut(t *testing.T) {
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/repos/alice/project/milestones":
+			writeFirstPage(w, r, `[{"id":9,"title":"v1.0"}]`)
+		case "GET /api/v1/repos/alice/project/issues/3", "PATCH /api/v1/repos/alice/project/issues/3":
+			_, _ = w.Write([]byte(`{"number":3}`))
+		case "GET /api/v1/repos/alice/project/issues/4", "PATCH /api/v1/repos/alice/project/issues/4":
+			_, _ = w.Write([]byte(`{"number":4,"milestone":{"id":9}}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	// Gitea ignores milestone changes from authors who cannot write to the issues.
+	err := Execute(context.Background(), deps, []string{"milestone", "issue", "add", "v1.0", "3", "-R", "alice/project"})
+	require.EqualError(t, err, "issue 3: Gitea left out the milestone: it does so for people who cannot write to the issues of alice/project")
+	require.Empty(t, diagnostics.String())
+	err = Execute(context.Background(), deps, []string{"milestone", "issue", "remove", "v1.0", "4", "-R", "alice/project"})
+	require.EqualError(t, err, "issue 4: Gitea left out the milestone: it does so for people who cannot write to the issues of alice/project")
+	require.Empty(t, diagnostics.String())
+}
+
 // payloadField returns the JSON request body's field name as text.
 func payloadField(t *testing.T, r *http.Request, name string) string {
 	t.Helper()
@@ -375,9 +399,9 @@ func TestMilestoneCreateState(t *testing.T) {
 	}))
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
-	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "create", "-R", "alice/project", "--title", "Done", "--state", "closed", "--json=id,state", "--no-input"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"milestone", "create", "-R", "alice/project", "--title", "Done", "--state", "closed", "--json=id,state,url,due_date", "--no-input"}))
 	require.Equal(t, "closed", payload["state"])
-	require.JSONEq(t, `{"id":9,"state":"closed"}`, out.String())
+	require.JSONEq(t, `{"id":9,"state":"closed","url":"`+server.URL+`/alice/project/milestone/9","due_date":null}`, out.String())
 }
 
 func TestMilestoneCreateRefusesAnExistingTitleUnlessForced(t *testing.T) {
@@ -453,7 +477,11 @@ func TestMilestoneTablesViewsAndDoneLines(t *testing.T) {
 			_, _ = w.Write([]byte(`{"number":1,"milestone":{"id":4,"title":"v0.9"}}`))
 		case "PATCH /api/v1/repos/alice/project/issues/1", "PATCH /api/v1/repos/alice/project/issues/2":
 			changed = append(changed, r.Method+" "+r.URL.Path)
-			_, _ = fmt.Fprintf(w, `{"number":%s}`, r.URL.Path[len(r.URL.Path)-1:])
+			milestone := ""
+			if id := payloadField(t, r, "milestone"); id != "0" {
+				milestone = `,"milestone":{"id":` + id + `}`
+			}
+			_, _ = fmt.Fprintf(w, `{"number":%s%s}`, r.URL.Path[len(r.URL.Path)-1:], milestone)
 		default:
 			changed = append(changed, r.Method+" "+r.URL.Path)
 			_, _ = w.Write([]byte(`{"id":3,"title":"v1.0","state":"closed"}`))

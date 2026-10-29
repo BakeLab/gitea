@@ -73,8 +73,11 @@ $ gt time list --mine --since 168h`, Args: argsExact(0), RunE: func(cmd *cobra.C
 		if scopes := setFlags([]string{"--mine", "--issue", "--username"}, opts.Mine, issue != "", opts.Username != ""); len(scopes) > 1 {
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with %s", scopes[0], scopes[1]))
 		}
+		if sources := setFlags([]string{"--repo", "--remote", "GITEA_CLI_REPO"}, a.options.repo != "", a.options.remote != "", a.deps.Getenv("GITEA_CLI_REPO") != ""); opts.Mine && len(sources) > 0 {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--mine cannot be combined with %s", sources[0]))
+		}
 		if total && a.options.json != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--total is a human-output summary; use --jq 'map(.seconds) | add // 0' for JSON"))
+			return clierr.Wrap(clierr.Usage, errors.New("--total cannot be combined with --json or --jq; sum JSON with --jq 'map(.seconds) | add // 0'"))
 		}
 		var err error
 		if opts.Since, opts.Before, err = tracked.parse(a.deps.Now()); err != nil {

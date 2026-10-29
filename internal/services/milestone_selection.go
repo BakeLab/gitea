@@ -29,7 +29,7 @@ func (s Milestones) AllIn(ctx context.Context, state string) ([]Milestone, error
 		// A 404 here can only mean the repository is missing or invisible.
 		return nil, Classify(err, "repository", s.Repository, "")
 	}
-	return convertAll(milestones, milestoneFrom), nil
+	return convertAll(milestones, s.from), nil
 }
 
 // Find returns the milestones that raws address among the open and closed milestones, each by ID

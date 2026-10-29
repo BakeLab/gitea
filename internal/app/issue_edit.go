@@ -168,7 +168,7 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 	flags.StringVarP(&file, "body-file", "F", "", "Read the body from `file`, or - for stdin")
 	flags.BoolVarP(&useEditor, "editor", "e", false, "Edit the current body in the configured editor")
 	metadata.register(cmd)
-	flags.StringVarP(&milestone, "milestone", "m", "", "Move the issue to a milestone by `title` or ID")
+	flags.StringVarP(&milestone, "milestone", "m", "", "Move the issue to a milestone by `title` or ID, a number being an ID first")
 	flags.BoolVar(&removeMilestone, "remove-milestone", false, "Remove the issue from its milestone")
 	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to; empty clears it")
 	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339 or Unix timestamp; only the date counts, as the end of that day in UTC; empty clears it")

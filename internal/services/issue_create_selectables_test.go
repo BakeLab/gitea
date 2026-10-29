@@ -98,14 +98,16 @@ func TestIssueSelectablesLoadMetadataWithoutPush(t *testing.T) {
 			loaded, err := service.CreateSelectables(context.Background())
 			require.NoError(t, err)
 			require.Len(t, loaded.Templates, 1)
-			require.Equal(t, lists, loaded.CreateSelectables)
+			want := lists
+			want.Milestones = []Milestone{{ID: 1, Title: "v1", URL: client.BaseURL + "/alice/project/milestone/1"}, {ID: 2, Title: "v2", URL: client.BaseURL + "/alice/project/milestone/2"}}
+			require.Equal(t, want, loaded.CreateSelectables)
 			require.Zero(t, calls["/api/v1/repos/alice/project"])
 			require.Equal(t, 1, calls["/api/v1/repos/alice/project/issue_templates"])
 
 			clear(calls)
 			edit, err := service.EditSelectables(context.Background())
 			require.NoError(t, err)
-			require.Equal(t, lists, edit)
+			require.Equal(t, want, edit)
 			require.Zero(t, calls["/api/v1/repos/alice/project"])
 			require.Zero(t, calls["/api/v1/repos/alice/project/issue_templates"])
 		})

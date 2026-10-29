@@ -160,7 +160,8 @@ type Milestone struct {
 	Title        string  `json:"title"`
 	Description  string  `json:"description"`
 	State        string  `json:"state"`
-	Deadline     *string `json:"due_on"`
+	URL          string  `json:"url"`
+	Deadline     *string `json:"due_date"`
 	OpenIssues   int     `json:"open_issues"`
 	ClosedIssues int     `json:"closed_issues"`
 }
@@ -170,6 +171,13 @@ func milestoneFrom(milestone *gitea.Milestone) Milestone {
 		ID: milestone.ID, Title: milestone.Title, Description: milestone.Description, State: string(milestone.State),
 		Deadline: optionalTimestamp(milestone.Deadline), OpenIssues: milestone.OpenIssues, ClosedIssues: milestone.ClosedIssues,
 	}
+}
+
+// from is milestoneFrom with the web page of the milestone, which Gitea does not return.
+func (s Milestones) from(milestone *gitea.Milestone) Milestone {
+	item := milestoneFrom(milestone)
+	item.URL = strings.TrimRight(s.Client.BaseURL, "/") + "/" + s.Repository + "/milestone/" + strconv.FormatInt(item.ID, 10)
+	return item
 }
 
 // MilestoneOptions allows explicit state, description and deadline updates.
@@ -207,7 +215,7 @@ func (s Milestones) List(ctx context.Context, state string, limit, page int) ([]
 		// A 404 here can only mean the repository is missing or invisible.
 		return nil, Classify(err, "repository", s.Repository, "")
 	}
-	return convertAll(milestones, milestoneFrom), nil
+	return convertAll(milestones, s.from), nil
 }
 
 // Create creates one milestone.
@@ -228,7 +236,7 @@ func (s Milestones) Create(ctx context.Context, opts MilestoneOptions) (Mileston
 	if err != nil {
 		return Milestone{}, err
 	}
-	return milestoneFrom(milestone), nil
+	return s.from(milestone), nil
 }
 
 // Edit updates a milestone.
@@ -260,7 +268,7 @@ func (s Milestones) Edit(ctx context.Context, id int64, opts MilestoneOptions) (
 	if err != nil {
 		return Milestone{}, err
 	}
-	return milestoneFrom(milestone), nil
+	return s.from(milestone), nil
 }
 
 // Delete deletes one milestone.

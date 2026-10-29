@@ -268,3 +268,16 @@ func TestIssueAndPullRequestsNameATurnedOffUnit(t *testing.T) {
 		require.EqualError(t, err, test.pulls)
 	}
 }
+
+func TestIssueAttachmentUploadNamesWhatIsMissing(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		if r.URL.Path == "/api/v1/repos/o/r/issues/99/assets" {
+			_, _ = w.Write([]byte(`{"message":"issue does not exist [id: 0, repo_id: 97, index: 99]"}`))
+		}
+	}))
+	_, err := Issues{Client: client, Repository: "o/r"}.UploadAttachment(context.Background(), 99, "a.txt", strings.NewReader("a"))
+	require.EqualError(t, err, "issue #99 not found in o/r")
+	_, err = Issues{Client: client, Repository: "o/missing"}.UploadAttachment(context.Background(), 1, "a.txt", strings.NewReader("a"))
+	require.EqualError(t, err, "repository o/missing not found")
+}

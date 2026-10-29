@@ -227,8 +227,9 @@ func TestCommentGroupCommentsLikeGh(t *testing.T) {
 		{[]string{"issue", "comment", "craete", "1"}, `unknown command "craete" for "gt issue comment"; did you mean create?`},
 		{[]string{"issue", "comment", "-b", "x"}, "missing issue number"},
 		{[]string{"issue", "comment", "1", "--edit-last", "--delete-last"}, "--edit-last cannot be combined with --delete-last"},
-		{[]string{"issue", "comment", "1", "--delete-last", "--json"}, "comment deletion does not return a resource; --json and --jq are not supported"},
-		{[]string{"issue", "comment", "1"}, "missing required input: supply --body, --body-file or --editor"},
+		{[]string{"issue", "comment", "1", "--delete-last", "--json"}, "--delete-last cannot be combined with --json or --jq"},
+		{[]string{"issue", "comment", "1", "--delete-last", "--body-file", "x"}, "--delete-last cannot be combined with --body-file"},
+		{[]string{"issue", "comment", "1"}, "issue comment requires --body, --body-file or --editor"},
 		{[]string{"pr", "comment", "1", "-b", "x"}, "#1 in alice/project is an issue, not a pull request; use gt issue comment 1"},
 	} {
 		require.ErrorContains(t, run(test.args...), test.want, test.args)
@@ -330,5 +331,5 @@ func TestCommentCreateAttachesFiles(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "comment", "create", "12", "-R", "alice/project", "--body", "Log attached", "--attachment", file}))
 	require.Equal(t, []string{"crash.log=panic"}, uploaded)
 	require.Equal(t, "https://example.org/c/7\n", out.String())
-	requireUsageBeforeRequests(t, "--attachment only attaches files to a new comment", "issue", "comment", "12", "--edit-last", "--body", "x", "--attachment", file)
+	requireUsageBeforeRequests(t, "--attachment cannot be combined with --edit-last", "issue", "comment", "12", "--edit-last", "--body", "x", "--attachment", file)
 }

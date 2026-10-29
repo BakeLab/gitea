@@ -23,7 +23,7 @@ func (a *application) timelineCommand(kind refKind) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "timeline " + operand, Short: "Show the activity on " + kind.article(),
 		Long: fmt.Sprintf(`Show what happened on %s, oldest first: comments, and changes such as labels,
-milestones, titles, assignees, references and state changes.`, kind.article()),
+milestones, titles, assignees, references, logged time and state changes.`, kind.article()),
 		Example: fmt.Sprintf(`$ gt %[1]s timeline %[2]s
 $ gt %[1]s timeline %[2]s --json type,author,created_at`, words.group, words.example),
 		Annotations: map[string]string{"gt.arguments": arguments}, Args: operandArgs, ValidArgsFunction: firstArg(a.completeDiscussions(kind)),
@@ -137,6 +137,16 @@ func timelineText(event services.TimelineEvent, repo string) string {
 		return "pushed commits"
 	case "delete_branch":
 		return "deleted the head branch"
+	case "add_time_manual":
+		return "logged " + text(event.Duration)
+	case "delete_time_manual":
+		return "deleted " + text(event.Duration) + " of logged time"
+	case "start_tracking":
+		return "started the stopwatch"
+	case "stop_tracking":
+		return "stopped the stopwatch, logging " + text(event.Duration)
+	case "cancel_tracking":
+		return "canceled the stopwatch"
 	}
 	return strings.ReplaceAll(event.Type, "_", " ")
 }

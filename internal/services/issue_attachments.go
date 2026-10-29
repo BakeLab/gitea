@@ -73,7 +73,10 @@ func (s Issues) DeleteAttachment(ctx context.Context, number, id int64) error {
 // UploadAttachment streams a file to its owning issue or pull request.
 func (s Issues) UploadAttachment(ctx context.Context, number int64, name string, input io.Reader) (IssueAttachment, error) {
 	asset, err := uploadAttachment(ctx, s.Client, fmt.Sprintf("%s/%d/assets", s.endpoint(), number), name, input)
-	return IssueAttachment(asset), err
+	if err != nil {
+		return IssueAttachment{}, s.issueError(ctx, err, number)
+	}
+	return IssueAttachment(asset), nil
 }
 
 // DownloadAttachment retrieves an attachment's metadata and returns a function that opens its

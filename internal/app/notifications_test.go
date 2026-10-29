@@ -28,14 +28,25 @@ func TestNotificationBoundsShareClockAndReachServer(t *testing.T) {
 		_, _ = w.Write([]byte(`[]`))
 	}))
 	defer server.Close()
+	for _, test := range []struct{ flag, warning string }{
+		{"--until=1h", ""},
+		{"--before=1h", "! --before is deprecated; use --until\n"},
+	} {
+		calls = 0
+		deps, out, diagnostics := serverDeps(t, server.URL)
+		reads := 0
+		deps.Now = func() time.Time { reads++; return now }
+		err := Execute(context.Background(), deps, []string{"notification", "list", "--since=24h", test.flag, "--json"})
+		require.NoError(t, err)
+		require.Equal(t, 1, reads)
+		require.Equal(t, 1, calls)
+		require.JSONEq(t, `[]`, out.String())
+		require.Equal(t, test.warning, withoutANSI(diagnostics.String()))
+	}
 	deps, out, _ := serverDeps(t, server.URL)
-	reads := 0
-	deps.Now = func() time.Time { reads++; return now }
-	err := Execute(context.Background(), deps, []string{"notification", "list", "--since=24h", "--before=1h", "--json"})
-	require.NoError(t, err)
-	require.Equal(t, 1, reads)
-	require.Equal(t, 1, calls)
-	require.JSONEq(t, `[]`, out.String())
+	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "list", "--help"}))
+	require.Contains(t, out.String(), "--until string")
+	require.NotContains(t, out.String(), "--before")
 }
 
 // notificationThreads is a page of two notification threads as Gitea sends them.
@@ -118,7 +129,7 @@ func TestNotificationWatchFailsWhenTheInstanceDoesNotAnswer(t *testing.T) {
 	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_HTTP_TIMEOUT": "50ms"})
 	err := Execute(context.Background(), deps, []string{"notification", "watch", "--json", "id", "--interval", "20ms", "--timeout", "10s"})
 	require.ErrorIs(t, err, transport.ErrTimeout, "a request that runs out of http_timeout is not the end of --timeout")
-	require.Equal(t, clierr.Canceled, clierr.ExitCode(err))
+	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 	require.Empty(t, out.String())
 }
 
@@ -188,8 +199,11 @@ func TestNotificationMarkAllNamesTheBeforeCutoff(t *testing.T) {
 	defer server.Close()
 	deps, _, diagnostics := serverDeps(t, server.URL)
 	deps.Now = func() time.Time { return now }
-	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "mark-read", "--all", "--before=1h"}))
-	require.Contains(t, withoutANSI(diagnostics.String()), "No unread notifications updated before 2028-02-01 11:00 in your inbox")
+	for _, flag := range []string{"--until=1h", "--before=1h"} {
+		diagnostics.Reset()
+		require.NoError(t, Execute(context.Background(), deps, []string{"notification", "mark-read", "--all", flag}))
+		require.Contains(t, withoutANSI(diagnostics.String()), "No unread notifications updated before 2028-02-01 11:00 in your inbox")
+	}
 	deps, out, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "unpin", "--help"}))
 	require.Contains(t, out.String(), "(default [pinned])")

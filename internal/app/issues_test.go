@@ -52,7 +52,7 @@ func TestIssueCreateSeedsFromTemplate(t *testing.T) {
 	}
 	// The title of a template is a prefix to complete, which never becomes the title without the form.
 	err := run("--template", "bug report")
-	require.ErrorContains(t, err, "missing required input: supply --title")
+	require.ErrorContains(t, err, "issue create requires --title")
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.Empty(t, created)
 	browser := &recordingBrowser{}
@@ -72,7 +72,7 @@ func TestIssueCreateSeedsFromTemplate(t *testing.T) {
 	require.ErrorContains(t, err, `issue template "missing" does not exist; available: Bug Report, Feature`)
 	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 	err = run("--template", "feature")
-	require.ErrorContains(t, err, "missing required input: supply --title")
+	require.ErrorContains(t, err, "issue create requires --title")
 	deps.Streams.In = strings.NewReader("From stdin")
 	require.NoError(t, run("--template", "bug report", "--title", "Crash", "--body-file", "-"))
 	err = run("--template", "feature", "--body-file", "-")
@@ -344,7 +344,7 @@ func TestIssueCreateSkipsInteractiveFormWithoutTTY(t *testing.T) {
 	deps.Streams.InTTY, deps.Streams.ErrTTY = false, false
 	err := Execute(context.Background(), deps, []string{"issue", "create", "-R", "alice/project", "--no-input"})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "supply --title")
+	require.Contains(t, err.Error(), "issue create requires --title")
 	require.Zero(t, form.calls)
 }
 
@@ -568,6 +568,9 @@ func TestIssueLabelFiltersRejectUnknownRepositoryLabels(t *testing.T) {
 	} {
 		require.NoError(t, Execute(context.Background(), deps, append(args, "--json")))
 	}
+	err := Execute(context.Background(), deps, []string{"search", "pr", "--owner", "alice", "--label", "bug", "--label", "help wanted", "--json"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.ErrorContains(t, err, "--label with several names requires --repo")
 	require.Equal(t, []string{
 		"/api/v1/repos/alice/project/issues?labels=bug,help wanted",
 		"/api/v1/repos/alice/project/issues?labels=bug",
@@ -708,14 +711,21 @@ func TestIssueMilestoneFiltersRejectUnknownMilestones(t *testing.T) {
 		{"issue", "list", "-R", "alice/project", "--milestone", "1"},
 		{"search", "issue", "-R", "alice/project", "--milestone", "V1.0"},
 		{"search", "issue", "--milestone", "nope"},
+		{"issue", "list", "-R", "alice/project", "-m", "v1.0", "-m", "2026"},
+		{"search", "issue", "-m", "v1.0", "-m", "nope"},
 	} {
 		require.NoError(t, Execute(context.Background(), deps, append(args, "--json")))
 	}
+	err := Execute(context.Background(), deps, []string{"search", "pr", "--owner", "alice", "--label", "bug", "--label", "help wanted", "--json"})
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err), "%v", err)
+	require.ErrorContains(t, err, "--label with several names requires --repo")
 	require.Equal(t, []string{
 		"/api/v1/repos/alice/project/issues?milestones=v1.0,2026",
 		"/api/v1/repos/alice/project/issues?milestones=v1.0",
 		"/api/v1/repos/alice/project/issues?milestones=v1.0",
 		"/api/v1/repos/issues/search?milestones=nope",
+		"/api/v1/repos/alice/project/issues?milestones=v1.0,2026",
+		"/api/v1/repos/issues/search?milestones=v1.0,nope",
 	}, listed)
 	require.Contains(t, diagnostics.String(), "pass --repo to check them")
 }

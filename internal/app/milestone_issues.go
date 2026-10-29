@@ -64,7 +64,9 @@ $ gt milestone issue %[1]s v1.0 12 13 '#14'`, verb), Annotations: map[string]str
 			service := services.Issues{Client: target.client, Repository: target.Repo}
 			unchanged := map[int64]bool{}
 			results, failures := applyBatch(cmd, numbers, issueLabel, func(n int64) (item services.Issue, err error) {
+				wanted := milestone.ID
 				if verb == "remove" {
+					wanted = 0
 					item, err = service.RemoveMilestone(cmd.Context(), n, milestone)
 					// Like adding an issue that is in the milestone already, this is no failure.
 					if notIn, ok := errors.AsType[*services.NotInMilestoneError](err); ok {
@@ -82,7 +84,13 @@ $ gt milestone issue %[1]s v1.0 12 13 '#14'`, verb), Annotations: map[string]str
 						item, err = service.Edit(cmd.Context(), n, services.IssueEdit{Milestone: &milestone.ID})
 					}
 				}
-				return item, itemError(err, target.Repo)
+				if err != nil {
+					return item, itemError(err, target.Repo)
+				}
+				if editLeftOut(services.IssueEdit{Milestone: &wanted}, item, target.Repo, issueMetadataFields) != nil {
+					return item, fmt.Errorf("Gitea left out the milestone: it does so for people who cannot write to the %ss of %s", discussionNoun(item.Kind), target.Repo)
+				}
+				return item, nil
 			}, nil)
 			var changed []string
 			for _, item := range results {

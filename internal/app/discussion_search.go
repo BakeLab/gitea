@@ -20,7 +20,7 @@ func (a *application) discussionSearchCommand(pulls bool) *cobra.Command {
 		noun, nouns, alias = "pr", "pull requests", "prs"
 	}
 	var opts services.DiscussionSearchOptions
-	var labels []string
+	var labels, milestones []string
 	var updated timeRange
 	opts.Pulls = pulls
 	example := fmt.Sprintf(`$ gt search %[1]s "login error"
@@ -30,7 +30,9 @@ $ gt search %[1]s crash -R alice/project --label bug --milestone v1.0`, noun)
 		example += "\n$ gt search pr --review-requested"
 	}
 	command := &cobra.Command{Use: noun + " [<query>...]", Aliases: []string{alias}, Short: "Search " + nouns, Long: fmt.Sprintf(`Search the %[1]s of every repository you can access on the instance, or of one
-repository with --repo. Words of the query match titles and bodies.`, nouns), Example: example, RunE: func(cmd *cobra.Command, args []string) error {
+repository with --repo. Words of the query match titles and bodies. Filters combine: a
+result must match all of them. Several --label names require --repo, as instance-wide
+search would return %[1]s with any of them.`, nouns), Example: example, RunE: func(cmd *cobra.Command, args []string) error {
 		if opts.Author != "" && opts.Authored {
 			return clierr.Wrap(clierr.Usage, errors.New("--author cannot be combined with --authored"))
 		}
@@ -41,8 +43,7 @@ repository with --repo. Words of the query match titles and bodies.`, nouns), Ex
 		if err := requireNames("label", "", labels); err != nil {
 			return err
 		}
-		milestones, err := nameFilter("milestone", opts.Milestones)
-		if err != nil {
+		if err := requireNames("milestone", "", milestones); err != nil {
 			return err
 		}
 		target, err := a.resolve(cmd.Context(), false)
@@ -57,6 +58,9 @@ repository with --repo. Words of the query match titles and bodies.`, nouns), Ex
 		}
 		if (opts.Team != "" || opts.ReviewRequested || opts.Reviewed) && target.Repo != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--team, --review-requested and --reviewed require instance-wide search; omit --repo or GITEA_CLI_REPO"))
+		}
+		if len(labels) > 1 && target.Repo == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--label with several names requires --repo, as instance-wide search matches any of them"))
 		}
 		opts.Author = target.expandMe(opts.Author)
 		if target.Repo != "" {
@@ -94,8 +98,8 @@ repository with --repo. Words of the query match titles and bodies.`, nouns), Ex
 	flags.StringVar(&opts.Owner, "owner", "", "Search only the repositories of this `owner`")
 	flags.StringVar(&opts.Team, "team", "", "Search only the repositories of this organization `team` (requires --owner)")
 	flags.StringVarP(&opts.Author, "author", "A", "", "Filter by author; @me for yourself")
-	flags.StringSliceVarP(&labels, "label", "l", nil, "Filter by label `names`")
-	flags.StringVarP(&opts.Milestones, "milestone", "m", "", "Filter by milestone `titles`, comma-separated")
+	flags.StringSliceVarP(&labels, "label", "l", nil, "Filter by label `names`; a result must have all of them (several require --repo)")
+	flags.StringSliceVarP(&milestones, "milestone", "m", nil, "Filter by milestone `titles`")
 	updated.register(command, "since", "Updated since a date, timestamp, or duration ago", "until", "Updated before a date, timestamp, or duration ago")
 	flags.BoolVar(&opts.Assigned, "assigned", false, "Assigned to you")
 	flags.BoolVar(&opts.Authored, "authored", false, "Created by you")

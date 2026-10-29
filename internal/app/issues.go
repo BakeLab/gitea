@@ -23,7 +23,11 @@ import (
 const issueArguments = `An issue can be supplied as argument in any of the following formats:
 - by number, e.g. "123" or "#123"
 - by URL, e.g. "https://gitea.com/OWNER/REPO/issues/123"
-- by repository and number, e.g. "OWNER/REPO#123"`
+- by repository and number, e.g. "OWNER/REPO#123"
+
+Several issues must be in one repository. Next to "OWNER/REPO#123" or a URL, "124" means
+OWNER/REPO#124, unless gt targets another repository otherwise, such as the clone's, --repo
+or GITEA_CLI_REPO: then the command fails, and the number must be qualified.`
 
 func (a *application) issueCommand() *cobra.Command {
 	group := &cobra.Command{Use: "issue", Short: "Manage issues", Long: `Work with the issues of a repository: list, view and create them, edit, close or reopen
@@ -36,7 +40,7 @@ commands also accept a pull request number.`}
 
 func (a *application) issueListCommand() *cobra.Command {
 	opts := services.ListOptions{Page: 1}
-	var labels []string
+	var labels, milestones []string
 	var updated timeRange
 	var web bool
 	cmd := &cobra.Command{Use: "list", Short: "List issues in a repository", Long: `List the issues of a repository, newest first. Filters combine: an issue must match all of them.
@@ -55,8 +59,7 @@ $ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), Ru
 		if err := requireNames("label", "", labels); err != nil {
 			return err
 		}
-		milestones, err := nameFilter("milestone", opts.Milestones)
-		if err != nil {
+		if err := requireNames("milestone", "", milestones); err != nil {
 			return err
 		}
 		if web {
@@ -97,8 +100,8 @@ $ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), Ru
 	flags.BoolVar(&opts.NoAssignee, "no-assignee", false, "Only issues without an assignee")
 	flags.StringVarP(&opts.Author, "author", "A", "", "Filter by author; @me for yourself")
 	flags.StringVar(&opts.Mentions, "mentions", "", "Filter by mentioned user; @me for yourself")
-	flags.StringSliceVarP(&labels, "label", "l", nil, "Filter by label `names`")
-	flags.StringVarP(&opts.Milestones, "milestone", "m", "", "Filter by milestone `titles` or IDs, comma-separated")
+	flags.StringSliceVarP(&labels, "label", "l", nil, "Filter by label `names`; an issue must have all of them")
+	flags.StringSliceVarP(&milestones, "milestone", "m", nil, "Filter by milestone `titles` or IDs, a number being an ID first")
 	updated.register(cmd, "since", "Updated since a date, timestamp, or duration ago", "until", "Updated before a date, timestamp, or duration ago")
 	flags.BoolVarP(&web, "web", "w", false, "Open the issue list in the browser")
 	_ = cmd.RegisterFlagCompletionFunc("label", a.completeLabels())
@@ -281,6 +284,14 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 		if !localFlagsChanged(cmd, "template") && a.canPrompt() && a.deps.IssueForm != nil {
 			return a.createIssueInteractively(cmd, strings.TrimSpace(templateName))
 		}
+		if !web && title == "" {
+			if bodyFile == "-" {
+				return clierr.Wrap(clierr.Usage, errors.New("--body-file - requires --title; stdin cannot also supply a prompt"))
+			}
+			if !a.canPrompt() {
+				return clierr.Wrap(clierr.Usage, errors.New("issue create requires --title"))
+			}
+		}
 		var target target
 		var templateBody, templateFile string
 		var templateLabels []string
@@ -325,9 +336,6 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 				}
 			}
 			return a.openBrowser(cmd, repositoryURL(target)+"/issues/new?"+query.Encode())
-		}
-		if bodyFile == "-" && title == "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--body-file - requires --title; stdin cannot also supply a prompt"))
 		}
 		if _, err := a.requireInput(cmd, &title, "title", "Title", nil); err != nil {
 			return err
@@ -393,7 +401,7 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 	flags.BoolVarP(&useEditor, "editor", "e", false, "Compose the issue body in the configured editor")
 	flags.StringSliceVarP(&labelNames, "label", "l", nil, "Add labels by `name`; prefix repo: or org: to disambiguate")
 	flags.StringSliceVarP(&assignees, "assignee", "a", nil, "Assign people by their `login`; @me for yourself")
-	flags.StringVarP(&milestone, "milestone", "m", "", "Add the issue to a milestone by `title` or ID")
+	flags.StringVarP(&milestone, "milestone", "m", "", "Add the issue to a milestone by `title` or ID, a number being an ID first")
 	flags.StringVarP(&templateName, "template", "T", "", "Start from the repository issue template with this `name`")
 	flags.StringVar(&ref, "ref", "", "Branch or tag the issue refers to")
 	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339 or Unix timestamp; only the date counts, as the end of that day in UTC")
@@ -693,7 +701,7 @@ func milestoneFlag(cmd *cobra.Command, value string) (selected string, remove bo
 		if cmd.Flags().Lookup("remove-milestone") != nil {
 			hint = "use --remove-milestone to clear it"
 		}
-		return "", false, clierr.Wrap(clierr.Usage, errors.New("--milestone needs a title or ID; "+hint))
+		return "", false, clierr.Wrap(clierr.Usage, errors.New("--milestone requires a title or ID; "+hint))
 	case strings.TrimSpace(value) == "0":
 		return "", true, nil
 	}
@@ -733,15 +741,6 @@ func itemError(err error, scope string) error {
 		return explain(err, "not found in %s", scope)
 	}
 	return err
-}
-
-// nameFilter splits a comma-separated filter of kind, trimming entries and rejecting blanks.
-func nameFilter(kind, raw string) ([]string, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	names := strings.Split(raw, ",")
-	return names, requireNames(kind, "", names)
 }
 
 // issueFilters checks the label and milestone filters of an issue listing in the target repository

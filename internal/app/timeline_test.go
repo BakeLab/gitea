@@ -36,7 +36,18 @@ func TestTimelineListsWhatHappenedOldestFirst(t *testing.T) {
 				{"id":13,"type":"removed_deadline","body":"2027-01-01","user":{"login":"bob"},"created_at":"2026-01-07T00:00:00Z"},
 				{"id":14,"type":"review_request","assignee_team":{"name":"devs"},"removed_assignee":false,"user":{"login":"bob"},"created_at":"2026-01-08T00:00:00Z"},
 				{"id":15,"type":"review_request","assignee_team":{"name":"devs"},"removed_assignee":true,"user":{"login":"bob"},"created_at":"2026-01-08T00:00:00Z"},
-				{"id":16,"type":"milestone","milestone":null,"old_milestone":null,"user":{"login":"bob"},"created_at":"2026-01-09T00:00:00Z"}]`)
+				{"id":16,"type":"milestone","milestone":null,"old_milestone":null,"user":{"login":"bob"},"created_at":"2026-01-09T00:00:00Z"},
+				{"id":17,"type":"add_dependency","dependent_issue":{"number":2,"repository":{"full_name":"alice/secret"}},"user":{"login":"bob"},"created_at":"2026-01-10T00:00:00Z"},
+				{"id":18,"type":"add_time_manual","body":"30 minutes","user":{"login":"bob"},"created_at":"2026-01-11T00:00:00Z"},
+				{"id":19,"type":"start_tracking","body":"","user":{"login":"bob"},"created_at":"2026-01-11T00:00:00Z"},
+				{"id":20,"type":"stop_tracking","body":"2 seconds","user":{"login":"bob"},"created_at":"2026-01-11T00:00:00Z"},
+				{"id":21,"type":"cancel_tracking","body":"","user":{"login":"bob"},"created_at":"2026-01-11T00:00:00Z"},
+				{"id":22,"type":"delete_time_manual","body":"30 minutes","user":{"login":"bob"},"created_at":"2026-01-11T00:00:00Z"}]`)
+		case "/api/v1/repos/alice/other/issues/9":
+			_, _ = w.Write([]byte(`{"number":9}`))
+		case "/api/v1/repos/alice/secret/issues/2":
+			// Gitea names issues of private repositories in the timeline of public ones.
+			w.WriteHeader(http.StatusNotFound)
 		default:
 			t.Errorf("unexpected %s", r.URL.Path)
 		}
@@ -51,7 +62,9 @@ func TestTimelineListsWhatHappenedOldestFirst(t *testing.T) {
 		"2026-01-07T00:00:00Z\tbob\tset the due date to 2026-12-01\n2026-01-07T00:00:00Z\tbob\tchanged the due date from 2026-12-01 to 2027-01-01\n"+
 		"2026-01-07T00:00:00Z\tbob\tremoved the due date 2027-01-01\n"+
 		"2026-01-08T00:00:00Z\tbob\trequested a review from team devs\n2026-01-08T00:00:00Z\tbob\tremoved the review request for team devs\n"+
-		"2026-01-09T00:00:00Z\tbob\tchanged the milestone\n", out.String())
+		"2026-01-09T00:00:00Z\tbob\tchanged the milestone\n2026-01-10T00:00:00Z\tbob\tadded a dependency\n"+
+		"2026-01-11T00:00:00Z\tbob\tlogged 30 minutes\n2026-01-11T00:00:00Z\tbob\tstarted the stopwatch\n2026-01-11T00:00:00Z\tbob\tstopped the stopwatch, logging 2 seconds\n"+
+		"2026-01-11T00:00:00Z\tbob\tcanceled the stopwatch\n2026-01-11T00:00:00Z\tbob\tdeleted 30 minutes of logged time\n", out.String())
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project", "--json", "type,label", "--jq", ".[0]"}))
 	require.JSONEq(t, `{"type":"label","label":"bug"}`, out.String())
@@ -60,11 +73,11 @@ func TestTimelineListsWhatHappenedOldestFirst(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project", "--json", "--jq", ".[:3]"}))
 	require.JSONEq(t, `[
 		{"id":1,"type":"label","author":"bob","url":"","created_at":"2026-01-01T00:00:00Z","body":null,"label":"bug","label_added":true,
-		 "milestone":null,"old_milestone":null,"old_title":null,"new_title":null,"assignee":null,"assignee_team":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null},
+		 "milestone":null,"old_milestone":null,"old_title":null,"new_title":null,"assignee":null,"assignee_team":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null,"duration":null},
 		{"id":2,"type":"change_title","author":"bob","url":"","created_at":"2026-01-02T00:00:00Z","body":null,"label":null,"label_added":null,
-		 "milestone":null,"old_milestone":null,"old_title":"crash","new_title":"Crash","assignee":null,"assignee_team":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null},
+		 "milestone":null,"old_milestone":null,"old_title":"crash","new_title":"Crash","assignee":null,"assignee_team":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null,"duration":null},
 		{"id":3,"type":"comment","author":"alice","url":"","created_at":"2026-01-03T00:00:00Z","body":"Fixed in main\nThanks","label":null,"label_added":null,
-		 "milestone":null,"old_milestone":null,"old_title":null,"new_title":null,"assignee":null,"assignee_team":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null}]`, out.String())
+		 "milestone":null,"old_milestone":null,"old_title":null,"new_title":null,"assignee":null,"assignee_team":null,"removed_assignee":null,"dependent_issue":null,"deadline":null,"old_deadline":null,"duration":null}]`, out.String())
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project", "--json", "assignee,removed_assignee,dependent_issue", "--jq", ".[5:9]"}))
 	require.JSONEq(t, `[{"assignee":"carol","removed_assignee":true,"dependent_issue":null},
@@ -80,9 +93,12 @@ func TestTimelineListsWhatHappenedOldestFirst(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project", "--json", "assignee,assignee_team,removed_assignee", "--jq", ".[13:15]"}))
 	require.JSONEq(t, `[{"assignee":null,"assignee_team":"devs","removed_assignee":false},{"assignee":null,"assignee_team":"devs","removed_assignee":true}]`, out.String())
 	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project", "--json", "body,duration", "--jq", ".[17:22]"}))
+	require.JSONEq(t, `[{"body":null,"duration":"30 minutes"},{"body":null,"duration":null},{"body":null,"duration":"2 seconds"},{"body":null,"duration":null},{"body":null,"duration":"30 minutes"}]`, out.String())
+	out.Reset()
 	plainTTY(t, &deps, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "timeline", "3", "-R", "alice/project"}))
-	require.Contains(t, out.String(), "Showing 16 of 16 events on alice/project#3\n")
+	require.Contains(t, out.String(), "Showing 22 of 22 events on alice/project#3\n")
 }
 
 func TestPullTimelineSelectsThePullRequestLikeOtherPullCommands(t *testing.T) {

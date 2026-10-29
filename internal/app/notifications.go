@@ -52,13 +52,13 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 	} {
 		var all bool
 		var filters []string
-		var before string
+		var until string
 		command := &cobra.Command{
 			Use: mark.verb + " [<id>...]", Short: mark.short, Example: mark.example, ValidArgsFunction: a.completeNotifications(),
 			Annotations: map[string]string{"gt.confirm": "true"},
 			Args: func(_ *cobra.Command, args []string) error {
 				if len(args) == 0 && !all {
-					return clierr.Wrap(clierr.Usage, errors.New("supply notification IDs or --all"))
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("notification %s requires notification IDs or --all", mark.verb))
 				}
 				if len(args) > 0 && all {
 					return clierr.Wrap(clierr.Usage, errors.New("--all cannot be combined with notification IDs"))
@@ -70,16 +70,19 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 				if err != nil {
 					return err
 				}
-				if !all && (cmd.Flags().Changed("status") || cmd.Flags().Changed("before")) {
-					return clierr.Wrap(clierr.Usage, errors.New("--status and --before require --all"))
+				if err := a.renamedFlag(cmd, "before", "until"); err != nil {
+					return err
 				}
-				var until time.Time
-				if cmd.Flags().Changed("before") {
-					parsed, err := parseRunTime(before, a.deps.Now())
+				if !all && (cmd.Flags().Changed("status") || cmd.Flags().Changed("until")) {
+					return clierr.Wrap(clierr.Usage, errors.New("--status and --until require --all"))
+				}
+				var cutoff time.Time
+				if cmd.Flags().Changed("until") {
+					parsed, err := parseRunTime(until, a.deps.Now())
 					if err != nil {
-						return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid --before: %w", err))
+						return clierr.Wrap(clierr.Usage, fmt.Errorf("invalid --until: %w", err))
 					}
-					until = *parsed
+					cutoff = *parsed
 				}
 				s, err := scope(cmd)
 				if err != nil {
@@ -99,8 +102,8 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 					}, func(item services.Notification) string { return fmt.Sprintf(mark.done, notificationLabel(item)) })
 				}
 				what := notificationsWith(filters)
-				if !until.IsZero() {
-					what += " updated before " + until.Format("2006-01-02 15:04")
+				if !cutoff.IsZero() {
+					what += " updated before " + cutoff.Format("2006-01-02 15:04")
 				}
 				what += " " + s.where
 				if a.canPrompt() {
@@ -108,7 +111,7 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 						return err
 					}
 				}
-				results, err := s.MarkAll(cmd.Context(), mark.status, filters, until)
+				results, err := s.MarkAll(cmd.Context(), mark.status, filters, cutoff)
 				if err != nil {
 					return err
 				}
@@ -126,7 +129,8 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 		command.Flags().BoolVar(&all, "all", false, "Apply to every notification that matches --status in the scope")
 		command.Flags().StringSliceVar(&filters, "status", []string{mark.filter}, "With --all, the statuses to change: unread, read, pinned")
 		enumValues(command, "status", "unread", "read", "pinned")
-		command.Flags().StringVar(&before, "before", "", "With --all, only notifications updated before a date, timestamp, or duration such as 1h")
+		command.Flags().StringVar(&until, "until", "", "With --all, only notifications updated before a date, timestamp, or duration such as 1h")
+		renameFlag(command, "before", "until")
 		group.AddCommand(command)
 	}
 	return jsonOutput(group, jsonFields[services.Notification]())
@@ -139,11 +143,15 @@ func notificationFilters(cmd *cobra.Command, opts *services.NotificationOptions,
 	enumValues(cmd, "status", "unread", "read", "pinned")
 	cmd.Flags().StringSliceVar(&opts.Types, "type", nil, "Only notifications about these subjects: issue, pull, commit, repository")
 	enumValues(cmd, "type", "issue", "pull", "commit", "repository")
-	updated.register(cmd, "since", "Only notifications updated since a date, timestamp, or duration such as 24h", "before", "Only notifications updated before a date, timestamp, or duration such as 1h")
+	updated.register(cmd, "since", "Only notifications updated since a date, timestamp, or duration such as 24h", "until", "Only notifications updated before a date, timestamp, or duration such as 1h")
+	renameFlag(cmd, "before", "until")
 }
 
 // notificationOptions completes the list filters for the API.
-func (a *application) notificationOptions(opts services.NotificationOptions, updated timeRange) (services.NotificationOptions, error) {
+func (a *application) notificationOptions(cmd *cobra.Command, opts services.NotificationOptions, updated *timeRange) (services.NotificationOptions, error) {
+	if err := a.renamedFlag(cmd, "before", "until"); err != nil {
+		return opts, err
+	}
 	types := make([]string, len(opts.Types))
 	for i, kind := range opts.Types {
 		types[i] = titleCase(kind)
@@ -165,7 +173,7 @@ $ gt notification list --status unread,read,pinned -R alice/project
 # Pull requests updated today
 $ gt notification list --type pull --since 24h`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			listed, err := a.notificationOptions(opts, updated)
+			listed, err := a.notificationOptions(cmd, opts, &updated)
 			if err != nil {
 				return err
 			}
@@ -179,7 +187,7 @@ $ gt notification list --type pull --since 24h`,
 			}
 			what := notificationsWith(opts.Statuses) + " " + s.where
 			empty := "no " + what
-			if cmd.Flags().Changed("type") || cmd.Flags().Changed("since") || cmd.Flags().Changed("before") {
+			if cmd.Flags().Changed("type") || cmd.Flags().Changed("since") || cmd.Flags().Changed("until") {
 				empty = "no " + notificationsWith(opts.Statuses) + " match your filters " + s.where
 			}
 			return writeTable(a, cmd, page.Items, listSpec[services.Notification]{
@@ -203,12 +211,15 @@ With --json it prints one JSON object per line. It polls on through an outage of
 of up to 5 minutes.`,
 		Example: "$ gt notification watch\n# Stream pull request notifications to a script, starting with the current ones\n$ gt notification watch --type pull --json id,repository,title --timeout 0 | ./notify.sh",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			listed, err := a.notificationOptions(opts, updated)
+			listed, err := a.notificationOptions(cmd, opts, &updated)
 			if err != nil {
 				return err
 			}
-			if interval <= 0 || timeout < 0 {
-				return clierr.Wrap(clierr.Usage, errors.New("--interval must be positive and --timeout not negative"))
+			if interval <= 0 {
+				return clierr.Wrap(clierr.Usage, errors.New("--interval must be positive"))
+			}
+			if timeout < 0 {
+				return clierr.Wrap(clierr.Usage, errors.New("--timeout cannot be negative"))
 			}
 			if !cmd.Flags().Changed("timeout") && !a.deps.Streams.OutTTY {
 				timeout = time.Minute
@@ -227,6 +238,7 @@ of up to 5 minutes.`,
 			if d.TTY && a.options.json == "" {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Watching %s %s; press Ctrl-C to stop\n", notificationsWith(opts.Statuses), s.where)
 			}
+			out := terminal.SafeWriter(cmd.OutOrStdout(), d.TTY, d.Color)
 			err = s.Watch(ctx, listed, interval, func(items []services.Notification) error {
 				if a.options.json != "" {
 					for _, item := range items {
@@ -241,11 +253,11 @@ of up to 5 minutes.`,
 					for i, item := range items {
 						rows[i] = notificationRow(item)
 					}
-					_, err := fmt.Fprint(cmd.OutOrStdout(), terminal.Table(notificationColumns, rows, d))
+					_, err := fmt.Fprint(out, terminal.Table(notificationColumns, rows, d))
 					return err
 				}
 				for _, item := range items {
-					if _, err := fmt.Fprintln(cmd.OutOrStdout(), watchLine(item, d)); err != nil {
+					if _, err := fmt.Fprintln(out, watchLine(item, d)); err != nil {
 						return err
 					}
 				}

@@ -288,7 +288,7 @@ func (a *application) writeDiscussion(cmd *cobra.Command, target target, v discu
 		var b strings.Builder
 		b.WriteString(view.Render(d))
 		for _, comment := range comments {
-			fmt.Fprintf(&b, "--\nauthor:\t%s\ncreated_at:\t%s\n", terminal.SafeLine(comment.author), pipedTime(comment.createdAt))
+			fmt.Fprintf(&b, "--\nauthor:\t%s\ncreated_at:\t%s\n", terminal.SafeLine(comment.author), terminal.SafeLine(pipedTime(comment.createdAt)))
 			if comment.id > 0 {
 				fmt.Fprintf(&b, "id:\t%d\n", comment.id)
 			}
@@ -297,8 +297,7 @@ func (a *application) writeDiscussion(cmd *cobra.Command, target target, v discu
 			}
 			fmt.Fprintf(&b, "--\n%s\n", terminal.SafeText(comment.body))
 		}
-		_, err := fmt.Fprint(cmd.OutOrStdout(), b.String())
-		return err
+		return a.writeHuman(cmd, b.String())
 	}
 	view.Meta = v.summary(now) + " • " + terminal.Plural(int(v.comments), "comment")
 	view.URL = ""

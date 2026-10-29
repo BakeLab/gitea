@@ -180,6 +180,23 @@ func (s Issues) Kind(ctx context.Context, number int64) (string, error) {
 	return KindIssue, nil
 }
 
+// Find is Kind, but a number Gitea does not show fails with a *NotFoundError, of the repository
+// when that is missing, unless the repository keeps its issues in an external tracker.
+func (s Issues) Find(ctx context.Context, number int64) (string, error) {
+	kind, err := s.Kind(ctx, number)
+	if err != nil || kind != "" {
+		return kind, err
+	}
+	repository, lookupErr := (Repositories{Client: s.Client}).get(ctx, s.Repository)
+	switch {
+	case IsNotFound(lookupErr):
+		return "", lookupErr
+	case lookupErr == nil && repository.ExternalTracker != nil:
+		return "", nil
+	}
+	return "", &NotFoundError{Kind: "issue or pull request", Key: "#" + strconv.FormatInt(number, 10), Scope: s.Repository}
+}
+
 // issueError names issue number in the failure of a request about it, or its repository when
 // that is what is missing. Some endpoints, such as the timeline, answer a missing issue with
 // HTTP 500 "issue does not exist".

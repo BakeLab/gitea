@@ -36,12 +36,16 @@ type TimelineEvent struct {
 	Assignee        *string `json:"assignee"`
 	AssigneeTeam    *string `json:"assignee_team"`
 	RemovedAssignee *bool   `json:"removed_assignee"`
-	// DependentIssue is the issue a dependency event added or removed, as OWNER/REPO#NUMBER.
+	// DependentIssue is the issue a dependency event added or removed, as OWNER/REPO#NUMBER, or
+	// nil for an issue the viewer cannot see.
 	DependentIssue *string `json:"dependent_issue"`
 	// Deadline is the due date, as YYYY-MM-DD, that an "added_deadline" or "modified_deadline"
 	// event set; OldDeadline is the one a "modified_deadline" or "removed_deadline" event replaced.
 	Deadline    *string `json:"deadline"`
 	OldDeadline *string `json:"old_deadline"`
+	// Duration is the time, as Gitea words it such as "30 minutes", that an "add_time_manual"
+	// or "stop_tracking" event logged or a "delete_time_manual" event deleted.
+	Duration *string `json:"duration"`
 }
 
 // timelineBodies are the event types whose body is text someone wrote. Gitea keeps internal
@@ -88,6 +92,8 @@ func timelineEventFrom(event *gitea.TimelineComment) TimelineEvent {
 		result.Deadline, result.OldDeadline = &deadline, &old
 	case "removed_deadline":
 		result.OldDeadline = &event.Body
+	case "add_time_manual", "stop_tracking", "delete_time_manual":
+		result.Duration = &event.Body
 	}
 	return result
 }
@@ -126,5 +132,46 @@ func (s Issues) Timeline(ctx context.Context, n int64, limit, page int) (Page[Ti
 		}
 		return events, headers, err
 	})
-	return convertPage(events, timelineEventFrom), s.issueError(ctx, err, n)
+	result := convertPage(events, timelineEventFrom)
+	if err != nil {
+		return result, s.issueError(ctx, err, n)
+	}
+	return result, s.hideInvisibleDependencies(ctx, result.Items)
+}
+
+// hideInvisibleDependencies clears the dependent issue of events naming an issue of another
+// repository that the viewer cannot see: Gitea names issues of private repositories in the
+// timeline of public ones.
+func (s Issues) hideInvisibleDependencies(ctx context.Context, events []TimelineEvent) error {
+	visible := map[string]bool{}
+	for i, event := range events {
+		ref := event.DependentIssue
+		if ref == nil {
+			continue
+		}
+		at := strings.LastIndex(*ref, "#")
+		if at < 0 {
+			continue
+		}
+		repository := (*ref)[:at]
+		number, err := strconv.ParseInt((*ref)[at+1:], 10, 64)
+		if err != nil || strings.EqualFold(repository, s.Repository) {
+			continue
+		}
+		seen, known := visible[*ref]
+		if !known {
+			_, err := repoCall(ctx, s.Client, repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Issue, *gitea.Response, error) {
+				return c.Issues.GetIssue(ctx, owner, repo, number)
+			})
+			if err != nil && !IsNotFound(err) {
+				return err
+			}
+			seen = err == nil
+			visible[*ref] = seen
+		}
+		if !seen {
+			events[i].DependentIssue = nil
+		}
+	}
+	return nil
 }
