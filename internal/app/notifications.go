@@ -239,12 +239,15 @@ of up to 5 minutes.`,
 				fmt.Fprintf(cmd.ErrOrStderr(), "Watching %s %s; press Ctrl-C to stop\n", notificationsWith(opts.Statuses), s.where)
 			}
 			out := terminal.SafeWriter(cmd.OutOrStdout(), d.TTY, d.Color)
+			headed := false
 			err = s.Watch(ctx, listed, interval, func(items []services.Notification) error {
 				if a.options.json != "" {
 					for _, item := range items {
-						if err := (terminal.JSONOutput{Fields: a.options.json, Allowed: commandOutputFields(cmd), Query: a.options.jq, Safe: d.TTY}).Write(cmd.OutOrStdout(), item); err != nil {
+						csv := a.options.csv != ""
+						if err := (terminal.JSONOutput{Fields: a.options.json, Allowed: commandOutputFields(cmd), Query: a.options.jq, Safe: d.TTY, CSV: csv, NoHeader: headed}).Write(cmd.OutOrStdout(), item); err != nil {
 							return err
 						}
+						headed = csv
 					}
 					return nil
 				}

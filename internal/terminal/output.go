@@ -5,6 +5,7 @@ package terminal
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,10 @@ type JSONOutput struct {
 	Safe bool
 	// Color highlights pretty JSON keys and values.
 	Color bool
+	// CSV writes the selected objects as CSV instead of JSON; Query must be empty.
+	CSV bool
+	// NoHeader leaves out the CSV header row, for rows that continue earlier output.
+	NoHeader bool
 }
 
 // Write projects explicit result fields of value, applies the jq filter, and writes the results.
@@ -45,7 +50,8 @@ func (o JSONOutput) Write(w io.Writer, value any) error {
 	if err := json.Unmarshal(data, &normalized); err != nil {
 		return err
 	}
-	if names := fieldNames(o.Fields); names != nil {
+	names := fieldNames(o.Fields)
+	if names != nil {
 		selectFields := func(item any) (any, error) {
 			object, ok := item.(map[string]any)
 			if !ok {
@@ -78,6 +84,9 @@ func (o JSONOutput) Write(w io.Writer, value any) error {
 				return err
 			}
 		}
+	}
+	if o.CSV {
+		return o.writeCSV(w, normalized, names)
 	}
 	if o.Query == "" {
 		return o.encode(w, normalized)
@@ -131,6 +140,79 @@ func (o JSONOutput) encode(w io.Writer, value any) error {
 	}
 	_, err := io.WriteString(w, text)
 	return err
+}
+
+// writeCSV writes a header row of the field names, then one row per object of value. Without selected
+// names, the columns are the allowed fields followed by any other keys of the objects.
+func (o JSONOutput) writeCSV(w io.Writer, value any, names []string) error {
+	items, ok := value.([]any)
+	if !ok {
+		items = []any{value}
+	}
+	objects := make([]map[string]any, len(items))
+	for i, item := range items {
+		if objects[i], ok = item.(map[string]any); !ok {
+			return errors.New("CSV output requires resource objects")
+		}
+	}
+	if names == nil {
+		var extra []string
+		for _, object := range objects {
+			for key := range object {
+				if !slices.Contains(o.Allowed, key) && !slices.Contains(extra, key) {
+					extra = append(extra, key)
+				}
+			}
+		}
+		slices.Sort(extra)
+		names = slices.Concat(o.Allowed, extra)
+	}
+	writer := csv.NewWriter(w)
+	if !o.NoHeader {
+		if err := writer.Write(names); err != nil {
+			return err
+		}
+	}
+	for _, object := range objects {
+		record := make([]string, len(names))
+		for i, name := range names {
+			cell, err := o.csvCell(object[name])
+			if err != nil {
+				return err
+			}
+			record[i] = cell
+		}
+		if err := writer.Write(record); err != nil {
+			return err
+		}
+	}
+	writer.Flush()
+	return writer.Error()
+}
+
+// csvCell writes a string as it is, null as an empty cell and any other value as compact JSON.
+func (o JSONOutput) csvCell(value any) (string, error) {
+	safe := o.Pretty || o.Safe
+	switch value := value.(type) {
+	case nil:
+		return "", nil
+	case string:
+		if safe {
+			return SafeText(value), nil
+		}
+		return value, nil
+	}
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return "", err
+	}
+	text := strings.TrimSuffix(buf.String(), "\n")
+	if safe {
+		text = escapeJSONText(text)
+	}
+	return text, nil
 }
 
 // IndentJSON formats JSON text for a terminal like Write with Pretty, but keeps the key order of the

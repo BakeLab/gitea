@@ -131,6 +131,8 @@ func TestJoinJSONFields(t *testing.T) {
 		{[]string{"release", "view", "--json", "tag_name", "v3"}, []string{"release", "view", "--json=tag_name", "v3"}},
 		{[]string{"search", "repo", "foo", "--json", "bar"}, []string{"search", "repo", "foo", "--json=bar"}},
 		{[]string{"release", "view", "--json", "v1"}, []string{"release", "view", "--json", "v1"}},
+		{[]string{"issue", "list", "--csv", "number,title"}, []string{"issue", "list", "--csv=number,title"}},
+		{[]string{"release", "view", "--csv", "v1"}, []string{"release", "view", "--csv", "v1"}},
 	} {
 		deps, _, _ := testDeps(t)
 		require.Equal(t, tc.want, joinJSONFields(NewRoot(deps), tc.args), tc.args)
@@ -165,6 +167,14 @@ func TestJSONFieldsAcceptSpaceSeparatedValue(t *testing.T) {
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"search", "repo", "--json", "foo"}))
 	require.Contains(t, out.String(), `"full_name":"alice/foo"`)
+	for _, args := range [][]string{{"org", "list", "--csv", "id,name"}, {"--csv=id,name", "org", "list"}} {
+		out.Reset()
+		require.NoError(t, Execute(context.Background(), deps, args), args)
+		require.Equal(t, "id,name\n1,team\n", out.String(), args)
+	}
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"org", "list", "--csv"}))
+	require.Contains(t, out.String(), ",Team,")
 }
 
 func TestSudoSendsHeaderAfterIdentityCheck(t *testing.T) {

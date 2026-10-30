@@ -118,6 +118,10 @@ func TestNotificationWatchStreamsOneJSONObjectPerLine(t *testing.T) {
 	deps, out, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "watch", "--json", "id,title", "--interval", "20ms", "--timeout", "500ms"}))
 	require.Equal(t, "{\"id\":1,\"title\":\"First\"}\n{\"id\":2,\"title\":\"Second\"}\n", out.String())
+	polls.Store(0)
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "watch", "--csv", "id,title", "--interval", "20ms", "--timeout", "500ms"}))
+	require.Equal(t, "id,title\n1,First\n2,Second\n", out.String())
 }
 
 func TestNotificationWatchFailsWhenTheInstanceDoesNotAnswer(t *testing.T) {

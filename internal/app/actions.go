@@ -90,7 +90,7 @@ $ gt workflow view ci --web`,
 				return clierr.Wrap(clierr.Usage, errors.New("--ref requires --yaml"))
 			}
 			if showYAML && (web || a.options.json != "") {
-				return clierr.Wrap(clierr.Usage, errors.New("--yaml cannot be combined with --web, --json or --jq"))
+				return clierr.Wrap(clierr.Usage, errors.New("--yaml cannot be combined with --web, --json, --jq or --csv"))
 			}
 			t, err := a.resolve(cmd.Context(), true)
 			if err != nil {
@@ -188,7 +188,7 @@ $ gt workflow run nightly --follow`,
 		Annotations: map[string]string{"gt.arguments": workflowArguments},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if follow && a.options.json != "" {
-				return clierr.Wrap(clierr.Usage, errors.New("--follow cannot be combined with --json or --jq"))
+				return clierr.Wrap(clierr.Usage, errors.New("--follow cannot be combined with --json, --jq or --csv"))
 			}
 			if interval <= 0 || timeout <= 0 {
 				return clierr.Wrap(clierr.Usage, errors.New("--interval and --timeout must be positive"))

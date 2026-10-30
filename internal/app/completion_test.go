@@ -115,6 +115,7 @@ func TestJSONFieldCompletion(t *testing.T) {
 	for args, want := range map[string][]string{
 		"issue list --json number,ti": {"number,title"},
 		"issue list --json=num":       {"number"},
+		"issue list --csv number,ti":  {"number,title"},
 		"issue list --json=state,ti":  {"state,title"},
 		"pr view --json head_r":       {"head_remote_deleted", "head_repo"},
 		"version --json ":             {},

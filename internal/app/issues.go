@@ -181,7 +181,7 @@ only when the output includes them (see gt help formatting).`, Example: `$ gt is
 $ gt issue view 12 --comments
 $ gt issue view https://gitea.com/OWNER/REPO/issues/12 --web`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: argsExact(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if comments && a.options.json != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--comments cannot be combined with --json or --jq; use gt issue comment list <number> --json"))
+			return clierr.Wrap(clierr.Usage, errors.New("--comments cannot be combined with --json, --jq or --csv; use gt issue comment list <number> --json"))
 		}
 		target, n, err := a.resolveRef(cmd, args[0], issueRef)
 		if err != nil {

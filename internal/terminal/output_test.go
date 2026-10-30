@@ -82,3 +82,21 @@ func TestJSONOutputIsIndentedAndColoredForTerminals(t *testing.T) {
 	require.NoError(t, JSONOutput{Query: ".title"}.Write(&out, value[0]))
 	require.Equal(t, "a \u202e\x1b[31mb\n", out.String())
 }
+
+func TestCSVOutput(t *testing.T) {
+	var out bytes.Buffer
+	value := []map[string]any{
+		{"number": 1, "title": "a, \"b\"\nc", "done": true, "due": nil, "labels": []any{map[string]any{"name": "<bug>"}}},
+		{"number": 2, "title": "\x1b[31mred\u202e", "done": false, "labels": []any{}},
+	}
+	require.NoError(t, JSONOutput{Fields: "number,title,due,labels,done", Allowed: []string{"done", "due", "labels", "number", "title"}, CSV: true}.Write(&out, value))
+	require.Equal(t, "number,title,due,labels,done\n1,\"a, \"\"b\"\"\nc\",,\"[{\"\"name\"\":\"\"<bug>\"\"}]\",true\n2,\x1b[31mred\u202e,,[],false\n", out.String())
+	out.Reset()
+	// Every field: the documented ones, then any others, a single object as one row, sanitized for a terminal.
+	require.NoError(t, JSONOutput{Allowed: []string{"title", "milestone"}, CSV: true, Pretty: true}.Write(&out, map[string]any{"title": value[1]["title"], "zz": []any{"\u009b"}}))
+	require.Equal(t, "title,milestone,zz\n[31mred,,\"[\"\"\\u009b\"\"]\"\n", out.String())
+	out.Reset()
+	require.NoError(t, JSONOutput{Fields: "number", CSV: true, NoHeader: true}.Write(&out, value))
+	require.Equal(t, "1\n2\n", out.String())
+	require.EqualError(t, JSONOutput{CSV: true}.Write(&out, []string{"x"}), "CSV output requires resource objects")
+}

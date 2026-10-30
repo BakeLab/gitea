@@ -332,7 +332,7 @@ $ gt %[1]s comment list %[2]s`, words.group, words.example), Annotations: map[st
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("--attachment cannot be combined with %s", last[0]))
 		}
 		if deleteLast && a.options.json != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--delete-last cannot be combined with --json or --jq"))
+			return clierr.Wrap(clierr.Usage, errors.New("--delete-last cannot be combined with --json, --jq or --csv"))
 		}
 		if err := a.validateComment(cmd, &flags, !deleteLast); err != nil {
 			return err

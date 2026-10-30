@@ -91,6 +91,6 @@ func TestManIncludesHelpTopicsButNotHelpCommands(t *testing.T) {
 	require.Contains(t, out.String(), ".SH SEE ALSO")
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"man", "environment"}))
-	require.Contains(t, out.String(), ".EX\n      --cwd directory", "the flags render as one block")
+	require.Contains(t, out.String(), ".EX\n      --csv fields", "the flags render as one block")
 	require.NotContains(t, out.String(), ".PP\n-q, --jq")
 }

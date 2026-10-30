@@ -71,10 +71,14 @@ func (a *application) writeHuman(cmd *cobra.Command, text string) error {
 	return fmt.Errorf("pager failed; check %s: %w", source, pagerErr.Err)
 }
 
-// writeJSON writes v as JSON, filtered by --json fields and --jq.
+// writeJSON writes v as JSON, filtered by --json fields and --jq, or as CSV with --csv.
 func (a *application) writeJSON(cmd *cobra.Command, v any) error {
-	pretty := a.deps.Streams.OutTTY
-	return terminal.JSONOutput{Fields: a.options.json, Allowed: commandOutputFields(cmd), Query: a.options.jq, Pretty: pretty, Color: pretty && a.colorEnabled()}.Write(cmd.OutOrStdout(), v)
+	pretty, csv := a.deps.Streams.OutTTY, a.options.csv != ""
+	allowed := commandOutputFields(cmd)
+	if csv && cmd.Annotations["gt.jsonfields"] != "" {
+		allowed = nil // Fields that vary, such as config get's key, make the result's keys the columns.
+	}
+	return terminal.JSONOutput{Fields: a.options.json, Allowed: allowed, Query: a.options.jq, Pretty: pretty, Color: pretty && a.colorEnabled(), CSV: csv}.Write(cmd.OutOrStdout(), v)
 }
 
 // listSpec describes how a list command shows its items to people.

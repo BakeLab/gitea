@@ -77,7 +77,7 @@ $ gt time list --mine --since 168h`, Args: argsExact(0), RunE: func(cmd *cobra.C
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("--mine cannot be combined with %s", sources[0]))
 		}
 		if total && a.options.json != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--total cannot be combined with --json or --jq; sum JSON with --jq 'map(.seconds) | add // 0'"))
+			return clierr.Wrap(clierr.Usage, errors.New("--total cannot be combined with --json, --jq or --csv; sum JSON with --jq 'map(.seconds) | add // 0'"))
 		}
 		var err error
 		if opts.Since, opts.Before, err = tracked.parse(a.deps.Now()); err != nil {

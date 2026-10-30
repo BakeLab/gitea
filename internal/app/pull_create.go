@@ -98,7 +98,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	}
 	if f.agit {
 		if a.options.json != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--json/--jq cannot be combined with --agit; AGit creates the pull request through git push"))
+			return clierr.Wrap(clierr.Usage, errors.New("--json, --jq or --csv cannot be combined with --agit; AGit creates the pull request through git push"))
 		}
 		if f.web {
 			return clierr.Wrap(clierr.Usage, errors.New("--web cannot be combined with --agit; AGit creates the pull request through git push, without a branch to compare"))
@@ -545,7 +545,7 @@ func (a *application) createPullInteractively(cmd *cobra.Command, snapshot setti
 		return clierr.Wrap(clierr.Usage, errors.New("pr create requires a target branch: the repository has no default branch"))
 	}
 	if values.Agit && a.options.json != "" {
-		return clierr.Wrap(clierr.Usage, errors.New("--json/--jq cannot be combined with AGit create; AGit creates the pull request through git push"))
+		return clierr.Wrap(clierr.Usage, errors.New("--json, --jq or --csv cannot be combined with AGit create; AGit creates the pull request through git push"))
 	}
 	base := &pullBase{branch: values.Base, repo: &loaded.Base}
 	if values.AsDraft {

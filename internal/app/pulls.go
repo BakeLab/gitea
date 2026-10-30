@@ -188,7 +188,7 @@ func (a *application) pullViewCommand() *cobra.Command {
 	var web, comments bool
 	cmd := &cobra.Command{Use: "view [<number> | <url> | <branch>]", Short: "View a pull request", Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
 		if comments && a.options.json != "" {
-			return clierr.Wrap(clierr.Usage, errors.New("--comments cannot be combined with --json or --jq; use gt pr comment list <number> --json or gt pr review list <number> --json"))
+			return clierr.Wrap(clierr.Usage, errors.New("--comments cannot be combined with --json, --jq or --csv; use gt pr comment list <number> --json or gt pr review list <number> --json"))
 		}
 		t, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {

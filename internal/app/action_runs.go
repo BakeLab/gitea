@@ -253,7 +253,7 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 		Annotations: map[string]string{"gt.arguments": runArguments},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if log && (web || a.options.json != "") {
-				return clierr.Wrap(clierr.Usage, errors.New("--log cannot be combined with --web, --json or --jq"))
+				return clierr.Wrap(clierr.Usage, errors.New("--log cannot be combined with --web, --json, --jq or --csv"))
 			}
 			t, id, err := a.runArg(cmd, args, false)
 			if err != nil {

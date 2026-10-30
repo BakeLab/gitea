@@ -2,8 +2,8 @@
 
 gt replaces [tea](https://gitea.com/gitea/tea). Commands are singular and grouped by resource
 (`gt pr`, not `tea pulls`), every `list` also answers to `ls` and every `delete` to `rm`, and
-`--json` with `--jq` replaces `--output`. gt reads its own configuration, so log in again with
-`gt auth login`.
+`--json` with `--jq`, or `--csv`, replaces `--output`. gt reads its own configuration, so log in
+again with `gt auth login`.
 
 ## Global flags
 
@@ -12,7 +12,7 @@ gt replaces [tea](https://gitea.com/gitea/tea). Commands are singular and groupe
 | `--login`, `-l` | `--host` and `--user` |
 | `--repo`, `-r` | `--repo`, `-R` |
 | `--remote`, `-R` | `--remote` |
-| `--output`, `-o` | `--json`, `--jq` |
+| `--output`, `-o` | `--json`, `--jq`, `--csv` |
 
 ## Commands
 

@@ -254,7 +254,7 @@ $ gt config get ssh_key --host https://gitea.com --user alice`,
 			if a.options.json != "*" {
 				for field := range strings.SplitSeq(a.options.json, ",") {
 					if field = strings.TrimSpace(field); field != "" && field != args[0] {
-						return clierr.Wrap(clierr.Usage, fmt.Errorf("--json field %s cannot be combined with key %s", field, args[0]))
+						return clierr.Wrap(clierr.Usage, fmt.Errorf("%s field %s cannot be combined with key %s", a.outputFlag(), field, args[0]))
 					}
 				}
 			}
@@ -749,7 +749,7 @@ $ gt alias set il "issue list --assignee @me" --clobber`,
 			if a.options.json != "" {
 				names := slices.Sorted(maps.Keys(s.Preferences.Aliases))
 				if len(names) == 0 && a.options.json != "*" {
-					return clierr.Wrap(clierr.Usage, errors.New("--json with field names requires aliases; none are defined"))
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("%s with field names requires aliases; none are defined", a.outputFlag()))
 				}
 				if err := terminal.ValidateOutput(a.options.json, "", names); err != nil {
 					return clierr.Wrap(clierr.Usage, err)

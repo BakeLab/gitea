@@ -96,7 +96,7 @@ func (a *application) writeHelp(cmd *cobra.Command, _ []string) {
 	}
 	section("LEARN MORE", "Use `gt <command> <subcommand> --help` for more information about a command.\n"+
 		"Read `gt help environment` for global flags and environment variables.\n"+
-		"Read `gt help formatting` for --json and --jq, and `gt help exit-codes` for exit codes.")
+		"Read `gt help formatting` for --json, --jq and --csv, and `gt help exit-codes` for exit codes.")
 	_, _ = io.WriteString(cmd.OutOrStdout(), strings.TrimRight(page.String(), "\n")+"\n")
 }
 
@@ -161,7 +161,7 @@ func availableCommands(cmd *cobra.Command) []commandList {
 }
 
 // helpFlags renders the flags of cmd, counting parents' persistent flags such as --org as its own, and
-// the global flags that apply to it: --repo, --remote and --cwd, --json and --jq, and --yes.
+// the global flags that apply to it: --repo, --remote and --cwd, --json, --jq and --csv, and --yes.
 func helpFlags(cmd *cobra.Command) (local, inherited string) {
 	globals := cmd.Root().PersistentFlags()
 	var own []*pflag.Flag
@@ -187,7 +187,7 @@ func helpFlags(cmd *cobra.Command) (local, inherited string) {
 }
 
 // sharedFlagNames are the global flags that help and the manual list only where they apply.
-var sharedFlagNames = []string{"repo", "remote", "cwd", "json", "jq", "yes"}
+var sharedFlagNames = []string{"repo", "remote", "cwd", "json", "jq", "csv", "yes"}
 
 // sharedFlags reports which of sharedFlagNames apply to cmd.
 func sharedFlags(cmd *cobra.Command) map[string]bool {
@@ -196,7 +196,7 @@ func sharedFlags(cmd *cobra.Command) map[string]bool {
 	// repo clone takes its repository as an argument only, so --repo and --remote do nothing there.
 	// Among gt extension's commands, only those running an extension take a repository.
 	selects := repo && path != "gt repo clone" && (!strings.HasPrefix(path, "gt extension") || runsExtension(cmd))
-	return map[string]bool{"repo": selects, "remote": selects && !runsExtension(cmd), "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd) || cmd.Annotations["gt.rawjson"] != "", "yes": cmd.Annotations["gt.confirm"] != ""}
+	return map[string]bool{"repo": selects, "remote": selects && !runsExtension(cmd), "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd) || cmd.Annotations["gt.rawjson"] != "", "csv": outputsJSON(cmd), "yes": cmd.Annotations["gt.confirm"] != ""}
 }
 
 // helpSection is a titled section of a help page.
@@ -219,20 +219,20 @@ func runsExtension(cmd *cobra.Command) bool {
 	return cmd.Annotations["gt.extension"] == "true" || cmd.CommandPath() == "gt extension exec"
 }
 
-// outputsJSON reports whether the --json flag applies to cmd.
+// outputsJSON reports whether the --json and --csv flags apply to cmd.
 func outputsJSON(cmd *cobra.Command) bool {
 	return cmd.Annotations["gt.text"] == "" && cmd.Annotations["gt.group"] == "" && (commandOutputFields(cmd) != nil || cmd.Annotations["gt.jsonfields"] != "")
 }
 
 // flagUsages renders flags in order as aligned usage lines without their common indentation. The
-// optional --json value and the help flag read as in gh: "--json fields", "Show help for command".
+// optional --json and --csv values and the help flag read as in gh: "--json fields", "Show help for command".
 func flagUsages(flags []*pflag.Flag) string {
 	set := pflag.NewFlagSet("help", pflag.ContinueOnError)
 	set.SortFlags = false
 	for _, flag := range flags {
 		shown := *flag
 		switch flag.Name {
-		case "json":
+		case "json", "csv":
 			shown.NoOptDefVal = ""
 		case "help":
 			shown.Usage = "Show help for command"
@@ -434,17 +434,25 @@ Policy: extensions (enabled or disabled), extension_hosts and extension_owners i
 restrict extensions for you. An administrator sets the same, and extension_credentials: denied,
 in /etc/gitea-cli/policy.yml (%ProgramData%\gitea-cli\policy.yml on Windows), which you
 cannot loosen.`},
-		{Use: "formatting", Short: "JSON output with --json and --jq", Long: `gt prints text for people by default. Scripts should use JSON: the columns and
-wording of text output may change between releases.
+		{Use: "formatting", Short: "JSON and CSV output with --json, --jq and --csv", Long: `gt prints text for people by default. Scripts should use JSON or CSV: the columns
+and wording of text output may change between releases.
 
   --json             print every field
   --json FIELDS      print only the comma-separated FIELDS, such as --json number,title
   -q, --jq EXPR      filter the JSON with a jq expression; implies --json
+  --csv              print every field as CSV
+  --csv FIELDS       print only the comma-separated FIELDS as CSV, such as --csv number,title
 
-The JSON FIELDS section of a command's help lists its fields, and shell completion
-offers them after --json. An unknown field reports the available ones. A word after
---json is read as an argument only when the command takes no other, as in
-gt release view --json v1; write --json=FIELDS to make it a field list.
+The JSON FIELDS section of a command's help lists its fields, which --csv selects too,
+and shell completion offers them after --json and --csv. An unknown field reports the
+available ones. A word after --json or --csv is read as an argument only when the
+command takes no other, as in gt release view --json v1; write --json=FIELDS to make
+it a field list.
+
+--csv prints a header row of the field names, then one row per item; a command that
+returns one item prints one row. Strings print as they are, null as an empty cell,
+and numbers, booleans, objects and arrays as compact JSON. --csv cannot be combined
+with --json or --jq.
 
 --jq runs inside gt, so jq does not need to be installed. String results print
 without quotes:
@@ -453,7 +461,7 @@ without quotes:
 
 Some fields cost extra requests, such as the reviewers of pr list, the blocked_by and blocks
 of issue view and issue edit, and the visibility of org member list. gt makes them only when
-the output includes the field: --json names it, or --json selects every field and the --jq
+the output includes the field: --json or --csv names it, or selects every field and the --jq
 expression names it. An expression that reaches such a field without naming it, as
 to_entries does, sees it empty; name the field in --json instead.
 
@@ -463,7 +471,7 @@ needs one shape passes one argument per call, or several and reads the array, su
 --jq '.[]'.
 
 On a terminal, JSON is indented and colored; otherwise each value prints on one line.
-Commands that return no resource, such as deletes, reject --json.`},
+Commands that return no resource, such as deletes, reject --json and --csv.`},
 	}
 	for _, topic := range topics {
 		topic.Hidden, topic.Annotations = true, map[string]string{topicAnnotation: "true"}

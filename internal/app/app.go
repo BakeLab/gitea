@@ -80,8 +80,10 @@ type options struct {
 	host, user, repo, cwd, remote string
 	sudo                          string
 	json, jq                      string
-	noInput, interactive, yes     bool
-	debug                         bool
+	// csv holds the --csv fields; checkOutputFlags copies them to json, which selects them.
+	csv                       string
+	noInput, interactive, yes bool
+	debug                     bool
 	// editor is the command's --editor, which needs a configured editor before any request.
 	editor bool
 	// repoArgument is set when repo holds a command's repository argument rather than --repo.
@@ -190,6 +192,8 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 	flags.StringVar(&a.options.json, "json", "", "Output JSON with the specified comma-separated `fields`, or all fields")
 	flags.Lookup("json").NoOptDefVal = "*"
 	flags.StringVarP(&a.options.jq, "jq", "q", "", "Filter JSON output using a jq `expression`; implies --json")
+	flags.StringVar(&a.options.csv, "csv", "", "Output CSV with the specified comma-separated `fields`, or all fields")
+	flags.Lookup("csv").NoOptDefVal = "*"
 	flags.BoolVar(&a.options.noInput, "no-input", false, "Disable prompts and implicit editor/browser interactions")
 	flags.BoolVar(&a.options.interactive, "interactive", false, "Allow prompts with machine output")
 	flags.BoolVarP(&a.options.yes, "yes", "y", false, "Accept confirmations without prompting")
@@ -200,6 +204,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 	_ = root.RegisterFlagCompletionFunc("remote", a.completeRemotes)
 	_ = root.RegisterFlagCompletionFunc("cwd", completeDirectories)
 	_ = root.RegisterFlagCompletionFunc("json", completeJSONFields)
+	_ = root.RegisterFlagCompletionFunc("csv", completeJSONFields)
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		if err := a.checkOutputFlags(cmd); err != nil {
 			return err
@@ -342,11 +347,22 @@ func editDistance(a, b string) int {
 	return row[len(b)]
 }
 
-// checkOutputFlags validates --json and --jq before a command runs. --jq alone selects every field,
-// except on commands that filter their raw JSON themselves (annotation gt.rawjson).
+// checkOutputFlags validates --json, --jq and --csv before a command runs. --jq alone selects every
+// field, except on commands that filter their raw JSON themselves (annotation gt.rawjson). --csv
+// selects its fields like --json, so that every JSON output path writes CSV instead.
 func (a *application) checkOutputFlags(cmd *cobra.Command) error {
 	selected := ""
 	switch {
+	case cmd.Flags().Changed("csv"):
+		for _, other := range []string{"json", "jq"} {
+			if cmd.Flags().Changed(other) {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("--csv cannot be combined with --%s", other))
+			}
+		}
+		if slices.ContainsFunc(strings.Split(a.options.csv, ","), func(name string) bool { return strings.TrimSpace(name) == "" }) {
+			return clierr.Wrap(clierr.Usage, errors.New("--csv field names cannot be empty; use --csv alone for every field"))
+		}
+		selected, a.options.json = "--csv", a.options.csv
 	case cmd.Flags().Changed("json"):
 		if a.options.json == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--json= requires field names; use --json alone for every field"))
@@ -359,7 +375,7 @@ func (a *application) checkOutputFlags(cmd *cobra.Command) error {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s; %s is not supported", reason, selected))
 	}
 	if flag := cmd.Flags().Lookup("web"); flag != nil && flag.Value.String() == "true" && (a.options.json != "" || a.options.jq != "") {
-		return clierr.Wrap(clierr.Usage, errors.New("--web cannot be combined with --json or --jq"))
+		return clierr.Wrap(clierr.Usage, errors.New("--web cannot be combined with --json, --jq or --csv"))
 	}
 	return clierr.Wrap(clierr.Usage, terminal.ValidateOutput(a.options.json, a.options.jq, commandOutputFields(cmd)))
 }
@@ -500,16 +516,25 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 
 var jsonFieldList = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(,[A-Za-z][A-Za-z0-9_]*)*$`)
 
-// joinJSONFields accepts `--json number,title` like `--json=number,title`. The word stays a positional
-// argument only when it is the only one and the command neither outputs any of those fields, nor one
-// they resemble, nor rejects the argument, so a misspelled field lists the available fields rather
-// than naming one more tag or label to change. Unknown commands, such as unexpanded aliases, are joined.
+// outputFlag names the flag that selected machine output, for usage errors about its fields.
+func (a *application) outputFlag() string {
+	if a.options.csv != "" {
+		return "--csv"
+	}
+	return "--json"
+}
+
+// joinJSONFields accepts `--json number,title` like `--json=number,title`, and --csv likewise. The word
+// stays a positional argument only when it is the only one and the command neither outputs any of those
+// fields, nor one they resemble, nor rejects the argument, so a misspelled field lists the available
+// fields rather than naming one more tag or label to change. Unknown commands, such as unexpanded
+// aliases, are joined.
 func joinJSONFields(root *cobra.Command, args []string) []string {
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--" {
 			break
 		}
-		if args[i] != "--json" || i+1 >= len(args) || !jsonFieldList.MatchString(args[i+1]) {
+		if (args[i] != "--json" && args[i] != "--csv") || i+1 >= len(args) || !jsonFieldList.MatchString(args[i+1]) {
 			continue
 		}
 		// A word that names a subcommand at this position is the command, as in `gt --json repo view`.
@@ -520,7 +545,7 @@ func joinJSONFields(root *cobra.Command, args []string) []string {
 		if fields := commandOutputFields(cmd); err == nil && terminal.ValidateOutput(args[i+1], "", fields) != nil && !namesField(args[i+1], fields) && !resemblesField(args[i+1], fields) && acceptsArgs(args) && len(positionalArgs(slices.Concat(args[:i+1], args[i+2:]))) == 0 {
 			continue
 		}
-		args = slices.Concat(args[:i], []string{"--json=" + args[i+1]}, args[i+2:])
+		args = slices.Concat(args[:i], []string{args[i] + "=" + args[i+1]}, args[i+2:])
 	}
 	return args
 }

@@ -131,7 +131,7 @@ func mergeCompletions(completers ...cobra.CompletionFunc) cobra.CompletionFunc {
 	}
 }
 
-// completeJSONFields completes the comma-separated fields that --json can select for the command.
+// completeJSONFields completes the comma-separated fields that --json and --csv can select for the command.
 var completeJSONFields = commaSeparated(func(cmd *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 	if cmd.Annotations["gt.text"] != "" || cmd.Annotations["gt.group"] != "" {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -139,11 +139,11 @@ var completeJSONFields = commaSeparated(func(cmd *cobra.Command, _ []string, toC
 	return matching(commandOutputFields(cmd), toComplete), cobra.ShellCompDirectiveNoFileComp
 })
 
-// completeJSONValue completes the word after a bare --json as its fields. Without this, cobra completes
-// that word as a positional argument, because the value of --json is optional.
+// completeJSONValue completes the word after a bare --json or --csv as its fields. Without this, cobra
+// completes that word as a positional argument, because the value of these flags is optional.
 func completeJSONValue(args []string) []string {
-	if n := len(args); n >= 2 && args[n-2] == "--json" && !strings.HasPrefix(args[n-1], "-") {
-		return slices.Concat(args[:n-2], []string{"--json=" + args[n-1]})
+	if n := len(args); n >= 2 && (args[n-2] == "--json" || args[n-2] == "--csv") && !strings.HasPrefix(args[n-1], "-") {
+		return slices.Concat(args[:n-2], []string{args[n-2] + "=" + args[n-1]})
 	}
 	return args
 }

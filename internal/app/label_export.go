@@ -34,7 +34,7 @@ $ gt label export -R alice/old | gt label import - -R alice/new`, Args: argsExac
 			}
 			if a.options.json != "" {
 				toStdout := output == "" || output == "-"
-				return terminal.JSONOutput{Fields: a.options.json, Allowed: commandOutputFields(cmd), Query: a.options.jq, Safe: toStdout && a.deps.Streams.OutTTY}.Write(destination, items)
+				return terminal.JSONOutput{Fields: a.options.json, Allowed: commandOutputFields(cmd), Query: a.options.jq, Safe: toStdout && a.deps.Streams.OutTTY, CSV: a.options.csv != ""}.Write(destination, items)
 			}
 			var text strings.Builder
 			for _, item := range items {

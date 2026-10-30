@@ -227,7 +227,7 @@ func TestCommentGroupCommentsLikeGh(t *testing.T) {
 		{[]string{"issue", "comment", "craete", "1"}, `unknown command "craete" for "gt issue comment"; did you mean create?`},
 		{[]string{"issue", "comment", "-b", "x"}, "missing issue number"},
 		{[]string{"issue", "comment", "1", "--edit-last", "--delete-last"}, "--edit-last cannot be combined with --delete-last"},
-		{[]string{"issue", "comment", "1", "--delete-last", "--json"}, "--delete-last cannot be combined with --json or --jq"},
+		{[]string{"issue", "comment", "1", "--delete-last", "--json"}, "--delete-last cannot be combined with --json, --jq or --csv"},
 		{[]string{"issue", "comment", "1", "--delete-last", "--body-file", "x"}, "--delete-last cannot be combined with --body-file"},
 		{[]string{"issue", "comment", "1"}, "issue comment requires --body, --body-file or --editor"},
 		{[]string{"pr", "comment", "1", "-b", "x"}, "#1 in alice/project is an issue, not a pull request; use gt issue comment 1"},
