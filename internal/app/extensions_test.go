@@ -570,6 +570,55 @@ func TestGHExtensionGetsGHCredentialsAndTheShim(t *testing.T) {
 	assert.True(t, same(shim, executable), "the shim runs gt")
 }
 
+func TestExtensionAliasesRunTheExtension(t *testing.T) {
+	deps, _, diagnostics := testDeps(t)
+	runs := &extensionRun{}
+	deps.RunExtension = func(c extensions.Command) (int, error) {
+		runs.commands = append(runs.commands, c)
+		return 0, nil
+	}
+	install := func(name, metadata string) {
+		dir := filepath.Join(t.TempDir(), "gt-"+name)
+		require.NoError(t, os.Mkdir(dir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "gt-"+name), []byte("#!/bin/sh\n"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "gt-extension.yml"), []byte(metadata), 0o644))
+		require.NoError(t, Execute(context.Background(), deps, []string{"extension", "install", dir}))
+	}
+	install("ee", "aliases:\n  user-group: ee-user-group\n  issue: ee-issue\n  shared: ee-shared\n")
+	install("zz", "aliases:\n  shared: zz-shared\n")
+	// Aliases that cannot be used are warned about; the extension is installed regardless.
+	diagnostics.Reset()
+	install("yy", "aliases:\n  issue: x\n  user-group: x\n  shared: x\n  yy: x\n  Bad: x\n  ok: ok\n")
+	for _, want := range []string{"alias gt issue of extension yy: gt issue is a built-in command", "gt user-group of extension yy: extension ee declares it too", "gt shared of extension yy: extension ee declares it too", "gt yy of extension yy: it is the name of the extension", "gt Bad of extension yy: its name must use"} {
+		assert.Contains(t, diagnostics.String(), want)
+	}
+	assert.NotContains(t, diagnostics.String(), "gt ok of")
+	run := func(args ...string) []string {
+		runs.commands = nil
+		require.NoError(t, Execute(context.Background(), deps, args))
+		require.Len(t, runs.commands, 1)
+		return runs.commands[0].Args
+	}
+	assert.Equal(t, []string{"ee-user-group", "list", "--json"}, run("user-group", "list", "--json"))
+	assert.Equal(t, []string{"ee-user-group", "list"}, run("--host", "https://example.com", "user-group", "list"))
+	assert.Equal(t, []string{"ee-shared"}, run("shared"), "the first extension by name wins")
+
+	// Built-in commands and the user's own aliases win.
+	runs.commands = nil
+	require.Error(t, Execute(context.Background(), deps, []string{"issue", "bogus"}))
+	assert.Empty(t, runs.commands)
+	require.NoError(t, Execute(context.Background(), deps, []string{"alias", "set", "user-group", "zz mine"}))
+	assert.Equal(t, []string{"mine", "list"}, run("user-group", "list"))
+
+	// An extension that takes over an alias says so.
+	diagnostics.Reset()
+	install("aa", "aliases:\n  shared: aa-shared\n")
+	install("ok", "")
+	assert.Contains(t, diagnostics.String(), "gt shared now runs extension aa instead of extension ee")
+	assert.Contains(t, diagnostics.String(), "gt ok now runs extension ok instead of the alias extension yy declares")
+	assert.Equal(t, []string{"aa-shared"}, run("shared"))
+}
+
 func TestExtensionCompletionAsksTheExtension(t *testing.T) {
 	deps, out, _ := testDeps(t)
 	runs := &extensionRun{}

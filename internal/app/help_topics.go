@@ -398,6 +398,11 @@ the repository declares:
   platforms        such as linux/amd64 or darwin; none means every platform
   credentials      true when it needs your Gitea token
   completion       cobra, when it answers Cobra's __complete protocol for shell completion
+  aliases          top-level commands that run the extension with fixed arguments: with
+                   "user-group: user-group", gt user-group runs gt NAME user-group. Built-in
+                   commands, extension names and your own aliases win over them, and of two
+                   extensions the first by name does; gt warns about an alias it ignores and
+                   installs the extension anyway.
 
 Running: gt checks the executable against the SHA-256 recorded at install and refuses one that
 changed. The extension inherits gt's terminal and environment, except for GITEA_TOKEN,

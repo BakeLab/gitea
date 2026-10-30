@@ -102,7 +102,7 @@ $ gt extension create hello --precompiled=go`,
 				return err
 			}
 			files := map[string]string{
-				"gt-extension.yml": fmt.Sprintf("description: %s\n# min_gt_version: 1.0.0\n# credentials: true\n", "Describe what gt "+name+" does"),
+				"gt-extension.yml": fmt.Sprintf("description: %s\n# min_gt_version: 1.0.0\n# credentials: true\n# aliases:\n#   short-name: subcommand --flag\n", "Describe what gt "+name+" does"),
 				"README.md":        fmt.Sprintf("# %s\n\nA gt extension. Install it with:\n\n    gt extension install OWNER/%s\n\nand run it as `gt %s`.\n", repo, repo, name),
 			}
 			mode := map[string]fs.FileMode{}

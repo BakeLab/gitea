@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/filelock"
+	"github.com/kballard/go-shellquote"
 	"gopkg.in/yaml.v3"
 )
 
@@ -48,7 +49,10 @@ const (
 // LockTimeout bounds the wait for another gt installing or removing an extension.
 const LockTimeout = 30 * time.Second
 
-var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,38}$`)
+var (
+	namePattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,38}$`)
+	aliasPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+)
 
 // ErrNotInstalled reports a name that no installed extension has.
 var ErrNotInstalled = errors.New("extension is not installed")
@@ -81,6 +85,9 @@ type Metadata struct {
 	Credentials bool     `yaml:"credentials,omitempty" json:"credentials"`
 	// Completion is "cobra" for an executable that answers Cobra's __complete protocol.
 	Completion string `yaml:"completion,omitempty" json:"completion"`
+	// Aliases maps a top-level command word to the arguments it passes to the extension, so
+	// user-group: "user-group" makes gt user-group run gt NAME user-group.
+	Aliases map[string]string `yaml:"aliases,omitempty" json:"aliases"`
 }
 
 // ParseMetadata reads gt-extension.yml, rejecting unknown keys so a misspelled declaration is noticed.
@@ -96,6 +103,22 @@ func ParseMetadata(data []byte) (Metadata, error) {
 		return Metadata{}, fmt.Errorf("parse gt-extension.yml: completion must be cobra")
 	}
 	return metadata, nil
+}
+
+// Alias returns the extension arguments the alias name stands for, or why gt ignores it. An
+// unusable alias is ignored, not an error, so a mistake in one never prevents installing the extension.
+func (m Metadata) Alias(name string) ([]string, error) {
+	if !aliasPattern.MatchString(name) {
+		return nil, errors.New("its name must use lowercase letters, digits and hyphens")
+	}
+	words, err := shellquote.Split(m.Aliases[name])
+	if err != nil {
+		return nil, fmt.Errorf("its arguments cannot be parsed: %w", err)
+	}
+	if len(words) == 0 {
+		return nil, errors.New("it needs arguments for the extension, such as " + name)
+	}
+	return words, nil
 }
 
 // Supports reports whether the declared platforms include goos/goarch; none declared means any.

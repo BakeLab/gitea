@@ -144,18 +144,20 @@ func (p extensionPolicy) allowsInstalled(extension extensions.Extension) error {
 	return p.allows(extension.Host, extension.Owner)
 }
 
-// addExtensionCommands lists the installed extensions the policy allows in help and completion,
-// and returns the names of all. Running one goes through runExtension before Cobra parses any flags.
-func (a *application) addExtensionCommands(root *cobra.Command) map[string]bool {
+// addExtensionCommands lists the installed extensions and their aliases the policy allows in help
+// and completion, and returns the names of all extensions. Running one goes through runExtension
+// before Cobra parses any flags.
+func (a *application) addExtensionCommands(root *cobra.Command, userAliases map[string]string) map[string]bool {
 	installed, _ := a.extensionStore().List()
+	a.extensionAliases = resolveExtensionAliases(root, installed, userAliases)
 	policy, policyErr := a.extensionPolicy()
+	allowed := func(extension extensions.Extension) bool {
+		return policyErr != nil || policy.allowsInstalled(extension) == nil
+	}
 	names := map[string]bool{}
 	for _, extension := range installed {
 		names[extension.Name] = true
-		if isCommand(root, extension.Name) || slices.ContainsFunc(root.Commands(), func(c *cobra.Command) bool { return c.Name() == extension.Name }) {
-			continue
-		}
-		if policyErr == nil && policy.allowsInstalled(extension) != nil {
+		if isCommand(root, extension.Name) || slices.ContainsFunc(root.Commands(), func(c *cobra.Command) bool { return c.Name() == extension.Name }) || !allowed(extension) {
 			continue
 		}
 		short := extension.Metadata.Description
@@ -173,14 +175,58 @@ func (a *application) addExtensionCommands(root *cobra.Command) map[string]bool 
 			},
 		})
 	}
+	for _, name := range slices.Sorted(maps.Keys(a.extensionAliases)) {
+		alias := a.extensionAliases[name]
+		if !allowed(alias.extension) {
+			continue
+		}
+		root.AddCommand(&cobra.Command{
+			Use: name, Short: terminal.SafeLine(fmt.Sprintf("Alias for gt %s %s", alias.extension.Name, alias.extension.Metadata.Aliases[name])), GroupID: "extension", DisableFlagParsing: true,
+			Annotations: map[string]string{"gt.extension": "true", "gt.extension-alias": "true"},
+			RunE: func(*cobra.Command, []string) error {
+				return clierr.Wrap(clierr.Usage, errors.New("extension must be run before parsing"))
+			},
+			ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+				return a.completeExtension(alias.extension, slices.Concat(alias.args, args, []string{toComplete}))
+			},
+		})
+	}
 	return names
 }
 
-// dispatchExtension runs the extension args[at] names unless a built-in command has that name, and
-// reports whether it did.
+// extensionAlias is the extension a top-level alias runs and the arguments it passes.
+type extensionAlias struct {
+	extension extensions.Extension
+	args      []string
+}
+
+// resolveExtensionAliases returns the usable aliases of installed. Built-in commands, extension
+// names and aliases the user set win; of two extensions the first by name does.
+func resolveExtensionAliases(root *cobra.Command, installed []extensions.Extension, userAliases map[string]string) map[string]extensionAlias {
+	resolved := map[string]extensionAlias{}
+	for _, extension := range installed {
+		for name := range extension.Metadata.Aliases {
+			_, owned := resolved[name]
+			_, userDefined := userAliases[name]
+			if owned || userDefined || isCommand(root, name) || slices.ContainsFunc(installed, func(e extensions.Extension) bool { return e.Name == name }) {
+				continue
+			}
+			if args, err := extension.Metadata.Alias(name); err == nil {
+				resolved[name] = extensionAlias{extension, args}
+			}
+		}
+	}
+	return resolved
+}
+
+// dispatchExtension runs the extension args[at] names, or the one whose alias it is, unless a
+// built-in command has that name, and reports whether it did.
 func (a *application) dispatchExtension(ctx context.Context, root *cobra.Command, args []string, at int) (bool, error) {
 	if at >= len(args) || isCommand(root, args[at]) {
 		return false, nil
+	}
+	if alias, ok := a.extensionAliases[args[at]]; ok {
+		return true, a.runExtension(ctx, root, alias.extension, args[:at], slices.Concat(alias.args, args[at+1:]))
 	}
 	extension, err := a.extensionStore().Lookup(args[at])
 	if errors.Is(err, extensions.ErrNotInstalled) {

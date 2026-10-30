@@ -40,6 +40,21 @@ func TestParseMetadata(t *testing.T) {
 	require.ErrorContains(t, err, "credential")
 	_, err = ParseMetadata([]byte("completion: bash\n"))
 	require.ErrorContains(t, err, "completion must be cobra")
+
+	metadata, err = ParseMetadata([]byte("aliases:\n  user-group: user-group\n  ls: \"list --all 'a b'\"\n"))
+	require.NoError(t, err)
+	args, err := metadata.Alias("ls")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"list", "--all", "a b"}, args)
+	// An unusable alias is ignored, never a reason to refuse the extension.
+	metadata, err = ParseMetadata([]byte("aliases: {Bad: x, a_b: x, empty: \"\", open: \"'x\"}"))
+	require.NoError(t, err)
+	for name := range metadata.Aliases {
+		_, err = metadata.Alias(name)
+		assert.Error(t, err, name)
+	}
+	_, err = metadata.Alias("open")
+	assert.ErrorContains(t, err, "cannot be parsed")
 }
 
 func TestStorePublishesAtomically(t *testing.T) {

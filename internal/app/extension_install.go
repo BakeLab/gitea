@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -449,6 +451,10 @@ func describeCandidate(c extensionCandidate) string {
 	if description := m.Metadata.Description; description != "" {
 		fmt.Fprintf(&b, "  description  %s\n", terminal.SafeLine(description))
 	}
+	if len(m.Metadata.Aliases) > 0 {
+		names := slices.Sorted(maps.Keys(m.Metadata.Aliases))
+		fmt.Fprintf(&b, "  commands     %s\n", terminal.SafeLine("gt "+strings.Join(names, ", gt ")))
+	}
 	credentials := "not requested"
 	if m.Metadata.Credentials {
 		credentials = "requested by gt-extension.yml"
@@ -574,6 +580,7 @@ func (a *application) installExtension(cmd *cobra.Command, raw string, opts exte
 	if c.manifest.DigestSource == "none" && a.options.yes {
 		a.warn(cmd, "Release %s of %s publishes no SHA-256 for %s; installing it because of --yes", c.manifest.Tag, c.manifest.Repository(), c.manifest.Asset)
 	}
+	a.warnExtensionAliases(cmd, c.manifest)
 	if !a.options.yes && a.canPrompt() {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Extension %s\n%s", c.manifest.Name, describeCandidate(c))
 	}
@@ -602,6 +609,43 @@ func (a *application) grantCredentials(cmd *cobra.Command, manifest extensions.M
 		return false, nil
 	}
 	return a.deps.Prompter.ConfirmDefault(cmd.Context(), "Give extension "+manifest.Name+" your Gitea token?", false)
+}
+
+// warnExtensionAliases warns about the aliases of manifest that gt will ignore, and about those
+// of installed extensions manifest takes over. Installing goes on.
+func (a *application) warnExtensionAliases(cmd *cobra.Command, manifest extensions.Manifest) {
+	snapshot, _ := a.settings()
+	installed, _ := a.extensionStore().List()
+	installed = slices.DeleteFunc(installed, func(e extensions.Extension) bool { return e.Name == manifest.Name })
+	owners := resolveExtensionAliases(cmd.Root(), installed, snapshot.Preferences.Aliases)
+	if owner, ok := owners[manifest.Name]; ok {
+		a.warn(cmd, "gt %s now runs extension %s instead of the alias extension %s declares", manifest.Name, manifest.Name, owner.extension.Name)
+	}
+	for _, name := range slices.Sorted(maps.Keys(manifest.Metadata.Aliases)) {
+		_, err := manifest.Metadata.Alias(name)
+		_, userDefined := snapshot.Preferences.Aliases[name]
+		owner, owned := owners[name]
+		var reason string
+		switch {
+		case err != nil:
+			reason = err.Error()
+		case isCommand(cmd.Root(), name):
+			reason = "gt " + name + " is a built-in command"
+		case name == manifest.Name:
+			reason = "it is the name of the extension"
+		case userDefined:
+			reason = "you have an alias of that name"
+		case slices.ContainsFunc(installed, func(e extensions.Extension) bool { return e.Name == name }):
+			reason = "extension " + name + " is installed"
+		case owned && owner.extension.Name < manifest.Name:
+			reason = "extension " + owner.extension.Name + " declares it too"
+		case owned:
+			a.warn(cmd, "gt %s now runs extension %s instead of extension %s", name, manifest.Name, owner.extension.Name)
+		}
+		if reason != "" {
+			a.warn(cmd, "Ignoring the alias gt %s of extension %s: %s", name, manifest.Name, reason)
+		}
+	}
 }
 
 // checkExtensionName refuses a name that a command, an alias or, unless force, an installed
@@ -672,6 +716,7 @@ func (a *application) installLocalExtension(cmd *cobra.Command, raw string, opts
 	if err := checkExtensionMetadata(name, manifest.Metadata); err != nil {
 		return err
 	}
+	a.warnExtensionAliases(cmd, manifest)
 	if manifest.Credentials, err = a.grantCredentials(cmd, manifest, opts.allowCredentials, policy); err != nil {
 		return err
 	}
@@ -822,6 +867,7 @@ func (a *application) upgradeExtension(cmd *cobra.Command, installed extensions.
 	if c.manifest.DigestSource == "none" && a.options.yes {
 		a.warn(cmd, "Release %s of %s publishes no SHA-256 for %s; upgrading to it because of --yes", c.manifest.Tag, c.manifest.Repository(), c.manifest.Asset)
 	}
+	a.warnExtensionAliases(cmd, c.manifest)
 	if !a.options.yes && a.canPrompt() {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Extension %s: %s → %s\n  installed    %s\n%s", m.Name, terminal.SafeLine(from), terminal.SafeLine(to), m.SHA256, describeCandidate(c))
 	}

@@ -102,6 +102,8 @@ type application struct {
 	generation uint64
 	// resolved is the last target a command resolved, which error hints repeat.
 	resolved target
+	// extensionAliases are the top-level aliases installed extensions declare that gt runs.
+	extensionAliases map[string]extensionAlias
 }
 
 // settings returns the settings, loaded once per run and again after gt changed them.
@@ -419,7 +421,8 @@ func rejectUnknownSubcommands(cmd *cobra.Command) {
 func builtins(root *cobra.Command) map[string]bool {
 	names := map[string]bool{"help": true, "completion": true}
 	for _, cmd := range root.Commands() {
-		if cmd.Annotations["gt.alias"] != "true" {
+		// A user alias may take the name of an alias an extension declares.
+		if cmd.Annotations["gt.alias"] != "true" && cmd.Annotations["gt.extension-alias"] != "true" {
 			names[cmd.Name()] = true
 		}
 	}
@@ -447,7 +450,7 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 		// An extension runs before gt rewrites any of its arguments. An alias may expand to an
 		// extension, and cannot have the name of one.
 		names = maps.Clone(names)
-		maps.Copy(names, a.addExtensionCommands(root))
+		maps.Copy(names, a.addExtensionCommands(root, snapshot.Preferences.Aliases))
 		if ran, err := a.dispatchExtension(ctx, root, args, commandIndex(root, args)); ran {
 			return err
 		}
