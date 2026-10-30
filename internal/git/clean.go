@@ -298,16 +298,24 @@ func switchAway(run func(...string) (string, error), branch string) error {
 // branch, read in one git call.
 func recordedPullNumbers(ctx context.Context, runner Runner, dir string) map[string]int64 {
 	numbers := map[string]int64{}
-	listing, err := runner.Output(ctx, dir, false, "config", "--get-regexp", `^branch\..*\.`+regexp.QuoteMeta(pullNumberKey)+`$`)
-	if err != nil {
-		return numbers
-	}
-	for line := range strings.Lines(listing) {
-		key, value, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
-		name := strings.TrimSuffix(strings.TrimPrefix(key, "branch."), "."+pullNumberKey)
+	for name, value := range branchConfigValues(ctx, runner, dir, pullNumberKey) {
 		if n, err := strconv.ParseInt(value, 10, 64); err == nil && n > 0 {
 			numbers[name] = n
 		}
 	}
 	return numbers
+}
+
+// branchConfigValues returns branch.<name>.key of each local branch that sets it, read in one git call.
+func branchConfigValues(ctx context.Context, runner Runner, dir, key string) map[string]string {
+	values := map[string]string{}
+	listing, err := runner.Output(ctx, dir, false, "config", "--get-regexp", `^branch\..*\.`+regexp.QuoteMeta(key)+`$`)
+	if err != nil {
+		return values
+	}
+	for line := range strings.Lines(listing) {
+		name, value, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
+		values[strings.TrimSuffix(strings.TrimPrefix(name, "branch."), "."+key)] = value
+	}
+	return values
 }

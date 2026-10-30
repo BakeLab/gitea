@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"slices"
 	"strings"
 	"sync"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/git/gittest"
 
 	"github.com/stretchr/testify/require"
 )
@@ -296,6 +299,66 @@ func TestPullViewResolvesCurrentBranch(t *testing.T) {
 	err := Execute(context.Background(), deps, []string{"pr", "view", "-R", "alice/project"})
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
 	require.EqualError(t, err, "pr view requires a pull request number, URL or branch with --repo")
+}
+
+func TestPullListLocal(t *testing.T) {
+	gittest.Isolate(t)
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+		require.NoError(t, err)
+		return strings.TrimSpace(string(out))
+	}
+	run("init", "--quiet", "--initial-branch=main")
+	run("commit", "--quiet", "--allow-empty", "--message=base")
+	commits := map[string]string{}
+	for _, branch := range []string{"agit", "fixed", "old", "pr/7", "feature"} {
+		run("switch", "--quiet", "--create", branch, "main")
+		run("commit", "--quiet", "--allow-empty", "--message="+branch)
+		commits[branch] = run("rev-parse", "HEAD")
+	}
+	run("update-ref", "refs/remotes/origin/fix", commits["fixed"])
+	run("config", "branch.fixed.remote", "origin")
+	run("config", "branch.fixed.merge", "refs/heads/fix")
+	run("config", "branch.pr/7.gitea-cli-pr", "7")
+	run("config", "branch.pr/7.gitea-cli-base-remote", "origin")
+
+	recent, ancient := time.Now().UTC().Format(time.RFC3339), "2020-01-01T00:00:00Z"
+	repo := `"repo":{"full_name":"alice/project"}`
+	var requests []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path+"?"+r.URL.Query().Get("state"))
+		switch {
+		case r.URL.Path == "/api/v1/repos/alice/project/pulls" && r.URL.Query().Get("state") == "open":
+			w.Header().Set("X-Total-Count", "1")
+			writeFirstPage(w, r, `[{"number":5,"title":"Add login","state":"open","html_url":"https://example.org/pr/5","head":{"ref":"feature","sha":"abc",`+repo+`}}]`)
+		case r.URL.Path == "/api/v1/repos/alice/project/pulls":
+			writeFirstPage(w, r, fmt.Sprintf(`[
+				{"number":3,"title":"Fix \u001b[2Jcrash","state":"closed","merged":true,"updated_at":%[1]q,"head":{"ref":"fix","sha":%[3]q,`+repo+`}},
+				{"number":4,"title":"AGit","state":"closed","updated_at":%[1]q,"head":{"ref":"refs/pull/4/head","sha":%[4]q},"base":{"ref":"main",`+repo+`}},
+				{"number":2,"title":"Old","state":"closed","merged":true,"updated_at":%[2]q,"head":{"ref":"old","sha":"def",`+repo+`}}]`,
+				recent, ancient, commits["fixed"], commits["agit"]))
+		case r.URL.Path == "/api/v1/repos/alice/project/pulls/7":
+			_, _ = fmt.Fprintf(w, `{"number":7,"title":"Checked out","state":"closed","updated_at":%q,"head":{"ref":"bob/fix","sha":"789"}}`, ancient)
+		default:
+			t.Errorf("unexpected request %s", r.URL)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	run("remote", "add", "origin", server.URL+"/alice/project.git")
+	deps, out, _ := serverDeps(t, server.URL)
+	deps.Git = git.System{}
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "--local", "--cwd", dir}))
+	require.Equal(t, "\tagit\t4\tclosed\tAGit\n*\tfeature\t5\topen\tAdd login\n\tfixed\t3\tmerged\tFix [2Jcrash\n\tmain\t-\t-\t\n\told\t-\t-\t\n\tpr/7\t7\tclosed\tChecked out\n", out.String())
+	require.Equal(t, []string{"/api/v1/repos/alice/project/pulls?open", "/api/v1/repos/alice/project/pulls?closed", "/api/v1/repos/alice/project/pulls/7?"}, requests)
+
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "list", "--local", "--cwd", dir, "--jq", `.[] | select(.current or .branch == "main")`}))
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	require.Len(t, lines, 2)
+	require.JSONEq(t, `{"branch":"feature","current":true,"commit":"`+commits["feature"]+`","number":5,"state":"open","title":"Add login","url":"https://example.org/pr/5","head_sha":"abc"}`, lines[0])
+	require.JSONEq(t, `{"branch":"main","current":false,"commit":"`+run("rev-parse", "main")+`","number":null,"state":"","title":"","url":"","head_sha":""}`, lines[1])
 }
 
 func TestPullCommandsNameTheIssueAPullRequestNumberBelongsTo(t *testing.T) {

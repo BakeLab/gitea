@@ -37,7 +37,7 @@ func (a *application) pullListCommand() *cobra.Command {
 	var state, milestone string
 	var options services.PullListOptions
 	var labels []string
-	var web bool
+	var web, local bool
 	cmd := &cobra.Command{Use: "list", Short: "List pull requests", Long: `List the pull requests of a repository, newest first.
 
 The reviewers, reviewer_teams, reviews and review_decision JSON fields come from the reviews of each
@@ -47,7 +47,16 @@ formatting). --limit bounds how many requests it makes.
 
 review_decision is changes_requested, approved, review_required or empty. When the base branch's
 protection requires approvals, the decision counts official approvals as Gitea does for merging:
-fewer than required give review_required.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+fewer than required give review_required.
+
+--local lists the local branches of the clone instead, each with the pull request it belongs to:
+the one pr checkout recorded for it, else one whose head branch is the branch's upstream or has
+its name, preferring open pull requests. A merged or closed one tells that gt pr clean can delete
+the branch. gt reads every open pull request, and closed ones back to the oldest last commit of
+a branch without an open one.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+		if local {
+			return a.pullListLocal(cmd)
+		}
 		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 1 {
 			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
 		}
@@ -130,6 +139,7 @@ fewer than required give review_required.`, Args: argsExact(0), RunE: func(cmd *
 	cmd.Flags().StringVarP(&milestone, "milestone", "m", "", "Filter by milestone title or ID")
 	enumFlag(cmd, &options.Sort, "sort", "", "", "Order", "oldest", "recentupdate", "recentclose", "leastupdate", "mostcomment", "leastcomment", "priority")
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the pull request list in the browser")
+	cmd.Flags().BoolVar(&local, "local", false, "List the local branches with their pull requests")
 	_ = cmd.RegisterFlagCompletionFunc("author", a.completeUsers())
 	_ = cmd.RegisterFlagCompletionFunc("assignee", a.completeUsers())
 	_ = cmd.RegisterFlagCompletionFunc("base", a.completeBranches())
@@ -138,7 +148,16 @@ fewer than required give review_required.`, Args: argsExact(0), RunE: func(cmd *
 	_ = cmd.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
 	cmd.Example = `$ gt pr list
 $ gt pr list --author @me --state all
+
+# Show the pull request of each local branch, such as which are merged
+$ gt pr list --local
+
 $ gt pr list --json number,title,head --jq '.[] | select(.head == "feature/login")'`
+	localFields := strings.Join(jsonFields[localBranchPull](), ", ")
+	cmd.Annotations = map[string]string{
+		localFieldsAnnotation: strings.ReplaceAll(localFields, " ", ""),
+		"gt.jsonfields":       wrap(strings.Join(jsonFields[services.Pull](), ", "), 78) + "\n\nWith --local:\n" + wrap(localFields, 78),
+	}
 	return cmd
 }
 

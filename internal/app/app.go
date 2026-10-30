@@ -639,11 +639,16 @@ func jsonOutput(cmd *cobra.Command, fields []string) *cobra.Command {
 	return cmd
 }
 
-// commandOutputFields returns the JSON fields declared on cmd or its parent, or nil for a command
-// group, which outputs nothing itself.
+// commandOutputFields returns the JSON fields declared on cmd for its --local flag when set, else
+// on cmd or its parent, or nil for a command group, which outputs nothing itself.
 func commandOutputFields(cmd *cobra.Command) []string {
 	if cmd.Annotations["gt.group"] != "" {
 		return nil
+	}
+	if fields, ok := cmd.Annotations[localFieldsAnnotation]; ok {
+		if flag := cmd.Flags().Lookup("local"); flag != nil && flag.Value.String() == "true" {
+			return strings.Split(fields, ",")
+		}
 	}
 	for _, c := range []*cobra.Command{cmd, cmd.Parent()} {
 		if c == nil {

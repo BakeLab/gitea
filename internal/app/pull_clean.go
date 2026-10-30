@@ -32,7 +32,9 @@ The head branch on Gitea is kept when you cannot push to it or another open pull
 it, and gt refuses to clean when it moved past the pull request. gt never deletes the default
 branch, the branches of an open pull request, or, without --ignore-sha, a local branch with
 commits that are not in the pull request. Deleting asks for a confirmation; without a terminal,
-pass --yes.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+pass --yes.
+
+gt pr list --local shows which local branches belong to a merged or closed pull request.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
 		if !a.insideClone(cmd.Context()) {
 			return clierr.Wrap(clierr.Usage, errors.New("pr clean requires a Git clone"))
 		}

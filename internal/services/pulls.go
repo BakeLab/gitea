@@ -452,6 +452,26 @@ func (s Pulls) NewestClosed(ctx context.Context, keep func(Pull) bool) (Pull, bo
 	return Pull{}, false, nil
 }
 
+// ClosedSince returns the closed and merged pull requests, most recently updated first, reading
+// pages until one ends with a pull request last updated before since.
+func (s Pulls) ClosedSince(ctx context.Context, since time.Time) ([]Pull, error) {
+	var pulls []Pull
+	for page := 1; page <= maxListPages; page++ {
+		items, more, err := s.List(ctx, PullListOptions{State: "closed", Sort: "recentupdate", Limit: 50, Page: page})
+		if err != nil {
+			return nil, err
+		}
+		pulls = append(pulls, items...)
+		if !more || len(items) == 0 {
+			break
+		}
+		if updated, err := time.Parse(time.RFC3339, items[len(items)-1].UpdatedAt); err == nil && updated.Before(since) {
+			break
+		}
+	}
+	return pulls, nil
+}
+
 // Create opens a pull request.
 func (s Pulls) Create(ctx context.Context, opts PullOptions) (Pull, error) {
 	pull, err := repoConvert(ctx, s.Client, s.Repository, pullFrom, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {

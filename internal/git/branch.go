@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ErrNotOnBranch reports a detached HEAD or a directory outside a checkout.
@@ -69,4 +70,60 @@ func ReadBranchConfig(ctx context.Context, runner Runner, dir, name string) Bran
 		config.PullNumber = n
 	}
 	return config
+}
+
+// LocalBranch is a local branch with the configuration that locates its pull request.
+type LocalBranch struct {
+	BranchConfig
+	Commit  string
+	Current bool
+	// Committed and UpstreamCommitted are the committer dates of the branch's tip and of the
+	// remote-tracking branch it tracks, which is zero when there is none.
+	Committed, UpstreamCommitted time.Time
+}
+
+// LocalBranches lists the local branches of the clone in dir by name, in four git calls.
+func LocalBranches(ctx context.Context, runner Runner, dir string) ([]LocalBranch, error) {
+	run := func(args ...string) (string, error) {
+		return runner.Output(ctx, dir, false, args...)
+	}
+	refs, err := run("for-each-ref", "--format=%(objectname)%09%(HEAD)%09%(committerdate:unix)%09%(upstream:remotename)%09%(upstream:remoteref)%09%(upstream)%09%(refname:lstrip=2)", "refs/heads/") // Output trims a leading %(HEAD) blank
+	if err != nil {
+		return nil, err
+	}
+	tracking := map[string]time.Time{}
+	if listing, err := run("for-each-ref", "--format=%(committerdate:unix)%09%(refname)", "refs/remotes/"); err == nil {
+		for line := range strings.Lines(listing) {
+			date, ref, _ := strings.Cut(strings.TrimRight(line, "\r\n"), "\t")
+			tracking[ref] = unixTime(date)
+		}
+	}
+	numbers := recordedPullNumbers(ctx, runner, dir)
+	bases := branchConfigValues(ctx, runner, dir, pullBaseRemoteKey)
+	var branches []LocalBranch
+	for line := range strings.Lines(refs) {
+		fields := strings.Split(strings.TrimRight(line, "\r\n"), "\t")
+		if len(fields) != 7 {
+			continue
+		}
+		name := fields[6]
+		branch := LocalBranch{
+			BranchConfig: BranchConfig{Name: name, PullNumber: numbers[name], BaseRemote: bases[name]},
+			Commit:       fields[0], Current: fields[1] == "*", Committed: unixTime(fields[2]),
+		}
+		if remote := fields[3]; remote != "" && remote != "." {
+			branch.Remote, branch.Merge = remote, strings.TrimPrefix(fields[4], "refs/heads/")
+			branch.UpstreamCommitted = tracking[fields[5]]
+		}
+		branches = append(branches, branch)
+	}
+	return branches, nil
+}
+
+func unixTime(seconds string) time.Time {
+	n, err := strconv.ParseInt(seconds, 10, 64)
+	if err != nil {
+		return time.Time{}
+	}
+	return time.Unix(n, 0)
 }
