@@ -138,3 +138,53 @@ func TestAdminViewFindsOnlyIndividualAccountsByExactName(t *testing.T) {
 	_, err := (AdminUsers{Client: client}).View(context.Background(), "acme")
 	require.EqualError(t, err, `user "acme" not found`)
 }
+
+func TestAdminListAndSearchSendTheQuery(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/admin/users":
+			require.Equal(t, "ali", r.URL.Query().Get("q"))
+			require.Equal(t, "2", r.URL.Query().Get("page"))
+			w.Header().Set("X-Total-Count", "3")
+		case "/api/v1/users/search":
+			require.Equal(t, "ali", r.URL.Query().Get("q"))
+			require.Equal(t, "5", r.URL.Query().Get("limit"))
+			_, _ = w.Write([]byte(`{"ok":true,"data":[{"id":3,"login":"alice"}]}`))
+			return
+		case "/api/v1/settings/api":
+			_, _ = w.Write([]byte(`{"max_response_items":50}`))
+			return
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`[{"id":3,"login":"alice"}]`))
+	}))
+	service := AdminUsers{Client: client}
+	page, err := service.List(context.Background(), "ali", 2, 2)
+	require.NoError(t, err)
+	require.Equal(t, Page[AdminUser]{Items: []AdminUser{{ID: 3, Username: "alice"}}, Total: 3, Counted: true}, page)
+	found, err := service.Search(context.Background(), "ali", 5)
+	require.NoError(t, err)
+	require.Equal(t, []AdminUser{{ID: 3, Username: "alice"}}, found)
+}
+
+func TestAdminDeleteNamesWhatTheUserStillOwns(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodDelete, r.Method)
+		switch r.URL.Path {
+		case "/api/v1/admin/users/bob":
+			if r.URL.Query().Get("purge") == "true" {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"user still has ownership of repositories [uid: 2]"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	service := AdminUsers{Client: client}
+	require.EqualError(t, service.Delete(context.Background(), "bob", false), `user "bob" still owns repositories`)
+	require.NoError(t, service.Delete(context.Background(), "bob", true))
+	require.EqualError(t, service.Delete(context.Background(), "ghost", true), `user "ghost" not found`)
+}

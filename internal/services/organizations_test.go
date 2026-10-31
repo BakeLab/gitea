@@ -333,3 +333,86 @@ func TestOrganizationMembersNameTheMissingOrganization(t *testing.T) {
 		require.EqualError(t, err, `organization "nope" not found`)
 	}
 }
+
+func TestCanGrantTeamAccessFollowsGiteasRules(t *testing.T) {
+	for _, tc := range []struct {
+		name, user, permissions, org string
+		member                       int
+		want                         bool
+		err                          string
+	}{
+		{name: "site administrator", user: `{"login":"bob","is_admin":true}`, want: true},
+		{name: "owner", user: `{"login":"bob"}`, permissions: `{"is_owner":true}`, want: true},
+		{name: "team access fixed", user: `{"login":"bob"}`, permissions: `{}`, org: `{"repo_admin_change_team_access":false}`},
+		{name: "team member", user: `{"login":"bob"}`, permissions: `{}`, org: `{"repo_admin_change_team_access":true}`, member: http.StatusOK, want: true},
+		{name: "not a member", user: `{"login":"bob"}`, permissions: `{}`, org: `{"repo_admin_change_team_access":true}`, member: http.StatusForbidden},
+		{name: "missing organization", user: `{"login":"bob"}`, err: `organization "acme" not found`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body := map[string]string{"/api/v1/user": tc.user, "/api/v1/users/bob/orgs/acme/permissions": tc.permissions, "/api/v1/orgs/acme": tc.org}[r.URL.Path]
+				switch {
+				case r.URL.Path == "/api/v1/teams/4/members/bob" && tc.member != 0:
+					w.WriteHeader(tc.member)
+					_, _ = w.Write([]byte(`{"login":"bob"}`))
+				case body == "":
+					w.WriteHeader(http.StatusNotFound)
+				default:
+					_, _ = w.Write([]byte(body))
+				}
+			}))
+			allowed, err := (Organizations{Client: client}).CanGrantTeamAccess(context.Background(), "acme", 4)
+			if tc.err != "" {
+				require.EqualError(t, err, tc.err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, allowed)
+		})
+	}
+}
+
+func TestOrganizationRepositoryCountAndDelete(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/orgs/acme/repos":
+			require.Equal(t, "1", r.URL.Query().Get("limit"))
+			w.Header().Set("X-Total-Count", "12")
+			_, _ = w.Write([]byte(`[{"id":1}]`))
+		case "DELETE /api/v1/orgs/acme":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusForbidden)
+		}
+	}))
+	service := Organizations{Client: client}
+	count, err := service.RepositoryCount(context.Background(), "acme")
+	require.NoError(t, err)
+	require.Equal(t, 12, *count)
+	count, err = service.RepositoryCount(context.Background(), "hidden")
+	require.NoError(t, err)
+	require.Nil(t, count, "a count the account cannot read is unknown")
+	require.NoError(t, service.Delete(context.Background(), "acme"))
+}
+
+func TestOwnerAndSudoUserLookupsNameWhatIsMissing(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Empty(t, r.Header.Get("Sudo"), "the Sudo user is looked up as the account itself")
+		switch r.URL.Path {
+		case "/api/v1/users/alice":
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		case "/api/v1/users/private":
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	require.NoError(t, OwnerExists(context.Background(), client, "alice"))
+	require.NoError(t, OwnerExists(context.Background(), client, "private"))
+	require.EqualError(t, OwnerExists(context.Background(), client, "ghost"), `user or organization "ghost" not found`)
+	require.NoError(t, MissingSudoUser(context.Background(), client))
+	client.Sudo = "alice"
+	require.NoError(t, MissingSudoUser(context.Background(), client))
+	client.Sudo = "ghost"
+	require.EqualError(t, MissingSudoUser(context.Background(), client), `--sudo user "ghost" not found`)
+}

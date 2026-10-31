@@ -75,4 +75,27 @@ func TestGiteaActionsQueuedRunLifecycle(t *testing.T) {
 	var canceled services.Run
 	require.NoError(t, json.Unmarshal(execute("run", "cancel", id, "-R", repo.FullName, "--yes", "--json"), &canceled))
 	require.Equal(t, runs[0].ID, canceled.ID)
+	var viewed services.Run
+	require.NoError(t, json.Unmarshal(execute("run", "view", id, "-R", repo.FullName, "--json"), &viewed))
+	require.Equal(t, "cancelled", viewed.Conclusion) //nolint:misspell // Gitea API spelling.
+	execute("run", "delete", id, "-R", repo.FullName, "--yes")
+	out.Reset()
+	require.ErrorContains(t, Execute(context.Background(), deps, []string{"run", "view", id, "-R", repo.FullName}), "not found")
+
+	var workflows []services.Workflow
+	require.NoError(t, json.Unmarshal(execute("workflow", "list", "-R", repo.FullName, "--json"), &workflows))
+	require.Len(t, workflows, 1)
+	require.Equal(t, "active", workflows[0].State)
+	var flow services.Workflow
+	execute("workflow", "disable", "gt.yml", "-R", repo.FullName)
+	require.NoError(t, json.Unmarshal(execute("workflow", "view", "gt.yml", "-R", repo.FullName, "--json"), &flow))
+	require.Equal(t, "disabled_manually", flow.State)
+	out.Reset()
+	require.Error(t, Execute(context.Background(), deps, []string{"workflow", "run", "gt.yml", "--ref", repo.DefaultBranch, "-R", repo.FullName}), "a disabled workflow cannot be dispatched")
+	execute("workflow", "enable", "gt.yml", "-R", repo.FullName)
+	require.NoError(t, json.Unmarshal(execute("workflow", "view", "gt.yml", "-R", repo.FullName, "--json"), &flow))
+	require.Equal(t, "active", flow.State)
+	execute("workflow", "run", "gt.yml", "--ref", repo.DefaultBranch, "-R", repo.FullName)
+	require.NoError(t, json.Unmarshal(execute("run", "list", "-R", repo.FullName, "--event", "workflow_dispatch", "--json"), &matching))
+	require.Len(t, matching, 1)
 }

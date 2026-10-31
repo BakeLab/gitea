@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -280,4 +281,61 @@ func TestIssueAttachmentUploadNamesWhatIsMissing(t *testing.T) {
 	require.EqualError(t, err, "issue #99 not found in o/r")
 	_, err = Issues{Client: client, Repository: "o/missing"}.UploadAttachment(context.Background(), 1, "a.txt", strings.NewReader("a"))
 	require.EqualError(t, err, "repository o/missing not found")
+}
+
+func TestSetBlockedByNamesWhatIsMissingOrRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name, blocker string
+		block         bool
+		status        int
+		message       string
+		viewMissing   bool
+		dependencies  bool
+		err           string
+	}{
+		{name: "block", blocker: "o/r", block: true, status: http.StatusCreated},
+		{name: "unblock", blocker: "o/r", status: http.StatusCreated},
+		{name: "exists", blocker: "o/r", block: true, status: http.StatusInternalServerError, message: "Issue dependency does already exist"},
+		{name: "missing repository", blocker: "x/y", block: true, status: http.StatusNotFound, message: "repository does not exist", err: "repository x/y not found"},
+		{name: "missing issue", blocker: "o/r", block: true, status: http.StatusNotFound, message: "issue does not exist [id: 0, repo_id: 1, index: 7]", err: "issue #7 not found in o/r"},
+		{name: "missing blocker", blocker: "x/y", block: true, status: http.StatusNotFound, message: "issue does not exist [id: 0, repo_id: 2, index: 3]", err: "issue x/y#3 not found"},
+		{name: "dependencies off", blocker: "o/r", block: true, status: http.StatusNotFound, err: "issue dependencies are disabled in o/r"},
+		{name: "no write access", blocker: "o/r", block: true, status: http.StatusNotFound, dependencies: true, err: "changing the dependencies of issue #7 requires write access to the issues of o/r"},
+		{name: "invisible issue", blocker: "o/r", block: true, status: http.StatusNotFound, viewMissing: true, err: "issue #7 not found in o/r"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method + " " + r.URL.Path {
+				case "GET /api/v1/repos/o/r/issues/7":
+					if tc.viewMissing {
+						w.WriteHeader(http.StatusNotFound)
+						return
+					}
+					_, _ = w.Write([]byte(`{"id":70,"number":7}`))
+				case "GET /api/v1/repos/o/r":
+					_, _ = fmt.Fprintf(w, `{"full_name":"o/r","internal_tracker":{"enable_issue_dependencies":%t}}`, tc.dependencies)
+				default:
+					method := http.MethodDelete
+					if tc.block {
+						method = http.MethodPost
+					}
+					owner, repo, _ := strings.Cut(tc.blocker, "/")
+					assert.Equal(t, method+" /api/v1/repos/o/r/issues/7/dependencies", r.Method+" "+r.URL.Path)
+					assert.Equal(t, map[string]any{"index": 3.0, "owner": owner, "repo": repo}, requestJSON(t, r))
+					w.WriteHeader(tc.status)
+					if tc.message != "" {
+						_, _ = fmt.Fprintf(w, `{"message":%q}`, tc.message)
+					} else if tc.status == http.StatusCreated {
+						_, _ = w.Write([]byte(`{"id":30}`))
+					}
+				}
+			}))
+			err := (Issues{Client: client, Repository: "o/r"}).SetBlockedBy(context.Background(), 7, IssueReference{Repository: tc.blocker, Number: 3}, tc.block)
+			if tc.err == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.EqualError(t, err, tc.err)
+		})
+	}
 }

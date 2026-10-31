@@ -4,8 +4,10 @@
 package extensions
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -121,8 +123,51 @@ func TestStoreRejectsForeignManifest(t *testing.T) {
 	require.ErrorContains(t, err, "parse ")
 	require.Len(t, listed, 1)
 	assert.Equal(t, "world", listed[0].Name)
+	assert.Equal(t, map[string]bool{"world": true}, store.Names())
 	require.NoError(t, store.Remove("hello"))
 	require.NoDirExists(t, filepath.Join(store.Dir, "hello"))
+}
+
+func TestStoreUnderAFileFails(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+	store := Store{Dir: filepath.Join(file, "extensions")}
+	_, err := store.Stage()
+	require.Error(t, err)
+	require.Error(t, store.Remove("hello"))
+	require.Empty(t, store.Names())
+}
+
+func TestExtensionPathByKind(t *testing.T) {
+	for _, tc := range []struct {
+		kind, want string
+	}{
+		{KindBinary, filepath.Join("store", "hello", "gt-hello")},
+		{KindScript, filepath.Join("store", "hello", "src", "gt-hello")},
+		{KindLocal, filepath.Join("work", "gt-hello")},
+	} {
+		extension := Extension{Manifest: Manifest{Name: "hello", Prefix: PrefixGT, Kind: tc.kind, Path: filepath.Join("work", "gt-hello")}, Dir: filepath.Join("store", "hello")}
+		if tc.kind == KindBinary && runtime.GOOS == "windows" {
+			tc.want += ".exe"
+		}
+		assert.Equal(t, tc.want, extension.Path(), tc.kind)
+	}
+	assert.Equal(t, "alice/gt-hello", Manifest{Owner: "alice", Repo: "gt-hello"}.Repository())
+	assert.Empty(t, Manifest{Kind: KindLocal}.Repository(), "a local extension has no repository")
+}
+
+func TestFileSHA256(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gt-hello")
+	require.NoError(t, os.WriteFile(path, []byte("hello\n"), 0o600))
+	digest, err := FileSHA256(path)
+	require.NoError(t, err)
+	assert.Equal(t, "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03", digest)
+	require.NoError(t, os.WriteFile(path, []byte("hello!\n"), 0o600))
+	changed, err := FileSHA256(path)
+	require.NoError(t, err)
+	assert.NotEqual(t, digest, changed)
+	_, err = FileSHA256(filepath.Join(t.TempDir(), "missing"))
+	require.ErrorIs(t, err, fs.ErrNotExist)
 }
 
 func TestChecksumFor(t *testing.T) {
@@ -200,4 +245,22 @@ func TestRunPassesExitCode(t *testing.T) {
 	assert.Equal(t, 0, code)
 	_, err = Run(Command{Path: filepath.Join(t.TempDir(), "missing")})
 	require.Error(t, err)
+
+	command, out = helperCommand(t, "0")
+	command.Interpreter, command.Path, command.Args = command.Path, command.Args[0], command.Args[1:]
+	_, err = Run(command)
+	require.NoError(t, err)
+	assert.Equal(t, "hello", out.String(), "the interpreter runs the script with its arguments")
+}
+
+func TestInterpreterOnlyOnWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("covers systems that execute scripts themselves")
+	}
+	interpreter, err := Interpreter("gt-hello", func(string) (string, error) {
+		t.Fatal("no interpreter is looked up")
+		return "", nil
+	})
+	require.NoError(t, err)
+	assert.Empty(t, interpreter)
 }

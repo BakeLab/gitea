@@ -5,9 +5,11 @@ package services
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -94,4 +96,69 @@ func TestScopedLabelNamesDoNotCollideWithLiteralPrefixes(t *testing.T) {
 	require.Equal(t, []int64{1, 2, 3}, ids)
 	_, err = service.ResolveIssueNames(context.Background(), []string{"org:bug"})
 	require.ErrorContains(t, err, "not found")
+}
+
+func TestLabelCreateUniqueRefusesOrUpdatesAFoldedName(t *testing.T) {
+	var requests []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		requests = append(requests, r.Method+" "+r.URL.Path+" "+string(body))
+		_, _ = w.Write([]byte(`{"id":9,"name":"bug"}`))
+	}))
+	service := Labels{Client: client, Repository: "alice/project"}
+	existing := []Label{{ID: 1, Name: "Bug", Archived: true}, {ID: 2, Name: "docs"}}
+	_, _, err := service.CreateUnique(context.Background(), existing, LabelOptions{Name: new("bug")}, false)
+	require.EqualError(t, err, `label "Bug" already exists in alice/project`)
+	require.Empty(t, requests)
+
+	_, updated, err := service.CreateUnique(context.Background(), existing, LabelOptions{Name: new("bug"), Color: new("ff0000")}, true)
+	require.NoError(t, err)
+	require.True(t, updated)
+	_, updated, err = service.CreateUnique(context.Background(), existing, LabelOptions{Name: new("feature"), Color: new("00ff00")}, true)
+	require.NoError(t, err)
+	require.False(t, updated)
+	require.Equal(t, []string{
+		`PATCH /api/v1/repos/alice/project/labels/1 {"name":null,"color":"ff0000","description":null,"exclusive":null,"is_archived":true}`,
+		`POST /api/v1/repos/alice/project/labels {"name":"feature","color":"00ff00","description":"","exclusive":false,"is_archived":false}`,
+	}, requests)
+}
+
+func TestLabelEditUniqueRefusesAnotherLabelsName(t *testing.T) {
+	var requests []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		requests = append(requests, r.Method+" "+r.URL.Path+" "+string(body))
+		_, _ = w.Write([]byte(`{"id":2,"name":"Docs"}`))
+	}))
+	service := Labels{Client: client, Organization: "company"}
+	existing := []Label{{ID: 1, Name: "Bug"}, {ID: 2, Name: "docs", Archived: true}}
+	_, err := service.EditUnique(context.Background(), existing, existing[1], LabelOptions{Name: new(" BUG ")})
+	require.EqualError(t, err, `label "Bug" already exists in company`)
+	require.Empty(t, requests)
+
+	_, err = service.EditUnique(context.Background(), existing, existing[1], LabelOptions{Name: new(" Docs ")})
+	require.NoError(t, err)
+	require.Equal(t, []string{`PATCH /api/v1/orgs/company/labels/2 {"name":"Docs","color":null,"description":null,"is_archived":true}`}, requests)
+}
+
+func TestLabelRequireFilterNamesMatchesExactRepositoryNames(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/repos/alice/project/labels", r.URL.Path)
+		writeFirstPage(w, r, `[{"id":1,"name":"bug"},{"id":2,"name":"7"}]`)
+	}))
+	service := Labels{Client: client, Repository: "alice/project"}
+	require.NoError(t, service.RequireFilterNames(context.Background(), []string{"bug", "7"}))
+	require.EqualError(t, service.RequireFilterNames(context.Background(), []string{"bug", "Bug"}),
+		`label "Bug" does not exist in alice/project; issue filters match repository labels only`)
+
+	found, err := service.Find(context.Background(), []string{"7", "BUG"}, true)
+	require.NoError(t, err)
+	require.Equal(t, []Label{{ID: 2, Name: "7"}, {ID: 1, Name: "bug"}}, found)
+	found, err = service.Find(context.Background(), []string{"2"}, false)
+	require.NoError(t, err)
+	require.Equal(t, []Label{{ID: 2, Name: "7"}}, found)
+	_, err = service.Find(context.Background(), []string{"bug", "2"}, true)
+	require.EqualError(t, err, `label "2" not found in alice/project`)
 }

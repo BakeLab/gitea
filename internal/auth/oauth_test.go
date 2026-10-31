@@ -186,6 +186,7 @@ func TestOAuthTokenEndpointOutageIsNotARejectedCredential(t *testing.T) {
 	_, err := manager.Refresh(context.Background(), server.URL, "alice", server.Client(), false, now)
 	require.EqualError(t, err, "OAuth refresh failed: "+server.URL+" answered HTTP 503 Service Unavailable; try again later")
 	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
+	require.True(t, IsOutage(err))
 	_, err = OAuthLogin(context.Background(), OAuthOptions{Instance: server.URL, HTTP: server.Client(), Timeout: 5 * time.Second, Authorize: func(_ context.Context, raw string) error {
 		u, err := url.Parse(raw)
 		if err != nil {
@@ -203,6 +204,7 @@ func TestOAuthTokenEndpointOutageIsNotARejectedCredential(t *testing.T) {
 	_, err = manager.Refresh(context.Background(), server.URL, "alice", server.Client(), false, now)
 	require.EqualError(t, err, "OAuth refresh failed; run gt auth login")
 	require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
+	require.False(t, IsOutage(err))
 }
 
 func TestRefreshEndsBeforeSettingsLockWaitersGiveUp(t *testing.T) {

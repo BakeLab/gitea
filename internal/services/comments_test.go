@@ -6,7 +6,9 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	gitea "gitea.dev/sdk"
@@ -83,4 +85,51 @@ func TestCommentViewExplainsAnEmptyAnswerForReviewComments(t *testing.T) {
 	}))
 	_, err := Comments{Client: client, Repository: "alice/project"}.View(context.Background(), 9)
 	require.EqualError(t, err, "comment 9 in alice/project is not a plain comment, such as an inline review comment, which this command cannot show")
+}
+
+func TestCommentEditAndDeleteExplainTimelineEvents(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "PATCH /api/v1/repos/o/r/issues/comments/5":
+			require.Equal(t, map[string]any{"body": "new"}, requestJSON(t, r))
+			_, _ = w.Write([]byte(`{"id":5,"body":"new","user":{"login":"alice"}}`))
+		case "PATCH /api/v1/repos/o/r/issues/comments/6":
+			w.WriteHeader(http.StatusNoContent)
+		case "DELETE /api/v1/repos/o/r/issues/comments/5":
+			w.WriteHeader(http.StatusNoContent)
+		case "DELETE /api/v1/repos/o/r/issues/comments/6":
+			w.WriteHeader(http.StatusBadRequest)
+		case "GET /api/v1/repos/o/r":
+			_, _ = w.Write([]byte(`{"id":1,"full_name":"o/r"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	service := Comments{Client: client, Repository: "o/r"}
+	edited, err := service.Edit(context.Background(), 5, "new")
+	require.NoError(t, err)
+	require.Equal(t, Comment{ID: 5, Body: "new", Author: "alice"}, edited)
+	_, err = service.Edit(context.Background(), 6, "new")
+	require.EqualError(t, err, "comment 6 in o/r is a timeline event, such as a label or title change, which cannot be edited")
+	_, err = service.Edit(context.Background(), 9, "new")
+	require.EqualError(t, err, "comment 9 not found in o/r")
+
+	require.NoError(t, service.Delete(context.Background(), 5))
+	require.EqualError(t, service.Delete(context.Background(), 6), "comment 6 in o/r is a timeline event, such as a label or title change, which cannot be deleted")
+	require.EqualError(t, service.Delete(context.Background(), 9), "comment 9 not found in o/r")
+}
+
+func TestCommentAttachmentUploadStreamsTheFile(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "POST /api/v1/repos/o/r/issues/comments/5/assets", r.Method+" "+r.URL.Path)
+		file, header, err := r.FormFile("attachment")
+		require.NoError(t, err)
+		content, err := io.ReadAll(file)
+		require.NoError(t, err)
+		require.Equal(t, "notes.txt hello", header.Filename+" "+string(content))
+		_, _ = w.Write([]byte(`{"id":3,"name":"notes.txt","size":5}`))
+	}))
+	attachment, err := (Comments{Client: client, Repository: "o/r"}).UploadAttachment(context.Background(), 5, "notes.txt", strings.NewReader("hello"))
+	require.NoError(t, err)
+	require.Equal(t, IssueAttachment{ID: 3, Name: "notes.txt", Size: 5}, attachment)
 }

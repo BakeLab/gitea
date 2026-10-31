@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/git/gittest"
 	"github.com/kballard/go-shellquote"
 	"github.com/stretchr/testify/require"
 )
@@ -142,4 +143,80 @@ func TestGitMissingConfigValueCarriesExitCode(t *testing.T) {
 	var failure *CommandError
 	require.ErrorAs(t, err, &failure)
 	require.Equal(t, 1, failure.ExitCode)
+}
+
+func TestPerOperationCredentialAndTLSArguments(t *testing.T) {
+	args, err := CredentialArguments("HTTPS://Example.test:443/gitea/", "/usr/bin/gt", "alice", "")
+	require.NoError(t, err)
+	prefix := "credential.https://example.test/gitea."
+	require.Equal(t, []string{"-c", prefix + "helper=", "-c", prefix + "helper=!/usr/bin/gt auth git-credential --host https://example.test/gitea --user alice", "-c", prefix + "useHttpPath=true"}, args)
+	_, err = CredentialArguments("https://example.test", "gt", "", "")
+	require.Error(t, err)
+
+	const section = "http.https://example.test/gitea."
+	for _, tc := range []struct {
+		name, cert, key string
+		insecure        bool
+		want            []string
+	}{
+		{name: "nothing"},
+		{name: "key in certificate file", cert: "/c.pem", want: []string{"-c", section + "sslCert=/c.pem", "-c", section + "sslKey=/c.pem"}},
+		{name: "separate key", cert: "/c.pem", key: "/k.pem", want: []string{"-c", section + "sslCert=/c.pem", "-c", section + "sslKey=/k.pem"}},
+		{name: "insecure", insecure: true, want: []string{"-c", section + "sslVerify=false"}},
+	} {
+		args, err := TLSArguments("https://example.test/gitea/", tc.cert, tc.key, tc.insecure)
+		require.NoError(t, err, tc.name)
+		require.Equal(t, tc.want, args, tc.name)
+	}
+	_, err = TLSArguments("https://example.test", "/c.pem\n[core]", "", false)
+	require.ErrorContains(t, err, "cannot contain NUL or line breaks")
+	_, err = TLSArguments("ssh://example.test", "/c.pem", "", false)
+	require.Error(t, err)
+}
+
+func TestSetupTLSIsUndoneOnlyWhereGtWroteIt(t *testing.T) {
+	gittest.Isolate(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	runner := System{}
+	_, err := runner.Output(ctx, dir, false, "init", "--quiet")
+	require.NoError(t, err)
+	const instance = "https://example.test/gitea"
+	get := func(key string) string {
+		value, _ := runner.Output(ctx, dir, false, "config", "--local", "--get-all", key)
+		return value
+	}
+	urlmatch := func(key, url string) string {
+		value, _ := runner.Output(ctx, dir, false, "config", "--get-urlmatch", key, url)
+		return value
+	}
+	for range 2 {
+		require.NoError(t, SetupTLS(ctx, runner, dir, true, instance+"/", "/certs/client.pem", "", true))
+	}
+	repo := instance + "/owner/repo.git"
+	require.Equal(t, "/certs/client.pem", urlmatch("http.sslCert", repo))
+	require.Equal(t, "/certs/client.pem", urlmatch("http.sslKey", repo))
+	require.Equal(t, "false", urlmatch("http.sslVerify", repo))
+	require.Empty(t, urlmatch("http.sslCert", "https://example.test/other/repo.git"))
+	require.Equal(t, "/certs/client.pem", get("gt."+instance+".sslCert"))
+	require.Empty(t, get("gt."+instance+".sslVerify"))
+
+	_, err = runner.Output(ctx, dir, false, "config", "--local", "http."+instance+".sslKey", "/certs/own-key.pem")
+	require.NoError(t, err)
+	for range 2 {
+		require.NoError(t, UnsetTLSCertificate(ctx, runner, dir, true, instance))
+	}
+	require.Empty(t, get("http."+instance+".sslCert"))
+	require.Equal(t, "/certs/own-key.pem", get("http."+instance+".sslKey"), "a key changed since setup is kept")
+	require.Empty(t, get("gt."+instance+".sslCert"))
+	require.Equal(t, "false", get("http."+instance+".sslVerify"))
+
+	for range 2 {
+		require.NoError(t, UnsetInsecureTLS(ctx, runner, dir, true, instance))
+	}
+	require.Empty(t, get("http."+instance+".sslVerify"))
+	_, err = runner.Output(ctx, dir, false, "config", "--local", "http."+instance+".sslVerify", "true")
+	require.NoError(t, err)
+	require.NoError(t, UnsetInsecureTLS(ctx, runner, dir, true, instance))
+	require.Equal(t, "true", get("http."+instance+".sslVerify"))
 }

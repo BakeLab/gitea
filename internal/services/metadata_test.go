@@ -97,3 +97,29 @@ func TestOrganizationArchivedLabelCreateFollowsUpWithPatch(t *testing.T) {
 		`PATCH /api/v1/orgs/company/labels/5 {"name":null,"color":null,"description":null,"is_archived":true}`,
 	}, requests)
 }
+
+func TestLabelAndMilestoneMutationsUseTheirScopes(t *testing.T) {
+	var requests []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests = append(requests, r.Method+" "+r.URL.Path+" "+string(body))
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":4,"title":"v1.0","state":"closed","due_on":"2027-01-01T00:00:00Z"}`))
+	}))
+	require.NoError(t, (Labels{Client: client, Repository: "alice/project"}).Delete(context.Background(), 5))
+	require.NoError(t, (Labels{Client: client, Organization: "company"}).Delete(context.Background(), 6))
+	milestones := Milestones{Client: client, Repository: "alice/project"}
+	created, err := milestones.Create(context.Background(), MilestoneOptions{Title: new("v1.0"), State: new("closed"), Deadline: new("2027-01-01T00:00:00Z")})
+	require.NoError(t, err)
+	require.Equal(t, client.BaseURL+"/alice/project/milestone/4", created.URL)
+	require.NoError(t, milestones.Delete(context.Background(), 4))
+	require.Equal(t, []string{
+		"DELETE /api/v1/repos/alice/project/labels/5 ",
+		"DELETE /api/v1/orgs/company/labels/6 ",
+		`POST /api/v1/repos/alice/project/milestones {"title":"v1.0","description":"","state":"closed","due_on":"2027-01-01T00:00:00Z"}`,
+		"DELETE /api/v1/repos/alice/project/milestones/4 ",
+	}, requests)
+}

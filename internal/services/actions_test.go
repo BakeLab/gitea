@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -377,4 +378,102 @@ func TestRunAndWorkflowListsNameAMissingRepository(t *testing.T) {
 	require.EqualError(t, err, "repository alice/missing not found")
 	_, err = service.Workflows(context.Background())
 	require.EqualError(t, err, "repository alice/missing not found")
+}
+
+func TestRunsAreNamedAfterTheirWorkflows(t *testing.T) {
+	workflows := true
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/actions/workflows":
+			if !workflows {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write([]byte(`{"workflows":[{"id":"ci.yml","name":"CI"},{"id":"lint.yml"}]}`))
+		case "/api/v1/repos/owner/repo/actions/runs":
+			require.Equal(t, "main", r.URL.Query().Get("branch"))
+			_, _ = w.Write([]byte(`{"total_count":3,"workflow_runs":[{"id":1,"path":"ci.yml@refs/heads/main"},{"id":2,"path":"lint.yml@refs/heads/main"},{"id":3,"path":"gone.yaml@refs/heads/main"}]}`))
+		case "/api/v1/repos/owner/repo/actions/runs/1":
+			_, _ = w.Write([]byte(`{"id":1,"path":"ci.yml@refs/heads/main"}`))
+		case "/api/v1/repos/owner/repo/actions/runs/1/jobs":
+			_, _ = w.Write([]byte(`{"jobs":[{"id":2,"name":"build"}]}`))
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+	}))
+	service := Actions{Client: client, Repository: "owner/repo"}
+	page, err := service.RunsPage(context.Background(), RunListOptions{Branch: "main", Limit: 3, Page: 1})
+	require.NoError(t, err)
+	names := make([]string, len(page.Items))
+	for i, run := range page.Items {
+		names[i] = run.Workflow
+	}
+	require.Equal(t, []string{"CI", "lint", "gone"}, names, "a workflow without a name or listing keeps its file stem")
+	run, err := service.RunDetails(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, "CI", run.Workflow)
+	require.Equal(t, "build", run.Jobs[0].Name)
+
+	returned := Run{ID: 1, Workflow: "ci", WorkflowPath: "ci.yml"}
+	require.Equal(t, "CI", service.NameRun(context.Background(), returned).Workflow)
+	workflows = false
+	require.Equal(t, returned, service.NameRun(context.Background(), returned), "a run stays as it is when the workflows cannot be listed")
+	_, err = service.RunDetails(context.Background(), 1)
+	require.Error(t, err)
+}
+
+func TestWorkflowAtFindsFilesOfTheRef(t *testing.T) {
+	ci := base64.StdEncoding.EncodeToString([]byte("name: Build\non: push\n"))
+	reads := 0
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ref := r.URL.Query().Get("ref")
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/actions/workflows":
+			_, _ = w.Write([]byte(`{"workflows":[{"id":"ci.yml","name":"CI","path":".github/workflows/ci.yml","state":"active"}]}`))
+		case "/api/v1/repos/owner/repo/contents/.gitea/workflows":
+			w.WriteHeader(http.StatusNotFound)
+			if ref == "gone" {
+				_, _ = w.Write([]byte(`{"message":"object does not exist [id: gone, rel_path: ]"}`))
+			}
+		case "/api/v1/repos/owner/repo/contents/.github/workflows":
+			if ref == "empty" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write([]byte(`[{"name":"ci.yml","type":"file","path":".github/workflows/ci.yml","html_url":"https://gitea.test/ci.yml"},{"name":"new.yaml","type":"file","path":".github/workflows/new.yaml"},{"name":"README.md","type":"file","path":".github/workflows/README.md"},{"name":"sub.yml","type":"dir","path":".github/workflows/sub.yml"}]`))
+		case "/api/v1/repos/owner/repo/contents/.github/workflows/ci.yml":
+			reads++
+			_, _ = w.Write([]byte(`{"content":"` + ci + `"}`))
+		case "/api/v1/repos/owner/repo/contents/.github/workflows/new.yaml":
+			reads++
+			_, _ = w.Write([]byte(`{"content":""}`))
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+	}))
+	service := Actions{Client: client, Repository: "owner/repo"}
+	workflow, err := service.WorkflowAt(context.Background(), "new", "feature")
+	require.NoError(t, err)
+	require.Equal(t, Workflow{ID: "new.yaml", Path: ".github/workflows/new.yaml"}, workflow)
+	require.Zero(t, reads, "a file name matches without reading the files")
+	workflow, err = service.WorkflowAt(context.Background(), "build", "feature")
+	require.NoError(t, err)
+	require.Equal(t, "ci.yml", workflow.ID)
+	require.Equal(t, 2, reads)
+	_, err = service.WorkflowAt(context.Background(), "sub", "feature")
+	require.EqualError(t, err, `workflow "sub" not found in owner/repo on feature`)
+	_, err = service.WorkflowAt(context.Background(), "ci", "gone")
+	require.EqualError(t, err, `ref "gone" not found in owner/repo`)
+	_, err = service.WorkflowAt(context.Background(), " ci ", "empty")
+	require.EqualError(t, err, `workflow "ci" not found in owner/repo on empty`)
+
+	workflow, err = service.FindWorkflowAt(context.Background(), "CI", "feature")
+	require.NoError(t, err)
+	require.Equal(t, Workflow{ID: "ci.yml", Name: "CI", Path: ".github/workflows/ci.yml", State: "active", URL: "https://gitea.test/ci.yml"}, workflow, "a listed workflow keeps its name and state")
+	workflow, err = service.FindWorkflowAt(context.Background(), "new.yaml", "feature")
+	require.NoError(t, err)
+	require.Equal(t, "new.yaml", workflow.ID, "a workflow only on the ref is found there")
+	workflow, err = service.FindWorkflowAt(context.Background(), "ci", "")
+	require.NoError(t, err)
+	require.Empty(t, workflow.URL)
 }

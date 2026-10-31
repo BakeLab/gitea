@@ -4,8 +4,10 @@
 package auth
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"gitea.dev/cli/internal/settings"
 	"github.com/stretchr/testify/require"
@@ -51,4 +53,30 @@ func TestReadGitCredentialRequestRejectsAmbiguityWithoutEchoingSecrets(t *testin
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "secret")
 	}
+}
+
+func TestGitCredentialAnswersOnlyForTokenAccounts(t *testing.T) {
+	config := settings.New(t.TempDir())
+	manager := newTestManager(t, config, &Store{Dir: config.Dir})
+	const instance = "https://example.test"
+	now := time.Now()
+	require.NoError(t, manager.Register(instance, "alice", settings.StoreFile, settings.AuthToken, HostOptions{}, Credential{AccessToken: "alice-token"}))
+	require.NoError(t, manager.Register(instance, "olivia", settings.StoreFile, settings.AuthOAuth, HostOptions{}, Credential{AccessToken: "olivia-token", RefreshToken: "refresh", ExpiresAt: now.Add(time.Hour)}))
+	require.NoError(t, manager.RegisterHTTPSign(instance, "sam", settings.Account{AuthMethod: settings.AuthHTTPSign, SSHKey: "/keys/id"}, HostOptions{}))
+
+	for user, token := range map[string]string{"alice": "alice-token", "olivia": "olivia-token"} {
+		credential, err := manager.GitCredential(t.Context(), instance, user, nil, now)
+		require.NoError(t, err, user)
+		require.Equal(t, token, credential.AccessToken, user)
+	}
+	_, err := manager.GitCredential(t.Context(), instance, "sam", nil, now)
+	require.ErrorContains(t, err, "HTTP signature accounts cannot supply Git HTTPS credentials")
+	_, err = manager.GitCredential(t.Context(), instance, "mallory", nil, now)
+	require.ErrorContains(t, err, "selected Git account is not configured")
+	_, err = manager.GitCredential(t.Context(), "https://other.test", "alice", nil, now)
+	require.ErrorContains(t, err, "selected Git account is not configured")
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = manager.GitCredential(canceled, instance, "alice", nil, now)
+	require.ErrorIs(t, err, context.Canceled)
 }

@@ -86,3 +86,25 @@ func TestNoInputKeepsGitSSHProgram(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(data), "example.invalid")
 }
+
+func TestSSHArgumentsSelectOnlyTheAccountKey(t *testing.T) {
+	args, err := SSHArguments("/keys/key with 'quote'", false)
+	require.NoError(t, err)
+	require.Len(t, args, 2)
+	require.Equal(t, "-c", args[0])
+	command, ok := strings.CutPrefix(args[1], "core.sshCommand=")
+	require.True(t, ok)
+	words, err := shellquote.Split(command)
+	require.NoError(t, err)
+	require.Equal(t, []string{"ssh", "-i", "/keys/key with 'quote'", "-oIdentitiesOnly=yes", "-oIdentityAgent=none"}, words)
+	for _, tc := range []struct {
+		key   string
+		agent bool
+	}{{"", false}, {"/keys/key", true}} {
+		args, err := SSHArguments(tc.key, tc.agent)
+		require.NoError(t, err)
+		require.Nil(t, args, "the user's SSH configuration is kept")
+	}
+	_, err = SSHArguments("/keys/key\n-oProxyCommand=x", true)
+	require.ErrorContains(t, err, "cannot contain NUL or line breaks")
+}

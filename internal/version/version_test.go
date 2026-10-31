@@ -4,6 +4,7 @@
 package version
 
 import (
+	"runtime"
 	"runtime/debug"
 	"testing"
 
@@ -36,4 +37,12 @@ func TestResolveFallsBackWhenUnstamped(t *testing.T) {
 	require.Equal(t, "development", resolve("", nil))
 	require.Equal(t, "development", resolve("", &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}))
 	require.Equal(t, "1.0.0", resolve("1.0.0", installed))
+}
+
+func TestFormatAndCurrentUseTheStamp(t *testing.T) {
+	version, tags := Version, Tags
+	t.Cleanup(func() { Version, Tags = version, tags })
+	Version, Tags = "1.2.3", "netgo"
+	require.Equal(t, "1.2.3", Current())
+	require.Equal(t, "gt version 1.2.3\nhttps://gitea.com/gitea/cli/releases/tag/v1.2.3\nbuilt with "+runtime.Version()+" (tags: netgo)", Format())
 }
