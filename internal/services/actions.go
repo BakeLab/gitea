@@ -63,6 +63,12 @@ func (s Actions) Workflows(ctx context.Context) ([]Workflow, error) {
 	response, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.ActionsWorkflowResponse, *gitea.Response, error) {
 		return c.Actions.ListRepoWorkflows(ctx, owner, repo)
 	})
+	if IsNotFound(err) {
+		if repoErr := missingRepository(ctx, s.Client, s.Repository); repoErr != nil {
+			return nil, repoErr
+		}
+		return nil, missingEndpoint("workflow listing", "GET /repos/{owner}/{repo}/actions/workflows")
+	}
 	if err != nil {
 		return nil, Classify(err, "repository", s.Repository, "")
 	}

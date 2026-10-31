@@ -15,10 +15,16 @@ import (
 	"gitea.dev/cli/internal/transport"
 )
 
-// CapabilityError reports an operation absent from the Gitea REST contract.
+// CapabilityError reports an operation absent from the Gitea REST contract, or from the server.
 type CapabilityError struct{ Feature, Reason string }
 
 func (e *CapabilityError) Error() string { return e.Feature + " is unsupported: " + e.Reason }
+
+// missingEndpoint reports an endpoint that answers 404 for a repository that exists: Gitea has it,
+// but servers with another API, such as Forgejo, may not.
+func missingEndpoint(feature, endpoint string) *CapabilityError {
+	return &CapabilityError{Feature: feature, Reason: "the server does not provide " + endpoint}
+}
 
 // NotFoundError reports a missing resource by the name the user gave it, such as
 // "issue #999 not found in alice/project".

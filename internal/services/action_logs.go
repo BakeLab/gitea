@@ -79,6 +79,11 @@ func (s Actions) JobsPage(ctx context.Context, run int64, limit, page int) (Page
 		}
 		return response.Jobs, headerOf(resp), nil
 	})
+	if IsNotFound(err) {
+		if _, runErr := s.Run(ctx, run); runErr == nil {
+			return Page[Job]{}, missingEndpoint("job listing", "GET /repos/{owner}/{repo}/actions/runs/{run}/jobs")
+		}
+	}
 	if err != nil {
 		return Page[Job]{}, repositoryItemError(ctx, s.Client, s.Repository, err, "run", strconv.FormatInt(run, 10))
 	}

@@ -101,7 +101,8 @@ func (s Actions) Runs(ctx context.Context, opts RunListOptions) ([]Run, error) {
 }
 
 // RunsPage lists a page of runs like Runs, named after their workflows, with the number of runs
-// the filters match when the server counts them.
+// the filters match when the server counts them. A server that cannot list workflows gets the
+// runs with a *CapabilityError.
 func (s Actions) RunsPage(ctx context.Context, opts RunListOptions) (Page[Run], error) {
 	page, err := s.runs(ctx, opts)
 	if err != nil {
@@ -220,13 +221,18 @@ func (s Actions) NameRun(ctx context.Context, run Run) Run {
 	return runs[0]
 }
 
-// RunDetails retrieves one run with its jobs, named after its workflow.
+// RunDetails retrieves one run with its jobs, named after its workflow. A server that cannot list
+// workflows or jobs gets the run without them, with a *CapabilityError for each.
 func (s Actions) RunDetails(ctx context.Context, id int64) (Run, error) {
-	names, err := s.workflowNames(ctx)
-	if err != nil {
+	names, namesErr := s.workflowNames(ctx)
+	if _, unsupported := errors.AsType[*CapabilityError](namesErr); namesErr != nil && !unsupported {
+		return Run{}, namesErr
+	}
+	run, err := s.runDetails(ctx, id, names)
+	if _, unsupported := errors.AsType[*CapabilityError](err); err != nil && !unsupported {
 		return Run{}, err
 	}
-	return s.runDetails(ctx, id, names)
+	return run, errors.Join(namesErr, err)
 }
 
 func (s Actions) runDetails(ctx context.Context, id int64, names map[string]string) (Run, error) {
@@ -234,11 +240,14 @@ func (s Actions) runDetails(ctx context.Context, id int64, names map[string]stri
 	if err != nil {
 		return Run{}, err
 	}
-	if run.Jobs, err = s.Jobs(ctx, id); err != nil {
-		return Run{}, err
-	}
 	if name := names[run.WorkflowPath]; name != "" {
 		run.Workflow = name
+	}
+	if run.Jobs, err = s.Jobs(ctx, id); err != nil {
+		if _, unsupported := errors.AsType[*CapabilityError](err); unsupported {
+			return run, err
+		}
+		return Run{}, err
 	}
 	return run, nil
 }

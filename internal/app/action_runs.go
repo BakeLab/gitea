@@ -92,6 +92,7 @@ $ gt run list --since 24h --json id,status,conclusion,workflow`,
 				}
 			}
 			page, err := service.RunsPage(cmd.Context(), opts)
+			err = a.warnUnsupported(cmd, err)
 			if errors.Is(err, services.ErrRunScanExhausted) {
 				return fmt.Errorf("%w; narrow the search with --branch, --workflow or --status", err)
 			}
@@ -271,7 +272,7 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 				return a.printJobLogs(cmd, service, id, jobs, 0)
 			}
 			run, err := service.RunDetails(cmd.Context(), id)
-			if err != nil {
+			if err := a.warnUnsupported(cmd, err); err != nil {
 				return err
 			}
 			if noJobs {
@@ -288,6 +289,27 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 	cmd.Flags().BoolVar(&log, "log", false, "Print the logs of every job instead, like gt run logs")
 	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	return jsonOutput(cmd, jsonFields[services.Run]())
+}
+
+// warnUnsupported warns of each *services.CapabilityError in err, the parts of a result the server
+// cannot provide, and returns err when anything else failed.
+func (a *application) warnUnsupported(cmd *cobra.Command, err error) error {
+	if err == nil {
+		return nil
+	}
+	errs := []error{err}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		errs = joined.Unwrap()
+	}
+	for _, e := range errs {
+		if _, ok := errors.AsType[*services.CapabilityError](e); !ok {
+			return err
+		}
+	}
+	for _, e := range errs {
+		a.warn(cmd, "%s", e)
+	}
+	return nil
 }
 
 // isWorkflowFile tells a workflow file name, which the server resolves itself, from a workflow name.
@@ -545,7 +567,7 @@ func (a *application) runArg(cmd *cobra.Command, args []string, active bool) (ta
 		return t, 0, err
 	}
 	page, err := services.Actions{Client: t.client, Repository: t.Repo}.RunsPage(cmd.Context(), services.RunListOptions{Limit: 30, Page: 1})
-	if err != nil {
+	if err := a.warnUnsupported(cmd, err); err != nil {
 		return t, 0, err
 	}
 	runs := page.Items
@@ -915,7 +937,7 @@ $ gt run delete 34 --yes`,
 			}
 			service := services.Actions{Client: t.client, Repository: t.Repo}
 			run, err := service.RunDetails(cmd.Context(), id)
-			if err != nil {
+			if err := a.warnUnsupported(cmd, err); err != nil {
 				return err
 			}
 			if !run.Completed() {

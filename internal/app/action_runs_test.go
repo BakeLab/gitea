@@ -268,6 +268,37 @@ View this run on Gitea: https://gitea.test/alice/project/actions/runs/29
 	}
 }
 
+func TestRunCommandsDegradeWithoutWorkflowAndJobListings(t *testing.T) {
+	const notFound = `404 {"message":"Not Found"}`
+	server, _ := actionsAPI(t, map[string]string{
+		"GET ":                     `{"id":1,"full_name":"alice/project"}`,
+		"GET actions/workflows":    notFound,
+		"GET actions/runs":         `{"total_count":1,"workflow_runs":[` + failedRunFixture + `]}`,
+		"GET actions/runs/29":      failedRunFixture,
+		"GET actions/runs/29/jobs": notFound,
+		"GET actions/runs/30":      notFound,
+		"GET actions/runs/30/jobs": notFound,
+	})
+	const noWorkflows = "! workflow listing is unsupported: the server does not provide GET /repos/{owner}/{repo}/actions/workflows\n"
+	const noJobs = "! job listing is unsupported: the server does not provide GET /repos/{owner}/{repo}/actions/runs/{run}/jobs\n"
+	deps, out, diagnostics := actionsDeps(t, server.URL, false)
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "list", "-R", "alice/project", "--json", "id,workflow"}))
+	require.JSONEq(t, `[{"id":29,"workflow":"nightly"}]`, out.String())
+	require.Equal(t, noWorkflows, diagnostics.String())
+	out.Reset()
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"run", "view", "29", "-R", "alice/project", "--json", "id,jobs"}))
+	require.JSONEq(t, `{"id":29,"jobs":null}`, out.String())
+	require.Equal(t, noWorkflows+noJobs, diagnostics.String())
+	require.EqualError(t, Execute(context.Background(), deps, []string{"workflow", "list", "-R", "alice/project"}), strings.TrimSuffix(strings.TrimPrefix(noWorkflows, "! "), "\n"))
+	require.EqualError(t, Execute(context.Background(), deps, []string{"run", "logs", "29", "-R", "alice/project"}), strings.TrimSuffix(strings.TrimPrefix(noJobs, "! "), "\n"))
+	require.EqualError(t, Execute(context.Background(), deps, []string{"run", "logs", "30", "-R", "alice/project"}), "run 30 not found in alice/project")
+
+	missing, _ := actionsAPI(t, map[string]string{"GET ": notFound, "GET actions/workflows": notFound})
+	deps, _, _ = actionsDeps(t, missing.URL, false)
+	require.EqualError(t, Execute(context.Background(), deps, []string{"workflow", "list", "-R", "alice/project"}), "repository alice/project not found")
+}
+
 func TestRunViewFitsStepsToTheTerminalWidth(t *testing.T) {
 	run := services.Run{ID: 5, Status: "completed", Conclusion: "success", Jobs: []services.Job{{
 		ID: 6, Name: "build", Status: "completed", Conclusion: "success",
