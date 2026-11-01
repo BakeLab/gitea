@@ -17,6 +17,7 @@ import (
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
 
@@ -119,7 +120,7 @@ func mirrorSourceURL(item services.Repository) string {
 
 func (a *application) repoCloneCommand() *cobra.Command {
 	var opts cloneOptions
-	var noUpstream bool
+	var noUpstream, findInstance bool
 	command := &cobra.Command{
 		Use:   "clone <repository> [<directory>] [-- <gitflags>...]",
 		Short: "Clone a repository locally",
@@ -129,12 +130,18 @@ remote (or the --upstream-remote-name one), and gt commands in the clone then ta
 with remote names other than upstream and origin, it is saved as with gt repo set-default. A pull
 mirror's source is added as the "source" remote; gt commands keep targeting the mirror. An HTTPS
 clone keeps the instance's stored TLS client certificate and --insecure setting in its Git
-configuration; GITEA_INSTANCE_INSECURE applies to the clone only.`,
+configuration; GITEA_INSTANCE_INSECURE applies to the clone only. With --find-instance, when no
+instance is selected and accounts exist on several, the repository is looked up on each of them; if
+more than one has it, gt asks which to clone from, or fails without prompts. The lookup sends the
+repository name to every instance with an account.`,
 		Example: `# Clone a repository into ./project
 $ gt repo clone alice/project
 
 # Clone into another directory with the last commit only
 $ gt repo clone alice/project src --depth 1
+
+# Clone from whichever instance with an account has the repository
+$ gt repo clone alice/project --find-instance
 
 # Clone over SSH whatever the configured Git protocol
 $ gt repo clone git@gitea.com:alice/project.git
@@ -151,6 +158,9 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 			}
 			if a.options.repo != "" {
 				return clierr.Wrap(clierr.Usage, errors.New("a repository argument cannot be combined with --repo"))
+			}
+			if findInstance && a.options.host != "" {
+				return clierr.Wrap(clierr.Usage, errors.New("--find-instance cannot be combined with --host"))
 			}
 			if noUpstream {
 				if cmd.Flags().Changed("upstream-remote-name") {
@@ -171,10 +181,16 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 					t, err = a.resolve(cmd.Context(), true)
 				}
 			}
-			if err != nil {
-				return err
+			var item services.Repository
+			required, ambiguous := errors.AsType[*instanceRequiredError](err)
+			switch {
+			case ambiguous && required.loggedIn && findInstance:
+				t, item, err = a.findRepository(cmd, required.instances)
+			case ambiguous && required.loggedIn:
+				err = clierr.Wrap(clierr.Usage, fmt.Errorf("%w; --find-instance looks the repository up on each of them", required))
+			case err == nil:
+				item, err = (services.Repositories{Client: t.client}).View(cmd.Context(), t.Repo)
 			}
-			item, err := (services.Repositories{Client: t.client}).View(cmd.Context(), t.Repo)
 			if err != nil {
 				return err
 			}
@@ -202,9 +218,76 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 	}
 	command.Flags().IntVarP(&opts.depth, "depth", "d", 0, "Number of commits to fetch (0: full history)")
 	command.Flags().StringVarP(&opts.upstream, "upstream-remote-name", "u", "upstream", "Remote name for the parent of a fork")
+	command.Flags().BoolVar(&findInstance, "find-instance", false, "Look the repository up on each instance with an account when none is selected")
 	command.Flags().BoolVar(&noUpstream, "no-upstream", false, "Do not add a remote for the parent of a fork or the source of a mirror")
 	command.ValidArgsFunction = pathArgs(1, false, completeDirectories, a.completeRepos())
 	return command
+}
+
+// findRepository looks up the repository argument on each of instances when none is selected,
+// and picks the instance that has it, asking when several do. The lookups never prompt.
+func (a *application) findRepository(cmd *cobra.Command, instances []string) (target, services.Repository, error) {
+	type match struct {
+		target target
+		item   services.Repository
+	}
+	var matches []match
+	var failures []error
+	for _, instance := range instances {
+		if err := cmd.Context().Err(); err != nil {
+			return target{}, services.Repository{}, err
+		}
+		probe := &application{deps: a.deps, options: a.options}
+		probe.options.host, probe.options.noInput = instance, true
+		t, err := probe.resolve(cmd.Context(), true)
+		if err == nil {
+			var item services.Repository
+			if item, err = (services.Repositories{Client: t.client}).View(cmd.Context(), t.Repo); err == nil {
+				matches = append(matches, match{t, item})
+				continue
+			}
+		}
+		if !services.IsNotFound(err) {
+			if !strings.Contains(err.Error(), instance) {
+				err = fmt.Errorf("%s: %w", instance, err)
+			}
+			failures = append(failures, err)
+		}
+	}
+	repo := a.options.repo
+	if len(matches) == 0 {
+		if len(failures) > 0 {
+			return target{}, services.Repository{}, failures[0]
+		}
+		return target{}, services.Repository{}, fmt.Errorf("repository %s not found on any instance (instances: %s)", repo, strings.Join(instances, ", "))
+	}
+	for _, failure := range failures {
+		a.warn(cmd, "Could not look up %s: %v", repo, failure)
+	}
+	chosen := matches[0]
+	if len(matches) > 1 {
+		locations := make([]string, len(matches))
+		for i, m := range matches {
+			locations[i] = m.target.Host + "/" + m.item.FullName
+		}
+		chooser, ok := a.chooser()
+		if !ok {
+			return target{}, services.Repository{}, clierr.Wrap(clierr.Usage, fmt.Errorf("repository %s exists on several instances; select one with --host (%s)", repo, strings.Join(locations, ", ")))
+		}
+		choices := make([]terminal.Choice, len(locations))
+		for i, location := range locations {
+			choices[i] = terminal.Choice{Label: location, Value: location}
+		}
+		location, err := chooser.Choose(cmd.Context(), "Which instance should "+repo+" be cloned from?", choices, "")
+		if err != nil {
+			return target{}, services.Repository{}, err
+		}
+		chosen = matches[slices.Index(locations, location)]
+	}
+	a.mu.Lock()
+	a.resolved = chosen.target
+	a.mu.Unlock()
+	return chosen.target, chosen.item, nil
 }
 
 // checkUpstreamRemoteName refuses an --upstream-remote-name that Git rejects, or that the given

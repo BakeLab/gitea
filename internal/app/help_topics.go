@@ -338,7 +338,8 @@ does not select the fork.
 
 gt selects the instance from the repository URL, --host, GITEA_CLI_HOST or
 GITEA_INSTANCE_URL, default_host, the only instance with an account, or, among several or
-none, the instance of the clone's repository.
+none, the instance of the clone's repository. gt repo clone --find-instance looks up a
+repository named without an instance on each instance with an account.
 
 Environment variables:
 

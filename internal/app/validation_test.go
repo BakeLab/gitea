@@ -282,6 +282,7 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"release", "edit", "v1", "v2", "--prerelease", "TRUE"}, "--prerelease takes no value; use --prerelease or --prerelease=false"},
 		{[]string{"repo", "clone", ""}, "repository cannot be empty"},
 		{[]string{"repo", "clone", "alice/project", " "}, "directory cannot be empty"},
+		{[]string{"repo", "clone", "alice/project", "--find-instance", "--host", "https://example.test"}, "--find-instance cannot be combined with --host"},
 		{[]string{"repo", "clone", "alice/project", "-u", ""}, "--upstream-remote-name requires a name; use --no-upstream"},
 		{[]string{"repo", "clone", "alice/project", "-u", "bad name"}, "--upstream-remote-name requires a valid Git remote name"},
 		{[]string{"repo", "clone", "alice/project", "-u", "origin"}, "--upstream-remote-name cannot be the fork's remote name origin"},

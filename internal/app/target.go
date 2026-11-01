@@ -638,9 +638,21 @@ func (a *application) defaultHost(t *target, s settings.Snapshot) error {
 		if len(candidates) == 0 {
 			return clierr.Wrap(clierr.Authentication, errors.New("no instance selected; log in with gt auth login, or pass --host"))
 		}
-		return clierr.Wrap(clierr.Usage, fmt.Errorf("instance required: select --host or set default_host (instances: %s)", strings.Join(slices.Sorted(maps.Keys(candidates)), ", ")))
+		instances := slices.Sorted(maps.Keys(candidates))
+		return clierr.Wrap(clierr.Usage, &instanceRequiredError{instances: instances, loggedIn: len(candidates[instances[0]].Users) > 0})
 	}
 	return nil
+}
+
+// instanceRequiredError reports a target that several instances could serve. loggedIn is false
+// when none has an account and instances lists every configured one.
+type instanceRequiredError struct {
+	instances []string
+	loggedIn  bool
+}
+
+func (e *instanceRequiredError) Error() string {
+	return "instance required: select --host or set default_host (instances: " + strings.Join(e.instances, ", ") + ")"
 }
 
 // soleInstanceSource words why the only candidate of selectableInstances was selected.

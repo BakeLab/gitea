@@ -4,19 +4,23 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/git/gittest"
 	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
 
 	"github.com/stretchr/testify/require"
 )
@@ -55,6 +59,81 @@ func TestCloneValidatesRemoteBeforeGitAndReturnsJSON(t *testing.T) {
 	runner.calls = nil
 	require.ErrorContains(t, Execute(context.Background(), deps, append(args, "--depth", "-1")), "--depth must be nonnegative")
 	require.Empty(t, runner.calls)
+}
+
+func TestCloneLooksUpTheRepositoryOnEveryInstance(t *testing.T) {
+	statuses := map[string]int{}
+	var lookups atomic.Int32
+	instance := func(name string) *httptest.Server {
+		var server *httptest.Server
+		server = newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			lookups.Add(1)
+			require.Equal(t, "/api/v1/repos/alice/project", r.URL.Path)
+			if status := cmp.Or(statuses[name], http.StatusNotFound); status != http.StatusOK {
+				http.Error(w, `{"message":"unavailable"}`, status)
+				return
+			}
+			_, _ = fmt.Fprintf(w, `{"id":7,"full_name":"alice/project","clone_url":"%s/alice/project.git"}`, server.URL)
+		}))
+		return server
+	}
+	first, second := instance("first"), instance("second")
+	defer first.Close()
+	defer second.Close()
+	deps, _, diagnostics := testDeps(t)
+	configureHost(t, deps, first.URL, settings.Host{})
+	configureHost(t, deps, second.URL, settings.Host{})
+	command := []string{"repo", "clone", "alice/project", "destination"}
+	args := append(slices.Clone(command), "--find-instance", "--no-input")
+	require.ErrorContains(t, Execute(context.Background(), deps, args), "instance required", "instances without accounts are not looked up")
+
+	configureAccounts(t, deps, first.URL, "alice", "alice")
+	configureAccounts(t, deps, second.URL, "alice", "alice")
+	err := Execute(context.Background(), deps, append(slices.Clone(command), "--no-input"))
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.ErrorContains(t, err, "--find-instance looks the repository up on each of them", "the flag is needed")
+	require.Zero(t, lookups.Load(), "no instance is asked without the flag")
+	cloneFrom := func(server *httptest.Server) string {
+		return credentialCall(t, deps, server.URL, "alice") + " clone -- " + server.URL + "/alice/project.git destination"
+	}
+	runner := &fakeGit{results: map[string]string{cloneFrom(first): "", cloneFrom(second): ""}}
+	deps.Git = runner
+	cloneCalls := func() []string {
+		return slices.DeleteFunc(slices.Clone(runner.calls), func(call string) bool { return !strings.Contains(call, " clone -- ") })
+	}
+
+	statuses["first"], statuses["second"] = http.StatusInternalServerError, http.StatusOK
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.Equal(t, []string{cloneFrom(second)}, cloneCalls())
+	require.Contains(t, diagnostics.String(), "Could not look up alice/project: "+first.URL+": ")
+	configureAccounts(t, deps, first.URL, "", "alice", "bob")
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.Contains(t, diagnostics.String(), "Could not look up alice/project: no active account on "+first.URL+" ")
+	configureAccounts(t, deps, first.URL, "alice", "alice")
+
+	runner.calls = nil
+	statuses["first"] = http.StatusOK
+	ordered := []*httptest.Server{first, second}
+	slices.SortFunc(ordered, func(a, b *httptest.Server) int { return strings.Compare(a.URL, b.URL) })
+	locations := []string{ordered[0].URL + "/alice/project", ordered[1].URL + "/alice/project"}
+	err = Execute(context.Background(), deps, args)
+	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	require.ErrorContains(t, err, "repository alice/project exists on several instances; select one with --host ("+strings.Join(locations, ", ")+")")
+	require.Empty(t, cloneCalls())
+
+	prompter := &choosingPrompter{choose: 1}
+	deps.Prompter = prompter
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	require.NoError(t, Execute(context.Background(), deps, append(slices.Clone(command), "--find-instance")))
+	require.Equal(t, []terminal.Choice{{Label: locations[0], Value: locations[0]}, {Label: locations[1], Value: locations[1]}}, prompter.choices)
+	require.Equal(t, []string{cloneFrom(ordered[1])}, cloneCalls())
+
+	runner.calls = nil
+	clear(statuses)
+	require.ErrorContains(t, Execute(context.Background(), deps, args), "repository alice/project not found on any instance")
+	statuses["first"] = http.StatusInternalServerError
+	require.ErrorContains(t, Execute(context.Background(), deps, args), first.URL+": ")
+	require.Empty(t, cloneCalls())
 }
 
 func TestSSHCloneUsesSelectedAccountKeyWithoutPersistingIt(t *testing.T) {
