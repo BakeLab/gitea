@@ -45,13 +45,8 @@ func (s Actions) Artifacts(ctx context.Context, run int64, limit, page int) (Pag
 		if err != nil {
 			return nil, nil, err
 		}
-		// The server sends its count in the body only, and caps the page size below what AllArtifacts asks for;
-		// a count smaller than the page means the response lacks it.
-		headers := headerOf(resp).Clone()
-		if total := int(response.TotalCount); total >= len(response.Artifacts) {
-			headers.Set("X-Total-Count", strconv.Itoa(total))
-		}
-		return convertAll(response.Artifacts, artifactFrom), headers, nil
+		// The server caps the page size below what AllArtifacts asks for.
+		return convertAll(response.Artifacts, artifactFrom), bodyCounted(resp, response.TotalCount, len(response.Artifacts)), nil
 	})
 	if err != nil {
 		return Page[Artifact]{}, repositoryItemError(ctx, s.Client, s.Repository, err, "run", strconv.FormatInt(run, 10))

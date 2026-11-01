@@ -8,7 +8,6 @@ import (
 	"maps"
 	"net/url"
 	"slices"
-	"strconv"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -107,12 +106,6 @@ func narrowedEvents(events []string) []string {
 	return narrowed
 }
 
-// WebhookScope selects one repository, organization, account or system scope.
-type WebhookScope struct {
-	Repository, Organization string
-	Account, Global          bool
-}
-
 // WebhookOptions distinguishes omitted input from explicit empty or false values.
 type WebhookOptions struct {
 	Type          string            `json:"type,omitempty"`
@@ -126,7 +119,7 @@ type WebhookOptions struct {
 // Webhooks manages hooks without returning delivery credentials.
 type Webhooks struct {
 	Client *transport.Client
-	Scope  WebhookScope
+	Scope  OwnerScope
 	// RevealURL returns delivery URLs whole, with the credentials they may carry.
 	RevealURL bool
 }
@@ -153,19 +146,7 @@ func (s Webhooks) List(ctx context.Context, limit, page int) (Page[Webhook], err
 		}
 		return c.Hooks.ListRepoHooks(ctx, owner, name, opts)
 	})
-	return convertPage(hooks, s.from), s.listError(err)
-}
-
-// listError names the repository or organization of the selected scope when a list answers 404,
-// which can only mean that it is missing or invisible.
-func (s Webhooks) listError(err error) error {
-	switch {
-	case s.Scope.Global, s.Scope.Account:
-		return err
-	case s.Scope.Organization != "":
-		return Classify(err, "organization", strconv.Quote(s.Scope.Organization), "")
-	}
-	return Classify(err, "repository", s.Scope.Repository, "")
+	return convertPage(hooks, s.from), s.Scope.listError(err)
 }
 
 func (s Webhooks) get(ctx context.Context, id int64) (*gitea.Hook, error) {
@@ -187,34 +168,9 @@ func (s Webhooks) get(ctx context.Context, id int64) (*gitea.Hook, error) {
 	return hook, s.itemError(ctx, err, id)
 }
 
-// itemError names webhook id in the failure of a request about it, or the repository or
-// organization of the selected scope when that is what is missing: Gitea answers both with the
-// same 404.
+// itemError names webhook id in the failure of a request about it.
 func (s Webhooks) itemError(ctx context.Context, err error, id int64) error {
-	key := strconv.FormatInt(id, 10)
-	switch {
-	case s.Scope.Global, s.Scope.Account:
-	case s.Scope.Organization != "":
-		if IsNotFound(err) {
-			if _, isOrg, orgErr := organization(ctx, s.Client, s.Scope.Organization); orgErr == nil && !isOrg {
-				return s.listError(err)
-			}
-		}
-	default:
-		return repositoryItemError(ctx, s.Client, s.Scope.Repository, err, "webhook", key)
-	}
-	return Classify(err, "webhook", key, s.errorScope())
-}
-
-// errorScope names the repository or organization the selected scope looks in, for error messages.
-func (s Webhooks) errorScope() string {
-	switch {
-	case s.Scope.Global, s.Scope.Account:
-		return ""
-	case s.Scope.Organization != "":
-		return s.Scope.Organization
-	}
-	return s.Scope.Repository
+	return s.Scope.itemError(ctx, s.Client, err, "webhook", id)
 }
 
 // View retrieves hook metadata without exposing its delivery configuration.
@@ -254,7 +210,7 @@ func (s Webhooks) Create(ctx context.Context, opts WebhookOptions) (Webhook, err
 	})
 	if err != nil {
 		// A 404 here can only mean the repository or organization is missing or invisible.
-		return Webhook{}, s.listError(err)
+		return Webhook{}, s.Scope.listError(err)
 	}
 	return s.from(hook), nil
 }

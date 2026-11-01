@@ -171,5 +171,5 @@ of the diff; gt refuses lines outside the diff. See [resources.md](references/re
 
 - Local Git work (commits, rebases, branches) needs `git`, not gt.
 - GitHub, GitLab or other forges: gt only talks to Gitea instances.
-- Administering the Gitea server itself (`app.ini`, runners) is outside gt, except the API
-  that `gt admin` and `gt api` expose.
+- Administering the Gitea server itself (`app.ini`) is outside gt, except the API that
+  `gt admin` and `gt api` expose and the Actions runners that `gt runner` manages.

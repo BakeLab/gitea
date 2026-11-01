@@ -50,44 +50,13 @@ func collapsedEvents(events []string) string {
 	return strings.Join(shown, ", ")
 }
 
-type webhookScope struct {
-	org             string
-	account, global bool
+func (a *application) webhookService(cmd *cobra.Command, scope *ownerScope) (target, services.Webhooks, error) {
+	t, selected, err := scope.resolve(a, cmd)
+	return t, services.Webhooks{Client: t.client, Scope: selected}, err
 }
 
-func (s *webhookScope) service(a *application, cmd *cobra.Command) (target, services.Webhooks, error) {
-	if scopes := setFlags([]string{"--org", "--account", "--global", "--repo"}, s.org != "", s.account, s.global, a.options.repo != ""); len(scopes) > 1 {
-		return target{}, services.Webhooks{}, clierr.Wrap(clierr.Usage, fmt.Errorf("%s cannot be combined with %s", scopes[0], scopes[1]))
-	}
-	t, err := a.resolve(cmd.Context(), s.org == "" && !s.account && !s.global)
-	return t, services.Webhooks{Client: t.client, Scope: services.WebhookScope{Repository: t.Repo, Organization: s.org, Account: s.account, Global: s.global}}, err
-}
-
-// webhookScopeName names a scope in messages: alice/x, organization acme, your account, the instance.
-func webhookScopeName(scope services.WebhookScope) string {
-	switch {
-	case scope.Global:
-		return "the instance"
-	case scope.Account:
-		return "your account"
-	case scope.Organization != "":
-		return "organization " + scope.Organization
-	}
-	return scope.Repository
-}
-
-func webhookSettingsURL(t target, scope services.WebhookScope, id int64) string {
-	hook := strconv.FormatInt(id, 10)
-	switch {
-	case scope.Global:
-		return webURL(t, "-", "admin", "hooks", hook)
-	case scope.Account:
-		return webURL(t, "user", "settings", "hooks", hook)
-	case scope.Organization != "":
-		return webURL(t, "org", scope.Organization, "settings", "hooks", hook)
-	}
-	owner, name, _ := strings.Cut(scope.Repository, "/")
-	return webURL(t, owner, name, "settings", "hooks", hook)
+func webhookSettingsURL(t target, scope services.OwnerScope, id int64) string {
+	return ownerSettingsURL(t, scope, "hooks", strconv.FormatInt(id, 10))
 }
 
 // webhookLabel names a webhook in messages: "webhook 3 (https://hooks.example.com/…)".
@@ -103,7 +72,7 @@ belong to the repository of the current directory or of --repo.
 Delivery URLs often carry credentials, so gt shows them without user information and query,
 and without the path for chat services; gt webhook view --reveal-url shows a URL whole.
 Signing secrets and authorization headers are never shown.`}
-	var scope webhookScope
+	var scope ownerScope
 	group.PersistentFlags().StringVar(&scope.org, "org", "", "Manage the webhooks of an organization")
 	group.PersistentFlags().BoolVar(&scope.account, "account", false, "Manage the webhooks of your account")
 	group.PersistentFlags().BoolVar(&scope.global, "global", false, "Manage the system webhooks of the instance (administrators)")
@@ -114,11 +83,10 @@ Signing secrets and authorization headers are never shown.`}
 
 // completeWebhooks completes the webhook IDs of the scope that the parsed flags select, with their
 // URLs and events.
-func (a *application) completeWebhooks(scope *webhookScope) cobra.CompletionFunc {
+func (a *application) completeWebhooks(scope *ownerScope) cobra.CompletionFunc {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
-		inRepository := scope.org == "" && !scope.account && !scope.global
-		return a.apiCompletion(inRepository, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
-			hooks, err := services.Webhooks{Client: t.client, Scope: services.WebhookScope{Repository: t.Repo, Organization: scope.org, Account: scope.account, Global: scope.global}}.List(ctx, completionLimit, 1)
+		return a.apiCompletion(scope.inRepository(), func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
+			hooks, err := services.Webhooks{Client: t.client, Scope: scope.of(t.Repo)}.List(ctx, completionLimit, 1)
 			return describe(hooks.Items, func(hook services.Webhook) (string, string) {
 				return strconv.FormatInt(hook.ID, 10), hook.URL + " (" + collapsedEvents(hook.Events) + ")"
 			}), err
@@ -126,7 +94,7 @@ func (a *application) completeWebhooks(scope *webhookScope) cobra.CompletionFunc
 	}
 }
 
-func (a *application) webhookListCommand(scope *webhookScope) *cobra.Command {
+func (a *application) webhookListCommand(scope *ownerScope) *cobra.Command {
 	var limit, page int
 	cmd := &cobra.Command{
 		Use: "list", Short: "List webhooks", Args: argsExact(0),
@@ -135,7 +103,7 @@ $ gt webhook list --org acme
 # print the delivery URLs
 $ gt webhook list --jq '.[].url'`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			target, service, err := scope.service(a, cmd)
+			target, service, err := a.webhookService(cmd, scope)
 			if err != nil {
 				return err
 			}
@@ -143,7 +111,7 @@ $ gt webhook list --jq '.[].url'`,
 			if err != nil {
 				return err
 			}
-			where := webhookScopeName(service.Scope)
+			where := service.Scope.String()
 			return writeTable(a, cmd, hooks.Items, listSpec[services.Webhook]{
 				Columns: []terminal.Column{{Header: "ID"}, {Header: "Type"}, {Header: "Active"}, {Header: "URL", Flex: true}, {Header: "Events", Flex: true, TTYOnly: true}, {Header: "Events", PipedOnly: true}},
 				Row: func(hook services.Webhook) []terminal.Cell {
@@ -168,7 +136,7 @@ $ gt webhook list --jq '.[].url'`,
 	return cmd
 }
 
-func (a *application) webhookViewCommand(scope *webhookScope) *cobra.Command {
+func (a *application) webhookViewCommand(scope *ownerScope) *cobra.Command {
 	var reveal bool
 	cmd := &cobra.Command{
 		Use: "view <id>", Short: "View a webhook", Args: argsExact(1), ValidArgsFunction: a.completeWebhooks(scope),
@@ -180,7 +148,7 @@ $ gt webhook view 3 --org acme --reveal-url`,
 			if err != nil {
 				return err
 			}
-			target, service, err := scope.service(a, cmd)
+			target, service, err := a.webhookService(cmd, scope)
 			if err != nil {
 				return err
 			}
@@ -206,7 +174,7 @@ $ gt webhook view 3 --org acme --reveal-url`,
 					Fields: []terminal.Field{
 						{Label: "Active", Value: strconv.FormatBool(hook.Active), PipedOnly: true},
 						{Label: "Type", Value: hook.Type, PipedOnly: true},
-						{Label: "Scope", Value: webhookScopeName(service.Scope)},
+						{Label: "Scope", Value: service.Scope.String()},
 						{Label: "Events", Value: strings.Join(hook.Events, ", ")},
 						{Label: "Content type", Value: hook.ContentType},
 						{Label: "Branch filter", Value: hook.BranchFilter},
@@ -229,7 +197,7 @@ var webhookEditFlags = []string{
 }
 
 // webhookChangeCommand creates or edits a webhook.
-func (a *application) webhookChangeCommand(scope *webhookScope, create bool) *cobra.Command {
+func (a *application) webhookChangeCommand(scope *ownerScope, create bool) *cobra.Command {
 	var endpoint, kind, secret, secretFile, authorization, authorizationFile, filter string
 	var events []string
 	var config map[string]string
@@ -388,7 +356,7 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 		if len(opts.Config) == 0 {
 			opts.Config = nil
 		}
-		target, service, err := scope.service(a, cmd)
+		target, service, err := a.webhookService(cmd, scope)
 		if err != nil {
 			return err
 		}
@@ -408,20 +376,20 @@ $ gt webhook create https://hooks.slack.com/services/T0/B0/X --org acme --type s
 			if err != nil {
 				return err
 			}
-			a.done(cmd, "Edited %s in %s", webhookLabel(hook), webhookScopeName(service.Scope))
+			a.done(cmd, "Edited %s in %s", webhookLabel(hook), service.Scope.String())
 			return a.jsonResult(cmd, hook)
 		}
 		hook, err := service.Create(cmd.Context(), opts)
 		if err != nil {
 			return err
 		}
-		a.done(cmd, "Created %s in %s for %s", webhookLabel(hook), webhookScopeName(service.Scope), collapsedEvents(hook.Events))
+		a.done(cmd, "Created %s in %s for %s", webhookLabel(hook), service.Scope.String(), collapsedEvents(hook.Events))
 		return a.created(cmd, hook, webhookSettingsURL(target, service.Scope, hook.ID))
 	}
 	return command
 }
 
-func (a *application) webhookDeleteCommand(scope *webhookScope) *cobra.Command {
+func (a *application) webhookDeleteCommand(scope *ownerScope) *cobra.Command {
 	return &cobra.Command{
 		Use: "delete <id>", Short: "Delete a webhook", Args: argsExact(1), ValidArgsFunction: a.completeWebhooks(scope),
 		Example: `$ gt webhook delete 3
@@ -432,7 +400,7 @@ $ gt webhook delete 4 --org acme --yes`,
 			if err != nil {
 				return err
 			}
-			_, service, err := scope.service(a, cmd)
+			_, service, err := a.webhookService(cmd, scope)
 			if err != nil {
 				return err
 			}
@@ -440,12 +408,12 @@ $ gt webhook delete 4 --org acme --yes`,
 			if err != nil {
 				return err
 			}
-			return a.deleteConfirmed(cmd, webhookLabel(hook)+" from "+webhookScopeName(service.Scope), func() error { return service.Delete(cmd.Context(), id) })
+			return a.deleteConfirmed(cmd, webhookLabel(hook)+" from "+service.Scope.String(), func() error { return service.Delete(cmd.Context(), id) })
 		},
 	}
 }
 
-func (a *application) webhookTestCommand(scope *webhookScope) *cobra.Command {
+func (a *application) webhookTestCommand(scope *ownerScope) *cobra.Command {
 	return &cobra.Command{
 		Use: "test <id>", Short: "Send a test delivery of a webhook", Args: argsExact(1), ValidArgsFunction: a.completeWebhooks(scope),
 		Long: `Ask Gitea to deliver a test push event for the latest commit of the default branch to a
@@ -461,7 +429,7 @@ cannot be used. The webhook's settings page shows the delivery and its response.
 			if scopes := setFlags([]string{"--org", "--account", "--global"}, scope.org != "", scope.account, scope.global); len(scopes) > 0 {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("webhook test cannot be combined with %s; Gitea tests only repository webhooks", scopes[0]))
 			}
-			_, service, err := scope.service(a, cmd)
+			_, service, err := a.webhookService(cmd, scope)
 			if err != nil {
 				return err
 			}
@@ -472,7 +440,7 @@ cannot be used. The webhook's settings page shows the delivery and its response.
 			if err := service.Test(cmd.Context(), id); err != nil {
 				return err
 			}
-			a.done(cmd, "Sent a test delivery to %s in %s", webhookLabel(hook), webhookScopeName(service.Scope))
+			a.done(cmd, "Sent a test delivery to %s in %s", webhookLabel(hook), service.Scope.String())
 			return nil
 		},
 	}

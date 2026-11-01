@@ -248,7 +248,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		}
 		return a.policy(snapshot).Validate(a.deps.Streams)
 	}
-	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.labelCommand(), a.milestoneCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.browseCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.packageCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false), a.extensionCommand())
+	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.runnerCommand(), a.labelCommand(), a.milestoneCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.browseCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.packageCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false), a.extensionCommand())
 	root.AddCommand(a.manCommand())
 	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Example: "$ gt version", Args: argsExact(0), Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), version.Format())
@@ -293,7 +293,7 @@ var teaCommands = map[string][]string{
 // command is additional.
 var rootGroups = map[string]string{
 	"auth": "core", "browse": "core", "issue": "core", "org": "core", "pr": "core", "release": "core", "repo": "core",
-	"run": "actions", "secret": "actions", "variable": "actions", "workflow": "actions",
+	"run": "actions", "runner": "actions", "secret": "actions", "variable": "actions", "workflow": "actions",
 }
 
 // verbAliases are the gh-style short names of common verbs; commands add others to their own Aliases.

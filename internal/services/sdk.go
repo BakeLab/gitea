@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -138,6 +139,16 @@ func headerOf(resp *gitea.Response) http.Header {
 		return http.Header{}
 	}
 	return resp.Header
+}
+
+// bodyCounted returns the headers of resp with the total_count of its body as X-Total-Count, for
+// lists that count only in the body; a count smaller than the page means the body lacks it.
+func bodyCounted(resp *gitea.Response, total int64, items int) http.Header {
+	headers := headerOf(resp).Clone()
+	if total >= int64(items) {
+		headers.Set("X-Total-Count", strconv.FormatInt(total, 10))
+	}
+	return headers
 }
 
 // deref returns the value behind an optional field, or its zero value when the field is absent.

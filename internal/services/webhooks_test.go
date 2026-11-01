@@ -41,7 +41,7 @@ func TestWebhookEditPreservesSettingsAndRedactsCredentials(t *testing.T) {
 		assert.Equal(t, map[string]any{"url": "https://hook.invalid/private-path", "channel": "new", "username": "robot", "secret": "private-secret"}, payload["config"])
 		w.WriteHeader(http.StatusOK)
 	}))
-	service := Webhooks{Client: client, Scope: WebhookScope{Repository: "owner/repo"}}
+	service := Webhooks{Client: client, Scope: OwnerScope{Repository: "owner/repo"}}
 	active := false
 	authorization := ""
 	item, err := service.Edit(context.Background(), 1, WebhookOptions{Active: &active, Authorization: &authorization, Config: map[string]string{"channel": "new"}})
@@ -63,13 +63,13 @@ func TestWebhookEditPreservesSettingsAndRedactsCredentials(t *testing.T) {
 
 func TestWebhookCreateMarksOnlyGlobalHooksAsSystem(t *testing.T) {
 	for name, test := range map[string]struct {
-		scope      WebhookScope
+		scope      OwnerScope
 		wantPath   string
 		wantConfig map[string]any
 	}{
-		"global":       {scope: WebhookScope{Global: true}, wantPath: "/api/v1/admin/hooks", wantConfig: map[string]any{"url": "https://hook.invalid", "is_system_webhook": "true"}},
-		"organization": {scope: WebhookScope{Organization: "team"}, wantPath: "/api/v1/orgs/team/hooks", wantConfig: map[string]any{"url": "https://hook.invalid"}},
-		"repository":   {scope: WebhookScope{Repository: "owner/repo"}, wantPath: "/api/v1/repos/owner/repo/hooks", wantConfig: map[string]any{"url": "https://hook.invalid"}},
+		"global":       {scope: OwnerScope{Global: true}, wantPath: "/api/v1/admin/hooks", wantConfig: map[string]any{"url": "https://hook.invalid", "is_system_webhook": "true"}},
+		"organization": {scope: OwnerScope{Organization: "team"}, wantPath: "/api/v1/orgs/team/hooks", wantConfig: map[string]any{"url": "https://hook.invalid"}},
+		"repository":   {scope: OwnerScope{Repository: "owner/repo"}, wantPath: "/api/v1/repos/owner/repo/hooks", wantConfig: map[string]any{"url": "https://hook.invalid"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var payload map[string]any
@@ -104,21 +104,21 @@ func TestWebhookGlobalEditUsesReturnedHook(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":2,"type":"gitea","active":true,"events":["push"]}`))
 	}))
 	authorization := "Bearer value"
-	item, err := (Webhooks{Client: client, Scope: WebhookScope{Global: true}}).Edit(context.Background(), 2, WebhookOptions{Authorization: &authorization})
+	item, err := (Webhooks{Client: client, Scope: OwnerScope{Global: true}}).Edit(context.Background(), 2, WebhookOptions{Authorization: &authorization})
 	require.NoError(t, err)
 	require.Equal(t, Webhook{ID: 2, Type: "gitea", Active: true, Events: []string{"push"}}, item)
 	require.Equal(t, []string{"GET /api/v1/admin/hooks/2", "PATCH /api/v1/admin/hooks/2"}, requests)
 }
 
-func TestWebhookScopesSelectEndpoints(t *testing.T) {
+func TestOwnerScopesSelectEndpoints(t *testing.T) {
 	for name, tc := range map[string]struct {
-		scope WebhookScope
+		scope OwnerScope
 		path  string
 	}{
-		"global":       {scope: WebhookScope{Global: true}, path: "/api/v1/admin/hooks"},
-		"account":      {scope: WebhookScope{Account: true}, path: "/api/v1/user/hooks"},
-		"organization": {scope: WebhookScope{Organization: "team"}, path: "/api/v1/orgs/team/hooks"},
-		"repository":   {scope: WebhookScope{Repository: "owner/repo"}, path: "/api/v1/repos/owner/repo/hooks"},
+		"global":       {scope: OwnerScope{Global: true}, path: "/api/v1/admin/hooks"},
+		"account":      {scope: OwnerScope{Account: true}, path: "/api/v1/user/hooks"},
+		"organization": {scope: OwnerScope{Organization: "team"}, path: "/api/v1/orgs/team/hooks"},
+		"repository":   {scope: OwnerScope{Repository: "owner/repo"}, path: "/api/v1/repos/owner/repo/hooks"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var requests []string
@@ -188,7 +188,7 @@ func TestWebhookTestInAnEmptyRepositoryAsksForACommit(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"message":"repository is empty"}`))
 	}))
-	err := Webhooks{Client: client, Scope: WebhookScope{Repository: "owner/repo"}}.Test(context.Background(), 15)
+	err := Webhooks{Client: client, Scope: OwnerScope{Repository: "owner/repo"}}.Test(context.Background(), 15)
 	require.EqualError(t, err, "owner/repo is empty; push a commit before testing its webhooks")
 }
 
@@ -205,15 +205,15 @@ func TestWebhookNotFoundNamesTheSelectedScope(t *testing.T) {
 	}))
 	ctx := context.Background()
 	for name, tc := range map[string]struct {
-		scope         WebhookScope
+		scope         OwnerScope
 		want, created string
 	}{
-		"organization":         {WebhookScope{Repository: "owner/repo", Organization: "acme"}, "webhook 9 not found in acme", `organization "acme" not found`},
-		"missing organization": {WebhookScope{Repository: "owner/repo", Organization: "gone"}, `organization "gone" not found`, `organization "gone" not found`},
-		"account":              {WebhookScope{Repository: "owner/repo", Account: true}, "webhook 9 not found", "not found (HTTP 404 POST /api/v1/user/hooks)"},
-		"global":               {WebhookScope{Repository: "owner/repo", Global: true}, "webhook 9 not found", "not found (HTTP 404 POST /api/v1/admin/hooks)"},
-		"repository":           {WebhookScope{Repository: "owner/repo"}, "webhook 9 not found in owner/repo", "repository owner/repo not found"},
-		"missing repository":   {WebhookScope{Repository: "owner/gone"}, "repository owner/gone not found", "repository owner/gone not found"},
+		"organization":         {OwnerScope{Repository: "owner/repo", Organization: "acme"}, "webhook 9 not found in acme", `organization "acme" not found`},
+		"missing organization": {OwnerScope{Repository: "owner/repo", Organization: "gone"}, `organization "gone" not found`, `organization "gone" not found`},
+		"account":              {OwnerScope{Repository: "owner/repo", Account: true}, "webhook 9 not found", "not found (HTTP 404 POST /api/v1/user/hooks)"},
+		"global":               {OwnerScope{Repository: "owner/repo", Global: true}, "webhook 9 not found", "not found (HTTP 404 POST /api/v1/admin/hooks)"},
+		"repository":           {OwnerScope{Repository: "owner/repo"}, "webhook 9 not found in owner/repo", "repository owner/repo not found"},
+		"missing repository":   {OwnerScope{Repository: "owner/gone"}, "repository owner/gone not found", "repository owner/gone not found"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			service := Webhooks{Client: client, Scope: tc.scope}

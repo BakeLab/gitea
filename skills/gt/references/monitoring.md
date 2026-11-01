@@ -31,7 +31,9 @@ gt run watch 34 --timeout 10m --no-input        # fails when the run does not su
 Both poll through an outage of the instance of up to 5 minutes. Prefer waiting over a loop
 of repeated calls. A run whose jobs never start is waiting for a runner, or, with status
 `waiting`, for approval in the web interface (a first-time contributor's fork); report that to
-the user instead of waiting longer.
+the user instead of waiting longer. `gt runner list --json name,status,labels` shows whether a
+runner with the run's labels is online, but only among the repository's own runners: those of
+its organization (`--org OWNER`) and of the instance (`--global`, administrators) take its jobs too.
 
 ## Finding the run
 
