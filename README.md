@@ -49,7 +49,7 @@ There are different ways to get `gt`:
    ```powershell
    irm https://gitea.com/gitea/cli/raw/branch/main/scripts/install.ps1 | iex
    # the latest nightly build
-   $env:GITEA_CLI_VERSION = "nightly"; irm https://gitea.com/gitea/cli/raw/branch/main/scripts/install.ps1 | iex
+   $env:GITEA_CLI_VERSION = 'nightly'; irm https://gitea.com/gitea/cli/raw/branch/main/scripts/install.ps1 | iex
    ```
 
 2. Use the prebuilt binaries from [dl.gitea.com](https://dl.gitea.com/gitea-cli/)
