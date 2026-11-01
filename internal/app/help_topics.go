@@ -40,7 +40,7 @@ const (
 // help omits --repo, --remote and --cwd.
 var noRepoCommands = []string{
 	"gt admin", "gt alias", "gt auth", "gt completion", "gt config", "gt help", "gt man", "gt org",
-	"gt repo create", "gt repo list", "gt repo migrate", "gt search repo", "gt ssh-key", "gt team", "gt version",
+	"gt repo create", "gt repo list", "gt repo migrate", "gt search repo", "gt ssh-key", "gt team", "gt upgrade", "gt version",
 }
 
 // writeHelp prints the help page of cmd.
@@ -355,6 +355,8 @@ Environment variables:
   GITEA_CLI_HTTP_TIMEOUT              longest wait for an answer, overriding config.yml
   GITEA_CLI_DATA_DIR                  data directory; installed extensions are in its extensions/
   GITEA_CLI_NO_EXTENSIONS             when set, turns extensions off
+  GITEA_CLI_NO_UPDATE_NOTIFIER        when set, gt does not check for a new release (gt upgrade --help)
+  GITEA_CLI_DOWNLOAD_URL              where gt upgrade downloads releases from
   NO_COLOR                            disables automatic color when set, even with CLICOLOR_FORCE
   CLICOLOR_FORCE                      unless empty or 0, colors stderr, even when redirected, and
                                       a terminal stdout despite CLICOLOR=0 or TERM=dumb

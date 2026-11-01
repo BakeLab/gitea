@@ -249,7 +249,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		return a.policy(snapshot).Validate(a.deps.Streams)
 	}
 	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.runnerCommand(), a.labelCommand(), a.milestoneCommand(), a.projectCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.browseCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.packageCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false), a.extensionCommand())
-	root.AddCommand(a.manCommand())
+	root.AddCommand(a.manCommand(), a.upgradeCommand())
 	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Example: "$ gt version", Args: argsExact(0), Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), version.Format())
 		return err
@@ -496,7 +496,9 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 		}
 	}
 	root.SetArgs(args)
+	notifyUpdate := a.checkForUpdate(ctx, args, deps.Client)
 	cmd, err := root.ExecuteContextC(ctx)
+	notifyUpdate(cmd, err == nil)
 	if services.IsUnauthorized(err) {
 		return clierr.Wrap(clierr.Authentication, err)
 	}

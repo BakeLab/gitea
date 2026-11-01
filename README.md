@@ -35,6 +35,7 @@ There are different ways to get `gt`:
 1. Run the install script. It downloads the binary for your system from dl.gitea.com, verifies its
    checksum and installs `gt`; `GITEA_CLI_VERSION` and `GITEA_CLI_INSTALL_DIR` choose another
    version or directory, and the version `nightly` installs the latest build of the main branch.
+   Later, `gt upgrade` upgrades it the same way.
 
    On Linux, macOS, FreeBSD or OpenBSD:
 

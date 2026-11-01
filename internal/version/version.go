@@ -25,6 +25,9 @@ var Tags = ""
 // releases carry a +commit suffix.
 var release = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$`)
 
+// IsRelease reports whether version is that of a tagged release rather than a build between releases.
+func IsRelease(version string) bool { return release.MatchString(version) }
+
 // Format describes the build like gh version: the version and its date, the release notes of a
 // release, and the Go version and build tags:
 //
@@ -69,7 +72,7 @@ func format(version, tags, goVersion string, info *debug.BuildInfo) string {
 		}
 	}
 	text := "gt version " + version + date + "\n"
-	if release.MatchString(version) {
+	if IsRelease(version) {
 		text += "https://gitea.com/gitea/cli/releases/tag/v" + version + "\n"
 	}
 	text += "built with " + goVersion
