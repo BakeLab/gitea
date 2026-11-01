@@ -203,6 +203,8 @@ var (
 	unknownTeam = regexp.MustCompile(`team does not exist \[[^\]]*name: ([^\]]+)\]`)
 	// pullTargets finds the branches in "pull request already exists for these targets [... head_branch: x, base_branch: y]".
 	pullTargets = regexp.MustCompile(`head_branch: ([^,\]]+), base_branch: ([^,\]]+)`)
+	// pullNumber finds the number of the open pull request in the same message, which Gitea calls issue_id.
+	pullNumber = regexp.MustCompile(`issue_id: (\d+)`)
 	// missingBranch finds the branch in the 404 messages `ref "x" does not exist` (create pull
 	// request) and `new base 'x' not exist` (edit pull request).
 	missingBranch = regexp.MustCompile(`^(?:ref "([^"]+)" does not exist|new base '([^']+)' not exist)$`)

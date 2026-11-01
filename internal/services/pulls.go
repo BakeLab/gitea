@@ -487,19 +487,40 @@ func (s Pulls) Create(ctx context.Context, opts PullOptions) (Pull, error) {
 }
 
 // existingPullError links the open pull request that already exists for the branches of opts,
-// which Gitea refuses to duplicate without saying which it is.
+// which Gitea's message numbers as issue_id, next to its database id.
 func (s Pulls) existingPullError(ctx context.Context, err error, opts PullOptions) error {
 	conflict, ok := errors.AsType[*ConflictError](err)
 	if !ok || conflict.Reason != ReasonExists || conflict.Kind != "pull request" {
 		return err
 	}
+	number, numbered := existingPullNumber(err)
 	existing, lookupErr := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.PullRequest, *gitea.Response, error) {
+		if numbered {
+			return c.PullRequests.GetPullRequest(ctx, owner, name, number)
+		}
 		return c.PullRequests.GetPullRequestByBaseHead(ctx, owner, name, opts.Base, opts.Head)
 	})
-	if lookupErr == nil && existing.HTMLURL != "" {
+	switch {
+	case lookupErr == nil && existing.HTMLURL != "" && (numbered || existing.State == gitea.StateOpen):
 		conflict.Hint = "see " + existing.HTMLURL
+	case numbered:
+		conflict.Hint = "see pull request #" + strconv.FormatInt(number, 10)
 	}
 	return err
+}
+
+// existingPullNumber reads the number of the existing pull request from Gitea's message.
+func existingPullNumber(err error) (int64, bool) {
+	apiErr, ok := errors.AsType[*transport.APIError](err)
+	if !ok {
+		return 0, false
+	}
+	match := pullNumber.FindStringSubmatch(apiErr.Message)
+	if match == nil {
+		return 0, false
+	}
+	number, parseErr := strconv.ParseInt(match[1], 10, 64)
+	return number, parseErr == nil
 }
 
 // PullRepository is what creating a pull request needs to know about the repository it goes into.

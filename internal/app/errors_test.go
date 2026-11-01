@@ -46,8 +46,12 @@ func TestExplainKeepsClassifiedErrorsAndAddsHints(t *testing.T) {
 		"GET /api/v1/repos/alice/project":                 {"200", `{"full_name":"alice/project","has_issues":true,"has_pull_requests":true}`},
 		"GET /api/v1/repos/alice/old":                     {"200", `{"full_name":"alice/old","archived":true,"has_issues":true}`},
 		"POST /api/v1/repos/alice/old/issues":             {"423", `{"message":"repo is archived"}`},
-		"POST /api/v1/repos/alice/project/pulls":          {"409", `{"message":"pull request already exists for these targets [id: 16, issue_id: 3, head_repo_id: 1, base_repo_id: 1, head_branch: feat, base_branch: main]"}`},
-		"GET /api/v1/repos/alice/project/pulls/main/feat": {"200", `{"number":2,"html_url":"https://gitea.test/alice/project/pulls/2"}`},
+		"POST /api/v1/repos/alice/project/pulls":          {"409", `{"message":"pull request already exists for these targets [id: 16, issue_id: 2, head_repo_id: 1, base_repo_id: 1, head_branch: feat, base_branch: main]"}`},
+		"GET /api/v1/repos/alice/project/pulls/2":         {"200", `{"number":2,"html_url":"https://gitea.test/alice/project/pulls/2"}`},
+		"GET /api/v1/repos/alice/project/pulls/main/feat": {"200", `{"number":1,"state":"closed","html_url":"https://gitea.test/alice/project/pulls/1"}`},
+		"POST /api/v1/repos/alice/legacy/pulls":           {"409", `{"message":"pull request already exists for these targets [id: 9, head_branch: feat, base_branch: main]"}`},
+		"GET /api/v1/repos/alice/legacy/pulls/main/feat":  {"200", `{"number":4,"state":"open","html_url":"https://gitea.test/alice/legacy/pulls/4"}`},
+		"POST /api/v1/repos/alice/fork/pulls":             {"409", `{"message":"pull request already exists for these targets [id: 9, issue_id: 7, head_repo_id: 2, base_repo_id: 2, head_branch: feat, base_branch: main]"}`},
 		"GET /api/v1/repos/alice/project/pulls/3":         {"200", `{"number":3,"state":"open","mergeable":true,"head":{"sha":"abc"}}`},
 		"POST /api/v1/repos/alice/project/pulls/3/merge":  {"405", `{"message":"Does not have enough approvals"}`},
 	})
@@ -60,6 +64,8 @@ func TestExplainKeepsClassifiedErrorsAndAddsHints(t *testing.T) {
 		{"missing pull request", []string{"pr", "view", "999", "-R", "alice/project"}, "pull request #999 not found in alice/project"},
 		{"archived repository", []string{"issue", "create", "-R", "alice/old", "--title", "x", "--body", "y"}, "alice/old is archived (read-only); unarchive it with: gt repo unarchive alice/old"},
 		{"existing pull request", []string{"pr", "create", "-R", "alice/project", "--head", "feat", "--base", "main", "--title", "x", "--body", "y"}, "pull request for feat into main already exists in alice/project; see https://gitea.test/alice/project/pulls/2"},
+		{"existing pull request without its number", []string{"pr", "create", "-R", "alice/legacy", "--head", "feat", "--base", "main", "--title", "x", "--body", "y"}, "pull request for feat into main already exists in alice/legacy; see https://gitea.test/alice/legacy/pulls/4"},
+		{"existing pull request that can't be read", []string{"pr", "create", "-R", "alice/fork", "--head", "feat", "--base", "main", "--title", "x", "--body", "y"}, "pull request for feat into main already exists in alice/fork; see pull request #7"},
 		{"context added by the command", []string{"pr", "merge", "3", "-R", "alice/project", "--yes"}, "pull request #3 cannot be merged: Gitea API returned HTTP 405 for POST /api/v1/repos/alice/project/pulls/3/merge: Does not have enough approvals"},
 		{"raw api response", []string{"api", "users/nobody"}, "not found (HTTP 404 GET /api/v1/users/nobody)"},
 	} {
