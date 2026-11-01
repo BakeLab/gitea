@@ -316,6 +316,57 @@ func (n NameOrID[T]) Find(items []T, raw string) (T, error) {
 	return zero, &NotFoundError{Kind: n.Kind, Key: key, Scope: n.Scope}
 }
 
+// FindAll returns the items among items that raws address, each like Find.
+func (n NameOrID[T]) FindAll(items []T, raws []string) ([]T, error) {
+	result := make([]T, len(raws))
+	for i, raw := range raws {
+		var err error
+		if result[i], err = n.Find(items, raw); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+// CreateUnique runs create unless an item among existing has name, ignoring case, which names
+// would then no longer address. With update it runs edit on that item instead and reports true;
+// otherwise a *ConflictError refuses it.
+func (n NameOrID[T]) CreateUnique(existing []T, name string, update bool, create func() (T, error), edit func(T) (T, error)) (T, bool, error) {
+	n.ByName = true
+	current, err := n.Find(existing, name)
+	if errors.As(err, new(*NotFoundError)) {
+		item, err := create()
+		return item, false, err
+	}
+	var zero T
+	if err != nil {
+		return zero, false, err
+	}
+	if !update {
+		return zero, false, n.exists(current)
+	}
+	item, err := edit(current)
+	return item, true, err
+}
+
+// RefuseRename refuses to rename current to name when another item among existing has it,
+// ignoring case, which CreateUnique refuses too: names would no longer address either item.
+func (n NameOrID[T]) RefuseRename(existing []T, current T, name string) error {
+	if name == n.Name(current) {
+		return nil
+	}
+	for _, other := range existing {
+		if n.ID(other) != n.ID(current) && strings.EqualFold(n.Name(other), name) {
+			return n.exists(other)
+		}
+	}
+	return nil
+}
+
+func (n NameOrID[T]) exists(item T) error {
+	return &ConflictError{Reason: ReasonExists, Kind: n.Kind, Key: strconv.Quote(n.Name(item)), Scope: n.Scope}
+}
+
 func sleepCtx(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()

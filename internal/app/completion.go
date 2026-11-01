@@ -345,13 +345,18 @@ func (a *application) completeMilestonesIn(state string) cobra.CompletionFunc {
 	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
 		items, err := services.Milestones{Client: t.client, Repository: t.Repo}.List(ctx, state, completionLimit, 1)
 		return describe(items, func(item services.Milestone) (string, string) {
-			// A title that reads as a number would be taken as an ID, so offer the ID instead.
-			if _, parse := strconv.ParseInt(strings.TrimSpace(item.Title), 10, 64); parse == nil {
-				return strconv.FormatInt(item.ID, 10), strings.TrimSpace(item.Title + " " + item.Description)
-			}
-			return item.Title, item.Description
+			return titleCandidate(item.ID, item.Title, item.Description)
 		}), err
 	})
+}
+
+// titleCandidate completes a resource addressed by title or ID by its title, or by its ID when the
+// title reads as a number, which would be taken as an ID.
+func titleCandidate(id int64, title, description string) (string, string) {
+	if _, parse := strconv.ParseInt(strings.TrimSpace(title), 10, 64); parse == nil {
+		return strconv.FormatInt(id, 10), strings.TrimSpace(title + " " + description)
+	}
+	return title, description
 }
 
 // completeUsers completes comma-separated usernames that can be assigned in the repository.

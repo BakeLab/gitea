@@ -5,6 +5,7 @@ package app
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/terminal"
@@ -20,6 +21,19 @@ func (a *application) confirmAction(cmd *cobra.Command, c terminal.Confirmation)
 		return err
 	}
 	return terminal.ConfirmAction(cmd.Context(), c, a.options.yes, a.deps.Streams, a.policy(s), a.deps.Prompter)
+}
+
+// selectionSubject names the selected items in a confirmation: `label "bug"`, or
+// `2 labels ("bug", "wontfix")`.
+func selectionSubject[T any](kind string, items []T, name func(T) string) string {
+	names := make([]string, len(items))
+	for i, item := range items {
+		names[i] = strconv.Quote(name(item))
+	}
+	if len(items) == 1 {
+		return kind + " " + names[0]
+	}
+	return fmt.Sprintf("%d %ss (%s)", len(items), kind, strings.Join(names, ", "))
 }
 
 // canPrompt reports whether gt may ask questions on this terminal.

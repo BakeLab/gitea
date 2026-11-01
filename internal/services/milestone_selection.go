@@ -5,7 +5,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -39,20 +38,17 @@ func (s Milestones) Find(ctx context.Context, raws []string, byName bool) ([]Mil
 	if err != nil {
 		return nil, err
 	}
-	result := make([]Milestone, len(raws))
-	for i, raw := range raws {
-		if result[i], err = s.FindIn(items, raw, byName); err != nil {
-			return nil, err
-		}
-	}
-	return result, nil
+	return s.finder(byName).FindAll(items, raws)
 }
 
 // FindIn returns the milestone among items, the milestones of the repository, that raw addresses
 // like Find.
 func (s Milestones) FindIn(items []Milestone, raw string, byName bool) (Milestone, error) {
-	finder := NameOrID[Milestone]{Kind: "milestone", Scope: s.Repository, ID: func(m Milestone) int64 { return m.ID }, Name: func(m Milestone) string { return m.Title }, ByName: byName}
-	return finder.Find(items, raw)
+	return s.finder(byName).Find(items, raw)
+}
+
+func (s Milestones) finder(byName bool) NameOrID[Milestone] {
+	return NameOrID[Milestone]{Kind: "milestone", Scope: s.Repository, ID: func(m Milestone) int64 { return m.ID }, Name: func(m Milestone) string { return m.Title }, ByName: byName}
 }
 
 // CreateUnique creates a milestone unless one has its title, ignoring case, which titles would
@@ -62,21 +58,10 @@ func (s Milestones) CreateUnique(ctx context.Context, opts MilestoneOptions, upd
 	if err != nil {
 		return Milestone{}, false, err
 	}
-	finder := NameOrID[Milestone]{Kind: "milestone", Scope: s.Repository, ID: func(m Milestone) int64 { return m.ID }, Name: func(m Milestone) string { return m.Title }, ByName: true}
-	current, err := finder.Find(items, deref(opts.Title))
-	if errors.As(err, new(*NotFoundError)) {
-		milestone, err := s.Create(ctx, opts)
-		return milestone, false, err
-	}
-	if err != nil {
-		return Milestone{}, false, err
-	}
-	if !update {
-		return Milestone{}, false, &ConflictError{Reason: ReasonExists, Kind: "milestone", Key: strconv.Quote(current.Title), Scope: s.Repository}
-	}
-	opts.Title = nil
-	milestone, err := s.Edit(ctx, current.ID, opts)
-	return milestone, true, err
+	return s.finder(true).CreateUnique(items, deref(opts.Title), update, func() (Milestone, error) { return s.Create(ctx, opts) }, func(current Milestone) (Milestone, error) {
+		opts.Title = nil
+		return s.Edit(ctx, current.ID, opts)
+	})
 }
 
 // EditUnique edits current like Edit but refuses to retitle it to the title of another milestone
@@ -85,12 +70,8 @@ func (s Milestones) CreateUnique(ctx context.Context, opts MilestoneOptions, upd
 func (s Milestones) EditUnique(ctx context.Context, existing []Milestone, current Milestone, opts MilestoneOptions) (Milestone, error) {
 	if opts.Title != nil {
 		opts.Title = new(strings.TrimSpace(*opts.Title)) // as Gitea stores it
-	}
-	if opts.Title != nil && *opts.Title != current.Title {
-		for _, other := range existing {
-			if other.ID != current.ID && strings.EqualFold(other.Title, *opts.Title) {
-				return Milestone{}, &ConflictError{Reason: ReasonExists, Kind: "milestone", Key: strconv.Quote(other.Title), Scope: s.Repository}
-			}
+		if err := s.finder(true).RefuseRename(existing, current, *opts.Title); err != nil {
+			return Milestone{}, err
 		}
 	}
 	return s.Edit(ctx, current.ID, opts)
@@ -115,7 +96,7 @@ func (s Milestones) FilterIDs(ctx context.Context, values []string) ([]string, e
 	if err != nil {
 		return nil, err
 	}
-	finder := NameOrID[Milestone]{Kind: "milestone", Scope: s.Repository, ID: func(m Milestone) int64 { return m.ID }, Name: func(m Milestone) string { return m.Title }}
+	finder := s.finder(false)
 	result := make([]string, len(values))
 	for i, raw := range values {
 		item, err := finder.Find(items, raw)

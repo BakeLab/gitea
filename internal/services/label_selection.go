@@ -5,7 +5,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -32,13 +31,7 @@ func (s Labels) Find(ctx context.Context, raws []string, byName bool) ([]Label, 
 	if err != nil {
 		return nil, err
 	}
-	result := make([]Label, len(raws))
-	for i, raw := range raws {
-		if result[i], err = s.FindIn(items, raw, byName); err != nil {
-			return nil, err
-		}
-	}
-	return result, nil
+	return s.finder(byName).FindAll(items, raws)
 }
 
 // FindIn returns the label among items, the labels of the scope, that raw addresses like Find.
@@ -50,20 +43,10 @@ func (s Labels) FindIn(items []Label, raw string, byName bool) (Label, error) {
 // create a second label that name filters cannot tell apart. Then update edits that label, keeping
 // its name, or CreateUnique fails. It reports whether it updated a label.
 func (s Labels) CreateUnique(ctx context.Context, existing []Label, opts LabelOptions, update bool) (Label, bool, error) {
-	current, err := s.finder(true).Find(existing, deref(opts.Name))
-	if errors.As(err, new(*NotFoundError)) {
-		label, err := s.Create(ctx, opts)
-		return label, false, err
-	}
-	if err != nil {
-		return Label{}, false, err
-	}
-	if !update {
-		return Label{}, false, &ConflictError{Reason: ReasonExists, Kind: "label", Key: strconv.Quote(current.Name), Scope: s.Scope()}
-	}
-	opts.Name = nil
-	label, err := s.Edit(ctx, current.ID, opts.KeepArchived(current))
-	return label, true, err
+	return s.finder(true).CreateUnique(existing, deref(opts.Name), update, func() (Label, error) { return s.Create(ctx, opts) }, func(current Label) (Label, error) {
+		opts.Name = nil
+		return s.Edit(ctx, current.ID, opts.KeepArchived(current))
+	})
 }
 
 // EditUnique edits current like Edit, keeping its archived state, but refuses to rename it to the
@@ -72,12 +55,8 @@ func (s Labels) CreateUnique(ctx context.Context, existing []Label, opts LabelOp
 func (s Labels) EditUnique(ctx context.Context, existing []Label, current Label, opts LabelOptions) (Label, error) {
 	if opts.Name != nil {
 		opts.Name = new(strings.TrimSpace(*opts.Name)) // as label create stores it, so that the name keeps addressing the label
-	}
-	if opts.Name != nil && *opts.Name != current.Name {
-		for _, other := range existing {
-			if other.ID != current.ID && strings.EqualFold(other.Name, *opts.Name) {
-				return Label{}, &ConflictError{Reason: ReasonExists, Kind: "label", Key: strconv.Quote(other.Name), Scope: s.Scope()}
-			}
+		if err := s.finder(true).RefuseRename(existing, current, *opts.Name); err != nil {
+			return Label{}, err
 		}
 	}
 	return s.Edit(ctx, current.ID, opts.KeepArchived(current))

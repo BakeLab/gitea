@@ -18,6 +18,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// orgScope registers --org on group, which manages what, such as "labels", of a repository or of
+// that organization, and returns the organization and the target of a command in group: the
+// repository's, or none with --org.
+func (a *application) orgScope(group *cobra.Command, what string) (*string, func(*cobra.Command) (target, error)) {
+	var org string
+	group.PersistentFlags().StringVar(&org, "org", "", "Manage the "+what+" of an `organization` instead of a repository")
+	_ = group.RegisterFlagCompletionFunc("org", a.completeOrgs())
+	return &org, func(cmd *cobra.Command) (target, error) {
+		if org != "" && a.options.repo != "" {
+			return target{}, clierr.Wrap(clierr.Usage, errors.New("--org cannot be combined with --repo"))
+		}
+		return a.resolve(cmd.Context(), org == "")
+	}
+}
+
 // labelScope returns the labels a label command manages: the repository's, or those of --org.
 type labelScope func(*cobra.Command) (services.Labels, error)
 
@@ -30,17 +45,12 @@ number is an ID first, then a name.`
 func (a *application) labelCommand() *cobra.Command {
 	group := &cobra.Command{Use: "label", Short: "Manage labels", Long: `Work with the labels of a repository or, with --org, of an organization. Labels are
 addressed by name or ID.`}
-	var org string
-	group.PersistentFlags().StringVar(&org, "org", "", "Manage the labels of an `organization` instead of a repository")
-	_ = group.RegisterFlagCompletionFunc("org", a.completeOrgs())
+	org, resolve := a.orgScope(group, "labels")
 	scope := func(cmd *cobra.Command) (services.Labels, error) {
-		if org != "" && a.options.repo != "" {
-			return services.Labels{}, clierr.Wrap(clierr.Usage, errors.New("--org cannot be combined with --repo"))
-		}
-		t, err := a.resolve(cmd.Context(), org == "")
-		return services.Labels{Client: t.client, Repository: t.Repo, Organization: org}, err
+		t, err := resolve(cmd)
+		return services.Labels{Client: t.client, Repository: t.Repo, Organization: *org}, err
 	}
-	complete := a.completeScopedLabels(&org)
+	complete := a.completeScopedLabels(org)
 	group.AddCommand(a.labelListCommand(scope), a.labelCreateCommand(scope), a.labelEditCommand(scope, complete), a.labelDeleteCommand(scope, complete),
 		a.labelImportCommand(scope), a.labelExportCommand(scope))
 	return jsonOutput(group, jsonFields[services.Label]())
@@ -309,19 +319,10 @@ $ gt label delete wontfix duplicate --yes`, Annotations: map[string]string{"gt.t
 		if err != nil {
 			return err
 		}
-		for i, label := range found {
-			if slices.ContainsFunc(found[:i], func(other services.Label) bool { return other.ID == label.ID }) {
-				return clierr.Wrap(clierr.Usage, errors.New("label "+args[i]+" is selected more than once"))
-			}
+		if err := refuseRepeats("label", args, found, func(l services.Label) int64 { return l.ID }); err != nil {
+			return err
 		}
-		names := make([]string, len(found))
-		for i, item := range found {
-			names[i] = strconv.Quote(item.Name)
-		}
-		subject := "label " + names[0]
-		if len(found) > 1 {
-			subject = fmt.Sprintf("%d labels (%s)", len(found), strings.Join(names, ", "))
-		}
+		subject := selectionSubject("label", found, func(l services.Label) string { return l.Name })
 		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: "Delete " + subject + " from " + s.Scope() + "?"}); err != nil {
 			return err
 		}

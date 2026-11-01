@@ -27,6 +27,17 @@ func number(raw string) (int64, error) {
 	return n, nil
 }
 
+// refuseRepeats rejects a selection that two arguments address, such as a title and its ID:
+// found holds the item each of args selected.
+func refuseRepeats[T any](kind string, args []string, found []T, id func(T) int64) error {
+	for i, item := range found {
+		if slices.ContainsFunc(found[:i], func(other T) bool { return id(other) == id(item) }) {
+			return clierr.Wrap(clierr.Usage, errors.New(kind+" "+args[i]+" is selected more than once"))
+		}
+	}
+	return nil
+}
+
 func resourceNumbers(args []string) ([]int64, error) {
 	result := make([]int64, len(args))
 	seen := make(map[int64]bool, len(args))

@@ -97,17 +97,17 @@ func milestoneRow(item services.Milestone) []terminal.Cell {
 		{Text: item.Title},
 		{Text: item.State, Color: stateColors[item.State]},
 		due,
-		{Text: milestoneProgress(item)},
+		{Text: progress(item.OpenIssues, item.ClosedIssues)},
 	}
 }
 
-// milestoneProgress summarizes the closed issues of a milestone: "3/5 (60%)".
-func milestoneProgress(item services.Milestone) string {
-	total := item.OpenIssues + item.ClosedIssues
+// progress summarizes the closed issues of a milestone or project: "3/5 (60%)".
+func progress[N int | int64](open, closed N) string {
+	total := open + closed
 	if total == 0 {
 		return "0/0"
 	}
-	return fmt.Sprintf("%d/%d (%d%%)", item.ClosedIssues, total, item.ClosedIssues*100/total)
+	return fmt.Sprintf("%d/%d (%d%%)", closed, total, closed*100/total)
 }
 
 // milestoneName names a milestone in messages: `milestone "v1.0" in alice/x`.
@@ -138,7 +138,7 @@ func milestoneView(t target, now time.Time) func(services.Milestone) terminal.Vi
 			Fields: []terminal.Field{
 				{Label: "State", Value: item.State, PipedOnly: true},
 				{Label: "Due", Value: due, PipedOnly: true},
-				{Label: "Progress", Value: milestoneProgress(item), PipedOnly: true},
+				{Label: "Progress", Value: progress(item.OpenIssues, item.ClosedIssues), PipedOnly: true},
 			},
 			Body: item.Description, Kind: "milestone", URL: milestoneURL(t, item),
 		}

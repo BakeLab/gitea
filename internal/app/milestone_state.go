@@ -35,10 +35,8 @@ $ gt milestone %[1]s v1.0 v1.1`, verb), Annotations: map[string]string{"gt.argum
 		if err != nil {
 			return err
 		}
-		for i, milestone := range selected {
-			if slices.ContainsFunc(selected[:i], func(other services.Milestone) bool { return other.ID == milestone.ID }) {
-				return clierr.Wrap(clierr.Usage, errors.New("milestone "+args[i]+" is selected more than once"))
-			}
+		if err := refuseRepeats("milestone", args, selected, func(m services.Milestone) int64 { return m.ID }); err != nil {
+			return err
 		}
 		results, failures := applyBatch(cmd, selected, func(milestone services.Milestone) string { return "milestone " + milestone.Title }, func(milestone services.Milestone) (services.Milestone, error) {
 			if milestone.State == state {
