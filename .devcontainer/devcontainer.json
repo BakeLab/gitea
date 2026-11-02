@@ -1,6 +1,6 @@
 {
   "name": "gitea-cli DevContainer",
-  "image": "mcr.microsoft.com/devcontainers/go:2.3-trixie",
+  "image": "mcr.microsoft.com/devcontainers/go:1.27-trixie",
   "features": {
     "ghcr.io/devcontainers/features/git-lfs:1.2.5": {}
   },
