@@ -73,7 +73,7 @@ jobs:
         run: make integration-test
     services:
       gitea:
-        image: docker.gitea.com/gitea:28.2.0
+        image: docker.gitea.com/gitea:28.3.0
         cmd:
           - bash
           - -c

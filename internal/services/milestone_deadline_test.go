@@ -14,10 +14,11 @@ import (
 func TestMilestoneEditPreservesDeadlineUnlessExplicitlyCleared(t *testing.T) {
 	reads := 0
 	want := "2028-01-15T23:59:59-08:00"
+	current := `{"id":9,"due_on":"2028-01-15T23:59:59-08:00"}`
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			reads++
-			_, _ = w.Write([]byte(`{"id":9,"due_on":"2028-01-15T23:59:59-08:00"}`))
+			_, _ = w.Write([]byte(current))
 			return
 		}
 		options := requestJSON(t, r)
@@ -33,4 +34,8 @@ func TestMilestoneEditPreservesDeadlineUnlessExplicitlyCleared(t *testing.T) {
 	_, err = service.Edit(context.Background(), 9, MilestoneOptions{Deadline: &want})
 	require.NoError(t, err)
 	require.Equal(t, 1, reads)
+	current = `{"id":9}`
+	_, err = service.Edit(context.Background(), 9, MilestoneOptions{State: &state})
+	require.NoError(t, err)
+	require.Equal(t, 2, reads)
 }

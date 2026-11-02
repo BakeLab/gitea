@@ -4,6 +4,7 @@
 package services
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -249,13 +250,13 @@ func (s Milestones) Edit(ctx context.Context, id int64, opts MilestoneOptions) (
 	if err != nil {
 		return Milestone{}, err
 	}
-	// Gitea clears omitted due_on values, so unrelated edits must resend the date.
+	// Gitea before 28.3 clears omitted due_on, 28.3 panics on null (https://github.com/go-gitea/gitea/pull/40171), so resend the date or the zero time.
 	if opts.Deadline == nil {
 		current, err := s.get(ctx, owner, repo, id)
 		if err != nil {
 			return Milestone{}, err
 		}
-		deadline = current.Deadline
+		deadline = cmp.Or(current.Deadline, &time.Time{})
 	}
 	edit := gitea.EditMilestoneOption{Title: deref(opts.Title), Description: opts.Description, Deadline: deadline}
 	if opts.State != nil {
