@@ -56,13 +56,9 @@ type installation struct {
 	kind installKind
 }
 
-// detectInstallation tells how the gt at executable was installed: by its version stamp and,
+// detectInstallation tells how the gt at path was installed: by its version stamp and,
 // for release builds, by the directory a package manager put it in.
-func detectInstallation(executable, stamped, goos string) installation {
-	path := executable
-	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
-		path = resolved
-	}
+func detectInstallation(path, stamped, goos string) installation {
 	i := installation{path: path}
 	slashed := filepath.ToSlash(path)
 	switch {
@@ -87,6 +83,9 @@ func (a *application) installation() (installation, error) {
 	executable, err := a.deps.Executable()
 	if err != nil {
 		return installation{}, fmt.Errorf("cannot find the gt executable: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
 	}
 	return detectInstallation(executable, version.Version, runtime.GOOS), nil
 }
