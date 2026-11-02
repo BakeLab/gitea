@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -69,7 +70,9 @@ func TestDownloadsPublishOnlyCompleteFiles(t *testing.T) {
 	require.NoError(t, writeOutput(cmd, private, func(w io.Writer) error { _, err := io.WriteString(w, "{}"); return err }))
 	info, err = os.Stat(private)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "API responses stay private")
+	if runtime.GOOS != "windows" { // Windows has no permission bits to keep private
+		require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "API responses stay private")
+	}
 	missing := filepath.Join(directory, "missing", "x.txt")
 	err = writeOutput(cmd, missing, func(w io.Writer) error { return nil })
 	require.ErrorIs(t, err, os.ErrNotExist)

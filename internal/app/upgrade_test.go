@@ -107,6 +107,16 @@ func TestUpgrade(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, entries, 1)
 	})
+	t.Run("removes the old executable on Windows when it no longer runs", func(t *testing.T) {
+		dir := t.TempDir()
+		executable, staged := filepath.Join(dir, "gt.exe"), filepath.Join(dir, "gt.new")
+		require.NoError(t, os.WriteFile(executable, []byte("old"), 0o755))
+		require.NoError(t, os.WriteFile(staged, []byte("new"), 0o755))
+		require.NoError(t, replaceExecutable(staged, executable, "windows"))
+		entries, err := os.ReadDir(dir)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+	})
 	t.Run("keeps the executable on a checksum mismatch", func(t *testing.T) {
 		var requests atomic.Int32
 		server := releaseServer(t, []byte("gt 0.3.0"), hex.EncodeToString(make([]byte, 32)), &requests, nil)

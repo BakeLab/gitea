@@ -99,7 +99,7 @@ func TestRunDownloadExtractsArtifactsByName(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			require.Equal(t, strings.ReplaceAll(tc.out, "{dir}", dir), diagnostics.String())
+			require.Equal(t, strings.ReplaceAll(strings.ReplaceAll(tc.out, "{dir}/", dir+string(filepath.Separator)), "{dir}", dir), diagnostics.String())
 			for name, content := range tc.files {
 				data, err := os.ReadFile(filepath.Join(dir, name))
 				require.NoError(t, err, name)

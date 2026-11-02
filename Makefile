@@ -9,6 +9,7 @@ GOFILES := $(shell find . -name "*.go" -type f)
 GOFUMPT_PACKAGE ?= mvdan.cc/gofumpt@v0.12.0 # renovate: datasource=go
 GOLANGCI_LINT_PACKAGE ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 # renovate: datasource=go
 DEADCODE_PACKAGE ?= golang.org/x/tools/cmd/deadcode@v0.52.0 # renovate: datasource=go
+WINDOWS_TEST_IMAGE ?= dockurr/windows:6.06@sha256:16fd7c39a3e48bb946d29c59dc6015942e5b900a1fa5d7e5552053bfc48ee2ea # renovate: datasource=docker
 
 BUILD_VERSION ?= $(shell git describe --tags --match 'v*' --always | sed 's/-/+/' | sed 's/^v//')
 BUILD_VERSION_TAG ?= $(subst +,_,$(BUILD_VERSION))
@@ -120,6 +121,11 @@ install-docs: docs
 .PHONY: unit-test
 unit-test:
 	$(GO) test $(UNIT_PACKAGES)
+
+# Runs the unit tests on Windows Server Core in a QEMU VM on the docker host, see CONTRIBUTING.md.
+.PHONY: test-windows
+test-windows:
+	@WINDOWS_TEST_IMAGE=$(WINDOWS_TEST_IMAGE) ./scripts/test-windows.sh
 
 .PHONY: integration-test
 integration-test:

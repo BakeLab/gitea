@@ -167,8 +167,12 @@ func TestStripControlsIsLinear(t *testing.T) {
 		strings.Repeat("a long code block line without any color in \u200fit\n", 20000) + "\x1b[1mend\x1b[m",
 	} {
 		start := time.Now()
+		_ = strings.Map(func(r rune) rune { return r }, text)
+		linear := time.Since(start)
+		start = time.Now()
 		stripped := stripControls(text)
-		require.Less(t, time.Since(start), time.Second, "stripping %d bytes took too long", len(text))
+		// Measured against one pass over the text on the same machine, so a slow one does not fail the test.
+		require.Less(t, time.Since(start), 50*linear+time.Second, "stripping %d bytes took too long; one pass took %v", len(text), linear)
 		require.Equal(t, strings.ReplaceAll(text, "\u200f", ""), stripped)
 	}
 }

@@ -112,7 +112,7 @@ func TestRejectCredentialsAsksHelpersToEraseTheAccount(t *testing.T) {
 	_, err := runner.Output(ctx, home, false, "config", "--global", "credential.helper", "!f() { echo \"op=$1\" >> '"+log+"'; cat >> '"+log+"'; }; f")
 	require.NoError(t, err)
 	store := filepath.Join(home, "git-credentials")
-	_, err = runner.Output(ctx, home, false, "config", "--global", "--add", "credential.helper", "store --file="+store)
+	_, err = runner.Output(ctx, home, false, "config", "--global", "--add", "credential.helper", "store --file="+filepath.ToSlash(store)) // the shell would eat the backslashes of a Windows path
 	require.NoError(t, err)
 	own := "http://alice:own-password@localhost:3001\n"
 	require.NoError(t, os.WriteFile(store, []byte(own+"http://alice:gt-token@localhost:3001/gitea/alice/project.git\n"), 0o600))
@@ -146,10 +146,12 @@ func TestGitMissingConfigValueCarriesExitCode(t *testing.T) {
 }
 
 func TestPerOperationCredentialAndTLSArguments(t *testing.T) {
-	args, err := CredentialArguments("HTTPS://Example.test:443/gitea/", "/usr/bin/gt", "alice", "")
+	executable, err := filepath.Abs("/usr/bin/gt") // gains a drive letter on Windows
+	require.NoError(t, err)
+	args, err := CredentialArguments("HTTPS://Example.test:443/gitea/", executable, "alice", "")
 	require.NoError(t, err)
 	prefix := "credential.https://example.test/gitea."
-	require.Equal(t, []string{"-c", prefix + "helper=", "-c", prefix + "helper=!/usr/bin/gt auth git-credential --host https://example.test/gitea --user alice", "-c", prefix + "useHttpPath=true"}, args)
+	require.Equal(t, []string{"-c", prefix + "helper=", "-c", prefix + "helper=!" + shellquote.Join(executable) + " auth git-credential --host https://example.test/gitea --user alice", "-c", prefix + "useHttpPath=true"}, args)
 	_, err = CredentialArguments("https://example.test", "gt", "", "")
 	require.Error(t, err)
 

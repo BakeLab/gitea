@@ -155,6 +155,7 @@ func TestRunReportsWhereADeclinedReviewWasSaved(t *testing.T) {
 	defer server.Close()
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)
+	t.Setenv("TMP", tmp) // Windows reads TMP rather than TMPDIR
 	var stderr bytes.Buffer
 	store := settings.New(t.TempDir())
 	deps := app.Dependencies{

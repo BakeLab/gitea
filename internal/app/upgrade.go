@@ -446,5 +446,6 @@ func replaceExecutable(staged, executable, goos string) error {
 	if err := os.Rename(staged, executable); err != nil {
 		return errors.Join(err, os.Rename(old, executable))
 	}
+	_ = os.Remove(old) // fails while the old executable still runs; the next upgrade replaces it
 	return nil
 }

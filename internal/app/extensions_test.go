@@ -722,6 +722,9 @@ func TestScriptExtensionIsClonedAtItsCommit(t *testing.T) {
 }
 
 func TestScriptExtensionSymlinkIsRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git checks symlinks out as plain files on Windows unless core.symlinks is enabled")
+	}
 	gittest.Isolate(t)
 	source := filepath.Join(t.TempDir(), "gt-hello")
 	runGit := func(args ...string) string {

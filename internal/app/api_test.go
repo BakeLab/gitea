@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -71,7 +72,9 @@ func TestAPIFieldsPlaceholdersAndAtomicPagination(t *testing.T) {
 	require.Equal(t, "[{\"number\":1}]\n[{\"number\":2}]\n", string(data))
 	info, err := os.Stat(output)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	if runtime.GOOS != "windows" { // Windows has no permission bits to keep private
+		require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 	failSecond = true
 	require.NoError(t, os.Remove(output))
 	require.Error(t, Execute(context.Background(), deps, args))

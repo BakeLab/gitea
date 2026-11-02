@@ -299,9 +299,9 @@ func TestResponseTimeoutStartsOnceTheBodyIsSent(t *testing.T) {
 		_, _ = w.Write(data)
 	}))
 	defer server.Close()
-	client := New(server.URL, "", false).WithResponseTimeout(50 * time.Millisecond)
+	client := New(server.URL, "", false).WithResponseTimeout(200 * time.Millisecond) // far above a chunk pause, so a loaded machine cannot stall a chunk past it
 	upload := func() (string, error) {
-		response, err := client.Send(context.Background(), http.MethodPost, "repos/a/b/releases/1/assets", &slowReader{chunks: 8, pause: 20 * time.Millisecond}, nil)
+		response, err := client.Send(context.Background(), http.MethodPost, "repos/a/b/releases/1/assets", &slowReader{chunks: 40, pause: 10 * time.Millisecond}, nil)
 		if err != nil {
 			return "", err
 		}
@@ -312,11 +312,11 @@ func TestResponseTimeoutStartsOnceTheBodyIsSent(t *testing.T) {
 	// The upload takes longer than the timeout, which bounds only the wait for the answer.
 	data, err := upload()
 	require.NoError(t, err)
-	require.Equal(t, "xxxxxxxx", data)
-	delay.Store(int64(200 * time.Millisecond))
+	require.Equal(t, strings.Repeat("x", 40), data)
+	delay.Store(int64(500 * time.Millisecond))
 	_, err = upload()
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.ErrorContains(t, err, "no answer within 50ms")
+	require.ErrorContains(t, err, "no answer within 200ms")
 }
 
 func TestResponseTimeoutBoundsAnUploadThatStopsGoingOut(t *testing.T) {

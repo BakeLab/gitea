@@ -77,6 +77,12 @@ coverage is enabled by `GITEA_CLI_TEST_REPOSITORY_ROOT` (the server's repository
 root, with `[security] IMPORT_LOCAL_PATHS = true`, for migration) and
 `GITEA_CLI_TEST_SSH_ENDPOINT` (the server's SSH endpoint as `host:port`).
 
+`make test-windows` cross-compiles the unit test binaries, installs Windows Server 2025 Core in a
+[dockur/windows](https://github.com/dockur/windows) QEMU VM on the docker host and runs them
+there. The host must allow privileged containers. The VM uses KVM when the host has `/dev/kvm`,
+otherwise Windows is emulated and much slower. The race detector is off, as it needs cgo. CI runs
+this weekly and on demand.
+
 ## Code review
 
 Changes to gitea-cli must be reviewed before they are accepted—no matter who

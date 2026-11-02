@@ -102,7 +102,9 @@ func TestAccountConfigOnlyChangesSelectedAccountMetadata(t *testing.T) {
 	host := snapshot.Hosts.Hosts[instance]
 	require.Equal(t, "alice", host.User)
 	require.Equal(t, tokenAccounts(settings.StoreFile, "alice")["alice"], host.Users["alice"])
-	require.Equal(t, settings.Account{AuthMethod: "token", CredentialStore: "file", SSHKey: "/keys/my key", SSHAgent: true, SSHCertPrincipal: "git", SSHKeyFingerprint: "SHA256:abcd"}, host.Users["bob"])
+	sshKey, err := filepath.Abs("/keys/my key") // a rooted path gains a drive letter on Windows
+	require.NoError(t, err)
+	require.Equal(t, settings.Account{AuthMethod: "token", CredentialStore: "file", SSHKey: sshKey, SSHAgent: true, SSHCertPrincipal: "git", SSHKeyFingerprint: "SHA256:abcd"}, host.Users["bob"])
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"config", "get", "ssh_agent", "--host", instance, "--user", "bob", "--show-source", "--json"}))
 	require.JSONEq(t, `{"ssh_agent":{"value":true,"source":"hosts.yml https://example.org/base user bob"}}`, out.String())

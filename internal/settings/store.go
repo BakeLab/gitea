@@ -446,7 +446,7 @@ func AtomicWrite(name string, data []byte) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(temp.Name(), filename)
+	return rename(temp.Name(), filename)
 }
 
 // linkTarget follows the symbolic links of filename to the file they name, which may not exist.

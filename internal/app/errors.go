@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"syscall"
 	"time"
 
 	"gitea.dev/cli/internal/services"
@@ -224,7 +223,7 @@ func unreachable(err error) string {
 	var dnsErr *net.DNSError
 	var opErr *net.OpError
 	switch {
-	case errors.Is(err, syscall.ECONNREFUSED):
+	case connectionRefused(err):
 		return "connection refused"
 	case errors.As(err, &dnsErr) && dnsErr.IsNotFound:
 		return "no such host"

@@ -230,24 +230,72 @@ func (s *screen) String() string {
 // text a step waits for.
 var csiSequence = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]")
 
+// newestReader serves keys to the latest Read caller. A finished form's read cannot be canceled on
+// every platform, such as a pipe on Windows, and would otherwise swallow the keys of the next form.
+type newestReader struct {
+	mu     sync.Mutex
+	buf    []byte
+	newest int
+	closed bool
+}
+
+func (r *newestReader) Read(p []byte) (int, error) {
+	r.mu.Lock()
+	r.newest++
+	id := r.newest
+	r.mu.Unlock()
+	for {
+		r.mu.Lock()
+		switch {
+		case id != r.newest:
+			if r.closed {
+				r.mu.Unlock()
+				return 0, io.EOF
+			}
+		case len(r.buf) > 0:
+			n := copy(p, r.buf)
+			r.buf = r.buf[n:]
+			r.mu.Unlock()
+			return n, nil
+		case r.closed:
+			r.mu.Unlock()
+			return 0, io.EOF
+		}
+		r.mu.Unlock()
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func (r *newestReader) WriteString(s string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.buf = append(r.buf, s...)
+	return len(s), nil
+}
+
+func (r *newestReader) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed = true
+	return nil
+}
+
 // keyStep sends key once the form drew show after the previous step's key.
 type keyStep struct{ show, key string }
 
 // screenPrompter is a prompter whose terminal sends the key of each step once the form shows the
 // step's text, so the form handled the keys before, and the focus or form change they cause,
-// whatever the speed of the machine. Unlike a plain reader, a pipe lets a finished form stop
-// reading, so the next form gets the keys that follow. Its context ends a form left waiting for
-// keys that never come.
+// whatever the speed of the machine. Its input gives keys to the newest reader only, so the next
+// form gets the keys that follow. Its context ends a form left waiting for keys that never come.
 func screenPrompter(t *testing.T, steps ...keyStep) (*FormPrompter, *screen, context.Context) {
 	t.Helper()
-	in, out, err := os.Pipe()
-	require.NoError(t, err)
+	in := &newestReader{}
+	out := in
 	t.Cleanup(func() { _ = in.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
 	drawn := &screen{}
 	go func() {
-		defer out.Close()
 		shown := 0
 		for _, step := range steps {
 			for !strings.Contains(csiSequence.ReplaceAllString(drawn.String()[shown:], ""), step.show) {
