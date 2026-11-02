@@ -41,7 +41,6 @@ jobs:
       pull-requests: write
     env:
       GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
-      GITEA_CLI_HOST: ${{ gitea.server_url }}
       GITEA_CLI_REPO: ${{ gitea.repository }}
     steps:
       - run: gt pr comment ${{ gitea.event.pull_request.number }} --no-input --body "Build passed."

@@ -66,10 +66,14 @@ func (a *application) resolve(ctx context.Context, requireRepo bool) (target, er
 	return a.resolveTarget(ctx, requireRepo, true)
 }
 
-// envHost returns the instance named by GITEA_CLI_HOST, else GITEA_INSTANCE_URL, and the variable
-// that named it. A GITEA_TOKEN belongs to this instance.
+// envHost returns the instance the environment names and the variable naming it. A GITEA_TOKEN
+// belongs to this instance.
 func (a *application) envHost() (host, key string) {
-	for _, key := range []string{"GITEA_CLI_HOST", "GITEA_INSTANCE_URL"} {
+	keys := []string{"GITEA_CLI_HOST", "GITEA_INSTANCE_URL"}
+	if a.deps.Getenv("GITEA_ACTIONS") == "true" && a.deps.Getenv("GITEA_TOKEN") != "" {
+		keys = append(keys, "GITEA_SERVER_URL", "GITHUB_SERVER_URL")
+	}
+	for _, key := range keys {
 		if value := a.deps.Getenv(key); value != "" {
 			return value, key
 		}
@@ -574,7 +578,7 @@ func (a *application) environmentSSHRemote(err error, raw string, configured map
 
 // cloneInstance selects the instance of the clone in the working directory for a target that
 // names none, such as a command that needs no repository or a repository named without an
-// instance, when nothing else would select one: no GITEA_CLI_HOST or GITEA_INSTANCE_URL, no
+// instance, when nothing else would select one: no instance from the environment, no
 // default_host and several instances, or none. Outside such a clone it does nothing.
 func (a *application) cloneInstance(ctx context.Context, t *target, s settings.Snapshot) {
 	if value, _ := a.envHost(); value != "" || s.Preferences.DefaultHost != "" || len(selectableInstances(s.Hosts.Hosts)) == 1 {
@@ -594,7 +598,7 @@ func (a *application) isGitRemote(ctx context.Context, name string) bool {
 	return err == nil && slices.Contains(strings.Fields(remotes), name)
 }
 
-// selectHost picks the instance: the repository's, --host, GITEA_CLI_HOST or GITEA_INSTANCE_URL,
+// selectHost picks the instance: the repository's, --host, the environment,
 // default_host, the only instance with an account, or the clone's (see cloneInstance).
 func (a *application) selectHost(t *target, s settings.Snapshot) error {
 	if a.options.host != "" {

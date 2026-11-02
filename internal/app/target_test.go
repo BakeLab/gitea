@@ -216,7 +216,7 @@ func TestEnvironmentTokenCannotCrossInstances(t *testing.T) {
 
 func TestEnvironmentTokenWithoutItsInstanceNamesTheVariables(t *testing.T) {
 	deps, out, _ := testDeps(t)
-	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "secret"})
+	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "secret", "GITHUB_ACTIONS": "true", "GITHUB_SERVER_URL": "https://github.com"})
 	err := Execute(context.Background(), deps, []string{"api", "user"})
 	require.EqualError(t, err, "GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance")
 	require.Equal(t, clierr.Usage, clierr.ExitCode(err))
@@ -252,6 +252,13 @@ func TestEnvironmentTokenBelongsToTheDefaultEnvironmentInstance(t *testing.T) {
 	deps.Getenv = envFunc(map[string]string{"GITEA_INSTANCE_URL": server.URL, "GITEA_TOKEN": "secret"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user", "--host", bare}))
 	require.NoError(t, Execute(context.Background(), deps, []string{"api", "repos/{owner}/{repo}", "-R", bare + "/alice/project"}))
+	deps.Getenv = envFunc(map[string]string{"GITEA_ACTIONS": "true", "GITHUB_SERVER_URL": server.URL, "GITEA_TOKEN": "secret"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user"}))
+	deps.Getenv = envFunc(map[string]string{"GITEA_ACTIONS": "true", "GITEA_SERVER_URL": server.URL, "GITHUB_SERVER_URL": "https://other.example.org", "GITEA_TOKEN": "secret"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user"}))
+	require.NoError(t, testManager(t, deps).Register(server.URL, "alice", "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: "secret"}))
+	deps.Getenv = envFunc(map[string]string{"GITEA_ACTIONS": "true", "GITEA_SERVER_URL": "https://other.example.org"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "user"}))
 	deps.Getenv = envFunc(map[string]string{"GITEA_INSTANCE_URL": server.URL, "GITEA_TOKEN": "secret\nother"})
 	err := Execute(context.Background(), deps, []string{"api", "user"})
 	require.EqualError(t, err, "GITEA_TOKEN must contain one token")

@@ -367,7 +367,7 @@ func (a *application) prepareExtension(extension extensions.Extension, args []st
 func (a *application) extensionCredentials(ctx context.Context, extension extensions.Extension) (map[string]string, error) {
 	set := map[string]string{}
 	if token := a.deps.Getenv("GITEA_TOKEN"); token != "" {
-		// GITEA_TOKEN belongs to the instance in GITEA_CLI_HOST or GITEA_INSTANCE_URL and to an account
+		// GITEA_TOKEN belongs to the instance the environment names and to an account
 		// gt cannot check without a request; pass it on only when --host selects that instance and
 		// no account is named.
 		host, key := a.envHost()

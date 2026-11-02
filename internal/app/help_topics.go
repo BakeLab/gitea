@@ -345,6 +345,8 @@ Environment variables:
 
   GITEA_CLI_CONFIG_DIR                configuration directory; gt config path prints the files
   GITEA_CLI_HOST, GITEA_INSTANCE_URL  instance URL, overriding default_host
+  GITEA_SERVER_URL                    in Gitea Actions, the GITEA_TOKEN instance when no other is set,
+                                      else GITHUB_SERVER_URL
   GITEA_TOKEN                         access token for that instance instead of stored credentials
   GITEA_INSTANCE_INSECURE             with GITEA_TOKEN, skip TLS verification when true
   GITEA_INSTANCE_SSH_HOST             with GITEA_TOKEN, SSH host that identifies the instance's remotes
