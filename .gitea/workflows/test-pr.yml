@@ -40,6 +40,38 @@ jobs:
       - name: Unit test and coverage
         run: make unit-test-coverage
 
+  windows-test:
+    name: Unit Test On Windows
+    runs-on: ubuntu-latest-kvm
+    env:
+      DOCKER_CONFIG: /tmp/docker-noauth # an empty config, so that pulls are anonymous rather than with the host's stale credentials
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+
+      - name: Prepare anonymous docker config
+        run: mkdir -p "$DOCKER_CONFIG" && echo '{}' > "$DOCKER_CONFIG/config.json"
+
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/windows-vm
+          key: windows-vm
+
+      - name: Unit test on Windows
+        id: test-windows
+        run: WINDOWS_TEST_CACHE="$HOME/.cache/windows-vm" make test-windows
+        env:
+          WINDOWS_TEST_TIMEOUT: 45
+
+      - if: always() && steps.test-windows.outputs.save-cache == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/windows-vm
+          key: windows-vm
+
   integration-test:
     name: Integration Test
     runs-on: ubuntu-latest

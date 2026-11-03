@@ -125,7 +125,7 @@ unit-test:
 # Runs the unit tests on Windows Server Core in a QEMU VM on the docker host, see CONTRIBUTING.md.
 .PHONY: test-windows
 test-windows:
-	@WINDOWS_TEST_IMAGE=$(WINDOWS_TEST_IMAGE) ./scripts/test-windows.sh
+	@GO=$(GO) WINDOWS_TEST_IMAGE=$(WINDOWS_TEST_IMAGE) ./scripts/test-windows.sh
 
 .PHONY: integration-test
 integration-test:

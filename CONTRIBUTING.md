@@ -81,7 +81,7 @@ root, with `[security] IMPORT_LOCAL_PATHS = true`, for migration) and
 [dockur/windows](https://github.com/dockur/windows) QEMU VM on the docker host and runs them
 there. The host must allow privileged containers. The VM uses KVM when the host has `/dev/kvm`,
 otherwise Windows is emulated and much slower. The race detector is off, as it needs cgo. CI runs
-this weekly and on demand.
+this on every pull request.
 
 ## Code review
 
