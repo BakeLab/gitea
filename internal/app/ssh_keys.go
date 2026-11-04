@@ -189,16 +189,9 @@ $ cat key.pub | gt ssh-key create`,
 			if len(args) == 0 && a.deps.Streams.InTTY {
 				return clierr.Wrap(clierr.Usage, errors.New("supply a public key file, such as ~/.ssh/id_ed25519.pub, or pipe a key to stdin"))
 			}
-			data, err := readFileOrStdin(a.deps.Streams.In, source)
-			if err != nil {
-				return fmt.Errorf("read public key: %w", err)
-			}
-			key, comment, content, err := publicKey(data, source, cmd.CommandPath())
-			if err != nil {
-				return err
-			}
 			hostname, _ := os.Hostname()
-			if title, err = keyTitle(cmd, title, comment, hostname); err != nil {
+			key, title, content, err := a.readPublicKey(cmd, source, cmd.CommandPath(), title, hostname)
+			if err != nil {
 				return err
 			}
 			target, err := a.resolve(cmd.Context(), false)
@@ -260,6 +253,22 @@ $ gt ssh-key delete 2 --yes`,
 			return a.deleteConfirmed(cmd, sshKeyLabel(key), func() error { return service.Delete(cmd.Context(), id) })
 		},
 	}
+}
+
+// readPublicKey reads the key to add from source, a file or - for stdin, and returns it with its
+// title, as keyTitle chooses it, and the content to send Gitea. command adds a public key named
+// after source, for the hint when source holds a private key.
+func (a *application) readPublicKey(cmd *cobra.Command, source, command, title, fallback string) (ssh.PublicKey, string, string, error) {
+	data, err := readFileOrStdin(a.deps.Streams.In, source)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("read public key: %w", err)
+	}
+	key, comment, content, err := publicKey(data, source, command)
+	if err != nil {
+		return nil, "", "", err
+	}
+	title, err = keyTitle(cmd, title, comment, fallback)
+	return key, title, content, err
 }
 
 // keyTitle returns the title of a key that is added: --title when given, else the key's comment,

@@ -80,15 +80,8 @@ comment.`,
 		Example: `$ gt repo deploy-key add ci.pub --title "Build server"
 $ gt repo deploy-key add deploy.pub --title "Release bot" --allow-write`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			data, err := readFileOrStdin(a.deps.Streams.In, args[0])
+			_, title, content, err := a.readPublicKey(cmd, args[0], cmd.CommandPath(), title, "")
 			if err != nil {
-				return fmt.Errorf("read public key: %w", err)
-			}
-			_, comment, content, err := publicKey(data, args[0], cmd.CommandPath())
-			if err != nil {
-				return err
-			}
-			if title, err = keyTitle(cmd, title, comment, ""); err != nil {
 				return err
 			}
 			t, err := a.resolve(cmd.Context(), true)

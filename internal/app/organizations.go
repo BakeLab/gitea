@@ -55,6 +55,16 @@ Teams grant members access to an organization's repositories; see gt team.`}
 	return jsonOutput(group, jsonFields[services.Organization]())
 }
 
+// organizationTable is the table of organizations, for the caller to give a context.
+func organizationTable(t target) listSpec[services.Organization] {
+	return listSpec[services.Organization]{
+		Columns: []terminal.Column{{Header: "Name"}, {Header: "Full name", Flex: true}, {Header: "Visibility"}},
+		Row: func(org services.Organization) []terminal.Cell {
+			return []terminal.Cell{{Text: org.Name, Link: webURL(t, org.Name), Bold: true}, {Text: org.FullName}, {Text: org.Visibility, Color: visibilityColors[org.Visibility]}}
+		},
+	}
+}
+
 func (a *application) organizationListCommand() *cobra.Command {
 	var all bool
 	var username string
@@ -80,13 +90,8 @@ $ gt org list --all`,
 			if err != nil {
 				return err
 			}
-			spec := listSpec[services.Organization]{
-				Columns: []terminal.Column{{Header: "Name"}, {Header: "Full name", Flex: true}, {Header: "Visibility"}},
-				Context: "organizations you belong to", Empty: "you don't belong to any organization",
-				Row: func(org services.Organization) []terminal.Cell {
-					return []terminal.Cell{{Text: org.Name, Link: webURL(target, org.Name), Bold: true}, {Text: org.FullName}, {Text: org.Visibility, Color: visibilityColors[org.Visibility]}}
-				},
-			}
+			spec := organizationTable(target)
+			spec.Context, spec.Empty = "organizations you belong to", "you don't belong to any organization"
 			switch {
 			case all:
 				spec.Context, spec.Empty = "organizations on "+target.Host, "no organizations on "+target.Host

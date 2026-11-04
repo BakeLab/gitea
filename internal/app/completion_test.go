@@ -59,6 +59,24 @@ func complete(t *testing.T, deps Dependencies, out *bytes.Buffer, args ...string
 	return lines[:len(lines)-1], cobra.ShellCompDirective(directive)
 }
 
+func TestAdminCompletionOffersAccountsOnlyForTheUsername(t *testing.T) {
+	requests := 0
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`[{"id":2,"login":"bob"}]`))
+	}))
+	defer server.Close()
+	deps, out, _ := serverDeps(t, server.URL)
+	for _, args := range []string{"admin user view bob ", "admin user edit bob ", "admin user delete bob ", "admin user rename bob ", "admin user key delete bob ", "admin user badge list bob ", "admin user badge add bob ", "admin user badge delete bob one ", "admin cron run update_mirrors "} {
+		items, directive := complete(t, deps, out, append(strings.Fields(args), "")...)
+		require.Empty(t, items, args)
+		require.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive, args)
+	}
+	require.Zero(t, requests, "no account is left to complete")
+	items, _ := complete(t, deps, out, "admin", "user", "key", "delete", "")
+	require.Contains(t, items, "bob")
+}
+
 func TestPullCompletionStopsAfterTheLastPositionalArgument(t *testing.T) {
 	requests := 0
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -144,6 +162,7 @@ func TestCompletionOffersPathsOnlyWherePathsAreExpected(t *testing.T) {
 		"api --input ":                   cobra.ShellCompDirectiveDefault,
 		"auth login --ssh-key ":          cobra.ShellCompDirectiveDefault,
 		"ssh-key create ":                cobra.ShellCompDirectiveDefault,
+		"admin user key create bob ":     cobra.ShellCompDirectiveDefault,
 		"release asset upload ":          cobra.ShellCompDirectiveNoFileComp,
 		"release asset upload v1 ":       cobra.ShellCompDirectiveDefault,
 		"release asset upload v1 a.txt ": cobra.ShellCompDirectiveDefault,

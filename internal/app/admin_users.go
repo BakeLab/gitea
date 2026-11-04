@@ -19,10 +19,11 @@ import (
 
 func (a *application) adminCommand() *cobra.Command {
 	group := &cobra.Command{Use: "admin", Short: "Manage instance administration", Long: "Administer the Gitea instance. These commands need an administrator account."}
-	users := &cobra.Command{Use: "user", Short: "Manage registered accounts", Long: `List, view, create, edit and delete the accounts of the instance. These commands need an
-administrator account.`}
-	users.AddCommand(a.adminUserListCommand(), a.adminUserViewCommand(), a.adminUserChangeCommand("create"), a.adminUserChangeCommand("edit"), a.adminUserDeleteCommand())
+	users := &cobra.Command{Use: "user", Short: "Manage registered accounts", Long: `List, view, create, edit, rename and delete the accounts of the instance, and manage their
+SSH keys and badges. These commands need an administrator account.`}
+	users.AddCommand(a.adminUserListCommand(), a.adminUserViewCommand(), a.adminUserChangeCommand("create"), a.adminUserChangeCommand("edit"), a.adminUserRenameCommand(), a.adminUserDeleteCommand(), a.adminUserKeyCommand(), a.adminUserBadgeCommand())
 	group.AddCommand(jsonOutput(users, jsonFields[services.AdminUser]()))
+	group.AddCommand(a.adminOrganizationCommand(), a.adminCronCommand(), a.adminEmailCommand())
 	return group
 }
 
@@ -102,7 +103,7 @@ $ gt admin user list --jq '.[].email'`,
 
 func (a *application) adminUserViewCommand() *cobra.Command {
 	return &cobra.Command{
-		Use: "view <username>", Short: "View an account", Args: argsExact(1), ValidArgsFunction: a.completeAdminUsers(),
+		Use: "view <username>", Short: "View an account", Args: argsExact(1), ValidArgsFunction: firstArg(a.completeAdminUsers()),
 		Example: `$ gt admin user view bob
 $ gt admin user view bob --json email,admin`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -152,7 +153,7 @@ func (a *application) adminUserChangeCommand(verb string) *cobra.Command {
 	var maxRepos int
 	opts := services.AdminUserOptions{}
 	command := &cobra.Command{
-		Use: "edit <username>", Short: "Edit an account", Args: argsExact(1), ValidArgsFunction: a.completeAdminUsers(),
+		Use: "edit <username>", Short: "Edit an account", Args: argsExact(1), ValidArgsFunction: firstArg(a.completeAdminUsers()),
 		Example: `$ gt admin user edit bob --full-name "Bob Builder" --restricted
 # reset a password and require a new one on the next sign-in
 $ gt admin user edit bob --password-file pw.txt --must-change-password
@@ -325,7 +326,7 @@ func validEmail(email string) error {
 func (a *application) adminUserDeleteCommand() *cobra.Command {
 	var purge bool
 	cmd := &cobra.Command{
-		Use: "delete <username>", Short: "Delete an account", Args: argsExact(1), ValidArgsFunction: a.completeAdminUsers(),
+		Use: "delete <username>", Short: "Delete an account", Args: argsExact(1), ValidArgsFunction: firstArg(a.completeAdminUsers()),
 		Long: `Delete an account. Gitea refuses while the user owns repositories or organizations, unless
 --purge deletes the account with everything it owns.`,
 		Example: `$ gt admin user delete spammer

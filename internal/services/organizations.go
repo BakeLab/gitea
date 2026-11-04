@@ -157,14 +157,18 @@ func listTotal(ctx context.Context, client *transport.Client, list func(context.
 	return nil, nil
 }
 
+func createOrgOption(opts OrganizationOptions) gitea.CreateOrgOption {
+	return gitea.CreateOrgOption{
+		Name: deref(opts.Name), FullName: deref(opts.FullName), Description: deref(opts.Description),
+		Website: deref(opts.Website), Location: deref(opts.Location), Visibility: gitea.VisibleType(deref(opts.Visibility)),
+		RepoAdminChangeTeamAccess: deref(opts.RepoAdminChangeTeamAccess),
+	}
+}
+
 // Create creates an organization owned by the selected account.
 func (s Organizations) Create(ctx context.Context, opts OrganizationOptions) (Organization, error) {
 	org, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Organization, *gitea.Response, error) {
-		return c.Organizations.CreateOrg(ctx, gitea.CreateOrgOption{
-			Name: deref(opts.Name), FullName: deref(opts.FullName), Description: deref(opts.Description),
-			Website: deref(opts.Website), Location: deref(opts.Location), Visibility: gitea.VisibleType(deref(opts.Visibility)),
-			RepoAdminChangeTeamAccess: deref(opts.RepoAdminChangeTeamAccess),
-		})
+		return c.Organizations.CreateOrg(ctx, createOrgOption(opts))
 	})
 	if err != nil {
 		return Organization{}, Classify(err, "name", strconv.Quote(deref(opts.Name)), "")
