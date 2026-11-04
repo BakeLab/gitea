@@ -220,7 +220,13 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 	if _, _, err := a.effectivePreferences(s); err != nil {
 		return t, err
 	}
-	newClient := func(token string) *transport.Client { return a.instanceClient(t.Host, token, host) }
+	newClient := func(token string) *transport.Client {
+		client := a.instanceClient(t.Host, token, host)
+		if a.options.dryRun {
+			client = client.DryRun(&a.dryRunRequests) // not the client of an OAuth refresh, which must be sent
+		}
+		return client
+	}
 	token := a.deps.Getenv("GITEA_TOKEN")
 	environmentCredential := token != ""
 	if strings.ContainsAny(token, "\r\n") {

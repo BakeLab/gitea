@@ -158,13 +158,5 @@ func sensitiveQuery(path, key string) bool {
 // request to w, plus the sanitized server message of a failed response, with the secrets marked
 // by WithSecrets redacted. Headers and bodies are never logged.
 func (c *Client) Debug(w io.Writer) *Client {
-	clone := *c
-	httpClient := *c.HTTP
-	base := httpClient.Transport
-	if base == nil {
-		base = http.DefaultTransport
-	}
-	httpClient.Transport = debugTransport{base: base, out: w}
-	clone.HTTP = &httpClient
-	return &clone
+	return c.wrapTransport(func(rt http.RoundTripper) http.RoundTripper { return debugTransport{base: rt, out: w} })
 }

@@ -73,12 +73,18 @@ func (a *application) writeHuman(cmd *cobra.Command, text string) error {
 
 // writeJSON writes v as JSON, filtered by --json fields and --jq, or as CSV with --csv.
 func (a *application) writeJSON(cmd *cobra.Command, v any) error {
-	pretty, csv := a.deps.Streams.OutTTY, a.options.csv != ""
 	allowed := commandOutputFields(cmd)
-	if csv && cmd.Annotations["gt.jsonfields"] != "" {
+	if a.options.csv != "" && cmd.Annotations["gt.jsonfields"] != "" {
 		allowed = nil // Fields that vary, such as config get's key, make the result's keys the columns.
 	}
-	return terminal.JSONOutput{Fields: a.options.json, Allowed: allowed, Query: a.options.jq, Pretty: pretty, Color: pretty && a.colorEnabled(), CSV: csv}.Write(cmd.OutOrStdout(), v)
+	return a.jsonWriter(a.options.json, a.options.jq, allowed).Write(cmd.OutOrStdout(), v)
+}
+
+// jsonWriter writes fields of the JSON to stdout, filtered by query: indented and colored on a
+// terminal, and as CSV with --csv.
+func (a *application) jsonWriter(fields, query string, allowed []string) terminal.JSONOutput {
+	pretty := a.deps.Streams.OutTTY
+	return terminal.JSONOutput{Fields: fields, Allowed: allowed, Query: query, Pretty: pretty, Color: pretty && a.colorEnabled(), CSV: a.options.csv != ""}
 }
 
 // listSpec describes how a list command shows its items to people.
@@ -164,7 +170,7 @@ func writeView[T any](a *application, cmd *cobra.Command, item T, view func(T) t
 // done reports a completed mutation on stderr, such as "✓ Closed issue alice/x#5 (Fix login)",
 // when people read stdout: on a TTY and without --json.
 func (a *application) done(cmd *cobra.Command, format string, args ...any) {
-	if !a.deps.Streams.OutTTY || a.options.json != "" {
+	if !a.deps.Streams.OutTTY || a.options.json != "" || a.options.dryRun {
 		return
 	}
 	a.feedback(cmd, "✓", "green", format, args...)

@@ -348,7 +348,7 @@ $ gt pr close 13 -c "Superseded by #15" --delete-branch`
 	} else {
 		cmd.Example = `$ gt pr reopen 13`
 	}
-	return cmd
+	return a.dryRunnable(cmd)
 }
 
 // deleteHead deletes the head branch of a merged or closed pull request on Gitea, unless it is
@@ -407,6 +407,9 @@ func (a *application) headKeptFor(ctx context.Context, service services.Pulls, i
 // is a branch of it that is behind, switching to the base branch first, like gh pr merge
 // --delete-branch, and then fast-forwards the base branch.
 func (a *application) deleteLocalHead(cmd *cobra.Command, t target, item services.Pull) {
+	if a.options.dryRun {
+		return
+	}
 	ctx := cmd.Context()
 	branch, err := a.currentBranch(ctx)
 	if err != nil || branch == item.Base || item.HeadSHA == "" {
@@ -738,6 +741,9 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 		if err != nil {
 			return fmt.Errorf("pull request %s was merged, but reading it failed: %w", ref, err)
 		}
+		if a.options.dryRun && !auto { // Gitea still has it open, as nothing was sent.
+			merged.Merged, merged.HeadRemoteDeleted = true, merged.HeadRemoteDeleted || (deleteBranch && !manual)
+		}
 		if auto && !merged.Merged {
 			a.done(cmd, "Pull request %s will be merged when its checks succeed", ref)
 		} else {
@@ -781,7 +787,7 @@ $ gt pr merge 13 --auto --yes
 
 # Mark #13 as merged by a commit pushed to the base branch outside Gitea
 $ gt pr merge 13 --method manually-merged --commit 4b825dc --delete-branch`
-	return cmd
+	return a.dryRunnable(cmd)
 }
 
 // mergeTarget selects the pull request to merge: the argument, else the current branch's pull

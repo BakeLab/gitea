@@ -424,5 +424,5 @@ $ gt repo delete alice/old-project --yes`,
 		},
 	}
 	command.ValidArgsFunction = a.completeRepos()
-	return command
+	return a.dryRunnable(command)
 }

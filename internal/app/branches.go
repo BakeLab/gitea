@@ -289,7 +289,7 @@ $ gt branch delete old-a old-b --yes`,
 		},
 	}
 	command.ValidArgsFunction = a.completeBranches()
-	return command
+	return a.dryRunnable(command)
 }
 
 func (a *application) branchProtectCommand() *cobra.Command {

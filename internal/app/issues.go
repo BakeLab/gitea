@@ -658,7 +658,7 @@ $ gt issue %[1]s 12 13 --comment %[2]q`, verb, commentExample), Annotations: map
 	}}
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", commentUsage)
 	cmd.ValidArgsFunction = a.completeIssues(completeState)
-	return cmd
+	return a.dryRunnable(cmd)
 }
 
 // withComment leaves comment on discussion n before change, deleting it again when change fails

@@ -235,9 +235,16 @@ func (c *Client) WithHeaders(headers http.Header) *Client {
 	if len(headers) == 0 || err != nil {
 		return c
 	}
+	return c.wrapTransport(func(rt http.RoundTripper) http.RoundTripper {
+		return headerTransport{base: rt, host: base.Host, headers: headers}
+	})
+}
+
+// wrapTransport returns a copy of c whose requests go through wrap of its transport.
+func (c *Client) wrapTransport(wrap func(http.RoundTripper) http.RoundTripper) *Client {
 	clone := *c
 	httpClient := *c.HTTP
-	httpClient.Transport = headerTransport{base: cmp.Or[http.RoundTripper](c.HTTP.Transport, http.DefaultTransport), host: base.Host, headers: headers}
+	httpClient.Transport = wrap(cmp.Or[http.RoundTripper](c.HTTP.Transport, http.DefaultTransport))
 	clone.HTTP = &httpClient
 	return &clone
 }
@@ -255,23 +262,21 @@ func (c *Client) WithClientCertificate(certFile, keyFile string) *Client {
 	if err != nil {
 		return c
 	}
-	transport, ok := replaceHTTPTransport(c.HTTP.Transport, func(tr *http.Transport) http.RoundTripper {
-		instance := tr.Clone()
-		instance.TLSClientConfig = instance.TLSClientConfig.Clone()
-		if instance.TLSClientConfig == nil {
-			instance.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	return c.wrapTransport(func(rt http.RoundTripper) http.RoundTripper {
+		transport, ok := replaceHTTPTransport(rt, func(tr *http.Transport) http.RoundTripper {
+			instance := tr.Clone()
+			instance.TLSClientConfig = instance.TLSClientConfig.Clone()
+			if instance.TLSClientConfig == nil {
+				instance.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+			}
+			instance.TLSClientConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return load() }
+			return hostTransport{host: base.Host, instance: instance, other: tr}
+		})
+		if !ok {
+			return failingTransport{fmt.Errorf("cannot present the client certificate %s: the HTTP transport cannot be configured", certFile)}
 		}
-		instance.TLSClientConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return load() }
-		return hostTransport{host: base.Host, instance: instance, other: tr}
+		return transport
 	})
-	if !ok {
-		transport = failingTransport{fmt.Errorf("cannot present the client certificate %s: the HTTP transport cannot be configured", certFile)}
-	}
-	clone := *c
-	httpClient := *c.HTTP
-	httpClient.Transport = transport
-	clone.HTTP = &httpClient
-	return &clone
 }
 
 // replaceHTTPTransport returns rt with the *http.Transport it wraps, through the wrappers of this
@@ -352,11 +357,7 @@ func (c *Client) WithResponseTimeout(timeout time.Duration) *Client {
 	if timeout <= 0 {
 		return c
 	}
-	clone := *c
-	httpClient := *c.HTTP
-	httpClient.Transport = responseTimeout{base: cmp.Or[http.RoundTripper](c.HTTP.Transport, http.DefaultTransport), timeout: timeout}
-	clone.HTTP = &httpClient
-	return &clone
+	return c.wrapTransport(func(rt http.RoundTripper) http.RoundTripper { return responseTimeout{base: rt, timeout: timeout} })
 }
 
 type unboundedResponse struct{}

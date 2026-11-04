@@ -794,5 +794,5 @@ $ gt release delete v1.0.0-rc1 v1.0.0-rc2 --delete-tag --yes`,
 	}
 	command.Flags().BoolVar(&deleteTag, "delete-tag", false, "Delete the release's Git tag too")
 	command.ValidArgsFunction = a.completeReleases()
-	return command
+	return a.dryRunnable(command)
 }

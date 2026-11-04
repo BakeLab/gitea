@@ -332,7 +332,7 @@ $ gt label delete wontfix duplicate --yes`, Annotations: map[string]string{"gt.t
 	}}
 	cmd.Flags().BoolVar(&byName, "by-name", false, "Match numeric arguments as label names rather than IDs")
 	cmd.ValidArgsFunction = complete
-	return cmd
+	return a.dryRunnable(cmd)
 }
 
 func (a *application) labelImportCommand(scope labelScope) *cobra.Command {

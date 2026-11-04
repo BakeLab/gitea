@@ -341,6 +341,21 @@ func TestPullMergeTellsWhyItKeepsTheCheckedOutHeadBranch(t *testing.T) {
 	require.NotContains(t, fake.calls, "branch -D -- feature")
 }
 
+func TestPullMergeDryRunAsksNothing(t *testing.T) {
+	var payload map[string]any
+	server := newAuthenticatedServer(mergeServer(t, openPull, &payload))
+	defer server.Close()
+	form := &mergeForm{}
+	deps, out, _ := serverDeps(t, server.URL)
+	deps.MergeForm, deps.Prompter = form, &scriptedPrompter{}
+	deps.Streams.InTTY, deps.Streams.ErrTTY, deps.Streams.OutTTY = true, true, true
+	deps.Getenv = serverEnv(server.URL, map[string]string{"NO_COLOR": "1"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "merge", "3", "-R", "alice/project", "--dry-run"}))
+	require.Empty(t, form.asked)
+	require.Nil(t, payload)
+	require.Contains(t, out.String(), "Dry run: would send POST ")
+}
+
 func TestPullMergeAsksForTheMethodAndBranchDeletion(t *testing.T) {
 	var payload map[string]any
 	server := newAuthenticatedServer(mergeServer(t, openPull, &payload))

@@ -86,6 +86,9 @@ type options struct {
 	csv                       string
 	noInput, interactive, yes bool
 	debug                     bool
+	// dryRun withholds the write requests of commands that take --dry-run, which dryRunJSON reports
+	// as JSON, filtered by jq, because --json or --jq was given.
+	dryRun, dryRunJSON bool
 	// editor is the command's --editor, which needs a configured editor before any request.
 	editor bool
 	// repoArgument is set when repo holds a command's repository argument rather than --repo.
@@ -109,6 +112,8 @@ type application struct {
 	serverVersions map[string]string
 	// extensionAliases are the top-level aliases installed extensions declare that gt runs.
 	extensionAliases map[string]extensionAlias
+	// dryRunRequests collects the write requests that --dry-run withheld.
+	dryRunRequests transport.DryRunRecorder
 }
 
 // settings returns the settings, loaded once per run and again after gt changed them.
@@ -250,6 +255,14 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 			}
 		}
 		a.options.editor, _ = cmd.Flags().GetBool("editor")
+		switch {
+		case a.options.dryRun && a.options.editor:
+			return clierr.Wrap(clierr.Usage, errors.New("--dry-run cannot be combined with --editor"))
+		case a.options.dryRun && a.options.interactive:
+			return clierr.Wrap(clierr.Usage, errors.New("--dry-run cannot be combined with --interactive"))
+		case a.options.dryRun:
+			a.options.noInput, a.options.yes = true, true // a dry run previews the command as given
+		}
 		if offline(cmd) {
 			return nil
 		}
@@ -385,6 +398,14 @@ func (a *application) checkOutputFlags(cmd *cobra.Command) error {
 	case a.options.jq != "" && cmd.Annotations["gt.rawjson"] == "":
 		selected, a.options.json = "--jq", "*"
 	}
+	switch {
+	case a.options.dryRun && selected == "--csv":
+		return clierr.Wrap(clierr.Usage, errors.New("--dry-run cannot be combined with --csv"))
+	case a.options.dryRun && selected != "":
+		// The report of a dry run is JSON whichever fields the command would print.
+		a.options.dryRunJSON, a.options.json = true, ""
+		return clierr.Wrap(clierr.Usage, terminal.ValidateOutput("", a.options.jq, nil))
+	}
 	if reason := cmd.Annotations["gt.text"]; reason != "" && selected != "" {
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s; %s is not supported", reason, selected))
 	}
@@ -510,6 +531,11 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 	root.SetArgs(args)
 	notifyUpdate := a.checkForUpdate(ctx, args, deps.Client)
 	cmd, err := root.ExecuteContextC(ctx)
+	if a.options.dryRun {
+		if requests := a.dryRunRequests.Requests(); len(requests) > 0 || (err == nil && a.options.dryRunJSON) {
+			err = cmp.Or(err, a.reportDryRun(requests))
+		}
+	}
 	notifyUpdate(cmd, err == nil)
 	if services.IsUnauthorized(err) {
 		return clierr.Wrap(clierr.Authentication, err)

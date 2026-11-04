@@ -24,6 +24,8 @@ ever adds to, and `gt schema` lists them with their types.
 
 With `GITEA_CLI_ERROR_FORMAT=json`, a failure is one line of JSON on stderr.
 
+`--dry-run` previews the write requests of commands such as `gt pr merge` without sending them.
+
 gt requires Gitea 28 or newer. It keeps its preferences in `config.yml` and its
 instances and accounts in `hosts.yml`.
 Run `gt --help` or `gt <command> --help` for supported commands and flags; the
