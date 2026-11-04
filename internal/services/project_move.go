@@ -49,9 +49,9 @@ func (s Projects) Move(ctx context.Context, number int64, column, project string
 		return Moved{}, fmt.Errorf("issue #%d is not on project %q", number, boards[0].Title)
 	}
 	var board *Board
-	var target *gitea.ProjectColumn
+	var target ProjectColumn
 	for i := range boards {
-		found, err := findColumn(boards[i].columns, column)
+		found, err := FindColumn(boards[i].columns, column)
 		if _, missing := errors.AsType[*NotFoundError](err); missing {
 			continue
 		}
@@ -91,26 +91,26 @@ func (s Projects) Move(ctx context.Context, number int64, column, project string
 	})
 }
 
-// findColumn matches name against columns by ID, then by title, then ignoring case, spaces and
+// FindColumn matches name against columns by ID, then by title, then ignoring case, spaces and
 // punctuation, so that "in-progress" finds "In progress".
-func findColumn(columns []*gitea.ProjectColumn, name string) (*gitea.ProjectColumn, error) {
-	find := NameOrID[*gitea.ProjectColumn]{Kind: "column", ID: func(c *gitea.ProjectColumn) int64 { return c.ID }, Name: func(c *gitea.ProjectColumn) string { return c.Title }}
+func FindColumn(columns []ProjectColumn, name string) (ProjectColumn, error) {
+	find := NameOrID[ProjectColumn]{Kind: "column", ID: func(c ProjectColumn) int64 { return c.ID }, Name: func(c ProjectColumn) string { return c.Title }}
 	column, err := find.Find(columns, name)
 	if _, missing := errors.AsType[*NotFoundError](err); !missing {
 		return column, err
 	}
 	want := squash(name)
 	if want == "" {
-		return nil, err
+		return ProjectColumn{}, err
 	}
-	var matches []*gitea.ProjectColumn
+	var matches []ProjectColumn
 	for _, c := range columns {
 		if squash(c.Title) == want {
 			matches = append(matches, c)
 		}
 	}
 	if len(matches) != 1 {
-		return nil, err
+		return ProjectColumn{}, err
 	}
 	return matches[0], nil
 }

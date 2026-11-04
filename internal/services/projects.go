@@ -6,7 +6,6 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"iter"
 	"slices"
 	"strconv"
@@ -23,12 +22,20 @@ type Projects struct {
 	Repository string
 }
 
+// ProjectColumn is a column of a project board.
+type ProjectColumn struct {
+	ID    int64
+	Title string
+}
+
+func columnFrom(c *gitea.ProjectColumn) ProjectColumn { return ProjectColumn{ID: c.ID, Title: c.Title} }
+
 // Board is a project with its columns, its default column and the column that holds each issue
 // on it, by the issue's global ID.
 type Board struct {
 	scope gitea.ProjectScope
 	*gitea.Project
-	columns       []*gitea.ProjectColumn
+	columns       []ProjectColumn
 	defaultColumn int64
 	held          map[int64]int64
 }
@@ -121,7 +128,7 @@ func (s Projects) missing(ctx context.Context, ref, owner, repo string) error {
 			return err
 		}
 		if slices.ContainsFunc(listed.projects, func(p *gitea.Project) bool { return numeric && p.ID == id || strings.EqualFold(p.Title, ref) }) {
-			return fmt.Errorf("project %q is closed", ref)
+			return &ConflictError{Reason: ReasonClosed, Kind: "project", Key: strconv.Quote(ref)}
 		}
 	}
 	return NotFound("project", strconv.Quote(ref), s.Repository)
@@ -173,7 +180,7 @@ func (s Projects) load(ctx context.Context, board *Board, withIssues bool) error
 	if err != nil {
 		return err
 	}
-	board.columns, board.held = columns, map[int64]int64{}
+	board.columns, board.held = convertAll(columns, columnFrom), map[int64]int64{}
 	if len(columns) == 0 {
 		return nil
 	}

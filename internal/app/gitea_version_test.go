@@ -100,7 +100,8 @@ func TestGiteaVersionComparison(t *testing.T) {
 }
 
 func TestGiteaVersionTablesApply(t *testing.T) {
-	t.Cleanup(func() { commandVersions, flagVersions = map[string]string{}, map[string]string{} })
+	commands, flags := commandVersions, flagVersions
+	t.Cleanup(func() { commandVersions, flagVersions = commands, flags })
 	commandVersions = map[string]string{"issue list": "29"}
 	flagVersions = map[string]string{"issue create --title": "30"}
 	deps, _, _ := testDeps(t)

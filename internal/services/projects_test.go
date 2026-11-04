@@ -117,17 +117,17 @@ func TestProjectMoveRefusals(t *testing.T) {
 }
 
 func TestFindColumnMatchesIDsTitlesThenSquashedTitles(t *testing.T) {
-	columns := []*gitea.ProjectColumn{{ID: 1, Title: "To do"}, {ID: 2, Title: "In progress"}, {ID: 3, Title: "In-Review"}, {ID: 4, Title: "in review"}}
+	columns := []ProjectColumn{{ID: 1, Title: "To do"}, {ID: 2, Title: "In progress"}, {ID: 3, Title: "In-Review"}, {ID: 4, Title: "in review"}}
 	for _, tc := range []struct {
 		name string
 		want int64
 	}{{"2", 2}, {"to do", 1}, {"in_progress", 2}, {"In Progress!", 2}, {"In-Review", 3}} {
-		found, err := findColumn(columns, tc.name)
+		found, err := FindColumn(columns, tc.name)
 		require.NoError(t, err, tc.name)
 		require.Equal(t, tc.want, found.ID, tc.name)
 	}
 	for _, name := range []string{"inreview", "---", "done"} {
-		_, err := findColumn(columns, name)
+		_, err := FindColumn(columns, name)
 		require.Error(t, err, name)
 	}
 }

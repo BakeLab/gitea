@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -80,6 +81,20 @@ func (s ProjectBoards) classify(err error) error {
 		return Classify(err, "organization", strconv.Quote(s.Organization), "")
 	}
 	return Classify(err, "repository", s.Repository, "")
+}
+
+// classifyProject classifies a failure of a request about project, which is named by its title
+// when known, else by its ID.
+func (s ProjectBoards) classifyProject(err error, project Project) error {
+	key := strconv.FormatInt(project.ID, 10)
+	if project.Title != "" {
+		key = strconv.Quote(project.Title)
+	}
+	err = Classify(err, "project", key, s.Scope())
+	if conflict, ok := errors.AsType[*ConflictError](err); ok && conflict.Reason == ReasonClosed {
+		conflict.Hint = "reopen it with gt project reopen"
+	}
+	return err
 }
 
 // ListPage returns one page of the projects in state: open, closed or all.
@@ -179,7 +194,7 @@ func (s ProjectBoards) Edit(ctx context.Context, id int64, opts ProjectOptions) 
 		return c.Projects.EditProject(ctx, scope, id, edit)
 	})
 	if err != nil {
-		return Project{}, Classify(err, "project", strconv.FormatInt(id, 10), s.Scope())
+		return Project{}, s.classifyProject(err, Project{ID: id})
 	}
 	return projectFrom(project), nil
 }
@@ -193,5 +208,5 @@ func (s ProjectBoards) Delete(ctx context.Context, id int64) error {
 	err = do(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		return c.Projects.DeleteProject(ctx, scope, id)
 	})
-	return Classify(err, "project", strconv.FormatInt(id, 10), s.Scope())
+	return s.classifyProject(err, Project{ID: id})
 }

@@ -50,7 +50,7 @@ account with --account. Projects are addressed by title or ID.`}
 	}
 	complete := func(state string) cobra.CompletionFunc { return a.completeScopedProjects(org, &account, state) }
 	group.AddCommand(a.projectListCommand(scope), a.projectViewCommand(scope, complete), a.projectCreateCommand(scope), a.projectEditCommand(scope, complete),
-		a.projectStateCommand("close", scope, complete), a.projectStateCommand("reopen", scope, complete), a.projectDeleteCommand(scope, complete))
+		a.projectStateCommand("close", scope, complete), a.projectStateCommand("reopen", scope, complete), a.projectDeleteCommand(scope, complete), a.projectWorkflowCommand(scope, complete))
 	return jsonOutput[services.Project](group)
 }
 

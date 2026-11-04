@@ -85,7 +85,7 @@ const (
 	ReasonArchived  = "archived"          // the repository is archived and read-only
 	ReasonExists    = "exists"            // a resource with the same identity already exists
 	ReasonMerged    = "merged"            // the pull request is already merged
-	ReasonClosed    = "closed"            // the pull request is closed
+	ReasonClosed    = "closed"            // the pull request or project is closed
 	ReasonDraft     = "draft"             // a draft pull request cannot be merged
 	ReasonOwnReview = "own review"        // authors cannot approve or reject their own pull request
 	ReasonNoChanges = "no changes"        // the head branch has no commits the base lacks
@@ -124,7 +124,11 @@ func (e *ConflictError) Error() string {
 	case ReasonMerged:
 		text = cmp.Or(subject, "the pull request") + " is already merged"
 	case ReasonClosed:
-		text = cmp.Or(subject, "the pull request") + " is closed"
+		text = cmp.Or(subject, "the pull request")
+		if e.Scope != "" {
+			text += " in " + e.Scope
+		}
+		text += " is closed"
 	case ReasonDraft:
 		text = cmp.Or(subject, "the pull request") + " is a draft"
 	case ReasonOwnReview:
@@ -183,6 +187,7 @@ var refusals = []struct {
 }{
 	{ReasonArchived, nil, []string{"repo is archived", "repository is archived", "> is archived"}},
 	{ReasonMerged, nil, []string{"already merged"}},
+	{ReasonClosed, []int{http.StatusForbidden}, []string{"project is closed"}},
 	{ReasonDraft, []int{http.StatusMethodNotAllowed}, []string{"work in progress", "draft"}},
 	{ReasonOwnReview, nil, []string{"approve your own pull", "reject your own pull"}},
 	{ReasonNoChanges, nil, []string{"no changes between the head and the base"}},

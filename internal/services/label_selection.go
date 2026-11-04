@@ -85,24 +85,28 @@ func selectLabelNames(scope string, names []string, matches map[string][]int64) 
 type labelKey struct{ scope, name string }
 
 // IssueLabelCatalog resolves the label names of issue flags against the repository's labels and
-// those its organization shares.
+// those its organization shares, or against the labels of an organization.
 type IssueLabelCatalog struct {
 	repository string
 	// folded indexes the names case-insensitively, for names without an exact match.
 	index, folded map[labelKey][]int64
+	names         map[int64]string
 }
 
-// IssueCatalog loads the labels that issue label names can select.
+// IssueCatalog loads the labels that issue label names can select: those of the repository and of
+// the organization that owns it, or those of the organization of an organization scope.
 func (s Labels) IssueCatalog(ctx context.Context) (IssueLabelCatalog, error) {
-	catalog := IssueLabelCatalog{repository: s.Repository, index: map[labelKey][]int64{}, folded: map[labelKey][]int64{}}
+	catalog := IssueLabelCatalog{repository: s.Scope(), index: map[labelKey][]int64{}, folded: map[labelKey][]int64{}, names: map[int64]string{}}
 	scopes := []Labels{s}
-	owner, _, _ := strings.Cut(s.Repository, "/")
-	_, isOrg, err := organization(ctx, s.Client, owner)
-	if err != nil {
-		return catalog, err
-	}
-	if isOrg {
-		scopes = append(scopes, Labels{Client: s.Client, Organization: owner})
+	if s.Organization == "" {
+		owner, _, _ := strings.Cut(s.Repository, "/")
+		_, isOrg, err := organization(ctx, s.Client, owner)
+		if err != nil {
+			return catalog, err
+		}
+		if isOrg {
+			scopes = append(scopes, Labels{Client: s.Client, Organization: owner})
+		}
 	}
 	for _, scope := range scopes {
 		scopeName := "repo"
@@ -114,6 +118,7 @@ func (s Labels) IssueCatalog(ctx context.Context) (IssueLabelCatalog, error) {
 			return catalog, err
 		}
 		for _, label := range labels {
+			catalog.names[label.ID] = label.Name
 			for _, key := range []labelKey{{scopeName, label.Name}, {"", label.Name}} {
 				catalog.index[key] = append(catalog.index[key], label.ID)
 				lower := labelKey{key.scope, strings.ToLower(key.name)}
@@ -126,7 +131,15 @@ func (s Labels) IssueCatalog(ctx context.Context) (IssueLabelCatalog, error) {
 
 // Resolve maps names to label IDs. Duplicate names require an explicit repo: or org: scope to avoid
 // choosing a different label.
-func (c IssueLabelCatalog) Resolve(names []string) ([]int64, error) {
+func (c IssueLabelCatalog) Resolve(names []string) ([]int64, error) { return c.resolve(names, false) }
+
+// ResolveOrID is Resolve that also takes the ID of a label in the catalog for a name that matches
+// none.
+func (c IssueLabelCatalog) ResolveOrID(names []string) ([]int64, error) {
+	return c.resolve(names, true)
+}
+
+func (c IssueLabelCatalog) resolve(names []string, ids bool) ([]int64, error) {
 	matches := map[string][]int64{}
 	for _, input := range names {
 		if strings.TrimSpace(input) == "" {
@@ -137,8 +150,17 @@ func (c IssueLabelCatalog) Resolve(names []string) ([]int64, error) {
 		if len(matches[input]) == 0 {
 			matches[input] = c.folded[labelKey{scope, strings.ToLower(name)}]
 		}
+		if id, err := strconv.ParseInt(input, 10, 64); ids && len(matches[input]) == 0 && err == nil && c.names[id] != "" {
+			matches[input] = []int64{id}
+		}
 	}
 	return selectLabelNames(c.repository, names, matches)
+}
+
+// Name returns the name of the label id, or false when the catalog lacks it.
+func (c IssueLabelCatalog) Name(id int64) (string, bool) {
+	name, ok := c.names[id]
+	return name, ok
 }
 
 // ResolveIssueNames resolves names through the repository's IssueCatalog.

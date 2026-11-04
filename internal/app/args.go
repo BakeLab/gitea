@@ -38,16 +38,18 @@ func refuseRepeats[T any](kind string, args []string, found []T, id func(T) int6
 	return nil
 }
 
-func resourceNumbers(args []string) ([]int64, error) {
+// resourceNumbers parses the numbers of the kind of resource, such as "workflow", that args select,
+// refusing a repeated one.
+func resourceNumbers(kind string, args []string) ([]int64, error) {
 	result := make([]int64, len(args))
 	seen := make(map[int64]bool, len(args))
 	for i, arg := range args {
 		n, err := number(arg)
 		if err != nil {
-			return nil, err
+			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("invalid %s number %q", kind, arg))
 		}
 		if seen[n] {
-			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("resource %d is selected more than once; supply unique numbers", n))
+			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("%s %d is selected more than once; supply unique numbers", kind, n))
 		}
 		seen[n] = true
 		result[i] = n

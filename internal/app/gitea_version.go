@@ -52,7 +52,7 @@ func requireGiteaFlag(cmd *cobra.Command, name, minimum string) *cobra.Command {
 // entry covers its subcommands. flagVersions does the same for a flag, as "run list --workflow". gt
 // requires Gitea 28 anyway, so neither lists anything below that.
 var (
-	commandVersions = map[string]string{}
+	commandVersions = map[string]string{"project workflow": "29"}
 	flagVersions    = map[string]string{}
 )
 

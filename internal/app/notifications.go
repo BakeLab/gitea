@@ -66,7 +66,7 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 				return nil
 			},
 			RunE: func(cmd *cobra.Command, args []string) error {
-				ids, err := resourceNumbers(args)
+				ids, err := resourceNumbers("resource", args)
 				if err != nil {
 					return err
 				}

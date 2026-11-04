@@ -113,6 +113,12 @@ gt project edit	card_type:string,closed_issues:integer,created_at:string,descrip
 gt project list	card_type:string,closed_issues:integer,created_at:string,description:string,id:integer,open_issues:integer,state:string,title:string,type:string,updated_at:string,url:string
 gt project reopen	card_type:string,closed_issues:integer,created_at:string,description:string,id:integer,open_issues:integer,state:string,title:string,type:string,updated_at:string,url:string
 gt project view	card_type:string,closed_issues:integer,created_at:string,description:string,id:integer,open_issues:integer,state:string,title:string,type:string,updated_at:string,url:string
+gt project workflow create	actions:object,created_at:string,enabled:boolean,event:string,filters:object,id:integer,updated_at:string
+gt project workflow disable	actions:object,created_at:string,enabled:boolean,event:string,filters:object,id:integer,updated_at:string
+gt project workflow edit	actions:object,created_at:string,enabled:boolean,event:string,filters:object,id:integer,updated_at:string
+gt project workflow enable	actions:object,created_at:string,enabled:boolean,event:string,filters:object,id:integer,updated_at:string
+gt project workflow list	actions:object,created_at:string,enabled:boolean,event:string,filters:object,id:integer,updated_at:string
+gt project workflow view	actions:object,created_at:string,enabled:boolean,event:string,filters:object,id:integer,updated_at:string
 gt release asset edit	created_at:string,download_count:integer,id:integer,name:string,size:integer,url:string
 gt release asset list	created_at:string,download_count:integer,id:integer,name:string,size:integer,url:string
 gt release asset upload	created_at:string,download_count:integer,id:integer,name:string,size:integer,url:string
