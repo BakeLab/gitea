@@ -386,7 +386,7 @@ $ gt repo transfer bob -R alice/project`,
 	}
 	command.Flags().StringSliceVar(&teams, "team", nil, "Grant this team of the new owning organization access (repeatable)")
 	command.ValidArgsFunction = firstArg(a.completeOrgs())
-	return jsonOutput(command, jsonFields[services.RepositoryTransfer]())
+	return jsonOutput[services.RepositoryTransfer](command)
 }
 
 func (a *application) repoDeleteCommand() *cobra.Command {

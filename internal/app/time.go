@@ -58,7 +58,7 @@ func (a *application) timeCommand() *cobra.Command {
 	group := &cobra.Command{Use: "time", Short: "Track time spent on issues and pull requests", Long: `Log the time spent on issues and pull requests, list it for a repository, an issue or
 yourself across repositories, and delete it.`}
 	group.AddCommand(a.timeListCommand(), a.timeCreateCommand(), a.timeDeleteCommand(), a.timeResetCommand())
-	return jsonOutput(group, jsonFields[services.TrackedTime]())
+	return jsonOutput[services.TrackedTime](group)
 }
 
 func (a *application) timeListCommand() *cobra.Command {

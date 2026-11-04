@@ -38,7 +38,7 @@ A package is addressed by its type, such as generic, npm or container, and its n
 	}
 	group.AddCommand(a.packageListCommand(service), a.packageVersionsCommand(service), a.packageViewCommand(service),
 		a.packageDeleteCommand(service), a.packageLinkCommand(service, true), a.packageLinkCommand(service, false), a.packageUploadCommand(service))
-	return jsonOutput(group, jsonFields[services.Package]())
+	return jsonOutput[services.Package](group)
 }
 
 // cloneUnusable reports whether resolving failed because the working directory names no repository
@@ -154,7 +154,7 @@ $ gt package view npm @acme/ui 2.1.0 --json files`,
 			})
 		},
 	}
-	return jsonOutput(cmd, jsonFields[packageDetails]())
+	return jsonOutput[packageDetails](cmd)
 }
 
 func (a *application) packageDeleteCommand(service packageService) *cobra.Command {

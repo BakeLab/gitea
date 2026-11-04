@@ -86,9 +86,9 @@ pull requests you created, those assigned to you, and those that request your re
 		command.Flags().BoolVar(&runs, "runs", true, "Include the failing Actions runs of the selected or discovered repository")
 	}
 	if pullsOnly {
-		return jsonOutput(command, jsonFields[services.PullStatus]())
+		return jsonOutput[services.PullStatus](command)
 	}
-	return jsonOutput(command, jsonFields[services.AccountStatus]())
+	return jsonOutput[services.AccountStatus](command)
 }
 
 // currentPullStatus reads the pull request of the checked-out branch with its checks and reviews.

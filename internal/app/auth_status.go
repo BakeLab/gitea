@@ -179,7 +179,7 @@ $ gt auth status --host gitea.com --json`,
 		},
 	}
 	status.Flags().BoolVar(&verify, "verify", false, "Check each credential against its instance")
-	return jsonOutput(status, jsonFields[authStatusRow]())
+	return jsonOutput[authStatusRow](status)
 }
 
 // unknownAccountError names the stored accounts when user is none of them, on selectedHost or on the

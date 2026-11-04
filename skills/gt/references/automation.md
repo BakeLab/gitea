@@ -8,6 +8,8 @@
 - A confirmation that cannot be asked fails with exit code 2 and
   `confirmation required…; rerun with --yes`. Add `--yes` only for actions that were approved.
 - `--json` and `--jq` give stable output; text output may change between releases.
+- `gt schema [command]` prints the JSON fields of a command with their types. gt only adds
+  fields; one is never removed or renamed (`gt help formatting`).
 - With `GITEA_CLI_ERROR_FORMAT=json` in the environment, a failure is one line of JSON on stderr:
   `{"error":{"code":4,"kind":"authentication","message":"…","status":401}}`.
 - Branch on exit codes ([SKILL.md](../SKILL.md#exit-codes)), not on messages.

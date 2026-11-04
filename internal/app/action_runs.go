@@ -36,12 +36,7 @@ func (a *application) runCommand() *cobra.Command {
 	group.AddCommand(a.runListCommand(), a.runViewCommand(), a.runWatchCommand(), a.runCancelCommand(), a.runRerunCommand(), a.runDeleteCommand(),
 		a.runJobsCommand(), a.runLogsCommand(), a.runDownloadCommand(), a.artifactCommand())
 	// Only gt run view and gt run watch fetch the jobs of a run.
-	return jsonOutput(group, runFieldsWithoutJobs())
-}
-
-// runFieldsWithoutJobs are the JSON fields of a run for the commands that do not fetch its jobs.
-func runFieldsWithoutJobs() []string {
-	return slices.DeleteFunc(jsonFields[services.Run](), func(field string) bool { return field == "jobs" })
+	return jsonOutput[services.Run](group, "jobs")
 }
 
 func (a *application) runListCommand() *cobra.Command {
@@ -288,7 +283,7 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the run in the browser")
 	cmd.Flags().BoolVar(&log, "log", false, "Print the logs of every job instead, like gt run logs")
 	cmd.ValidArgsFunction = firstArg(a.completeRuns())
-	return jsonOutput(cmd, jsonFields[services.Run]())
+	return jsonOutput[services.Run](cmd)
 }
 
 // warnUnsupported warns of each *services.CapabilityError in err, the parts of a result the server
@@ -648,7 +643,7 @@ $ gt run watch 34 --expect-head HEAD`,
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "Maximum time to wait")
 	cmd.Flags().StringVar(&head, "expect-head", "", "Fail unless the run is for this `commit`: a SHA, or a revision of the local clone")
 	cmd.ValidArgsFunction = firstArg(a.completeRuns())
-	return jsonOutput(cmd, jsonFields[services.Run]())
+	return jsonOutput[services.Run](cmd)
 }
 
 // watchRun polls run id until it completes, redrawing the run view on the alternate screen of a

@@ -22,7 +22,7 @@ func (a *application) adminCommand() *cobra.Command {
 	users := &cobra.Command{Use: "user", Short: "Manage registered accounts", Long: `List, view, create, edit, rename and delete the accounts of the instance, and manage their
 SSH keys and badges. These commands need an administrator account.`}
 	users.AddCommand(a.adminUserListCommand(), a.adminUserViewCommand(), a.adminUserChangeCommand("create"), a.adminUserChangeCommand("edit"), a.adminUserRenameCommand(), a.adminUserDeleteCommand(), a.adminUserKeyCommand(), a.adminUserBadgeCommand())
-	group.AddCommand(jsonOutput(users, jsonFields[services.AdminUser]()))
+	group.AddCommand(jsonOutput[services.AdminUser](users))
 	group.AddCommand(a.adminOrganizationCommand(), a.adminCronCommand(), a.adminEmailCommand())
 	return group
 }

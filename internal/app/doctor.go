@@ -55,7 +55,7 @@ type doctorReport struct {
 const doctorTimeout = 10 * time.Second
 
 func (a *application) doctorCommand() *cobra.Command {
-	return jsonOutput(&cobra.Command{
+	return jsonOutput[doctorReport](&cobra.Command{
 		Use: "doctor", Short: "Check gt's setup for this directory", Args: argsExact(0),
 		// doctor loads the settings itself, to report a broken file instead of failing on it.
 		Annotations: map[string]string{"gt.offline": "true"},
@@ -83,7 +83,7 @@ when a check fails.`,
 			}
 			return err
 		},
-	}, jsonFields[doctorReport]())
+	})
 }
 
 // diagnose resolves the target like other commands, but reports each problem instead of stopping

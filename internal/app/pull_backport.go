@@ -105,7 +105,7 @@ $ gt pr backport 42 --to release/v1.2 --to release/v1.1 --yes
 $ gt pr backport 42 --to release/v1.1 --keep
 $ git add . && git cherry-pick --continue
 $ gt pr backport --continue`
-	return jsonOutput(cmd, jsonFields[backportOutput]())
+	return jsonOutput[backportOutput](cmd)
 }
 
 func (a *application) runBackport(cmd *cobra.Command, args, targets []string, branch, milestone string, keep bool) error {

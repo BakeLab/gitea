@@ -24,7 +24,7 @@ import (
 func (a *application) sshKeyCommand() *cobra.Command {
 	group := &cobra.Command{Use: "ssh-key", Short: "Manage SSH keys", Long: "Manage the SSH public keys of your account, which authenticate Git operations over SSH."}
 	group.AddCommand(a.sshKeyListCommand(), a.sshKeyViewCommand(), a.sshKeyCreateCommand(), a.sshKeyDeleteCommand())
-	return jsonOutput(group, jsonFields[services.SSHKey]())
+	return jsonOutput[services.SSHKey](group)
 }
 
 // sshKeyLabel names a key in messages: `SSH key "laptop" (SHA256:…)`.

@@ -433,7 +433,7 @@ $ gt %[1]s comment edit 81`, words.group), Args: argsExact(1), RunE: func(cmd *c
 		return a.deleteComment(cmd, t, comment)
 	}}
 	group.AddCommand(list, view, create, edit, remove, a.commentAttachmentCommand(kind))
-	return jsonOutput(group, jsonFields[services.Comment]())
+	return jsonOutput[services.Comment](group)
 }
 
 // discussionRef resolves the issue or pull request a comment command addresses: an issue by

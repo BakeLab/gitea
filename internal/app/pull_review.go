@@ -178,7 +178,7 @@ $ gt pr review create --comment -b "Looks good overall"`
 	}
 	review.AddCommand(a.pullReviewRequestCommand(true), a.pullReviewRequestCommand(false))
 	review.AddCommand(a.pullReviewSubmitCommand(), a.pullReviewDeleteCommand(), a.pullReviewDismissCommand(true), a.pullReviewDismissCommand(false))
-	return jsonOutput(review, jsonFields[services.Review]())
+	return jsonOutput[services.Review](review)
 }
 
 func (a *application) reviewCreateCommand(use, short string) *cobra.Command {
@@ -770,7 +770,7 @@ func (a *application) pullReviewCommentsCommand() *cobra.Command {
 	cmd.Example = `$ gt pr review comments 13
 $ gt pr review comments 13 --review 6`
 	cmd.ValidArgsFunction = firstArg(a.completePulls("all"))
-	return jsonOutput(cmd, jsonFields[services.ReviewComment]())
+	return jsonOutput[services.ReviewComment](cmd)
 }
 
 func (a *application) pullReviewResolveCommand(resolve bool) *cobra.Command {
@@ -851,7 +851,7 @@ func (a *application) pullReviewReplyCommand() *cobra.Command {
 	cmd.Flags().BoolVarP(&useEditor, "editor", "e", false, "Write the reply in your editor")
 	cmd.Example = `$ gt pr review reply 13 36 -b "Done, the password is hashed now"`
 	cmd.ValidArgsFunction = a.completeReviewArgs(true)
-	return jsonOutput(cmd, jsonFields[services.ReviewComment]())
+	return jsonOutput[services.ReviewComment](cmd)
 }
 
 // completeReviewArgs completes an open pull request, then the IDs of its reviews, or of its inline

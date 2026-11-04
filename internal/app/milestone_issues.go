@@ -113,5 +113,5 @@ $ gt milestone issue %[1]s v1.0 12 13 '#14'`, verb), Annotations: map[string]str
 		}
 		group.AddCommand(command)
 	}
-	return jsonOutput(group, jsonFields[services.Issue]())
+	return jsonOutput[services.Issue](group)
 }

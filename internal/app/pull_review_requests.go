@@ -81,5 +81,5 @@ $ gt pr review request --team developers`
 	} else {
 		cmd.Example = "$ gt pr review cancel-request 13 --reviewer carol"
 	}
-	return jsonOutput(cmd, jsonFields[services.Pull]())
+	return jsonOutput[services.Pull](cmd)
 }

@@ -40,7 +40,7 @@ const (
 // help omits --repo, --remote and --cwd.
 var noRepoCommands = []string{
 	"gt admin", "gt alias", "gt auth", "gt completion", "gt config", "gt help", "gt man", "gt org",
-	"gt repo create", "gt repo list", "gt repo migrate", "gt search repo", "gt ssh-key", "gt team", "gt upgrade", "gt version",
+	"gt repo create", "gt repo list", "gt repo migrate", "gt schema", "gt search repo", "gt ssh-key", "gt team", "gt upgrade", "gt version",
 }
 
 // writeHelp prints the help page of cmd.
@@ -491,7 +491,17 @@ needs one shape passes one argument per call, or several and reads the array, su
 --jq '.[]'.
 
 On a terminal, JSON is indented and colored; otherwise each value prints on one line.
-Commands that return no resource, such as deletes, reject --json and --csv.`},
+Commands that return no resource, such as deletes, reject --json and --csv.
+
+Compatibility: scripts may rely on the JSON that --json and --jq select, not on text or the
+order of keys. gt only adds fields and commands: a field is never
+removed or renamed, and it keeps its JSON type, though a field may become null where it had
+no value. A field that is going away is documented as deprecated for at least one
+release first. Fields that vary, such as those of gt config get, are the exception and say so
+in their help. gt schema prints every command's fields with their types, as JSON:
+
+  $ gt schema issue list
+  $ gt schema --jq '.commands[] | select(.command == "gt pr view") | .fields[].name'`},
 	}
 	for _, topic := range topics {
 		topic.Hidden, topic.Annotations = true, map[string]string{topicAnnotation: "true"}

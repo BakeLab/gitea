@@ -260,7 +260,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		return a.policy(snapshot).Validate(a.deps.Streams)
 	}
 	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.runnerCommand(), a.labelCommand(), a.milestoneCommand(), a.projectCommand(), a.sshKeyCommand(), a.timeCommand(), a.wikiCommand(), a.browseCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.packageCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false), a.extensionCommand())
-	root.AddCommand(a.manCommand(), a.upgradeCommand())
+	root.AddCommand(a.manCommand(), a.schemaCommand(), a.upgradeCommand())
 	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Example: "$ gt version", Args: argsExact(0), Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), version.Format())
 		return err
@@ -647,13 +647,40 @@ func commandIndex(root *cobra.Command, args []string) int {
 // they declare their own, its direct subcommands.
 const fieldsAnnotation = "gt.fields"
 
-// jsonOutput declares the JSON fields cmd and its direct subcommands output.
-func jsonOutput(cmd *cobra.Command, fields []string) *cobra.Command {
+// varyingJSONOutput declares fields that vary, such as config keys, which have no type.
+func varyingJSONOutput(cmd *cobra.Command, fields []string) *cobra.Command {
 	if cmd.Annotations == nil {
 		cmd.Annotations = map[string]string{}
 	}
 	cmd.Annotations[fieldsAnnotation] = strings.Join(fields, ",")
 	return cmd
+}
+
+// outputTypes maps the outputTypeAnnotation of a command to the type it outputs, for gt schema.
+var outputTypes sync.Map
+
+// jsonOutput declares the JSON fields of T, except omit, as those cmd and its direct subcommands
+// output.
+func jsonOutput[T any](cmd *cobra.Command, omit ...string) *cobra.Command {
+	t := reflect.TypeFor[T]()
+	key := t.PkgPath() + "." + t.Name()
+	outputTypes.Store(key, t)
+	varyingJSONOutput(cmd, slices.DeleteFunc(jsonFields[T](), func(name string) bool { return slices.Contains(omit, name) }))
+	cmd.Annotations[outputTypeAnnotation] = key
+	return cmd
+}
+
+// fieldsDeclaration returns cmd, else its parent, whichever declares the JSON fields of cmd.
+func fieldsDeclaration(cmd *cobra.Command) *cobra.Command {
+	for _, c := range []*cobra.Command{cmd, cmd.Parent()} {
+		if c == nil {
+			continue
+		}
+		if _, ok := c.Annotations[fieldsAnnotation]; ok {
+			return c
+		}
+	}
+	return nil
 }
 
 // commandOutputFields returns the JSON fields declared on cmd for its --local flag when set, else
@@ -667,35 +694,30 @@ func commandOutputFields(cmd *cobra.Command) []string {
 			return strings.Split(fields, ",")
 		}
 	}
-	for _, c := range []*cobra.Command{cmd, cmd.Parent()} {
-		if c == nil {
-			continue
-		}
-		if fields, ok := c.Annotations[fieldsAnnotation]; ok {
-			return strings.Split(fields, ",")
-		}
+	if c := fieldsDeclaration(cmd); c != nil {
+		return strings.Split(c.Annotations[fieldsAnnotation], ",")
 	}
 	return nil
 }
 
 // jsonFields lists the JSON names of T's fields, which --json can select, in alphabetical order.
 func jsonFields[T any]() []string {
-	fields := structJSONFields(reflect.TypeFor[T]())
+	var fields []string
+	structJSONFields(reflect.TypeFor[T](), func(name, _ string, _ reflect.Type) { fields = append(fields, name) })
 	slices.Sort(fields)
 	return fields
 }
 
-// structJSONFields lists the JSON names of t's fields, including those of embedded structs.
-func structJSONFields(t reflect.Type) []string {
-	var fields []string
+// structJSONFields calls visit with the JSON name, tag options and type of each of t's fields in
+// order, including those of embedded structs.
+func structJSONFields(t reflect.Type, visit func(name, options string, field reflect.Type)) {
 	for field := range t.Fields() {
-		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		name, options, _ := strings.Cut(field.Tag.Get("json"), ",")
 		switch {
 		case field.Anonymous && name == "":
-			fields = append(fields, structJSONFields(field.Type)...)
+			structJSONFields(field.Type, visit)
 		case name != "" && name != "-":
-			fields = append(fields, name)
+			visit(name, options, field.Type)
 		}
 	}
-	return fields
 }

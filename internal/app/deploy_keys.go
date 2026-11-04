@@ -18,7 +18,7 @@ func (a *application) deployKeyCommand() *cobra.Command {
 such as for a build server. A deploy key can read the repository, and push to it when added
 with --allow-write.`}
 	group.AddCommand(a.deployKeyListCommand(), a.deployKeyAddCommand(), a.deployKeyDeleteCommand())
-	return jsonOutput(group, jsonFields[services.DeployKey]())
+	return jsonOutput[services.DeployKey](group)
 }
 
 // deployKeyLabel names a key in messages: `deploy key "ci" (SHA256:…)`.

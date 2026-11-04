@@ -78,7 +78,7 @@ Signing secrets and authorization headers are never shown.`}
 	group.PersistentFlags().BoolVar(&scope.global, "global", false, "Manage the system webhooks of the instance (administrators)")
 	_ = group.RegisterFlagCompletionFunc("org", a.completeOrgs())
 	group.AddCommand(a.webhookListCommand(&scope), a.webhookViewCommand(&scope), a.webhookChangeCommand(&scope, true), a.webhookChangeCommand(&scope, false), a.webhookTestCommand(&scope), a.webhookDeleteCommand(&scope))
-	return jsonOutput(group, jsonFields[services.Webhook]())
+	return jsonOutput[services.Webhook](group)
 }
 
 // completeWebhooks completes the webhook IDs of the scope that the parsed flags select, with their

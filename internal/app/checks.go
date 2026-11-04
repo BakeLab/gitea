@@ -111,7 +111,7 @@ $ gt pr checks
 
 # Wait until the checks of #13 finish, then merge it
 $ gt pr checks 13 --watch && gt pr merge 13`
-	return jsonOutput(cmd, jsonFields[services.Check]())
+	return jsonOutput[services.Check](cmd)
 }
 
 // checksOutcome is the exit status of checks: 1 when one failed, 8 while any is pending.

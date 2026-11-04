@@ -97,7 +97,7 @@ $ gt extension list --json name,tag,credentials`,
 			return cmp.Or(err, listErr)
 		},
 	}
-	return jsonOutput(cmd, jsonFields[extensionItem]())
+	return jsonOutput[extensionItem](cmd)
 }
 
 // completeExtensions completes the names of the installed extensions with their sources.
@@ -273,5 +273,5 @@ $ gt extension search --index https://git.example.com/platform/gt-extensions`,
 		},
 	}
 	cmd.Flags().StringVar(&index, "index", defaultExtensionIndex, "Index `repository` to search")
-	return jsonOutput(cmd, jsonFields[extensionListing]())
+	return jsonOutput[extensionListing](cmd)
 }

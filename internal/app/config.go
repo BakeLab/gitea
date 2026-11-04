@@ -286,7 +286,7 @@ $ gt config get ssh_key --host https://gitea.com --user alice`,
 		},
 	}
 	get.Flags().BoolVar(&getSource, "show-source", false, "Also print where the value comes from")
-	group.AddCommand(jsonOutput(get, configKeys))
+	group.AddCommand(varyingJSONOutput(get, configKeys))
 	list := &cobra.Command{
 		Use: "list", Short: "List settings and their values", Args: argsExact(0),
 		Example: `$ gt config list
@@ -316,7 +316,7 @@ $ gt config list --host https://gitea.com`,
 			}, listPage{Number: 1})
 		},
 	}
-	group.AddCommand(jsonOutput(list, configKeys))
+	group.AddCommand(varyingJSONOutput(list, configKeys))
 	group.AddCommand(&cobra.Command{
 		Use: "set <key> <value>", Short: "Change a setting", Args: argsExact(2), ValidArgsFunction: a.completeConfig,
 		Annotations: textOutput("config set does not return a resource"),

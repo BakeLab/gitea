@@ -191,7 +191,7 @@ branch named with --branch that is not of the pull request is refused.`, Annotat
 	cmd.Example = `$ gt pr checkout 13
 $ gt pr co feature/login
 $ gt pr checkout 13 --update`
-	return jsonOutput(cmd, jsonFields[git.CheckoutResult]())
+	return jsonOutput[git.CheckoutResult](cmd)
 }
 
 // checkoutBranchName names the local branch for a pull request: its head branch name when

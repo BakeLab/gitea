@@ -28,7 +28,7 @@ func (a *application) releaseAssetCommand() *cobra.Command {
 		Long:  "List, upload, download, rename and delete the files attached to a release. Assets are addressed by their exact, case-sensitive name or by ID.",
 	}
 	group.AddCommand(a.assetListCommand(), a.releaseUploadCommand(), a.releaseDownloadCommand(), a.assetEditCommand(), a.assetDeleteCommand())
-	return jsonOutput(group, jsonFields[services.ReleaseAsset]())
+	return jsonOutput[services.ReleaseAsset](group)
 }
 
 // assetFinder addresses the assets of the release tagged tag by name or ID. Asset names are
@@ -168,7 +168,7 @@ $ gt release upload v1.0.0 dist/gt-linux --clobber`,
 	command.Flags().StringVar(&name, "name", "", "Asset name (default: the file's name)")
 	command.Flags().BoolVar(&clobber, "clobber", false, "Replace assets with the same name")
 	command.ValidArgsFunction = pathArgs(1, true, completeFiles, a.completeReleases())
-	return jsonOutput(command, jsonFields[services.ReleaseAsset]())
+	return jsonOutput[services.ReleaseAsset](command)
 }
 
 func (a *application) releaseDownloadCommand() *cobra.Command {

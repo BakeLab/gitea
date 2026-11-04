@@ -52,7 +52,7 @@ $ gt %[1]s timeline %[2]s --json type,author,created_at`, words.group, words.exa
 		},
 	}
 	pageFlags(cmd, &limit, &page)
-	return jsonOutput(cmd, jsonFields[services.TimelineEvent]())
+	return jsonOutput[services.TimelineEvent](cmd)
 }
 
 // timelineText words a timeline event in repository repo, such as `added label "bug"` or a

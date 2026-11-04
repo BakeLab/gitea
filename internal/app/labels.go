@@ -53,7 +53,7 @@ addressed by name or ID.`}
 	complete := a.completeScopedLabels(org)
 	group.AddCommand(a.labelListCommand(scope), a.labelCreateCommand(scope), a.labelEditCommand(scope, complete), a.labelDeleteCommand(scope, complete),
 		a.labelImportCommand(scope), a.labelExportCommand(scope))
-	return jsonOutput(group, jsonFields[services.Label]())
+	return jsonOutput[services.Label](group)
 }
 
 func (a *application) labelListCommand(scope labelScope) *cobra.Command {

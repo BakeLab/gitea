@@ -44,7 +44,7 @@ and instance runners that also take a repository's jobs; with --global it shows 
 	group.PersistentFlags().BoolVar(&scope.global, "global", false, "Manage the runners of the instance (administrators)")
 	_ = group.RegisterFlagCompletionFunc("org", a.completeOrgs())
 	group.AddCommand(a.runnerListCommand(&scope), a.runnerViewCommand(&scope), a.runnerStateCommand(&scope, true), a.runnerStateCommand(&scope, false), a.runnerDeleteCommand(&scope), a.runnerTokenCommand(&scope))
-	return jsonOutput(group, jsonFields[services.Runner]())
+	return jsonOutput[services.Runner](group)
 }
 
 // completeRunners completes the runner IDs of the scope that the parsed flags select, with their names.
@@ -245,5 +245,5 @@ $ gitea-runner register --no-interactive --instance https://gitea.example.com --
 			return a.created(cmd, token, token.Token)
 		},
 	}
-	return jsonOutput(cmd, jsonFields[services.RegistrationToken]())
+	return jsonOutput[services.RegistrationToken](cmd)
 }

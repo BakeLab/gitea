@@ -27,7 +27,7 @@ edit, publish and delete them, and upload or download their assets.`,
 	}
 	group.AddCommand(a.releaseListCommand(), a.releaseViewCommand(), a.releaseCreateCommand(), a.releaseEditCommand(),
 		a.releasePublishCommand(), a.releaseDeleteCommand(), a.releaseAssetCommand(), a.releaseUploadCommand(), a.releaseDownloadCommand())
-	return jsonOutput(group, jsonFields[services.Release]())
+	return jsonOutput[services.Release](group)
 }
 
 // releaseKind is the type of a release for people: Draft, Pre-release, or Latest when it is the

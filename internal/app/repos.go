@@ -56,7 +56,7 @@ local branches and forks in sync, and change their settings.`,
 	}
 	group.AddCommand(a.repoListCommand(), a.repoViewCommand(), a.repositorySyncCommand(), a.repoSetDefaultCommand())
 	a.addRepositoryMutations(group)
-	return jsonOutput(group, jsonFields[services.Repository]())
+	return jsonOutput[services.Repository](group)
 }
 
 func (a *application) repoSetDefaultCommand() *cobra.Command {

@@ -19,6 +19,9 @@ gt alias set bugs 'issue list --label bug'
 gt help
 ```
 
+Scripts and agents get stable machine-readable output: `--json` and `--jq` select fields that gt only
+ever adds to, and `gt schema` lists them with their types.
+
 With `GITEA_CLI_ERROR_FORMAT=json`, a failure is one line of JSON on stderr.
 
 gt requires Gitea 28 or newer. It keeps its preferences in `config.yml` and its

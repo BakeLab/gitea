@@ -51,7 +51,7 @@ func (a *application) adminUserKeyCommand() *cobra.Command {
 	group := &cobra.Command{Use: "key", Short: "Manage the SSH keys of an account", Long: `Add and delete SSH public keys on behalf of another account. These commands need an
 administrator account; gt ssh-key manages your own keys.`}
 	group.AddCommand(a.adminUserKeyCreateCommand(), a.adminUserKeyDeleteCommand())
-	return jsonOutput(group, jsonFields[services.SSHKey]())
+	return jsonOutput[services.SSHKey](group)
 }
 
 func (a *application) adminUserKeyCreateCommand() *cobra.Command {
@@ -147,7 +147,7 @@ $ gt admin user badge list bob --jq '.[].slug'`,
 		},
 	}
 	group.AddCommand(list, a.adminUserBadgeChangeCommand(true), a.adminUserBadgeChangeCommand(false))
-	return jsonOutput(group, jsonFields[services.AdminBadge]())
+	return jsonOutput[services.AdminBadge](group)
 }
 
 // adminUserBadgeChangeCommand awards badges when add is set and takes them away otherwise.
@@ -239,7 +239,7 @@ $ gt admin org list --json name,visibility`,
 		return a.created(cmd, org, webURL(target, org.Name))
 	}
 	group.AddCommand(list, create)
-	return jsonOutput(group, jsonFields[services.Organization]())
+	return jsonOutput[services.Organization](group)
 }
 
 // completeCronTasks completes the names of the scheduled tasks.
@@ -294,7 +294,7 @@ $ gt admin cron list --jq '.[].name'`,
 		},
 	}
 	group.AddCommand(list, run)
-	return jsonOutput(group, jsonFields[services.CronTask]())
+	return jsonOutput[services.CronTask](group)
 }
 
 func (a *application) adminEmailCommand() *cobra.Command {
@@ -332,5 +332,5 @@ $ gt admin email list --query example.com`,
 	list.Flags().StringVar(&query, "query", "", "Only list addresses whose address, username or full name contains this text")
 	pageFlags(list, &limit, &page)
 	group.AddCommand(list)
-	return jsonOutput(group, jsonFields[services.AdminEmail]())
+	return jsonOutput[services.AdminEmail](group)
 }

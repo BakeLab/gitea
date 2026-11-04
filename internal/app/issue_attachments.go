@@ -261,7 +261,7 @@ $ gt %[1]s download %[2]s 9 -O - | less`, parent.group, parent.example), Annotat
 	}}
 	destination.register(download)
 	group.AddCommand(list, view, upload, edit, remove, download)
-	return jsonOutput(group, jsonFields[services.IssueAttachment]())
+	return jsonOutput[services.IssueAttachment](group)
 }
 
 // uploadAttachments attaches each file to the item id through upload, calls uploaded, when given,

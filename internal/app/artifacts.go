@@ -53,7 +53,7 @@ $ gt run artifact list 34`,
 	list.ValidArgsFunction = firstArg(a.completeRuns())
 	group.AddCommand(list)
 
-	return jsonOutput(group, jsonFields[services.Artifact]())
+	return jsonOutput[services.Artifact](group)
 }
 
 // artifactColumns head artifactRow: sizes and expiry for people on a terminal, bytes and times

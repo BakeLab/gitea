@@ -165,7 +165,7 @@ gt pr list --local shows which local branches belong to a merged or closed pull 
 	cmd.ValidArgsFunction = firstArg(a.completePulls("closed"))
 	cmd.Example = `# After #13 was merged, delete its branch locally and on Gitea
 $ gt pr clean 13`
-	return jsonOutput(cmd, jsonFields[git.CleanResult]())
+	return jsonOutput[git.CleanResult](cmd)
 }
 
 func (a *application) remotesForRepositoryURLs(ctx context.Context, hosts map[string]settings.Host, cloneURL, sshURL, fullName string) ([]string, error) {

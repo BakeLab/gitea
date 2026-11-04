@@ -95,7 +95,7 @@ In JSON, access is the team's effective access as the text views show it, such a
 "write (code, issues, pulls)"; permission is the team-wide level Gitea reports, which is none
 for a team that grants its access per unit.`}
 	group.AddCommand(a.teamListCommand(), a.teamViewCommand(), a.teamCreateCommand(), a.teamEditCommand(), a.teamDeleteCommand(), a.teamMemberCommand(), a.teamRepoCommand())
-	return jsonOutput(group, jsonFields[services.Team]())
+	return jsonOutput[services.Team](group)
 }
 
 func (a *application) teamListCommand() *cobra.Command {
@@ -627,7 +627,7 @@ $ gt team member add 2 bob carol`,
 		},
 	}
 	group.AddCommand(list, add, remove)
-	return jsonOutput(group, jsonFields[services.TeamMember]())
+	return jsonOutput[services.TeamMember](group)
 }
 
 // teamRepository resolves a repository argument of team repo add and remove: a name inside the
@@ -674,7 +674,7 @@ its organization. Repositories are named alone, such as service, or as ORG/NAME.
 	}
 	pageFlags(list, &limit, &page)
 	group.AddCommand(list, a.teamRepoAccessCommand(true), a.teamRepoAccessCommand(false))
-	return jsonOutput(group, jsonFields[services.Repository]())
+	return jsonOutput[services.Repository](group)
 }
 
 func (a *application) teamRepoAccessCommand(grant bool) *cobra.Command {

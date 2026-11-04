@@ -52,7 +52,7 @@ them, and manage their members.
 
 Teams grant members access to an organization's repositories; see gt team.`}
 	group.AddCommand(a.organizationListCommand(), a.organizationViewCommand(), a.organizationCreateCommand(), a.organizationEditCommand(), a.organizationDeleteCommand(), a.organizationMemberCommand())
-	return jsonOutput(group, jsonFields[services.Organization]())
+	return jsonOutput[services.Organization](group)
 }
 
 // organizationTable is the table of organizations, for the caller to give a context.
@@ -363,7 +363,7 @@ $ gt org member list acme --public`,
 	list.Flags().BoolVar(&public, "public", false, "List only public memberships")
 	pageFlags(list, &limit, &page)
 	group.AddCommand(list, a.organizationVisibilityCommand(true), a.organizationVisibilityCommand(false), a.organizationMemberRemoveCommand())
-	return jsonOutput(group, jsonFields[services.OrganizationMember]())
+	return jsonOutput[services.OrganizationMember](group)
 }
 
 // completeOrganizationMembers completes an organization, then the members of that organization.

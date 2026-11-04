@@ -133,7 +133,7 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 		renameFlag(command, "before", "until")
 		group.AddCommand(command)
 	}
-	return jsonOutput(group, jsonFields[services.Notification]())
+	return jsonOutput[services.Notification](group)
 }
 
 // notificationFilters registers the list filters of list and watch.

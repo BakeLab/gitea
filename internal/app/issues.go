@@ -35,7 +35,7 @@ one or more, and comment on them. Gitea lists pull requests among issues, so mos
 commands also accept a pull request number.`}
 	group.AddCommand(a.issueListCommand(), a.issueViewCommand(), a.issueCreateCommand(), a.issueEditCommand(), a.issueMoveCommand(),
 		a.issueStateCommand("close"), a.issueStateCommand("reopen"), a.issueAttachmentCommand(issueRef), a.commentCommand(issueRef), a.timelineCommand(issueRef))
-	return jsonOutput(group, jsonFields[services.Issue]())
+	return jsonOutput[services.Issue](group)
 }
 
 func (a *application) issueListCommand() *cobra.Command {
@@ -210,7 +210,7 @@ $ gt issue view https://gitea.com/OWNER/REPO/issues/12 --web`, Annotations: map[
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the issue in the browser")
 	cmd.Flags().BoolVarP(&comments, "comments", "c", false, "View issue comments")
 	cmd.ValidArgsFunction = firstArg(a.completeIssues("open"))
-	return jsonOutput(cmd, jsonFields[issueDetails]())
+	return jsonOutput[issueDetails](cmd)
 }
 
 // issueDetails is the JSON of issue view: the issue with the issues it depends on and blocks,

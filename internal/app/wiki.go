@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -26,7 +25,7 @@ func (a *application) wikiCommand() *cobra.Command {
 		Long:  "List, view, create, edit and delete the pages of a repository's wiki, and list their revisions.",
 	}
 	group.AddCommand(a.wikiListCommand(), a.wikiViewCommand(), a.wikiRevisionsCommand(), a.wikiCreateCommand(), a.wikiEditCommand(), a.wikiDeleteCommand())
-	return jsonOutput(group, jsonFields[services.WikiPage]())
+	return jsonOutput[services.WikiPage](group)
 }
 
 func (a *application) completeWikiPages() cobra.CompletionFunc {
@@ -64,9 +63,7 @@ func (a *application) wikiListCommand() *cobra.Command {
 	}
 	pageFlags(command, &limit, &page)
 	// Gitea lists pages without their content.
-	return jsonOutput(command, slices.DeleteFunc(jsonFields[services.WikiPage](), func(field string) bool {
-		return slices.Contains([]string{"body", "commit_count", "footer", "sidebar"}, field)
-	}))
+	return jsonOutput[services.WikiPage](command, "body", "commit_count", "footer", "sidebar")
 }
 
 func (a *application) wikiViewCommand() *cobra.Command {
@@ -147,7 +144,7 @@ func (a *application) wikiRevisionsCommand() *cobra.Command {
 	}
 	positiveIntVar(command, &page, "page", 1, math.MaxInt, "Revision page (server controls page size)")
 	command.ValidArgsFunction = a.completeWikiPages()
-	return jsonOutput(command, jsonFields[services.WikiRevision]())
+	return jsonOutput[services.WikiRevision](command)
 }
 
 // wikiContent are the flags of wiki create and wiki edit.

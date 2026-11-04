@@ -180,7 +180,7 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 	_ = cmd.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
 	_ = cmd.RegisterFlagCompletionFunc("ref", a.completeBranches())
 	cmd.ValidArgsFunction = a.completeIssues("open")
-	return jsonOutput(cmd, jsonFields[issueDetails]())
+	return jsonOutput[issueDetails](cmd)
 }
 
 func editedIssue(t target) func(issueDetails) string {

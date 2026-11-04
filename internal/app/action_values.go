@@ -94,9 +94,9 @@ Note that the global --user flag selects the account gt acts as, not a scope.`, 
 		group.AddCommand(a.variableViewCommand(), a.variableGetCommand())
 	}
 	if secret {
-		return jsonOutput(group, jsonFields[services.ActionSecret]())
+		return jsonOutput[services.ActionSecret](group)
 	}
-	return jsonOutput(group, jsonFields[services.ActionVariable]())
+	return jsonOutput[services.ActionVariable](group)
 }
 
 func (a *application) actionValueListCommand(secret bool, kind string) *cobra.Command {
@@ -304,7 +304,7 @@ dotenv file instead.%[2]s`, kind, descriptionNote),
 	scope.register(a, cmd, kind)
 	cmd.ValidArgsFunction = a.completeActionValues(secret, &scope)
 	if secret {
-		return jsonOutput(cmd, jsonFields[services.SetActionSecret]())
+		return jsonOutput[services.SetActionSecret](cmd)
 	}
 	return cmd
 }
