@@ -19,6 +19,8 @@ gt alias set bugs 'issue list --label bug'
 gt help
 ```
 
+With `GITEA_CLI_ERROR_FORMAT=json`, a failure is one line of JSON on stderr.
+
 gt requires Gitea 28 or newer. It keeps its preferences in `config.yml` and its
 instances and accounts in `hosts.yml`.
 Run `gt --help` or `gt <command> --help` for supported commands and flags; the

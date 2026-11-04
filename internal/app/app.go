@@ -222,6 +222,9 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		if err := validateEnums(cmd); err != nil {
 			return err
 		}
+		if err := a.checkErrorFormat(); err != nil {
+			return err
+		}
 		if _, err := a.colorEnvironment(); err != nil {
 			return err
 		}

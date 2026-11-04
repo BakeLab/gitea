@@ -355,6 +355,7 @@ Environment variables:
   GITEA_CLI_EDITOR                    editor, overriding config.yml
   GITEA_CLI_PAGER                     pager, overriding config.yml
   GITEA_CLI_COLOR                     color preference: auto, always or never
+  GITEA_CLI_ERROR_FORMAT              how failures are reported on stderr: text or json (see below)
   GITEA_CLI_HTTP_TIMEOUT              longest wait for an answer, overriding config.yml
   GITEA_CLI_DATA_DIR                  data directory; installed extensions are in its extensions/
   GITEA_CLI_NO_EXTENSIONS             when set, turns extensions off
@@ -370,6 +371,15 @@ Environment variables:
 
 Piped or redirected stdout is data: the color settings never color it. Only a
 command's own --color always does, such as gt pr diff --color always.
+
+With GITEA_CLI_ERROR_FORMAT=json, a failure prints one line of JSON on stderr instead of text,
+and the exit code stays that of gt help exit-codes:
+
+  {"error":{"code":4,"kind":"authentication","message":"authentication rejected; run gt auth login","status":401}}
+
+kind is one of failure, usage, canceled, authentication, unsuccessful, head_mismatch and
+pending. status, the HTTP status of the answer from Gitea, is present when there was one, and
+draft, the path where the text of a canceled command was saved, when one was saved.
 
 Preferences in config.yml are described in gt config --help.`},
 		{Use: "exit-codes", Short: "Exit codes used by gt", Long: `gt exits with one of these codes:

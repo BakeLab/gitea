@@ -132,6 +132,13 @@ func TestRunReportsDeclinedConfirmationsAndExplainedFailures(t *testing.T) {
 	}
 	require.Equal(t, 1, run(context.Background(), deps, []string{"issue", "view", "9", "-R", "alice/project", "--no-input"}, app.Execute))
 	require.Equal(t, "Error: issue #9 not found in alice/project\n", stderr.String())
+
+	stderr.Reset()
+	deps.Getenv = func(key string) string {
+		return map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL, "GITEA_CLI_ERROR_FORMAT": "json"}[key]
+	}
+	require.Equal(t, 3, run(context.Background(), deps, []string{"repo", "archive", "-R", "alice/project", "--interactive"}, app.Execute))
+	require.JSONEq(t, `{"error":{"code":3,"kind":"canceled","message":"canceled"}}`, stderr.String())
 }
 
 type reviewFormStub struct{}
@@ -245,4 +252,47 @@ func TestRunKeepsTheExitCodeOfAnInterruptedExtension(t *testing.T) {
 	require.Equal(t, 7, run(ctx, deps, nil, func(context.Context, app.Dependencies, []string) error { return clierr.Quiet(7) }))
 	require.Empty(t, stderr.String())
 	require.Equal(t, clierr.Interrupted, run(ctx, deps, nil, func(context.Context, app.Dependencies, []string) error { return errors.New("read failed") }))
+}
+
+func TestRunReportsFailuresInTheConfiguredFormat(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/user":
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		case "/api/v1/repos/alice/project":
+			_, _ = w.Write([]byte(`{"full_name":"alice/project","has_issues":true}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"not found"}`))
+		}
+	}))
+	defer server.Close()
+	var stderr bytes.Buffer
+	deps := app.Dependencies{
+		Settings: settings.New(t.TempDir()), Credentials: &auth.Store{Dir: t.TempDir()}, Client: transport.New, Prompter: decliningPrompter{},
+		Streams: terminal.Streams{In: &bytes.Buffer{}, Out: &bytes.Buffer{}, ErrOut: &stderr},
+		Getenv: func(key string) string {
+			return map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL}[key]
+		},
+	}
+	// --json alone keeps text errors, as gh does.
+	require.Equal(t, 1, run(context.Background(), deps, []string{"issue", "view", "9", "-R", "alice/project", "--no-input", "--json"}, app.Execute))
+	require.Equal(t, "Error: issue #9 not found in alice/project\n", stderr.String())
+
+	env := map[string]string{"GITEA_TOKEN": "token", "GITEA_CLI_HOST": server.URL, "GITEA_CLI_ERROR_FORMAT": "json"}
+	deps.Getenv = func(key string) string { return env[key] }
+	stderr.Reset()
+	require.Equal(t, 1, run(context.Background(), deps, []string{"issue", "view", "9", "-R", "alice/project", "--no-input"}, app.Execute))
+	require.JSONEq(t, `{"error":{"code":1,"kind":"failure","message":"issue #9 not found in alice/project","status":404}}`, stderr.String())
+	require.Equal(t, 1, strings.Count(stderr.String(), "\n"))
+
+	stderr.Reset()
+	require.Equal(t, 2, run(context.Background(), deps, []string{"issue", "view", "--bogus"}, app.Execute))
+	require.Contains(t, stderr.String(), `"kind":"usage"`)
+	require.NotContains(t, stderr.String(), "Error:")
+
+	env["GITEA_CLI_ERROR_FORMAT"] = "yaml"
+	stderr.Reset()
+	require.Equal(t, 2, run(context.Background(), deps, []string{"issue", "view", "9", "-R", "alice/project", "--no-input"}, app.Execute))
+	require.True(t, strings.HasPrefix(stderr.String(), "Error: "))
 }

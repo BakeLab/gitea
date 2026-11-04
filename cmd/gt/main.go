@@ -39,8 +39,8 @@ func main() {
 	os.Exit(code)
 }
 
-// run executes gt, reports a failure on stderr and returns the exit code. An interrupt exits
-// silently, and a declined confirmation prints only "Canceled.".
+// run executes gt, reports a failure on stderr, as JSON with GITEA_CLI_ERROR_FORMAT=json, and returns
+// the exit code. An interrupt exits silently, and a declined confirmation prints only "Canceled.".
 func run(ctx context.Context, deps app.Dependencies, args []string, execute func(context.Context, app.Dependencies, []string) error) int {
 	err := execute(ctx, deps, args)
 	// An extension that handled Ctrl-C reported its outcome with its own exit code.
@@ -49,11 +49,18 @@ func run(ctx context.Context, deps app.Dependencies, args []string, execute func
 		err = clierr.Wrap(clierr.Interrupted, err)
 	}
 	code := clierr.ExitCode(err)
+	canceled := code == clierr.Canceled && !errors.Is(err, context.DeadlineExceeded)
 	switch {
 	case err == nil, clierr.IsQuiet(err):
 	case code == clierr.Interrupted:
 		reportDraft(deps, err)
-	case code == clierr.Canceled && !errors.Is(err, context.DeadlineExceeded):
+	case app.JSONErrors(deps):
+		message := "canceled"
+		if !canceled {
+			message = app.Explain(ctx, deps, err).Error()
+		}
+		_ = app.WriteErrorJSON(deps.Streams.ErrOut, message, err)
+	case canceled:
 		fmt.Fprintln(deps.Streams.ErrOut, "Canceled.")
 		reportDraft(deps, err)
 	default:
