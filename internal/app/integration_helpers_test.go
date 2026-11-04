@@ -43,6 +43,7 @@ func giteaDeps(t *testing.T) (giteaTarget, Dependencies, *bytes.Buffer, *bytes.B
 	gitea := giteaTarget{url: instance, token: readTokenFile(t, tokenFile)}
 	deps, out, diagnostics := testDeps(t)
 	deps.Git = nil
+	deps.ServerVersion = nil // ask the instance, so the version gates run
 	deps.Getenv = gitea.env(gitea.token)
 	return gitea, deps, out, diagnostics
 }

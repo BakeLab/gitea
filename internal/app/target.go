@@ -158,6 +158,11 @@ func (a *application) resolveRequest(ctx context.Context, req targetRequest) (ta
 	a.mu.Lock()
 	a.resolved = t
 	a.mu.Unlock()
+	if req.authenticate && !req.offline {
+		if err := a.checkGiteaVersion(ctx, t); err != nil {
+			return t, err
+		}
+	}
 	return t, nil
 }
 

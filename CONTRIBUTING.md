@@ -83,6 +83,13 @@ there. The host must allow privileged containers. The VM uses KVM when the host 
 otherwise Windows is emulated and much slower. The race detector is off, as it needs cgo. CI runs
 this on every pull request.
 
+## Gitea version requirements
+
+gt requires Gitea 28 or newer, and nothing is tracked below that. A command or flag that needs
+something newer goes into `commandVersions` or `flagVersions` in `internal/app/gitea_version.go`.
+gt then asks the server for its version once and fails with a usage error before the request, and
+help text states the requirement. Remove the entry when the minimum rises past it.
+
 ## Code review
 
 Changes to gitea-cli must be reviewed before they are accepted—no matter who

@@ -59,6 +59,8 @@ type Dependencies struct {
 	Getenv        func(string) string
 	LookupEnv     func(string) (string, bool)
 	Client        func(string, string, bool) *transport.Client
+	// ServerVersion reads an instance's Gitea version; nil asks the instance.
+	ServerVersion func(context.Context, *transport.Client) (string, error)
 	// DataDir holds installed extensions; PolicyFile is the system policy, which may not exist.
 	DataDir    string
 	PolicyFile string
@@ -102,6 +104,9 @@ type application struct {
 	generation uint64
 	// resolved is the last target a command resolved, which error hints repeat.
 	resolved target
+	// command is the command being run; serverVersions caches each instance's Gitea version.
+	command        *cobra.Command
+	serverVersions map[string]string
 	// extensionAliases are the top-level aliases installed extensions declare that gt runs.
 	extensionAliases map[string]extensionAlias
 }
@@ -208,6 +213,9 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 	_ = root.RegisterFlagCompletionFunc("json", completeJSONFields)
 	_ = root.RegisterFlagCompletionFunc("csv", completeJSONFields)
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		a.mu.Lock()
+		a.command = cmd
+		a.mu.Unlock()
 		if err := a.checkOutputFlags(cmd); err != nil {
 			return err
 		}
@@ -276,6 +284,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		cmd.SuggestFor = teaCommands[cmd.Name()]
 	}
 	rejectUnknownSubcommands(root)
+	applyGiteaVersions(root)
 	addVerbAliases(root)
 	completeDefaults(root)
 	return root, a
