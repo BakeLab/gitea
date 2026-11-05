@@ -129,6 +129,8 @@ type targetRequest struct {
 	offline bool
 	// refresh still refreshes an expiring OAuth token when offline.
 	refresh bool
+	// noRepo ignores GITEA_CLI_REPO, for a command that spans instances.
+	noRepo bool
 }
 
 func (a *application) resolveTarget(ctx context.Context, requireRepo, authenticate bool) (target, error) {
@@ -378,6 +380,9 @@ func (a *application) repositorySource(ctx context.Context, t *target, s setting
 	if a.options.repo != "" {
 		t.RepoSource = a.repoOptionSource()
 		return a.options.repo, nil
+	}
+	if req.noRepo {
+		return "", nil
 	}
 	if raw := a.deps.Getenv("GITEA_CLI_REPO"); raw != "" {
 		t.RepoSource = "GITEA_CLI_REPO"

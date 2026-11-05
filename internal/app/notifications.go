@@ -7,12 +7,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
 	"github.com/spf13/cobra"
 )
@@ -22,6 +25,15 @@ type notificationScope struct {
 	services.Notifications
 	// where names the scope in messages: "in your inbox" or "in alice/project".
 	where string
+	// host and user are the instance and account of the inbox.
+	host, user string
+}
+
+// accountNotification is a listed notification with the account it belongs to.
+type accountNotification struct {
+	Host string `json:"host"`
+	User string `json:"user"`
+	services.Notification
 }
 
 func (a *application) notificationCommand() *cobra.Command {
@@ -39,7 +51,7 @@ type of a notification is issue, pull, commit or repository, as --type selects t
 		if t.Repo != "" {
 			where = "in " + t.Repo
 		}
-		return notificationScope{services.Notifications{Client: t.client, Repository: t.Repo}, where}, nil
+		return notificationScope{services.Notifications{Client: t.client, Repository: t.Repo}, where, t.Host, t.User}, nil
 	}
 	group.AddCommand(a.notificationListCommand(scope), a.notificationWatchCommand(scope), a.notificationViewCommand(scope))
 	for _, mark := range []struct {
@@ -165,17 +177,33 @@ func (a *application) notificationOptions(cmd *cobra.Command, opts services.Noti
 func (a *application) notificationListCommand(scope func(*cobra.Command) (notificationScope, error)) *cobra.Command {
 	opts := services.NotificationOptions{}
 	var updated timeRange
+	var allAccounts bool
 	command := &cobra.Command{
 		Use: "list", Short: "List notifications", Args: argsExact(0),
+		Long: `List the notifications of your account, or with --all-accounts those of every account you
+are logged in to, most recently updated first, each with its host and user. --host and --user
+narrow --all-accounts to the accounts they name, and --limit applies to the merged list. An account
+that fails does not hide the others: they are listed, and gt exits with the failure.`,
 		Example: `$ gt notification list
 # Including the ones you read, of one repository
 $ gt notification list --status unread,read,pinned -R alice/project
 # Pull requests updated today
-$ gt notification list --type pull --since 24h`,
+$ gt notification list --type pull --since 24h
+# Every account, or every account on one instance
+$ gt notification list --all-accounts
+$ gt notification list --all-accounts --host gitea.com`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if allAccounts {
+				if conflict := setFlags([]string{"--repo", "--this-repo", "--page", "GITEA_TOKEN"}, a.options.repo != "", cmd.Flags().Changed("this-repo"), cmd.Flags().Changed("page"), a.deps.Getenv("GITEA_TOKEN") != ""); len(conflict) > 0 {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("--all-accounts cannot be combined with %s", conflict[0]))
+				}
+			}
 			listed, err := a.notificationOptions(cmd, opts, &updated)
 			if err != nil {
 				return err
+			}
+			if allAccounts {
+				return a.listAccountNotifications(cmd, listed, opts.Statuses)
 			}
 			s, err := scope(cmd)
 			if err != nil {
@@ -185,18 +213,129 @@ $ gt notification list --type pull --since 24h`,
 			if err != nil {
 				return err
 			}
+			items := make([]accountNotification, len(page.Items))
+			for i, item := range page.Items {
+				items[i] = accountNotification{s.host, s.user, item}
+			}
 			what := notificationsWith(opts.Statuses) + " " + s.where
 			empty := "no " + what
 			if cmd.Flags().Changed("type") || cmd.Flags().Changed("since") || cmd.Flags().Changed("until") {
 				empty = "no " + notificationsWith(opts.Statuses) + " match your filters " + s.where
 			}
-			return writeTable(a, cmd, page.Items, listSpec[services.Notification]{
-				Columns: notificationColumns, Row: notificationRow, Empty: empty, Context: what,
-			}, servicePage(page, opts.Page))
+			return writeTable(a, cmd, items, listSpec[accountNotification]{
+				Columns: notificationColumns, Row: func(item accountNotification) []terminal.Cell { return notificationRow(item.Notification) }, Empty: empty, Context: what,
+			}, listPage{Number: opts.Page, More: page.More, Total: page.Total, Counted: page.Counted})
 		},
 	}
 	notificationFilters(command, &opts, &updated)
-	return command
+	command.Flags().BoolVar(&allAccounts, "all-accounts", false, "List the notifications of every account you are logged in to")
+	return jsonOutput[accountNotification](command)
+}
+
+// listAccountNotifications lists the inboxes of the accounts --host and --user select, merged with
+// the most recently updated first. Each inbox is asked for --limit items, so the merged list is complete.
+func (a *application) listAccountNotifications(cmd *cobra.Command, opts services.NotificationOptions, statuses []string) error {
+	s, err := a.settings()
+	if err != nil {
+		return err
+	}
+	accounts, err := selectedAccounts(a, s)
+	if err != nil {
+		return err
+	}
+	items := []accountNotification{}
+	var failures []error
+	more := false
+	for _, account := range accounts {
+		t, err := a.accountTarget(cmd.Context(), account.host, account.user)
+		var page services.Page[services.Notification]
+		if err == nil {
+			page, err = services.Notifications{Client: t.client}.List(cmd.Context(), opts)
+		}
+		if err != nil {
+			failures = append(failures, fmt.Errorf("%s on %s: %w", account.user, account.host, err))
+			continue
+		}
+		more = more || page.More
+		for _, item := range page.Items {
+			items = append(items, accountNotification{account.host, account.user, item})
+		}
+	}
+	slices.SortStableFunc(items, func(x, y accountNotification) int {
+		return terminal.ParseTime(y.UpdatedAt).Compare(terminal.ParseTime(x.UpdatedAt))
+	})
+	if len(failures) == len(accounts) {
+		return errors.Join(failures...)
+	}
+	if len(items) > opts.Limit {
+		items, more = items[:opts.Limit], true
+	}
+	what := notificationsWith(statuses) + " across " + terminal.Plural(len(accounts), "account")
+	heading := what
+	if more { // The total is unknown, so the table cannot say "Showing 30 of 30".
+		heading = ""
+	}
+	err = writeTable(a, cmd, items, listSpec[accountNotification]{
+		Columns: slices.Concat([]terminal.Column{{Header: "Host"}, {Header: "User"}}, notificationColumns),
+		Row: func(item accountNotification) []terminal.Cell {
+			return slices.Concat([]terminal.Cell{{Text: item.Host}, {Text: item.User}}, notificationRow(item.Notification))
+		},
+		Empty: "no " + what, Context: heading,
+	}, listPage{Number: 1})
+	if more {
+		a.warn(cmd, "More notifications exist; raise --limit to list them")
+	}
+	return errors.Join(append(failures, err)...)
+}
+
+// notificationAccount is one stored account.
+type notificationAccount struct{ host, user string }
+
+// selectedAccounts returns the stored accounts that --host and --user select, sorted.
+func selectedAccounts(a *application, s settings.Snapshot) ([]notificationAccount, error) {
+	selectedHost := a.options.host
+	if selectedHost == "" {
+		selectedHost, _ = a.envHost()
+	}
+	if selectedHost != "" {
+		var err error
+		if selectedHost, err = settings.ResolveHost(selectedHost, s.Hosts.Hosts); err != nil {
+			return nil, clierr.Wrap(clierr.Usage, err)
+		}
+	}
+	selectedUser, _ := a.selectedUser()
+	var accounts []notificationAccount
+	for _, instance := range slices.Sorted(maps.Keys(s.Hosts.Hosts)) {
+		if selectedHost != "" && instance != selectedHost {
+			continue
+		}
+		users := s.Hosts.Hosts[instance].Users
+		for _, user := range slices.Sorted(maps.Keys(users)) {
+			if selectedUser == "" || strings.EqualFold(user, selectedUser) {
+				accounts = append(accounts, notificationAccount{instance, user})
+			}
+		}
+	}
+	switch {
+	case len(accounts) > 0:
+		return accounts, nil
+	case selectedUser != "":
+		if err := unknownAccountError(s.Hosts.Hosts, selectedHost, selectedUser); err != nil {
+			return nil, clierr.Wrap(clierr.Authentication, err)
+		}
+	case selectedHost != "":
+		return nil, clierr.Wrap(clierr.Authentication, fmt.Errorf("not logged in to %s; run gt auth login --host %s", selectedHost, selectedHost))
+	}
+	return nil, clierr.Wrap(clierr.Authentication, errors.New("not logged in to any Gitea instance; run gt auth login"))
+}
+
+// accountTarget connects to the stored account user of instance, whichever account --host, --user
+// or the environment select.
+func (a *application) accountTarget(ctx context.Context, instance, user string) (target, error) {
+	host, selected := a.options.host, a.options.user
+	defer func() { a.options.host, a.options.user = host, selected }()
+	a.options.host, a.options.user = instance, user
+	return a.resolveRequest(ctx, targetRequest{authenticate: true, noRepo: true})
 }
 
 func (a *application) notificationWatchCommand(scope func(*cobra.Command) (notificationScope, error)) *cobra.Command {

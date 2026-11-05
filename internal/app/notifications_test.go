@@ -4,12 +4,18 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"gitea.dev/cli/internal/auth"
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/transport"
@@ -238,4 +244,119 @@ func TestNotificationViewSurvivesARefusedMark(t *testing.T) {
 	require.Contains(t, out.String(), "status:\tunread\n")
 	require.NotContains(t, out.String(), "_No comments yet._")
 	require.Contains(t, diagnostics.String(), "Could not mark notification 12 as read")
+}
+
+func TestNotificationListAllAccounts(t *testing.T) {
+	inbox := func(id int, updated string) string {
+		return fmt.Sprintf(`[{"id":%d,"unread":true,"updated_at":%q,"repository":{"full_name":"alice/project"},"subject":{"title":"Thread %d","type":"Issue","state":"open"}}]`, id, updated, id)
+	}
+	inboxes := func(answers map[string]string) *httptest.Server {
+		return newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token := r.Header.Get("Authorization")
+			for account, answer := range answers {
+				if strings.HasSuffix(token, account) {
+					if answer == "" {
+						w.WriteHeader(http.StatusInternalServerError)
+						return
+					}
+					_, _ = w.Write([]byte(answer))
+					return
+				}
+			}
+			t.Errorf("unexpected credential %q", token)
+		}))
+	}
+	first := inboxes(map[string]string{"alice": inbox(1, "2026-10-11T10:00:00Z"), "bob": inbox(2, "2026-10-11T12:00:00Z")})
+	defer first.Close()
+	second := inboxes(map[string]string{"carol": inbox(3, "2026-10-11T11:00:00Z")})
+	defer second.Close()
+	broken := inboxes(map[string]string{"dave": ""})
+	defer broken.Close()
+	setup := func(t *testing.T, accounts map[string][]string) (Dependencies, *bytes.Buffer, *bytes.Buffer) {
+		t.Helper()
+		deps, out, diagnostics := testDeps(t)
+		for host, users := range accounts {
+			for _, user := range users {
+				require.NoError(t, testManager(t, deps).Register(host, user, "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: user}))
+			}
+		}
+		return deps, out, diagnostics
+	}
+	all := map[string][]string{first.URL: {"alice", "bob"}, second.URL: {"carol"}}
+	ids := func(t *testing.T, data []byte) (ids []string) {
+		t.Helper()
+		var items []struct {
+			ID   int    `json:"id"`
+			Host string `json:"host"`
+			User string `json:"user"`
+		}
+		require.NoError(t, json.Unmarshal(data, &items))
+		for _, item := range items {
+			ids = append(ids, fmt.Sprintf("%d %s %s", item.ID, item.User, item.Host))
+		}
+		return ids
+	}
+
+	t.Run("merged with the most recent first", func(t *testing.T) {
+		deps, out, _ := setup(t, all)
+		require.NoError(t, Execute(context.Background(), deps, []string{"notification", "list", "--all-accounts", "--json", "id,host,user"}))
+		require.Equal(t, []string{"2 bob " + first.URL, "3 carol " + second.URL, "1 alice " + first.URL}, ids(t, out.Bytes()))
+	})
+	t.Run("table", func(t *testing.T) {
+		deps, out, _ := setup(t, all)
+		require.NoError(t, Execute(context.Background(), deps, []string{"notification", "list", "--all-accounts"}))
+		require.True(t, strings.HasPrefix(out.String(), first.URL+"\tbob\t2\tissue\t"), out.String())
+	})
+	t.Run("host and user narrow the accounts", func(t *testing.T) {
+		deps, out, _ := setup(t, all)
+		require.NoError(t, Execute(context.Background(), deps, []string{"notification", "list", "--all-accounts", "--host", first.URL, "--json", "id,host,user"}))
+		require.Equal(t, []string{"2 bob " + first.URL, "1 alice " + first.URL}, ids(t, out.Bytes()))
+		deps, out, _ = setup(t, all)
+		require.NoError(t, Execute(context.Background(), deps, []string{"notification", "list", "--all-accounts", "--user", "CAROL", "--json", "id,host,user"}))
+		require.Equal(t, []string{"3 carol " + second.URL}, ids(t, out.Bytes()))
+	})
+	t.Run("GITEA_CLI_REPO names no inbox", func(t *testing.T) {
+		deps, out, _ := setup(t, map[string][]string{second.URL: {"carol"}})
+		deps.Getenv = envFunc(map[string]string{"GITEA_CLI_REPO": "alice/project"})
+		require.NoError(t, Execute(context.Background(), deps, []string{"notification", "list", "--all-accounts", "--json", "id,host,user"}))
+		require.Equal(t, []string{"3 carol " + second.URL}, ids(t, out.Bytes()))
+	})
+	t.Run("limit applies to the merged list", func(t *testing.T) {
+		deps, out, diagnostics := setup(t, all)
+		require.NoError(t, Execute(context.Background(), deps, []string{"notification", "list", "--all-accounts", "--limit", "1", "--json", "id,host,user"}))
+		require.Equal(t, []string{"2 bob " + first.URL}, ids(t, out.Bytes()))
+		require.Contains(t, diagnostics.String(), "raise --limit")
+	})
+	t.Run("a failing account does not hide the others", func(t *testing.T) {
+		deps, out, _ := setup(t, map[string][]string{second.URL: {"carol"}, broken.URL: {"dave"}})
+		err := Execute(context.Background(), deps, []string{"notification", "list", "--all-accounts", "--json", "id,host,user"})
+		require.ErrorContains(t, err, "dave on "+broken.URL)
+		require.Equal(t, []string{"3 carol " + second.URL}, ids(t, out.Bytes()))
+	})
+	t.Run("every account failing lists nothing", func(t *testing.T) {
+		deps, out, _ := setup(t, map[string][]string{broken.URL: {"dave"}})
+		require.ErrorContains(t, Execute(context.Background(), deps, []string{"notification", "list", "--all-accounts"}), "dave on "+broken.URL)
+		require.Empty(t, out.String())
+	})
+	t.Run("no account", func(t *testing.T) {
+		deps, _, _ := setup(t, nil)
+		err := Execute(context.Background(), deps, []string{"notification", "list", "--all-accounts"})
+		require.ErrorContains(t, err, "not logged in to any Gitea instance")
+		require.Equal(t, clierr.Authentication, clierr.ExitCode(err))
+		deps, _, _ = setup(t, all)
+		err = Execute(context.Background(), deps, []string{"notification", "list", "--all-accounts", "--user", "nobody"})
+		require.ErrorContains(t, err, `account "nobody" is not logged in on any instance`)
+	})
+	t.Run("GITEA_TOKEN selects one account", func(t *testing.T) {
+		deps, _, _ := serverDeps(t, second.URL)
+		err := Execute(context.Background(), deps, []string{"notification", "list", "--all-accounts"})
+		require.ErrorContains(t, err, "--all-accounts cannot be combined with GITEA_TOKEN")
+		require.Equal(t, clierr.Usage, clierr.ExitCode(err))
+	})
+	t.Run("a single account names itself in JSON", func(t *testing.T) {
+		deps, out, _ := setup(t, map[string][]string{second.URL: {"carol"}})
+		deps.Getenv = envFunc(map[string]string{"GITEA_CLI_HOST": second.URL})
+		require.NoError(t, Execute(context.Background(), deps, []string{"notification", "list", "--json", "id,host,user"}))
+		require.Equal(t, []string{"3 carol " + second.URL}, ids(t, out.Bytes()))
+	})
 }

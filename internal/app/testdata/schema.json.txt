@@ -57,7 +57,7 @@ gt milestone issue remove	assignees:array<string>?,author:string,body:string,com
 gt milestone list	closed_issues:integer,description:string,due_date:string?,id:integer,open_issues:integer,state:string,title:string,url:string
 gt milestone reopen	closed_issues:integer,description:string,due_date:string?,id:integer,open_issues:integer,state:string,title:string,url:string
 gt milestone view	closed_issues:integer,description:string,due_date:string?,id:integer,open_issues:integer,state:string,title:string,url:string
-gt notification list	id:integer,number:integer?,pinned:boolean,repository:string,state:string,title:string,type:string,unread:boolean,updated_at:string,url:string
+gt notification list	host:string,id:integer,number:integer?,pinned:boolean,repository:string,state:string,title:string,type:string,unread:boolean,updated_at:string,url:string,user:string
 gt notification mark-read	id:integer,number:integer?,pinned:boolean,repository:string,state:string,title:string,type:string,unread:boolean,updated_at:string,url:string
 gt notification mark-unread	id:integer,number:integer?,pinned:boolean,repository:string,state:string,title:string,type:string,unread:boolean,updated_at:string,url:string
 gt notification pin	id:integer,number:integer?,pinned:boolean,repository:string,state:string,title:string,type:string,unread:boolean,updated_at:string,url:string
