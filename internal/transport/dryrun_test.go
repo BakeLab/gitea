@@ -66,3 +66,56 @@ func TestDryRunAnswersWithheldWrites(t *testing.T) {
 	require.Empty(t, body)
 	require.Len(t, rec.Requests(), 4)
 }
+
+func TestDryRunAnswersEachEndpointWithItsOwnSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		method, path string
+		status       int
+	}{
+		{http.MethodPost, "/api/v1/repos/a/b/issues/5/pin", http.StatusNoContent},
+		{http.MethodPut, "/api/v1/repos/a/b/issues/5/lock", http.StatusNoContent},
+		{http.MethodPost, "/api/v1/repos/a/b/pulls/7/merge", http.StatusOK},
+		{http.MethodPost, "/api/v1/repos/a/b/issues", http.StatusCreated},
+		{http.MethodDelete, "/api/v1/repos/a/b/issues/5", http.StatusNoContent},
+		{http.MethodPost, "/api/v1/admin/cron/update_mirrors", http.StatusNoContent},
+		{http.MethodPost, "/api/v1/repos/a/b/pulls/7/update", http.StatusOK},
+		{http.MethodPost, "/git/api/v1/repos/a/b/issues/5/pin", http.StatusNoContent},
+	} {
+		require.Equal(t, tc.status, successStatus(tc.method, tc.path), tc.method+" "+tc.path)
+	}
+	for _, entry := range dryRunStatuses {
+		require.NotZero(t, entry.status, entry.path)
+		require.Contains(t, []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete}, entry.method, entry.path)
+		require.True(t, strings.HasPrefix(entry.path, "/"), entry.path)
+	}
+}
+
+func TestDryRunMasksSecretsInTheReport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("a write reached the server") }))
+	defer server.Close()
+	var rec DryRunRecorder
+	client := New(server.URL, "token", false).DryRun(&rec)
+	for path, body := range map[string]string{
+		"repos/a/b/actions/secrets/DEPLOY": `{"data":"s3cret"}`,
+		"admin/users":                      `{"username":"bob","password":"hunter2","email":"b@x"}`,
+		"repos/a/b/hooks":                  `{"type":"gitea","config":{"url":"https://x","secret":"sig"}}`,
+		"repos/migrate":                    `{"clone_addr":"https://x","auth_token":"tok"}`,
+		"repos/a/b/actions/variables/V":    `{"value":"visible","data":"also visible"}`,
+		"repos/a/b/hooks/telegram":         `{"config":{"bot_token":"bot-t0k","url":"https://x/send?access_token=url-t0k"}}`,
+		"repos/x":                          `{"client_secret":"cl-s3c","token":["list-t0k"],"new_password":{"v":"nested-pw"},"api_key":12345}`,
+		"repos/y":                          `{"text":"<b>&","id":9007199254740993,"authorization_header":""}`,
+	} {
+		_, err := client.Do(context.Background(), http.MethodPost, path, strings.NewReader(body), nil)
+		require.NoError(t, err)
+	}
+	var all strings.Builder
+	for _, request := range rec.Requests() {
+		all.WriteString(string(request.Body) + "\n")
+	}
+	for _, secret := range []string{"s3cret", "hunter2", `"sig"`, `"tok"`, "bot-t0k", "url-t0k", "cl-s3c", "list-t0k", "nested-pw", "12345"} {
+		require.NotContains(t, all.String(), secret)
+	}
+	for _, shown := range []string{"bob", "visible", "https://x", "<b>&", "9007199254740993", `"authorization_header":""`} {
+		require.Contains(t, all.String(), shown)
+	}
+}

@@ -25,7 +25,7 @@ template, as in `gh`.
 
 With `GITEA_CLI_ERROR_FORMAT=json`, a failure is one line of JSON on stderr.
 
-`--dry-run` previews the write requests of commands such as `gt pr merge` without sending them.
+`--dry-run` previews the write requests of every command that only changes Gitea, such as `gt pr merge`, without sending them.
 
 gt requires Gitea 28 or newer. It keeps its preferences in `config.yml` and its
 instances and accounts in `hosts.yml`.

@@ -197,7 +197,7 @@ outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnot
 		}
 		a.done(cmd, "Edited pull request %s", refLabel(t.Repo, n, item.Title))
 		// The edit stands and is reported; what Gitea left out fails the command after.
-		return errors.Join(followUpError(fmt.Sprintf("pull request #%d", n), "edited", failures), pullEditLeftOut(n, opts, item, t.Repo, issueEditFlags(cmd)), a.pullResult(cmd, t, item))
+		return errors.Join(followUpError(fmt.Sprintf("pull request #%d", n), "edited", failures), a.pullEditLeftOut(n, opts, item, t.Repo, issueEditFlags(cmd)), a.pullResult(cmd, t, item))
 	}}
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Pull request title")
 	cmd.Flags().StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339 or Unix timestamp; only the date counts, as the end of that day in UTC; empty clears it")
@@ -275,15 +275,15 @@ func (a *application) editPullInteractively(cmd *cobra.Command, t target, n int6
 		return err
 	}
 	a.done(cmd, "Edited pull request %s", refLabel(t.Repo, n, item.Title))
-	return errors.Join(pullEditLeftOut(n, opts, item, t.Repo, issueMetadataFields), a.pullResult(cmd, t, item))
+	return errors.Join(a.pullEditLeftOut(n, opts, item, t.Repo, issueMetadataFields), a.pullResult(cmd, t, item))
 }
 
 // pullEditLeftOut fails, as issue edit does, when pull request n, edited without an error, lacks
 // a change to its milestone, assignees or due date that opts asked for, named by names. Gitea
 // leaves them out without an error for an author who cannot write to the pull requests, and drops
 // the due date too when a milestone sends the edit through the issue endpoint.
-func pullEditLeftOut(n int64, opts services.PullEdit, item services.Pull, repository string, names issueMetadataNames) error {
-	return editLeftOut(services.IssueEdit{
+func (a *application) pullEditLeftOut(n int64, opts services.PullEdit, item services.Pull, repository string, names issueMetadataNames) error {
+	return a.editLeftOut(services.IssueEdit{
 		Assignees: opts.Assignees, Milestone: opts.Milestone, Deadline: opts.Deadline, RemoveDeadline: opts.RemoveDeadline, Changes: opts.Changes,
 	}, services.Issue{
 		Kind: services.KindPull, Number: n, Assignees: item.Assignees, Milestone: item.Milestone, Deadline: item.Deadline,
@@ -328,7 +328,7 @@ removes or adds that marker.`, Annotations: pullArgumentsAnnotation(nil), Args: 
 			if item, err = service.Edit(cmd.Context(), n, services.PullEdit{Title: &title}); err != nil {
 				return err
 			}
-			if item.Draft != undo {
+			if item.Draft != undo && !a.options.dryRun { // a dry run changes nothing to read back
 				return errors.New("the title was changed, but Gitea still " + map[bool]string{true: "does not treat", false: "treats"}[undo] + " the pull request as a draft; this instance may use a different draft prefix, so edit the title with: gt pr edit " + strconv.FormatInt(n, 10) + " --title")
 			}
 			if undo {

@@ -5,6 +5,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"gitea.dev/cli/internal/terminal"
 	"gitea.dev/cli/internal/transport"
@@ -41,4 +42,50 @@ func (a *application) reportDryRun(requests []transport.DryRunRequest) error {
 		}
 	}
 	return nil
+}
+
+// dryRunCommands are the commands, besides those that call dryRunnable themselves, that take
+// --dry-run: every command that changes things on Gitea and nothing else. Commands that change the
+// local clone or configuration too are left out, as TestDryRunCoversEveryWrite explains for each.
+var dryRunCommands = []string{
+	"admin cron run", "admin org create", "admin user badge add", "admin user badge delete", "admin user create", "admin user delete",
+	"admin user edit", "admin user key create", "admin user key delete", "admin user rename",
+	"api",
+	"branch create", "branch protect", "branch rename", "branch unprotect",
+	"gpg-key create", "gpg-key delete", "gpg-key verify",
+	"issue attachment delete", "issue attachment edit", "issue attachment upload", "issue comment attachment delete",
+	"issue comment", "issue comment attachment edit", "issue comment attachment upload", "issue comment create", "issue comment delete",
+	"issue comment edit", "issue create", "issue delete", "issue edit", "issue lock", "issue move", "issue pin", "issue unlock", "issue unpin",
+	"label create", "label edit", "label import",
+	"milestone close", "milestone create", "milestone delete", "milestone edit", "milestone issue add", "milestone issue remove", "milestone reopen",
+	"notification mark-read", "notification mark-unread", "notification pin", "notification unpin",
+	"org create", "org delete", "org edit", "org member conceal", "org member publicize", "org member remove",
+	"package delete", "package link", "package unlink", "package upload",
+	"pr attachment delete", "pr attachment edit", "pr attachment upload", "pr comment attachment delete", "pr comment attachment edit",
+	"pr comment", "pr comment attachment upload", "pr comment create", "pr comment delete", "pr comment edit", "pr edit", "pr ready",
+	"pr review", "pr review cancel-request", "pr review create", "pr review delete", "pr review dismiss", "pr review reply", "pr review request",
+	"pr review resolve", "pr review submit", "pr review undismiss", "pr review unresolve", "pr update-branch",
+	"project close", "project create", "project delete", "project edit", "project reopen", "project workflow create",
+	"project workflow delete", "project workflow disable", "project workflow edit", "project workflow enable",
+	"release asset delete", "release asset edit", "release asset upload", "release create", "release edit", "release publish", "release upload",
+	"repo archive", "repo create", "repo deploy-key add", "repo deploy-key delete", "repo edit", "repo migrate", "repo rename",
+	"repo transfer", "repo unarchive",
+	"run cancel", "run delete", "run rerun",
+	"runner delete", "runner disable", "runner enable", "runner token",
+	"secret delete", "secret set", "ssh-key create", "ssh-key delete",
+	"team create", "team delete", "team edit", "team member add", "team member remove", "team repo add", "team repo remove",
+	"time create", "time delete", "time reset",
+	"variable delete", "variable set",
+	"webhook create", "webhook delete", "webhook edit", "webhook test",
+	"wiki create", "wiki delete", "wiki edit",
+	"workflow disable", "workflow enable", "workflow run",
+}
+
+// addDryRun gives the commands of dryRunCommands their --dry-run flag.
+func (a *application) addDryRun(root *cobra.Command) {
+	for _, path := range dryRunCommands {
+		if cmd, _, err := root.Find(strings.Fields(path)); err == nil && cmd != root && cmd.Flags().Lookup("dry-run") == nil {
+			a.dryRunnable(cmd)
+		}
+	}
 }

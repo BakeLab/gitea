@@ -244,6 +244,9 @@ $ gt repo rename new-name -R alice/old-name`,
 // when its default repository did, and that default repository when it names t, to fullName, the new
 // name of t's repository.
 func (a *application) repositoryMoved(cmd *cobra.Command, t target, fullName string) {
+	if a.options.dryRun {
+		return // a dry run changes nothing in the clone either
+	}
 	ctx := cmd.Context()
 	remote, ok := strings.CutPrefix(t.RepoSource, "remote ")
 	if t.RepoSource == "git config gt.repository" {

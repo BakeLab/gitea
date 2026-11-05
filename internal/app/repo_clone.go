@@ -237,7 +237,7 @@ func (a *application) findRepository(cmd *cobra.Command, instances []string) (ta
 		if err := cmd.Context().Err(); err != nil {
 			return target{}, services.Repository{}, err
 		}
-		probe := &application{deps: a.deps, options: a.options}
+		probe := &application{deps: a.deps, options: a.options, dryRunRequests: a.dryRunRequests}
 		probe.options.host, probe.options.noInput = instance, true
 		t, err := probe.resolve(cmd.Context(), true)
 		if err == nil {

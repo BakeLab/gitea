@@ -147,13 +147,13 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 			if err != nil {
 				if item.Number != 0 {
 					// Gitea refused the labels after taking the other changes.
-					leftOut = append(leftOut, editLeftOut(opts, item, target.Repo, names))
+					leftOut = append(leftOut, a.editLeftOut(opts, item, target.Repo, names))
 				}
 				return issueDetails{Issue: item}, itemError(err, target.Repo)
 			}
 			if editing {
 				// The edit stands and is reported; what Gitea left out fails the command after.
-				leftOut = append(leftOut, editLeftOut(opts, item, target.Repo, names))
+				leftOut = append(leftOut, a.editLeftOut(opts, item, target.Repo, names))
 			}
 			if _, err := boards.apply(cmd.Context(), item.ID); err != nil {
 				return issueDetails{Issue: item}, err
@@ -228,11 +228,11 @@ func (a *application) editIssuesInteractively(cmd *cobra.Command, target target,
 		if err != nil {
 			if item.Number != 0 {
 				// Gitea refused the labels after taking the other changes.
-				leftOut = append(leftOut, editLeftOut(opts, item, target.Repo, issueMetadataFields))
+				leftOut = append(leftOut, a.editLeftOut(opts, item, target.Repo, issueMetadataFields))
 			}
 			return issueDetails{Issue: item}, itemError(err, target.Repo)
 		}
-		leftOut = append(leftOut, editLeftOut(opts, item, target.Repo, issueMetadataFields))
+		leftOut = append(leftOut, a.editLeftOut(opts, item, target.Repo, issueMetadataFields))
 		if details, err = a.issueDetails(cmd, service, item); err == nil {
 			a.done(cmd, "%s", edited(details))
 		}
@@ -323,7 +323,10 @@ func issueEditFlags(cmd *cobra.Command) issueMetadataNames {
 // author of an issue who cannot write to the issues of repository, and the permissions of a
 // repository tell only about its code, not its issues. Label changes need no check, as Gitea
 // refuses them outright.
-func editLeftOut(opts services.IssueEdit, item services.Issue, repository string, names issueMetadataNames) error {
+func (a *application) editLeftOut(opts services.IssueEdit, item services.Issue, repository string, names issueMetadataNames) error {
+	if a.options.dryRun {
+		return nil // nothing was written, so nothing can be left out
+	}
 	var missing []string
 	var milestone int64
 	if item.Milestone != nil {

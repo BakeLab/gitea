@@ -12,9 +12,10 @@
   fields; one is never removed or renamed (`gt help formatting`).
 - With `GITEA_CLI_ERROR_FORMAT=json` in the environment, a failure is one line of JSON on stderr:
   `{"error":{"code":4,"kind":"authentication","message":"…","status":401}}`.
-- `--dry-run` on `issue close`, `issue reopen`, `pr close`, `pr reopen`, `pr merge`,
-  `release delete`, `repo delete`, `label delete` and `branch delete` prints the write
-  requests instead of sending them. Use it to preview a change before asking for approval.
+- Every command that only changes things on Gitea takes `--dry-run`, which prints the write
+  requests instead of sending them (`issue close`, `pr merge`, `release create`, `repo delete`
+  and so on; not `pr create`, which pushes). Use it to preview a change before asking for
+  approval; secrets in the requests are shown as `[REDACTED]`.
 - Branch on exit codes ([SKILL.md](../SKILL.md#exit-codes)), not on messages.
 
 ## Credentials without a login

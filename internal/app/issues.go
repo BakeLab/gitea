@@ -401,7 +401,7 @@ $ gt issue create --template "Bug report"`, Args: argsExact(0), RunE: func(cmd *
 		if _, err := boards.apply(cmd.Context(), item.ID); err != nil {
 			failures = append(failures, fmt.Errorf("%w; add it later with: gt issue edit %d %s%s", err, item.Number, projectFlags(boards.add), a.suggestedRepo(target)))
 		}
-		return errors.Join(requested.leftOut(item, target.Repo, issueMetadataFlags), followUpError(fmt.Sprintf("issue #%d", item.Number), "created", failures), a.issueCreated(cmd, target, item))
+		return errors.Join(a.metadataLeftOut(requested, item, target.Repo, issueMetadataFlags), followUpError(fmt.Sprintf("issue #%d", item.Number), "created", failures), a.issueCreated(cmd, target, item))
 	}}
 	flags := cmd.Flags()
 	flags.StringVarP(&title, "title", "t", "", "Issue title")
@@ -440,11 +440,14 @@ var (
 	issueMetadataFields = issueMetadataNames{labels: "labels", milestone: "milestone", assignees: "assignees", deadline: "due date"}
 )
 
-// leftOut fails when the created item lacks metadata that was asked for, named by names. Gitea
+// metadataLeftOut fails when the created item lacks metadata that was asked for, named by names. Gitea
 // drops the labels, milestone, assignees and due date of people who cannot write to the issues of
 // repository without an error, and the permissions of a repository tell only about its code, not
 // its issues.
-func (m issueMetadata) leftOut(item services.Issue, repository string, names issueMetadataNames) error {
+func (a *application) metadataLeftOut(m issueMetadata, item services.Issue, repository string, names issueMetadataNames) error {
+	if a.options.dryRun {
+		return nil // nothing was written, so nothing can be left out
+	}
 	var missing []string
 	if slices.ContainsFunc(m.labels, func(id int64) bool { return !hasLabel(item, id) }) {
 		missing = append(missing, names.labels)
@@ -552,7 +555,7 @@ func (a *application) createIssueInteractively(cmd *cobra.Command, templateName 
 	}
 	created = true
 	a.warnTemplateLabelsLeftOut(cmd, target, item, requested, labelIDs)
-	return errors.Join(requested.leftOut(item, target.Repo, issueMetadataFields), a.issueCreated(cmd, target, item))
+	return errors.Join(a.metadataLeftOut(requested, item, target.Repo, issueMetadataFields), a.issueCreated(cmd, target, item))
 }
 
 // issueTemplateChoice offers template in the create form, which applies its title, body, labels and ref.

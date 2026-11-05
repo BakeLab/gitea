@@ -522,12 +522,14 @@ does not have prints as <no value>.
 On a terminal, JSON is indented and colored; otherwise each value prints on one line.
 Commands that return no resource, such as deletes, reject --json, --template and --csv.
 
-Previews: commands that change things through the API, such as issue close, pr merge and
-repo delete, take --dry-run. It sends the reads the command needs, withholds every write request,
-asks nothing, as with --no-input, and prints the requests instead, as
+Previews: every command that changes things only on Gitea, such as issue close, pr merge,
+release create and repo delete, takes --dry-run; commands that also change the clone or gt's
+settings, such as pr create, repo clone and config set, do not. It sends the reads the command needs,
+withholds every write request, asks nothing, as with --no-input, and prints the requests instead, as
 {"dry_run":true,"requests":[{"method":"PATCH","url":"...","body":{...}}]} with --json or
---jq, else as one line per request. Nothing changes on Gitea or locally, and since nothing is
-sent, a preview cannot show a write that Gitea would refuse.
+--jq, else as one line per request; what the command would print about the writes is held back,
+and passwords, tokens and secrets in a request are shown as [REDACTED]. Nothing changes on Gitea
+or locally, and since nothing is sent, a preview cannot show a write that Gitea would refuse.
 
 Compatibility: scripts may rely on the JSON that --json and --jq select, not on text or the
 order of keys. gt only adds fields and commands: a field is never

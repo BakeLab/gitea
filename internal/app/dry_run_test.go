@@ -18,8 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// dryRunCases lists every command that takes --dry-run, which TestDryRunFlagsHaveCases enforces, and
-// the write each one previews.
+// dryRunCases and dryRunWriteCases list every command that takes --dry-run, which
+// TestDryRunFlagsHaveCases enforces, and the write each one previews.
 var dryRunCases = []struct {
 	args []string
 	want string
@@ -72,6 +72,11 @@ func dryRunServer(t *testing.T) *httptest.Server {
 			return
 		}
 		path := r.URL.Path
+		if status, body, ok := dryRunFixture(path, r.URL.Query().Get("page")); ok {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+			return
+		}
 		switch {
 		case strings.HasSuffix(path, "/issues/5"):
 			_, _ = w.Write([]byte(`{"number":5,"title":"Bug","state":"open","repository":{"full_name":"alice/project"}}`))
@@ -87,7 +92,7 @@ func dryRunServer(t *testing.T) *httptest.Server {
 		case strings.HasSuffix(path, "/pulls/9"):
 			_, _ = w.Write([]byte(pull(9, "open", "fix", true)))
 		case strings.HasSuffix(path, "/releases/tags/v1"):
-			_, _ = w.Write([]byte(`{"id":3,"tag_name":"v1","name":"v1"}`))
+			_, _ = w.Write([]byte(`{"id":3,"tag_name":"v1","name":"v1","assets":[{"id":1,"name":"a.txt"}]}`))
 		case strings.HasSuffix(path, "/labels") && r.URL.Query().Get("page") > "1":
 			_, _ = w.Write([]byte(`[]`))
 		case strings.HasSuffix(path, "/labels"):
@@ -99,7 +104,7 @@ func dryRunServer(t *testing.T) *httptest.Server {
 		case strings.HasSuffix(path, "/repos/alice/project"):
 			_, _ = w.Write([]byte(`{"id":1,"full_name":"alice/project","name":"project","owner":{"login":"alice"},"default_branch":"main","allow_merge_commits":true,"allow_squash_merge":true,"allow_rebase":true,"allow_manual_merge":true,"has_issues":true}`))
 		default:
-			_, _ = w.Write([]byte(`[]`))
+			_, _ = w.Write([]byte(dryRunGenericResponse(path, r.URL.Query().Get("page"))))
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -110,11 +115,11 @@ func dryRunServer(t *testing.T) *httptest.Server {
 // change to the clone does, and stdout holds only the report.
 func TestDryRunCommands(t *testing.T) {
 	server := dryRunServer(t)
-	for _, tc := range dryRunCases {
+	for _, tc := range append(slices.Clone(dryRunCases), dryRunWriteCases...) {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
-			out, _, err := dryRun(t, server, tc.args...)
-			require.NoError(t, err)
-			require.Contains(t, out, "Dry run: would send "+tc.want+" ")
+			out, _, err := dryRun(t, server, expandDryRunArgs(t, tc.args)...)
+			require.NoError(t, err, "%v", tc.args)
+			require.Contains(t, out, "Dry run: would send "+tc.want)
 			for line := range strings.Lines(out) {
 				require.True(t, strings.HasPrefix(line, "Dry run: would send "), line)
 			}
@@ -168,6 +173,21 @@ func TestDryRunRunsToTheEnd(t *testing.T) {
 		require.Equal(t, 1, strings.Count(out, "\n"))
 		require.Contains(t, stderr, "is already closed")
 	})
+	t.Run("edits whose read-back has nothing to find", func(t *testing.T) {
+		for _, args := range [][]string{
+			{"pr", "edit", "7", "--milestone", "Bug"},
+			{"pr", "edit", "7", "--add-assignee", "bob"},
+			{"pr", "edit", "7", "--deadline", "2030-01-01"},
+			{"pr", "edit", "7", "--add-label", "repo:bug"},
+			{"issue", "edit", "5", "--add-label", "repo:bug"},
+			{"issue", "edit", "5", "--set-labels", "repo:bug"},
+			{"notification", "mark-read", "--all"},
+		} {
+			out, _, err := dryRun(t, server, args...)
+			require.NoError(t, err, "%v", args)
+			require.Contains(t, out, "Dry run: would send", "%v", args)
+		}
+	})
 	t.Run("failure of another item", func(t *testing.T) {
 		out, _, err := dryRun(t, server, "issue", "close", "5", "404")
 		require.ErrorContains(t, err, "issue 404")
@@ -200,7 +220,7 @@ func TestDryRunRunsToTheEnd(t *testing.T) {
 	})
 }
 
-// TestDryRunFlagsHaveCases makes a new command with --dry-run add itself to dryRunCases, which
+// TestDryRunFlagsHaveCases makes a new command with --dry-run add itself to dryRunWriteCases, which
 // proves it sends no write and leaves the clone alone. upgrade and extension upgrade have their own.
 func TestDryRunFlagsHaveCases(t *testing.T) {
 	deps, _, _ := testDeps(t)
@@ -214,10 +234,70 @@ func TestDryRunFlagsHaveCases(t *testing.T) {
 			walk(child)
 		}
 	}
-	walk(NewRoot(deps))
+	root := NewRoot(deps)
+	walk(root)
 	want := []string{"gt extension upgrade", "gt upgrade"}
-	for _, tc := range dryRunCases {
-		want = append(want, "gt "+tc.args[0]+" "+tc.args[1])
+	for _, tc := range append(slices.Clone(dryRunCases), dryRunWriteCases...) {
+		cmd, _, err := root.Find(tc.args)
+		require.NoError(t, err)
+		want = append(want, cmd.CommandPath())
 	}
 	require.ElementsMatch(t, want, got)
+}
+
+// dryRunReadVerbs are the last words of commands that only read.
+var dryRunReadVerbs = []string{"list", "view", "get", "status", "logs", "diff", "download", "jobs", "timeline", "checks", "revisions", "comments", "watch", "export", "versions", "show"}
+
+// dryRunExempt are the commands, with their subcommands, that have no --dry-run although they are not
+// read-only, and why.
+var dryRunExempt = []struct{ path, reason string }{
+	{"gt auth", "changes the saved credentials, not Gitea"},
+	{"gt config", "changes gt's settings, not Gitea"},
+	{"gt alias", "changes gt's settings, not Gitea"},
+	{"gt extension", "installs, runs and removes programs on this computer"},
+	{"gt completion", "writes a script to stdout"},
+	{"gt pr create", "pushes the head branch from the clone"},
+	{"gt pr checkout", "changes the clone"},
+	{"gt pr clean", "deletes branches of the clone"},
+	{"gt pr backport", "cherry-picks in the clone and pushes"},
+	{"gt repo clone", "creates a clone"},
+	{"gt repo fork", "can clone and add remotes to the clone"},
+	{"gt repo sync", "updates branches of the clone"},
+	{"gt repo set-default", "changes the clone's configuration"},
+	{"gt browse", "opens a browser"},
+	{"gt doctor", "reads"},
+	{"gt gpg-key token", "reads"},
+	{"gt version", "reads"},
+	{"gt schema", "reads"},
+	{"gt search", "reads"},
+}
+
+// TestDryRunCoversEveryWrite makes a new command either take --dry-run or say why not, so that none
+// of the writes of gt is left out by accident: add its path to dryRunCommands, with a case in
+// dryRunWriteCases, when it only changes things on Gitea.
+func TestDryRunCoversEveryWrite(t *testing.T) {
+	deps, _, _ := testDeps(t)
+	used := map[string]bool{}
+	walkCommands(NewRoot(deps), func(cmd *cobra.Command) {
+		if !cmd.HasParent() || !cmd.IsAvailableCommand() {
+			return
+		}
+		if cmd.HasAvailableSubCommands() && !strings.Contains(cmd.Use, " ") {
+			return // only a group; one that takes an operand, like pr review, writes itself
+		}
+		path := cmd.CommandPath()
+		if cmd.Flags().Lookup("dry-run") != nil || slices.Contains(dryRunReadVerbs, cmd.Name()) {
+			return
+		}
+		for _, exempt := range dryRunExempt {
+			if path == exempt.path || strings.HasPrefix(path, exempt.path+" ") {
+				used[exempt.path] = true
+				return
+			}
+		}
+		t.Errorf("%s has no --dry-run: add it to dryRunCommands, or to dryRunExempt with the reason", path)
+	})
+	for _, exempt := range dryRunExempt {
+		require.True(t, used[exempt.path], "%s is exempt but no command needs it", exempt.path)
+	}
 }

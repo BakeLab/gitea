@@ -114,6 +114,9 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 	if err := validateCreateFlags(cmd, f.opts, f.org, f.team, f.template, f.localSource, f.clone); err != nil {
 		return err
 	}
+	if a.options.dryRun && (f.localSource != "" || f.clone) {
+		return clierr.Wrap(clierr.Usage, errors.New("--dry-run cannot be combined with --source or --clone, which change the local clone"))
+	}
 	if f.public {
 		if cmd.Flags().Changed("private") {
 			return clierr.Wrap(clierr.Usage, errors.New("--public cannot be combined with --private"))
@@ -147,7 +150,7 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 			return err
 		}
 	}
-	selected := &application{deps: a.deps, options: a.options}
+	selected := &application{deps: a.deps, options: a.options, dryRunRequests: a.dryRunRequests}
 	selected.options.repo = f.template
 	target, err := selected.resolve(cmd.Context(), false)
 	if err != nil {

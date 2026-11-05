@@ -133,6 +133,8 @@ func TestUsageErrorsPrecedeRequests(t *testing.T) {
 		{[]string{"issue", "create", "--title", "safe", "--json", "--jq", "["}, "invalid --jq expression"},
 		{[]string{"issue", "close", "5", "--dry-run", "--jq", "["}, "invalid --jq expression"},
 		{[]string{"issue", "close", "5", "--dry-run", "--csv"}, "--dry-run cannot be combined with --csv"},
+		{[]string{"api", "user", "--dry-run", "--output-file", "new.json"}, "--dry-run cannot be combined with --output-file"},
+		{[]string{"workflow", "run", "ci.yml", "--dry-run", "--follow"}, "--dry-run cannot be combined with --follow"},
 		{[]string{"pr", "merge", "5", "--dry-run", "--editor"}, "--dry-run cannot be combined with --editor"},
 		{[]string{"pr", "merge", "5", "--dry-run", "--interactive"}, "--dry-run cannot be combined with --interactive"},
 		{[]string{"issue", "create", "--milestone="}, "--milestone requires a title or ID; omit --milestone for none"},

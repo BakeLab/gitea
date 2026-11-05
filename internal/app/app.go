@@ -5,6 +5,7 @@
 package app
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -115,7 +116,9 @@ type application struct {
 	// extensionAliases are the top-level aliases installed extensions declare that gt runs.
 	extensionAliases map[string]extensionAlias
 	// dryRunRequests collects the write requests that --dry-run withheld.
-	dryRunRequests transport.DryRunRecorder
+	dryRunRequests *transport.DryRunRecorder
+	// dryRunHeld holds what a dry run prints to stdout.
+	dryRunHeld *bytes.Buffer
 }
 
 // settings returns the settings, loaded once per run and again after gt changed them.
@@ -178,7 +181,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 			return value, value != ""
 		}
 	}
-	a := &application{deps: deps}
+	a := &application{deps: deps, dryRunRequests: &transport.DryRunRecorder{}}
 	if prompter, ok := deps.Prompter.(*terminal.FormPrompter); ok {
 		// Forms draw on stderr, so they follow the color settings for stderr.
 		prompter.Color = a.errColorEnabled
@@ -263,8 +266,17 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 			return clierr.Wrap(clierr.Usage, errors.New("--dry-run cannot be combined with --editor"))
 		case a.options.dryRun && a.options.interactive:
 			return clierr.Wrap(clierr.Usage, errors.New("--dry-run cannot be combined with --interactive"))
+		case a.options.dryRun && cmd.Flags().Changed("web"):
+			return clierr.Wrap(clierr.Usage, errors.New("--dry-run cannot be combined with --web"))
+		case a.options.dryRun && cmd.Flags().Changed("follow"):
+			return clierr.Wrap(clierr.Usage, errors.New("--dry-run cannot be combined with --follow"))
 		case a.options.dryRun:
 			a.options.noInput, a.options.yes = true, true // a dry run previews the command as given
+			// What the command prints after its withheld writes, such as the address of the issue it
+			// "created", is not true, so stdout is held back until Execute knows whether to report.
+			a.dryRunHeld = &bytes.Buffer{}
+			a.deps.Streams.Out = a.dryRunHeld
+			cmd.Root().SetOut(a.dryRunHeld)
 		}
 		if offline(cmd) {
 			return nil
@@ -276,6 +288,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		return a.policy(snapshot).Validate(a.deps.Streams)
 	}
 	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.runnerCommand(), a.labelCommand(), a.milestoneCommand(), a.projectCommand(), a.sshKeyCommand(), a.gpgKeyCommand(), a.timeCommand(), a.wikiCommand(), a.browseCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.packageCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false), a.extensionCommand())
+	a.addDryRun(root)
 	root.AddCommand(a.manCommand(), a.schemaCommand(), a.upgradeCommand())
 	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Example: "$ gt version", Args: argsExact(0), Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), version.Format())
@@ -560,9 +573,13 @@ func Execute(ctx context.Context, deps Dependencies, args []string) error {
 	root.SetArgs(args)
 	notifyUpdate := a.checkForUpdate(ctx, args, deps.Client)
 	cmd, err := root.ExecuteContextC(ctx)
-	if a.options.dryRun {
+	if a.dryRunHeld != nil {
+		a.deps.Streams.Out = deps.Streams.Out
 		if requests := a.dryRunRequests.Requests(); len(requests) > 0 || (err == nil && a.options.dryRunJSON) {
 			err = cmp.Or(err, a.reportDryRun(requests))
+		} else {
+			_, copyErr := a.dryRunHeld.WriteTo(deps.Streams.Out) // nothing was withheld: the command's own output stands
+			err = cmp.Or(err, copyErr)
 		}
 	}
 	notifyUpdate(cmd, err == nil)
