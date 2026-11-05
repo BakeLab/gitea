@@ -162,6 +162,8 @@ func TestCompletionOffersPathsOnlyWherePathsAreExpected(t *testing.T) {
 		"api --input ":                   cobra.ShellCompDirectiveDefault,
 		"auth login --ssh-key ":          cobra.ShellCompDirectiveDefault,
 		"ssh-key create ":                cobra.ShellCompDirectiveDefault,
+		"gpg-key create ":                cobra.ShellCompDirectiveDefault,
+		"gpg-key verify 3AA5 ":           cobra.ShellCompDirectiveDefault,
 		"admin user key create bob ":     cobra.ShellCompDirectiveDefault,
 		"release asset upload ":          cobra.ShellCompDirectiveNoFileComp,
 		"release asset upload v1 ":       cobra.ShellCompDirectiveDefault,
@@ -183,7 +185,7 @@ func TestCompletionOffersPathsOnlyWherePathsAreExpected(t *testing.T) {
 		}
 		path := strings.Fields(cmd.CommandPath())[1:]
 		_, directive := complete(t, deps, out, append(path, "")...)
-		takesFile := slices.Contains([]string{"gt browse", "gt label import", "gt ssh-key create", "gt repo deploy-key add"}, cmd.CommandPath())
+		takesFile := slices.Contains([]string{"gt browse", "gt label import", "gt ssh-key create", "gt gpg-key create", "gt repo deploy-key add"}, cmd.CommandPath())
 		require.Equal(t, takesFile, directive == cobra.ShellCompDirectiveDefault, "%s <TAB>: %d", cmd.CommandPath(), directive)
 		for _, flags := range []*pflag.FlagSet{cmd.LocalNonPersistentFlags(), cmd.PersistentFlags()} {
 			flags.VisitAll(func(flag *pflag.Flag) {

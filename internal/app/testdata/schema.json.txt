@@ -18,6 +18,11 @@ gt config list	browser:,client_cert:,client_key:,color:,default_host:,editor:,ex
 gt doctor	checks:array<object>?,host:string,host_source:string,repo:string,repo_source:string,user:string,user_source:string
 gt extension list	commit:string,compat_gh:boolean,credentials:boolean,description:string,digest_source:string,host:string,kind:string,name:string,path:string,pinned:boolean,repository:string,sha256:string,shadowed:boolean,source:string,tag:string
 gt extension search	description:string,installed:boolean,name:string,platforms:array<string>?,repository:string
+gt gpg-key create	can_certify:boolean,can_encrypt_comms:boolean,can_encrypt_storage:boolean,can_sign:boolean,created_at:string,emails:array<object>?,expires_at:string,id:integer,key_id:string,primary_key_id:string,public_key:string,subkeys:array<string>?,verified:boolean
+gt gpg-key list	can_certify:boolean,can_encrypt_comms:boolean,can_encrypt_storage:boolean,can_sign:boolean,created_at:string,emails:array<object>?,expires_at:string,id:integer,key_id:string,primary_key_id:string,public_key:string,subkeys:array<string>?,verified:boolean
+gt gpg-key token	token:string
+gt gpg-key verify	can_certify:boolean,can_encrypt_comms:boolean,can_encrypt_storage:boolean,can_sign:boolean,created_at:string,emails:array<object>?,expires_at:string,id:integer,key_id:string,primary_key_id:string,public_key:string,subkeys:array<string>?,verified:boolean
+gt gpg-key view	can_certify:boolean,can_encrypt_comms:boolean,can_encrypt_storage:boolean,can_sign:boolean,created_at:string,emails:array<object>?,expires_at:string,id:integer,key_id:string,primary_key_id:string,public_key:string,subkeys:array<string>?,verified:boolean
 gt issue attachment edit	created_at:string,download_count:integer,id:integer,name:string,size:integer,url:string
 gt issue attachment list	created_at:string,download_count:integer,id:integer,name:string,size:integer,url:string
 gt issue attachment upload	created_at:string,download_count:integer,id:integer,name:string,size:integer,url:string

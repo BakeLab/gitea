@@ -39,7 +39,7 @@ const (
 // noRepoCommands are command paths, with their subcommands, that never select a repository, so their
 // help omits --repo, --remote and --cwd.
 var noRepoCommands = []string{
-	"gt admin", "gt alias", "gt auth", "gt completion", "gt config", "gt help", "gt man", "gt org",
+	"gt admin", "gt alias", "gt auth", "gt completion", "gt config", "gt gpg-key", "gt help", "gt man", "gt org",
 	"gt repo create", "gt repo gitignore", "gt repo license", "gt repo list", "gt repo migrate", "gt schema", "gt search repo", "gt ssh-key", "gt team", "gt upgrade", "gt version",
 }
 
