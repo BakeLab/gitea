@@ -176,6 +176,7 @@ func (a *application) chooseRemoteRepository(ctx context.Context) (string, error
 
 func (a *application) repoListCommand() *cobra.Command {
 	var opts services.RepositoryListOptions
+	var selecting bool
 	list := &cobra.Command{
 		Use:   "list [<owner>]",
 		Short: "List repositories",
@@ -194,6 +195,9 @@ $ gt repo list --starred --json full_name,url`,
 			if err := a.rejectRepoFlag(cmd, func(owner string) string { return "gt repo list " + owner }); err != nil {
 				return err
 			}
+			if err := a.checkSelect(cmd, selecting); err != nil {
+				return err
+			}
 			if len(args) > 0 {
 				opts.Owner = args[0]
 			}
@@ -208,6 +212,9 @@ $ gt repo list --starred --json full_name,url`,
 			if err != nil {
 				return err
 			}
+			if selecting && len(result.Items) > 0 {
+				return runSelection(a, cmd, result.Items, repoSelection(), target.Host, servicePage(result, opts.Page))
+			}
 			collection := repositoryCollection(opts)
 			spec := listSpec[services.Repository]{Columns: repositoryColumns, Row: repositoryRow, Context: collection, Empty: "no " + collection}
 			return writeTable(a, cmd, result.Items, spec, servicePage(result, opts.Page))
@@ -217,6 +224,7 @@ $ gt repo list --starred --json full_name,url`,
 	enumFlag(list, &opts.Kind, "type", "", "", "Only list repositories of this kind", "fork", "source", "mirror")
 	list.Flags().BoolVar(&opts.Starred, "starred", false, "List your starred repositories")
 	list.Flags().BoolVar(&opts.Watched, "watched", false, "List the repositories you watch")
+	selectFlag(list, &selecting)
 	list.ValidArgsFunction = a.completeOrgs()
 	return list
 }

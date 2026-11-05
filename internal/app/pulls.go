@@ -37,7 +37,7 @@ func (a *application) pullListCommand() *cobra.Command {
 	var state, milestone string
 	var options services.PullListOptions
 	var labels []string
-	var web, local bool
+	var web, local, selecting bool
 	cmd := &cobra.Command{Use: "list", Short: "List pull requests", Long: `List the pull requests of a repository, newest first.
 
 The reviewers, reviewer_teams, reviews and review_decision JSON fields come from the reviews of each
@@ -53,7 +53,13 @@ fewer than required give review_required.
 the one pr checkout recorded for it, else one whose head branch is the branch's upstream or has
 its name, preferring open pull requests. A merged or closed one tells that gt pr clean can delete
 the branch. gt reads every open pull request, and closed ones back to the oldest last commit of
-a branch without an open one.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+a branch without an open one.
+
+--select offers the listed pull requests in a filterable list, shows the one you pick and asks what
+to do with it: check it out, show its diff, review, merge, comment or close it.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+		if err := a.checkSelect(cmd, selecting); err != nil {
+			return err
+		}
 		if local {
 			return a.pullListLocal(cmd)
 		}
@@ -104,6 +110,9 @@ a branch without an open one.`, Args: argsExact(0), RunE: func(cmd *cobra.Comman
 				return err
 			}
 		}
+		if selecting && len(items) > 0 {
+			return runSelection(a, cmd, items, pullSelection(t.Repo), t.Host, servicePage(window, page))
+		}
 		noun := map[string]string{"open": "open pull requests", "closed": "closed pull requests", "merged": "merged pull requests", "all": "pull requests"}[state]
 		what := noun + " in " + t.Repo
 		empty := "no " + what
@@ -140,6 +149,7 @@ a branch without an open one.`, Args: argsExact(0), RunE: func(cmd *cobra.Comman
 	enumFlag(cmd, &options.Sort, "sort", "", "", "Order", "oldest", "recentupdate", "recentclose", "leastupdate", "mostcomment", "leastcomment", "priority")
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the pull request list in the browser")
 	cmd.Flags().BoolVar(&local, "local", false, "List the local branches with their pull requests")
+	selectFlag(cmd, &selecting)
 	_ = cmd.RegisterFlagCompletionFunc("author", a.completeUsers())
 	_ = cmd.RegisterFlagCompletionFunc("assignee", a.completeUsers())
 	_ = cmd.RegisterFlagCompletionFunc("base", a.completeBranches())

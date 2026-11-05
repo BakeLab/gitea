@@ -54,6 +54,7 @@ func releaseTime(item services.Release) string {
 
 func (a *application) releaseListCommand() *cobra.Command {
 	var limit, page int
+	var selecting bool
 	command := &cobra.Command{
 		Use:   "list",
 		Short: "List releases",
@@ -61,6 +62,9 @@ func (a *application) releaseListCommand() *cobra.Command {
 $ gt release list -R alice/project --json tag,title,draft`,
 		Args: argsExact(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := a.checkSelect(cmd, selecting); err != nil {
+				return err
+			}
 			target, err := a.resolve(cmd.Context(), true)
 			if err != nil {
 				return err
@@ -68,6 +72,9 @@ $ gt release list -R alice/project --json tag,title,draft`,
 			result, err := (services.Releases{Client: target.client, Repository: target.Repo}).ListPage(cmd.Context(), limit, page)
 			if err != nil {
 				return err
+			}
+			if selecting && len(result.Items) > 0 {
+				return runSelection(a, cmd, result.Items, releaseSelection(target.Repo), target.Host, servicePage(result, page))
 			}
 			// Releases come newest first, so the first published one of the first page is the latest.
 			var latest int64
@@ -94,6 +101,7 @@ $ gt release list -R alice/project --json tag,title,draft`,
 		},
 	}
 	pageFlags(command, &limit, &page)
+	selectFlag(command, &selecting)
 	return command
 }
 

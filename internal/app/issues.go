@@ -42,13 +42,18 @@ func (a *application) issueListCommand() *cobra.Command {
 	opts := services.ListOptions{Page: 1}
 	var labels, milestones []string
 	var updated timeRange
-	var web bool
+	var web, selecting bool
 	cmd := &cobra.Command{Use: "list", Short: "List issues in a repository", Long: `List the issues of a repository, newest first. Filters combine: an issue must match all of them.
 Labels and milestones must exist in the repository.`, Example: `$ gt issue list --label bug --state all
 $ gt issue list --assignee @me --json number,title
 $ gt issue list --no-assignee --label bug
 # Issues and pull requests in a milestone, as tab-separated values
-$ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+$ gt issue list --kind all --milestone v1.0 | cut -f1,2
+# Pick an issue from a filterable list, then comment on it or close it
+$ gt issue list --select`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+		if err := a.checkSelect(cmd, selecting); err != nil {
+			return err
+		}
 		var err error
 		if opts.Since, opts.Before, err = updated.parse(a.deps.Now()); err != nil {
 			return err
@@ -89,8 +94,12 @@ $ gt issue list --kind all --milestone v1.0 | cut -f1,2`, Args: argsExact(0), Ru
 		if err != nil {
 			return err
 		}
+		if selecting && len(page.Items) > 0 {
+			return runSelection(a, cmd, page.Items, issueSelection(target.Repo, opts.Kind), target.Host, servicePage(page, opts.Page))
+		}
 		return writeTable(a, cmd, page.Items, issueListSpec("in "+target.Repo, opts.State, opts.Kind, filtered), servicePage(page, opts.Page))
 	}}
+	selectFlag(cmd, &selecting)
 	enumFlag(cmd, &opts.State, "state", "s", "open", "Filter by state", "open", "closed", "all")
 	enumFlag(cmd, &opts.Kind, "kind", "", "issues", "List issues, pull requests or both; the kind field of each reads issue or pull", "issues", "pulls", "all")
 	pageFlags(cmd, &opts.Limit, &opts.Page)
