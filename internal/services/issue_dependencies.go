@@ -78,42 +78,66 @@ func (s Issues) Dependencies(ctx context.Context, number int64) (IssueDependenci
 // where the instance allows that, or with block false lifts that dependency. Like other additions
 // and removals, adding a dependency that exists or removing one that does not changes nothing.
 func (s Issues) SetBlockedBy(ctx context.Context, n int64, blocker IssueReference, block bool) error {
-	owner, repo, err := splitRepository(blocker.Repository)
+	return s.changeDependency(ctx, n, blocker, func(ctx context.Context, c *gitea.Client, owner, repo string, meta gitea.IssueMeta) (*gitea.Response, error) {
+		if block {
+			_, resp, err := c.Issues.CreateIssueDependency(ctx, owner, repo, n, meta)
+			return resp, err
+		}
+		_, resp, err := c.Issues.RemoveIssueDependency(ctx, owner, repo, n, meta)
+		return resp, err
+	})
+}
+
+// SetBlocks makes issue n block issue blocked, which may belong to another repository where the
+// instance allows that, or with block false lifts that. It is SetBlockedBy the other way round.
+func (s Issues) SetBlocks(ctx context.Context, n int64, blocked IssueReference, block bool) error {
+	return s.changeDependency(ctx, n, blocked, func(ctx context.Context, c *gitea.Client, owner, repo string, meta gitea.IssueMeta) (*gitea.Response, error) {
+		if block {
+			_, resp, err := c.Issues.CreateIssueBlocking(ctx, owner, repo, n, meta)
+			return resp, err
+		}
+		_, resp, err := c.Issues.RemoveIssueBlocking(ctx, owner, repo, n, meta)
+		return resp, err
+	})
+}
+
+// changeDependency runs change, a request about issue n of s and the other issue, and words its
+// failure.
+func (s Issues) changeDependency(ctx context.Context, n int64, other IssueReference, change func(ctx context.Context, c *gitea.Client, owner, repo string, meta gitea.IssueMeta) (*gitea.Response, error)) error {
+	owner, repo, err := splitRepository(other.Repository)
 	if err != nil {
 		return err
 	}
 	err = repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, repoOwner, repoName string) (*gitea.Response, error) {
-		meta := gitea.IssueMeta{Index: blocker.Number, Owner: owner, Name: repo}
-		if block {
-			_, resp, err := c.Issues.CreateIssueDependency(ctx, repoOwner, repoName, n, meta)
-			return resp, err
-		}
-		_, resp, err := c.Issues.RemoveIssueDependency(ctx, repoOwner, repoName, n, meta)
-		return resp, err
+		return change(ctx, c, repoOwner, repoName, gitea.IssueMeta{Index: other.Number, Owner: owner, Name: repo})
 	})
-	name := blocker.Repository + "#" + strconv.FormatInt(blocker.Number, 10)
+	name := other.Repository + "#" + strconv.FormatInt(other.Number, 10)
+	kind := "issue"
+	if s.Pulls {
+		kind = "pull request"
+	}
 	// Gitea answers 500 when the dependency to add exists or the one to remove does not.
 	if apiErr, ok := errors.AsType[*transport.APIError](err); ok {
 		message := strings.ToLower(apiErr.Message)
 		if strings.Contains(message, "issue dependency does already exist") || strings.Contains(message, "issue dependency does not exist") {
 			return nil
 		}
-		// A 404 names the missing issue by its index, or the missing repository of the blocker.
+		// A 404 names the missing issue by its index, or the missing repository of the other issue.
 		if apiErr.Status == http.StatusNotFound {
-			missing := &NotFoundError{Kind: "issue", Key: "#" + strconv.FormatInt(n, 10), Scope: s.Repository, Err: err}
+			missing := &NotFoundError{Kind: kind, Key: "#" + strconv.FormatInt(n, 10), Scope: s.Repository, Err: err}
 			switch {
 			case strings.Contains(message, "repository does not exist"):
-				return &NotFoundError{Kind: "repository", Key: blocker.Repository, Err: err}
+				return &NotFoundError{Kind: "repository", Key: other.Repository, Err: err}
 			case !strings.Contains(message, "index: "):
 				return s.dependencyRefusal(ctx, n, missing)
-			case !strings.Contains(message, fmt.Sprintf("index: %d]", blocker.Number)):
+			case !strings.Contains(message, fmt.Sprintf("index: %d]", other.Number)):
 				return missing
-			case blocker.Number == n && !strings.EqualFold(blocker.Repository, s.Repository):
+			case other.Number == n && !strings.EqualFold(other.Repository, s.Repository):
 				// The index fits both issues; the edited one tells which is missing.
 				if _, err := s.View(ctx, n); err != nil {
 					return missing
 				}
-			case blocker.Number == n:
+			case other.Number == n:
 				return missing
 			}
 			return &NotFoundError{Kind: "issue", Key: name, Err: err}

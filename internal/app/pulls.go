@@ -200,7 +200,28 @@ func (a *application) pullResult(cmd *cobra.Command, t target, item services.Pul
 	if err != nil {
 		return err
 	}
-	return a.writeJSON(cmd, item)
+	return a.writePullJSON(cmd, t, item)
+}
+
+// pullDependenciesJSON is the JSON of pr view and pr edit: the pull request with the issues it depends on and
+// blocks, which are read only when the output includes them.
+type pullDependenciesJSON struct {
+	services.Pull
+	BlockedBy []services.IssueReference `json:"blocked_by,omitzero"`
+	Blocks    []services.IssueReference `json:"blocks,omitzero"`
+}
+
+// writePullJSON writes item as JSON, with its dependencies when the output includes them.
+func (a *application) writePullJSON(cmd *cobra.Command, t target, item services.Pull) error {
+	details := pullDependenciesJSON{Pull: item}
+	if slices.Contains(commandOutputFields(cmd), "blocked_by") && a.jsonSelects("blocked_by", "blocks") { // only pr view and pr edit declare them
+		dependencies, err := (services.Issues{Client: t.client, Repository: t.Repo, Pulls: true}).Dependencies(cmd.Context(), item.Number)
+		if err != nil {
+			return err
+		}
+		details.BlockedBy, details.Blocks = dependencies.BlockedBy, dependencies.Blocks
+	}
+	return a.writeJSON(cmd, details)
 }
 
 func (a *application) pullWithReviews(cmd *cobra.Command, t target, item services.Pull) (services.Pull, error) {
@@ -238,7 +259,7 @@ func (a *application) pullViewCommand() *cobra.Command {
 		}
 		item = service.WithReviews(cmd.Context(), item, details.reviews)
 		if a.options.json != "" {
-			return a.writeJSON(cmd, item)
+			return a.writePullJSON(cmd, t, item)
 		}
 		if item.State == "open" && item.HeadSHA != "" {
 			if details.checks, err = service.CommitChecks(cmd.Context(), item.HeadSHA); err != nil {
@@ -256,8 +277,9 @@ $ gt pr view
 # View #13 with its comments and reviews
 $ gt pr view 13 --comments
 
-$ gt pr view feature/login --json number,state,review_decision`
-	return cmd
+$ gt pr view feature/login --json number,state,review_decision
+$ gt pr view 13 --json blocked_by,blocks`
+	return jsonOutput[pullDependenciesJSON](cmd)
 }
 
 // pullState reports merged pull requests as merged, and open drafts as draft.

@@ -374,3 +374,23 @@ func TestDryRunLeavesWhatItDoesNotWithholdAlone(t *testing.T) {
 		}
 	})
 }
+
+// TestDryRunPreviewsDependencyChanges covers the dependency flags of issue edit and pr edit, which
+// the one case of each command in dryRunWriteCases does not send.
+func TestDryRunPreviewsDependencyChanges(t *testing.T) {
+	server := dryRunServer(t)
+	repo := server.URL + "/api/v1/repos/alice/project"
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"issue", "edit", "5", "--add-blocks", "9"}, "POST " + repo + "/issues/5/blocks"},
+		{[]string{"issue", "edit", "5", "--remove-blocked-by", "9"}, "DELETE " + repo + "/issues/5/dependencies"},
+		{[]string{"pr", "edit", "7", "--add-blocked-by", "9"}, "POST " + repo + "/issues/7/dependencies"},
+		{[]string{"pr", "edit", "7", "--remove-blocks", "9"}, "DELETE " + repo + "/issues/7/blocks"},
+	} {
+		out, _, err := dryRun(t, server, tc.args...)
+		require.NoError(t, err, "%v", tc.args)
+		require.Contains(t, out, "Dry run: would send "+tc.want, "%v", tc.args)
+	}
+}

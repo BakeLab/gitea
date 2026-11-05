@@ -481,7 +481,7 @@ without quotes:
   $ gt issue list --json number,title --jq '.[] | "\(.number)\t\(.title)"'
 
 Some fields cost extra requests, such as the reviewers of pr list, the blocked_by and blocks
-of issue view and issue edit, and the visibility of org member list. gt makes them only when
+of issue view, issue edit, pr view and pr edit, and the visibility of org member list. gt makes them only when
 the output includes the field: --json or --csv names it, or selects every field and the --jq
 expression names it. An expression that reaches such a field without naming it, as
 to_entries does, sees it empty; name the field in --json instead.

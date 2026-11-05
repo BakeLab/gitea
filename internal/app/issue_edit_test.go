@@ -472,7 +472,7 @@ func TestIssueEditAddsAndRemovesDependencies(t *testing.T) {
 	defer server.Close()
 	deps, _, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "alice/project", "--add-blocked-by", "#9,3,bob/lib#5", "--remove-blocked-by", "4"}))
-	require.Equal(t, []string{"POST alice/project#9", "POST alice/project#3", "POST bob/lib#5", "DELETE alice/project#4"}, requests)
+	require.Equal(t, []string{"DELETE alice/project#4", "POST alice/project#9", "POST alice/project#3", "POST bob/lib#5"}, requests)
 	requireUsageBeforeRequests(t, "takes issues as N, #N, OWNER/REPO#N or an issue URL", "issue", "edit", "12", "--add-blocked-by", "lib#5")
 	requests = nil
 	for _, refused := range []struct{ want, flag, value string }{

@@ -4,6 +4,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -23,7 +24,8 @@ func (a *application) issueEditCommand() *cobra.Command {
 	var title, body, file, deadline, ref, milestone string
 	var useEditor, removeMilestone bool
 	var metadata metadataFlags
-	var addBlockedBy, removeBlockedBy, addProjects, removeProjects []string
+	var dependencies dependencyFlags
+	var addProjects, removeProjects []string
 	cmd := &cobra.Command{Use: "edit {<number> | <url>}...", Short: "Edit issues: title, body, labels, assignees, milestone, deadline", Long: `Edit one or more issues. Without flags on a terminal, a form edits one issue at a time,
 starting from its current values. Label and assignee flags add to or remove from each issue's
 current values; the --set flags replace them. The blocked_by and blocks JSON fields cost extra
@@ -35,7 +37,8 @@ names the flags or form fields it left out and fails. Gitea refuses their label 
 so gt sends the other changes first.`, Example: `$ gt issue edit 12 --title "Crash on start" --add-label bug
 $ gt issue edit 12 13 --add-assignee @me --milestone v1.0
 $ gt issue edit 12 --remove-label wontfix --remove-milestone
-$ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+$ gt issue edit 12 --add-blocked-by 9
+$ gt issue edit 9 --add-blocks 12`, Annotations: map[string]string{"gt.arguments": issueArguments}, Args: usageArgs(cobra.MinimumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var draft terminal.Draft
 		defer finishDraft(&draft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
@@ -83,7 +86,7 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 		if err := metadata.validate(cmd); err != nil {
 			return err
 		}
-		blockers, err := dependencyChanges(addBlockedBy, removeBlockedBy)
+		blockers, err := dependencies.changes()
 		if err != nil {
 			return err
 		}
@@ -91,7 +94,7 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 			return err
 		}
 		editing := opts != (services.IssueEdit{}) || useEditor || metadata.changed(cmd) || milestone != ""
-		if !editing && len(addBlockedBy)+len(removeBlockedBy)+len(addProjects)+len(removeProjects) == 0 {
+		if !editing && dependencies.count()+len(addProjects)+len(removeProjects) == 0 {
 			return errNothingToEdit
 		}
 		target, numbers, err := a.resolveRefs(cmd, args, issueRef)
@@ -129,14 +132,8 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 		names := issueEditFlags(cmd)
 		var leftOut []error
 		done := batchDone(a, cmd, numbers, issueLabel, func(n int64) (issueDetails, error) {
-			for _, blocker := range blockers {
-				if err := service.SetBlockedBy(cmd.Context(), n, blocker.IssueReference, blocker.block); err != nil {
-					// A missing blocker or repository keeps its own name.
-					if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Scope == "" {
-						return issueDetails{}, err
-					}
-					return issueDetails{}, itemError(err, target.Repo)
-				}
+			if err := applyDependencies(cmd.Context(), service, n, blockers); err != nil {
+				return issueDetails{}, err
 			}
 			var item services.Issue
 			if editing {
@@ -174,8 +171,7 @@ $ gt issue edit 12 --add-blocked-by 9`, Annotations: map[string]string{"gt.argum
 	flags.StringVar(&deadline, "deadline", "", "Due `date`: YYYY-MM-DD, RFC3339 or Unix timestamp; only the date counts, as the end of that day in UTC; empty clears it")
 	flags.StringArrayVar(&addProjects, "add-project", nil, "Add the issue to the project with this ID or `title`, a number being an ID first (repeatable)")
 	flags.StringArrayVar(&removeProjects, "remove-project", nil, "Take the issue off the project with this ID or `title`, a number being an ID first (repeatable)")
-	flags.StringSliceVar(&addBlockedBy, "add-blocked-by", nil, "Mark the issue as blocked by other `issues`: N, #N, OWNER/REPO#N or a URL")
-	flags.StringSliceVar(&removeBlockedBy, "remove-blocked-by", nil, "Lift the dependency on other `issues`: N, #N, OWNER/REPO#N or a URL")
+	dependencies.register(cmd, "issue")
 	a.completeMetadataFlags(cmd)
 	_ = cmd.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
 	_ = cmd.RegisterFlagCompletionFunc("ref", a.completeBranches())
@@ -393,33 +389,80 @@ func sameElements[T any](a, b []T, equal func(T, T) bool) bool {
 	return true
 }
 
-// dependencyChange adds or removes the issue that blocks another; an issue without a repository
-// is one of the edited issue's repository.
+// dependencyChange adds or removes a dependency between the edited issue and another one; an issue
+// without a repository is one of the edited issue's repository.
 type dependencyChange struct {
 	services.IssueReference
+	// block is true to add the dependency and false to lift it.
 	block bool
+	// blocks is true when the edited issue blocks the other, false when the other blocks it.
+	blocks bool
 	// flag and raw are the flag and value that named the issue.
 	flag, raw string
 }
 
-// dependencyChanges parses --add-blocked-by and --remove-blocked-by, in that order. A repository
-// stays as given, such as a URL, until resolveDependencies resolves it.
-func dependencyChanges(add, remove []string) ([]dependencyChange, error) {
+// dependencyFlags are --add-blocked-by, --remove-blocked-by, --add-blocks and --remove-blocks.
+type dependencyFlags struct {
+	addBlockedBy, removeBlockedBy, addBlocks, removeBlocks []string
+}
+
+// register adds the flags to cmd, which edits noun, "issue" or "pull request".
+func (d *dependencyFlags) register(cmd *cobra.Command, noun string) {
+	flags := cmd.Flags()
+	flags.StringSliceVar(&d.addBlockedBy, "add-blocked-by", nil, "Mark the "+noun+" as blocked by other `issues`: N, #N, OWNER/REPO#N or a URL")
+	flags.StringSliceVar(&d.removeBlockedBy, "remove-blocked-by", nil, "Lift the dependency of the "+noun+" on other `issues`: N, #N, OWNER/REPO#N or a URL")
+	flags.StringSliceVar(&d.addBlocks, "add-blocks", nil, "Mark the "+noun+" as blocking other `issues`: N, #N, OWNER/REPO#N or a URL")
+	flags.StringSliceVar(&d.removeBlocks, "remove-blocks", nil, "Stop the "+noun+" from blocking other `issues`: N, #N, OWNER/REPO#N or a URL")
+}
+
+// count is how many issues the flags name.
+func (d dependencyFlags) count() int {
+	return len(d.addBlockedBy) + len(d.removeBlockedBy) + len(d.addBlocks) + len(d.removeBlocks)
+}
+
+// changes parses the flags, in the order of their declaration. A repository stays as given, such as
+// a URL, until resolveDependencies resolves it.
+func (d dependencyFlags) changes() ([]dependencyChange, error) {
 	var changes []dependencyChange
 	for _, list := range []struct {
-		flag   string
-		values []string
-		block  bool
-	}{{"add-blocked-by", add, true}, {"remove-blocked-by", remove, false}} {
+		flag          string
+		values        []string
+		block, blocks bool
+	}{ // removals first: a flip adds what Gitea would refuse as circular while the old one stands
+		{"remove-blocked-by", d.removeBlockedBy, false, false},
+		{"remove-blocks", d.removeBlocks, false, true},
+		{"add-blocked-by", d.addBlockedBy, true, false},
+		{"add-blocks", d.addBlocks, true, true},
+	} {
 		for _, raw := range list.values {
 			parsed, err := parseRef(raw, issueRef)
 			if err != nil || parsed.Number < 1 || (parsed.Repo != "" && !strings.Contains(parsed.Repo, "/")) {
 				return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("--%s takes issues as N, #N, OWNER/REPO#N or an issue URL, not %q", list.flag, raw))
 			}
-			changes = append(changes, dependencyChange{services.IssueReference{Repository: parsed.Repo, Number: parsed.Number}, list.block, list.flag, raw})
+			changes = append(changes, dependencyChange{services.IssueReference{Repository: parsed.Repo, Number: parsed.Number}, list.block, list.blocks, list.flag, raw})
 		}
 	}
 	return changes, nil
+}
+
+// applyDependencies makes the changes to issue or pull request n, stopping at the first failure.
+func applyDependencies(ctx context.Context, service services.Issues, n int64, changes []dependencyChange) error {
+	for _, change := range changes {
+		var err error
+		if change.blocks {
+			err = service.SetBlocks(ctx, n, change.IssueReference, change.block)
+		} else {
+			err = service.SetBlockedBy(ctx, n, change.IssueReference, change.block)
+		}
+		if err != nil {
+			// A missing other issue or repository keeps its own name.
+			if notFound, ok := errors.AsType[*services.NotFoundError](err); ok && notFound.Scope == "" {
+				return err
+			}
+			return itemError(err, service.Repository)
+		}
+	}
+	return nil
 }
 
 // resolveDependencies resolves the repository of each change to OWNER/REPO on the instance of t,
@@ -431,7 +474,11 @@ func (a *application) resolveDependencies(t target, numbers []int64, changes []d
 	}
 	instance, _ := settings.NormalizeHost(t.Host)
 	var resolved []dependencyChange
-	seen := map[services.IssueReference]bool{}
+	type dependencyKey struct {
+		reference services.IssueReference
+		blocks    bool
+	}
+	seen := map[dependencyKey]bool{}
 	for _, change := range changes {
 		raw := change.Repository
 		change.Repository = t.Repo
@@ -448,12 +495,19 @@ func (a *application) resolveDependencies(t target, numbers []int64, changes []d
 		if strings.EqualFold(change.Repository, t.Repo) && slices.Contains(numbers, change.Number) {
 			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("--%s %s names the edited issue; an issue cannot block itself", change.flag, change.raw))
 		}
-		key := services.IssueReference{Repository: strings.ToLower(change.Repository), Number: change.Number}
+		key := dependencyKey{services.IssueReference{Repository: strings.ToLower(change.Repository), Number: change.Number}, change.blocks}
 		if block, ok := seen[key]; ok {
 			if block != change.block {
-				return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("%s#%d is both added and removed as a blocker", change.Repository, change.Number))
+				role := "a blocker"
+				if change.blocks {
+					role = "a blocked issue"
+				}
+				return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("%s#%d is both added and removed as %s", change.Repository, change.Number, role))
 			}
 			continue
+		}
+		if opposite, ok := seen[dependencyKey{key.reference, !change.blocks}]; ok && opposite && change.block {
+			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("%s#%d cannot both block and be blocked by the edited issue", change.Repository, change.Number))
 		}
 		seen[key] = change.block
 		resolved = append(resolved, change)

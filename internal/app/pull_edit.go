@@ -22,6 +22,7 @@ func (a *application) pullEditCommand() *cobra.Command {
 	var metadata metadataFlags
 	var reviewers services.ReviewRequestChanges
 	var addProjects, removeProjects []string
+	var dependencies dependencyFlags
 	cmd := &cobra.Command{Use: "edit [<number> | <url> | <branch>]", Short: "Edit a pull request", Long: `Edit the title, body, base branch, reviewers, labels, assignees, milestone or due date of a
 pull request, or mark it as a draft or ready for review. Without flags on a terminal, a form edits
 the title, base branch, body, assignees, milestone, labels and due date, starting from their
@@ -30,7 +31,12 @@ current values, and sends only what changed.
 Gitea changes the milestone, assignees and due date only for people who can write to the pull
 requests of the repository, and leaves them as they were for the author of a pull request who
 cannot: gt then names the flags or form fields it left out and fails. Gitea refuses their label changes
-outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+outright, so gt sends the other changes first.
+
+--add-blocked-by and --remove-blocked-by change which issues or pull requests must be done first,
+--add-blocks and --remove-blocks which ones wait for this pull request; the same flags of gt issue edit
+work on issues. The blocked_by and blocks JSON fields cost extra requests, made only when the output
+includes them.`, Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var editorDraft terminal.Draft
 		defer finishDraft(&editorDraft, &runErr)
 		if err := validateBodySources(cmd); err != nil {
@@ -94,11 +100,18 @@ outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnot
 		if err := validateProjectChanges(addProjects, removeProjects); err != nil {
 			return err
 		}
-		if opts == (services.PullEdit{}) && !useEditor && !draft && !ready && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone") && !removeMilestone && len(addProjects)+len(removeProjects) == 0 {
+		blockers, err := dependencies.changes()
+		if err != nil {
+			return err
+		}
+		if opts == (services.PullEdit{}) && !useEditor && !draft && !ready && !metadata.changed(cmd) && !cmd.Flags().Changed("milestone") && !removeMilestone && len(addProjects)+len(removeProjects)+dependencies.count() == 0 {
 			return errPullNothingToEdit
 		}
 		t, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
+			return err
+		}
+		if blockers, err = a.resolveDependencies(t, []int64{n}, blockers); err != nil {
 			return err
 		}
 		switch {
@@ -165,10 +178,20 @@ outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnot
 		if err != nil {
 			return err
 		}
+		if len(blockers) > 0 && before == nil { // an issue's number must fail before its dependencies change
+			current, err := service.View(cmd.Context(), n)
+			if err != nil {
+				return err
+			}
+			before = &current
+		}
+		if err := applyDependencies(cmd.Context(), services.Issues{Client: t.client, Repository: t.Repo, Pulls: true}, n, blockers); err != nil {
+			return err
+		}
 		var item services.Pull
 		var failures []error
 		if opts == (services.PullEdit{}) {
-			// Only project boards change: there is nothing to send to the pull request itself.
+			// Only project boards or dependencies change: there is nothing to send to the pull request itself.
 			if _, err := boards.applyToNumber(cmd.Context(), n); err != nil {
 				return err
 			}
@@ -212,6 +235,7 @@ outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnot
 	cmd.Flags().StringArrayVar(&removeProjects, "remove-project", nil, "Take the pull request off the project with this ID or `title`, a number being an ID first (repeatable)")
 	cmd.Flags().StringVarP(&milestone, "milestone", "m", "", "Milestone title or ID; 0 removes it")
 	cmd.Flags().BoolVar(&removeMilestone, "remove-milestone", false, "Remove the milestone")
+	dependencies.register(cmd, "pull request")
 	metadata.register(cmd)
 	cmd.Flags().StringSliceVar(&reviewers.Add.Users, "add-reviewer", nil, "Request reviews from users; @me for yourself")
 	cmd.Flags().StringSliceVar(&reviewers.Remove.Users, "remove-reviewer", nil, "Withdraw review requests from users")
@@ -225,8 +249,9 @@ outright, so gt sends the other changes first.`, Annotations: pullArgumentsAnnot
 	cmd.ValidArgsFunction = firstArg(a.completePulls("open"))
 	cmd.Example = `$ gt pr edit 13 --title "Add login support" --add-reviewer carol
 $ gt pr edit --base develop
-$ gt pr edit 13 --editor`
-	return cmd
+$ gt pr edit 13 --editor
+$ gt pr edit 13 --add-blocked-by 9 --remove-blocks 20`
+	return jsonOutput[pullDependenciesJSON](cmd)
 }
 
 var errPullNothingToEdit = clierr.Wrap(clierr.Usage, errors.New("nothing to edit; pass a flag such as --title (see gt pr edit --help)"))
