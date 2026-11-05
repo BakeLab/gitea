@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
@@ -79,19 +80,25 @@ func TestIssueEditAddsToAndRemovesFromProjects(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "Empty", "--add-project", "empty"}))
 	require.Equal(t, []string{"POST /api/v1/orgs/acme/projects/4/columns", "POST /api/v1/orgs/acme/projects/4/columns/20/default", "POST /api/v1/orgs/acme/projects/4/columns/20/issues/70"}, mutations)
 	// Two spellings of a title load the project once.
+	var readsMu sync.Mutex // gt reads a project's columns concurrently
 	reads := map[string]int{}
 	handler := projectServer(t, &mutations)
 	counting := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("page") == "1" {
+			readsMu.Lock()
 			reads[r.URL.Path]++
+			readsMu.Unlock()
 		}
 		handler.ServeHTTP(w, r)
 	}))
 	defer counting.Close()
 	deps, _, _ = serverDeps(t, counting.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--remove-project", "Board", "--remove-project", "board"}))
-	require.Equal(t, 1, reads["/api/v1/orgs/acme/projects/3/columns"])
-	require.Equal(t, 1, reads["/api/v1/orgs/acme/projects/3/columns/11/issues"])
+	readsMu.Lock()
+	columns, issues := reads["/api/v1/orgs/acme/projects/3/columns"], reads["/api/v1/orgs/acme/projects/3/columns/11/issues"]
+	readsMu.Unlock()
+	require.Equal(t, 1, columns)
+	require.Equal(t, 1, issues)
 	mutations = nil
 	err = Execute(context.Background(), deps, []string{"issue", "edit", "12", "-R", "acme/app", "--add-project", "Board", "--remove-project", "board"})
 	require.EqualError(t, err, `--add-project "Board" cannot be combined with --remove-project "board", which name the same project`)
