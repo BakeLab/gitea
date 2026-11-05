@@ -43,6 +43,8 @@ EOF
 gt issue create --template bug --title "Crash on empty config" --no-input --json number,url
 gt issue close 17 --comment "Fixed in #18." --no-input
 gt issue reopen 17 --comment "Still happens on main." --no-input
+gt issue lock 17 --reason Resolved --no-input     # unlock, pin and unpin work the same way
+gt issue delete 17 --yes --no-input                # for good, with its comments; issues only
 ```
 
 - Labels, a milestone, assignees and a due date need write access to the repository's issues.
@@ -50,7 +52,7 @@ gt issue reopen 17 --comment "Still happens on main." --no-input
 - `--template` starts from a repository issue template; without a terminal it requires
   `--title`.
 - Closing and reopening ask no confirmation and are visible to everyone: only when the user
-  asks.
+  asks. Locking and pinning are too. Deleting asks first (`--yes` skips it) and cannot be undone.
 
 ## Working on an issue
 

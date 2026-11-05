@@ -66,7 +66,7 @@ func issueFrom(issue *gitea.Issue) Issue {
 		Author: login(issue.Poster), Labels: convertAll(issue.Labels, labelFrom), Ref: issue.Ref, ID: issue.ID, Number: issue.Index,
 		Title: issue.Title, Body: issue.Body, URL: issue.HTMLURL, State: string(issue.State),
 		CreatedAt: timestamp(issue.Created), UpdatedAt: timestamp(issue.Updated), Deadline: optionalTimestamp(issue.Deadline),
-		Assignees: convertAll(issue.Assignees, login), Milestone: issueMilestoneFrom(issue.Milestone), Comments: int64(issue.Comments),
+		Assignees: convertAll(issue.Assignees, login), Milestone: issueMilestoneFrom(issue.Milestone), Comments: int64(issue.Comments), Locked: issue.IsLocked,
 	}
 }
 

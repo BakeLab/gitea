@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ type Issue struct {
 	Assignees []string        `json:"assignees"`
 	Milestone *IssueMilestone `json:"milestone"`
 	Comments  int64           `json:"comments"`
+	Locked    bool            `json:"-"`
 }
 
 // Kinds of Issue: Gitea lists pull requests among issues.
@@ -343,4 +345,40 @@ func (s Issues) edit(ctx context.Context, number int64, opts gitea.EditIssueOpti
 		return c.Issues.EditIssue(ctx, owner, repo, number, opts)
 	})
 	return item, s.issueError(ctx, err, number)
+}
+
+// SetLocked locks the conversation of an issue or pull request, or unlocks it. Gitea does nothing
+// when it is in that state already. reason is free text: Gitea does not check it against the
+// reasons that its settings offer.
+func (s Issues) SetLocked(ctx context.Context, number int64, locked bool, reason string) error {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+		if locked {
+			return c.Issues.LockIssue(ctx, owner, repo, number, gitea.LockIssueOption{LockReason: reason})
+		}
+		return c.Issues.UnlockIssue(ctx, owner, repo, number)
+	})
+	return s.issueError(ctx, err, number)
+}
+
+// SetPinned pins an issue or pull request to the top of its list, or unpins it.
+func (s Issues) SetPinned(ctx context.Context, number int64, pinned bool) error {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+		if pinned {
+			return c.Issues.PinIssue(ctx, owner, repo, number)
+		}
+		return c.Issues.UnpinIssue(ctx, owner, repo, number)
+	})
+	// Gitea answers 500 for every failure to pin, such as one that is pinned already.
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok && pinned && apiErr.Status == http.StatusInternalServerError {
+		return fmt.Errorf("could not pin: it may be pinned already, or too many are: %w", err)
+	}
+	return s.issueError(ctx, err, number)
+}
+
+// Delete deletes an issue for good, with its comments.
+func (s Issues) Delete(ctx context.Context, number int64) error {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+		return c.Issues.DeleteIssue(ctx, owner, repo, number)
+	})
+	return s.issueError(ctx, err, number)
 }

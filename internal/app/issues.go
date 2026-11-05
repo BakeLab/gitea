@@ -34,7 +34,7 @@ func (a *application) issueCommand() *cobra.Command {
 one or more, and comment on them. Gitea lists pull requests among issues, so most issue
 commands also accept a pull request number.`}
 	group.AddCommand(a.issueListCommand(), a.issueViewCommand(), a.issueCreateCommand(), a.issueEditCommand(), a.issueMoveCommand(),
-		a.issueStateCommand("close"), a.issueStateCommand("reopen"), a.issueAttachmentCommand(issueRef), a.commentCommand(issueRef), a.timelineCommand(issueRef))
+		a.issueStateCommand("close"), a.issueStateCommand("reopen"), a.issueLockCommand(), a.issueUnlockCommand(), a.issuePinCommand(), a.issueUnpinCommand(), a.issueDeleteCommand(), a.issueAttachmentCommand(issueRef), a.commentCommand(issueRef), a.timelineCommand(issueRef))
 	return jsonOutput[services.Issue](group)
 }
 
