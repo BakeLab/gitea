@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Release](https://raster.shields.io/badge/dynamic/json.svg?label=release&url=https://gitea.com/api/v1/repos/gitea/cli/releases&query=$[0].tag_name)](https://gitea.com/gitea/cli/releases)
 [![Join the chat at https://img.shields.io/discord/322538954119184384.svg](https://img.shields.io/discord/322538954119184384.svg)](https://discord.gg/Gitea)
-[![Go Report Card](https://goreportcard.com/badge/gitea.dev/cli)](https://goreportcard.com/report/gitea.dev/cli) [![GoDoc](https://pkg.go.dev/badge/gitea.dev/cli?status.svg)](https://godoc.org/gitea.dev/cli)
+[![GoDoc](https://pkg.go.dev/badge/gitea.dev/cli?status.svg)](https://godoc.org/gitea.dev/cli)
 ![gitea-cli Release Status](https://gitea.com/gitea/cli/actions/workflows/release-nightly.yml/badge.svg)
 
 ## The official CLI for Gitea
@@ -71,11 +71,13 @@ There are different ways to get `gt`:
    brew install gitea-cli
    ```
 
-5. Linux packages: download the `.deb`, `.rpm`, `.apk` or Arch `.pkg.tar.zst` for your system from the
+5. Arch Linux: install `gitea-cli` from the [extra repository](https://archlinux.org/packages/extra/x86_64/gitea-cli/) with `sudo pacman -S gitea-cli`
+
+6. Linux packages: download the `.deb`, `.rpm`, `.apk` or Arch `.pkg.tar.zst` for your system from the
    [release](https://gitea.com/gitea/cli/releases) and install it with your package manager, for example
    `sudo apt install ./gitea-cli_<version>_amd64.deb`. They include the man pages and shell completions.
 
-6. Install from source: [see *Compilation*](#compilation)
+7. Install from source: [see *Compilation*](#compilation)
 
 ### Log in to Gitea from gt
 
