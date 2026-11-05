@@ -54,7 +54,7 @@ func (a *application) repoCommand() *cobra.Command {
 		Long: `Work with Gitea repositories: list and view them, create, fork, clone and migrate them, keep
 local branches and forks in sync, and change their settings.`,
 	}
-	group.AddCommand(a.repoListCommand(), a.repoViewCommand(), a.repositorySyncCommand(), a.repoSetDefaultCommand())
+	group.AddCommand(a.repoListCommand(), a.repoViewCommand(), a.repositorySyncCommand(), a.repoSetDefaultCommand(), a.repoLicenseCommand(), a.repoGitignoreCommand())
 	a.addRepositoryMutations(group)
 	return jsonOutput[services.Repository](group)
 }
