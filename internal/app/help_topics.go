@@ -96,7 +96,7 @@ func (a *application) writeHelp(cmd *cobra.Command, _ []string) {
 	}
 	section("LEARN MORE", "Use `gt <command> <subcommand> --help` for more information about a command.\n"+
 		"Read `gt help environment` for global flags and environment variables.\n"+
-		"Read `gt help formatting` for --json, --jq and --csv, and `gt help exit-codes` for exit codes.")
+		"Read `gt help formatting` for --json, --jq, --template and --csv, and `gt help exit-codes` for exit codes.")
 	_, _ = io.WriteString(cmd.OutOrStdout(), strings.TrimRight(page.String(), "\n")+"\n")
 }
 
@@ -187,7 +187,7 @@ func helpFlags(cmd *cobra.Command) (local, inherited string) {
 }
 
 // sharedFlagNames are the global flags that help and the manual list only where they apply.
-var sharedFlagNames = []string{"repo", "remote", "cwd", "json", "jq", "csv", "yes"}
+var sharedFlagNames = []string{"repo", "remote", "cwd", "json", "jq", "template", "csv", "yes"}
 
 // sharedFlags reports which of sharedFlagNames apply to cmd.
 func sharedFlags(cmd *cobra.Command) map[string]bool {
@@ -196,7 +196,7 @@ func sharedFlags(cmd *cobra.Command) map[string]bool {
 	// repo clone takes its repository as an argument only, so --repo and --remote do nothing there.
 	// Among gt extension's commands, only those running an extension take a repository.
 	selects := repo && path != "gt repo clone" && (!strings.HasPrefix(path, "gt extension") || runsExtension(cmd))
-	return map[string]bool{"repo": selects, "remote": selects && !runsExtension(cmd), "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd) || cmd.Annotations["gt.rawjson"] != "", "csv": outputsJSON(cmd), "yes": cmd.Annotations["gt.confirm"] != ""}
+	return map[string]bool{"repo": selects, "remote": selects && !runsExtension(cmd), "cwd": repo, "json": outputsJSON(cmd), "jq": outputsJSON(cmd) || cmd.Annotations["gt.rawjson"] != "", "template": outputsJSON(cmd) && cmd.LocalNonPersistentFlags().Lookup("template") == nil, "csv": outputsJSON(cmd), "yes": cmd.Annotations["gt.confirm"] != ""}
 }
 
 // helpSection is a titled section of a help page.
@@ -454,12 +454,13 @@ Policy: extensions (enabled or disabled), extension_hosts and extension_owners i
 restrict extensions for you. An administrator sets the same, and extension_credentials: denied,
 in /etc/gitea-cli/policy.yml (%ProgramData%\gitea-cli\policy.yml on Windows), which you
 cannot loosen.`},
-		{Use: "formatting", Short: "JSON and CSV output with --json, --jq and --csv", Long: `gt prints text for people by default. Scripts should use JSON or CSV: the columns
+		{Use: "formatting", Short: "JSON, CSV and template output with --json, --jq, --template and --csv", Long: `gt prints text for people by default. Scripts should use JSON or CSV: the columns
 and wording of text output may change between releases.
 
   --json             print every field
   --json FIELDS      print only the comma-separated FIELDS, such as --json number,title
   -q, --jq EXPR      filter the JSON with a jq expression; implies --json
+  --template TEXT    format the JSON with a Go template; implies --json
   --csv              print every field as CSV
   --csv FIELDS       print only the comma-separated FIELDS as CSV, such as --csv number,title
 
@@ -490,8 +491,36 @@ object for one argument and an array of the successful results for several. A sc
 needs one shape passes one argument per call, or several and reads the array, such as with
 --jq '.[]'.
 
+--template renders the JSON through a Go template (text/template), as gh does, so a result
+can be laid out for people or for another program without jq. The data is the JSON that
+--json would print: an array for a list, an object for one item. A template prints exactly
+what it says, so end a line with {{"\n"}}. It cannot be combined with --jq or --csv, and
+commands that take their own --template, issue create, repo create and project create, keep it
+for their templates.
+
+  $ gt issue list --template '{{range .}}#{{.number}} {{.title}}{{"\n"}}{{end}}'
+  $ gt pr list --json number,title,author --template '{{range .}}{{tablerow .number .title .author}}{{end}}{{tablerender}}'
+  $ gt release view v1 --template '{{.tag}}: {{join ", " (pluck "name" .assets)}}{{"\n"}}'
+
+Besides the functions of Go's text/template, these are available:
+
+  join SEP LIST       join the values of a list
+  pluck FIELD LIST    collect one field of every object of a list
+  tablerow CELLS...   add a row to a table; tablerender prints the table, columns aligned
+  timeago TIME        a timestamp as "about 3 hours ago"; timefmt LAYOUT TIME uses Go's layout
+  truncate N TEXT     cut TEXT to N columns, ending in …
+  color STYLE TEXT    paint TEXT: black, red, green, yellow, blue, magenta, cyan or white,
+                      with +b bold, +d dim, +u underline or +h bright, as in green+b;
+                      autocolor paints only on a terminal that shows color
+  hyperlink URL TEXT  a link on a terminal that supports them, else TEXT
+  contains PART TEXT, hasPrefix PREFIX TEXT, hasSuffix SUFFIX TEXT, regexMatch PATTERN TEXT
+
+Numbers print in full, as in {{.number}} for 123456789. Text that the server sent has its
+control characters removed on a terminal before the template sees it. A field that an item
+does not have prints as <no value>.
+
 On a terminal, JSON is indented and colored; otherwise each value prints on one line.
-Commands that return no resource, such as deletes, reject --json and --csv.
+Commands that return no resource, such as deletes, reject --json, --template and --csv.
 
 Previews: commands that change things through the API, such as issue close, pr merge and
 repo delete, take --dry-run. It sends the reads the command needs, withholds every write request,

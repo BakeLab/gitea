@@ -33,6 +33,8 @@ instead of assuming `gh` behaviour.
   own, and never pass `--editor` or `--web`, which open one even then.
 - Read with `--json` and filter with `--jq`; the text output is for people and may change.
   `--jq` runs inside gt, so `jq` need not be installed, and strings print without quotes.
+  `--template` formats the JSON with a Go template when a layout is wanted rather than data
+  (`gt help formatting` lists its functions); prefer `--jq` for scripts.
 - An unknown `--json` field fails and names the available ones; `gt help formatting`
   explains fields that cost extra requests.
 - Without a terminal, confirmations fail with exit code 2. Pass `--yes` only after the user

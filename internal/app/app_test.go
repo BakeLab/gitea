@@ -311,7 +311,8 @@ func TestCommandHelpShowsRelevantFlagsOnly(t *testing.T) {
 		"\nINHERITED FLAGS\n  -R, --repo OWNER/REPO ",
 		"\n      --json fields ",
 		"\n  -q, --jq expression ",
-		"\n  -h, --help              Show help for command\n\n  " + globalFlagsLine + "\n",
+		"\n      --template template ",
+		"  Show help for command\n\n  " + globalFlagsLine + "\n",
 		"\nJSON FIELDS\n  assignees, author, body, ",
 	} {
 		require.Contains(t, help, want)

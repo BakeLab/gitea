@@ -83,7 +83,9 @@ type options struct {
 	sudo                          string
 	json, jq                      string
 	// csv holds the --csv fields; checkOutputFlags copies them to json, which selects them.
-	csv                       string
+	csv string
+	// template holds the --template Go template; checkOutputFlags makes it select every field unless --json names some.
+	template                  string
 	noInput, interactive, yes bool
 	debug                     bool
 	// dryRun withholds the write requests of commands that take --dry-run, which dryRunJSON reports
@@ -204,6 +206,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 	flags.StringVar(&a.options.json, "json", "", "Output JSON with the specified comma-separated `fields`, or all fields")
 	flags.Lookup("json").NoOptDefVal = "*"
 	flags.StringVarP(&a.options.jq, "jq", "q", "", "Filter JSON output using a jq `expression`; implies --json")
+	flags.StringVar(&a.options.template, "template", "", "Format JSON output using a Go `template`; implies --json (see gt help formatting)")
 	flags.StringVar(&a.options.csv, "csv", "", "Output CSV with the specified comma-separated `fields`, or all fields")
 	flags.Lookup("csv").NoOptDefVal = "*"
 	flags.BoolVar(&a.options.noInput, "no-input", false, "Disable prompts and implicit editor/browser interactions")
@@ -374,11 +377,35 @@ func editDistance(a, b string) int {
 	return row[len(b)]
 }
 
+// outputTemplate reports whether cmd got the global --template of the output, not the --template of
+// its own, which gt issue create, gt repo create and gt project create have for a template to start
+// from.
+func outputTemplate(cmd *cobra.Command) bool {
+	flag := cmd.Flags().Lookup("template")
+	return flag != nil && flag.Changed && flag == cmd.Root().PersistentFlags().Lookup("template")
+}
+
 // checkOutputFlags validates --json, --jq and --csv before a command runs. --jq alone selects every
 // field, except on commands that filter their raw JSON themselves (annotation gt.rawjson). --csv
 // selects its fields like --json, so that every JSON output path writes CSV instead.
 func (a *application) checkOutputFlags(cmd *cobra.Command) error {
 	selected := ""
+	if outputTemplate(cmd) {
+		for _, other := range []string{"jq", "csv"} {
+			if cmd.Flags().Changed(other) {
+				return clierr.Wrap(clierr.Usage, fmt.Errorf("--template cannot be combined with --%s", other))
+			}
+		}
+		if strings.TrimSpace(a.options.template) == "" {
+			return clierr.Wrap(clierr.Usage, errors.New(`--template requires a template, such as '{{.title}}{{"\n"}}'`))
+		}
+		if cmd.Annotations["gt.rawjson"] != "" {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("%s prints the API's own JSON; --template is not supported, use --jq", cmd.CommandPath()))
+		}
+		if err := terminal.ValidateTemplate(a.options.template); err != nil {
+			return clierr.Wrap(clierr.Usage, err)
+		}
+	}
 	switch {
 	case cmd.Flags().Changed("csv"):
 		for _, other := range []string{"json", "jq"} {
@@ -395,6 +422,8 @@ func (a *application) checkOutputFlags(cmd *cobra.Command) error {
 			return clierr.Wrap(clierr.Usage, errors.New("--json= requires field names; use --json alone for every field"))
 		}
 		selected = "--json"
+	case outputTemplate(cmd):
+		selected, a.options.json = "--template", "*"
 	case a.options.jq != "" && cmd.Annotations["gt.rawjson"] == "":
 		selected, a.options.json = "--jq", "*"
 	}

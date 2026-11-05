@@ -12,6 +12,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf16"
 
@@ -34,10 +35,17 @@ type JSONOutput struct {
 	Safe bool
 	// Color highlights pretty JSON keys and values.
 	Color bool
+	// Links lets a template's hyperlink function emit links.
+	Links bool
 	// CSV writes the selected objects as CSV instead of JSON; Query must be empty.
 	CSV bool
 	// NoHeader leaves out the CSV header row, for rows that continue earlier output.
 	NoHeader bool
+	// Template renders the selected objects through this Go template instead of writing JSON; Query
+	// and CSV must be empty.
+	Template string
+	// Now is the time that the template function timeago measures from; it is the clock by default.
+	Now func() time.Time
 }
 
 // Write projects explicit result fields of value, applies the jq filter, and writes the results.
@@ -47,7 +55,11 @@ func (o JSONOutput) Write(w io.Writer, value any) error {
 		return err
 	}
 	var normalized any
-	if err := json.Unmarshal(data, &normalized); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if o.Template != "" {
+		decoder.UseNumber() // so that an ID prints as 123456789, not as 1.23456789e+08
+	}
+	if err := decoder.Decode(&normalized); err != nil {
 		return err
 	}
 	names := fieldNames(o.Fields)
@@ -87,6 +99,9 @@ func (o JSONOutput) Write(w io.Writer, value any) error {
 	}
 	if o.CSV {
 		return o.writeCSV(w, normalized, names)
+	}
+	if o.Template != "" {
+		return o.writeTemplate(w, normalized)
 	}
 	if o.Query == "" {
 		return o.encode(w, normalized)

@@ -244,7 +244,7 @@ of up to 5 minutes.`,
 				if a.options.json != "" {
 					for _, item := range items {
 						csv := a.options.csv != ""
-						if err := (terminal.JSONOutput{Fields: a.options.json, Allowed: commandOutputFields(cmd), Query: a.options.jq, Safe: d.TTY, CSV: csv, NoHeader: headed}).Write(cmd.OutOrStdout(), item); err != nil {
+						if err := (terminal.JSONOutput{Fields: a.options.json, Allowed: commandOutputFields(cmd), Query: a.options.jq, Safe: d.TTY, CSV: csv, NoHeader: headed, Template: a.options.template, Now: a.deps.Now}).Write(cmd.OutOrStdout(), item); err != nil {
 							return err
 						}
 						headed = csv

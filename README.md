@@ -20,7 +20,8 @@ gt help
 ```
 
 Scripts and agents get stable machine-readable output: `--json` and `--jq` select fields that gt only
-ever adds to, and `gt schema` lists them with their types.
+ever adds to, and `gt schema` lists them with their types. `--template` formats the same JSON with a Go
+template, as in `gh`.
 
 With `GITEA_CLI_ERROR_FORMAT=json`, a failure is one line of JSON on stderr.
 

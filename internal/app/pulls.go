@@ -42,7 +42,7 @@ func (a *application) pullListCommand() *cobra.Command {
 
 The reviewers, reviewer_teams, reviews and review_decision JSON fields come from the reviews of each
 pull request, and merged_by from reading each pull request again. gt only makes these requests when
---json names the fields, or selects every field and a --jq expression names them (see gt help
+--json names the fields, or selects every field and a --jq expression or --template names them (see gt help
 formatting). --limit bounds how many requests it makes.
 
 review_decision is changes_requested, approved, review_required or empty. When the base branch's
@@ -166,7 +166,8 @@ $ gt pr list --json number,title,head --jq '.[] | select(.head == "feature/login
 // requests.
 func (a *application) jsonSelects(fields ...string) bool {
 	if a.options.json == "*" {
-		return a.options.jq == "" || slices.ContainsFunc(fields, func(field string) bool { return strings.Contains(a.options.jq, field) })
+		expression := a.options.jq + a.options.template
+		return expression == "" || slices.ContainsFunc(fields, func(field string) bool { return strings.Contains(expression, field) })
 	}
 	for field := range strings.SplitSeq(a.options.json, ",") {
 		if slices.Contains(fields, strings.TrimSpace(field)) {

@@ -44,11 +44,16 @@ func (a *application) display() terminal.Display {
 	return terminal.Display{
 		TTY:      streams.OutTTY,
 		Color:    streams.OutTTY && streams.OutColor(preferences.Color, a.deps.Getenv),
-		Links:    !streams.OutPlain && terminal.HyperlinksEnabled(preferences.Hyperlinks, streams.OutEscapes(), a.deps.Getenv),
+		Links:    a.linksEnabled(preferences),
 		Markdown: terminal.MarkdownEnabled(preferences.Markdown, streams.OutTTY),
 		Width:    streams.Width,
 		Now:      a.deps.Now(),
 	}
+}
+
+func (a *application) linksEnabled(preferences settings.Preferences) bool {
+	streams := a.deps.Streams
+	return !streams.OutPlain && terminal.HyperlinksEnabled(preferences.Hyperlinks, streams.OutEscapes(), a.deps.Getenv)
 }
 
 // writeHuman pages human list and view text; --no-input does not disable paging.
@@ -84,7 +89,8 @@ func (a *application) writeJSON(cmd *cobra.Command, v any) error {
 // terminal, and as CSV with --csv.
 func (a *application) jsonWriter(fields, query string, allowed []string) terminal.JSONOutput {
 	pretty := a.deps.Streams.OutTTY
-	return terminal.JSONOutput{Fields: fields, Allowed: allowed, Query: query, Pretty: pretty, Color: pretty && a.colorEnabled(), CSV: a.options.csv != ""}
+	preferences, _ := a.preferences()
+	return terminal.JSONOutput{Fields: fields, Allowed: allowed, Query: query, Pretty: pretty, Color: pretty && a.colorEnabled(), Links: a.linksEnabled(preferences), CSV: a.options.csv != "", Template: a.options.template, Now: a.deps.Now}
 }
 
 // listSpec describes how a list command shows its items to people.
