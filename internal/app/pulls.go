@@ -27,7 +27,7 @@ $ gt pr merge --squash --delete-branch`
 	group.AddCommand(a.pullChecksCommand(), a.pullCheckoutCommand(), a.pullBackportCommand(), a.pullCleanCommand(), a.statusCommand(true))
 	group.AddCommand(a.pullListCommand(), a.pullViewCommand())
 	a.addPullMutations(group)
-	group.AddCommand(a.pullEditCommand(), a.pullReadyCommand())
+	group.AddCommand(a.pullEditCommand(), a.pullReadyCommand(), a.pullLockCommand(), a.pullUnlockCommand(), a.pullPinCommand(), a.pullUnpinCommand(), a.pullDeleteCommand())
 	group.AddCommand(a.issueAttachmentCommand(pullRef), a.commentCommand(pullRef), a.timelineCommand(pullRef))
 	return jsonOutput[services.Pull](group)
 }

@@ -45,6 +45,7 @@ type Pull struct {
 	MergeCommitSHA *string `json:"merge_commit_sha"`
 	// MergeBase is the commit of the base branch the pull request's own commits start from.
 	MergeBase string `json:"-"`
+	Locked    bool   `json:"-"`
 	Mergeable bool   `json:"mergeable"`
 	Draft     bool   `json:"draft"`
 	// ReviewDecision summarizes the reviews like gh: approved, changes_requested, review_required
@@ -103,6 +104,7 @@ func pullFrom(pull *gitea.PullRequest) Pull {
 		state = "merged"
 	}
 	result := Pull{
+		Locked: pull.IsLocked,
 		Author: login(pull.Poster), CreatedAt: timestamp(deref(pull.Created)), UpdatedAt: timestamp(deref(pull.Updated)),
 		Assignees: convertAll(pull.Assignees, login), Milestone: issueMilestoneFrom(pull.Milestone), Labels: convertAll(pull.Labels, labelFrom),
 		Deadline: optionalTimestamp(pull.Deadline), ID: pull.ID, Number: pull.Index, Title: pull.Title, Body: pull.Body,

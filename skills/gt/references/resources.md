@@ -45,6 +45,7 @@ gt issue close 17 --comment "Fixed in #18." --no-input
 gt issue reopen 17 --comment "Still happens on main." --no-input
 gt issue lock 17 --reason Resolved --no-input     # unlock, pin and unpin work the same way
 gt issue delete 17 --yes --no-input                # for good, with its comments; issues only
+gt pr lock 18 --reason Resolved --no-input        # pr unlock, pin, unpin and delete too; pull requests only
 ```
 
 - Labels, a milestone, assignees and a due date need write access to the repository's issues.

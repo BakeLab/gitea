@@ -102,7 +102,7 @@ func (a *application) issueDeleteCommand() *cobra.Command {
 		Use: "delete {<number> | <url>}...", Aliases: []string{"rm"}, Short: "Delete issues",
 		Long: `Delete issues for good, with their comments, attachments and time tracking. This cannot be
 undone and needs the permission to delete issues, which Gitea gives repository owners and
-administrators. To only stop work on one, use gt issue close. Pull requests are not deleted.`,
+administrators. To only stop work on one, use gt issue close. To delete a pull request, use gt pr delete.`,
 		Example: `$ gt issue delete 12
 $ gt issue delete 12 13 --yes`,
 		Annotations: map[string]string{"gt.arguments": issueArguments, "gt.text": "issue deletion does not return a resource", "gt.confirm": "true"},
@@ -120,7 +120,7 @@ $ gt issue delete 12 13 --yes`,
 					return fmt.Errorf("%s: %w", issueLabel(n), itemError(err, target.Repo))
 				}
 				if items[i].Kind == services.KindPull {
-					return fmt.Errorf("%s is a pull request; gt does not delete pull requests, use gt pr close", refLabel(target.Repo, n, items[i].Title))
+					return fmt.Errorf("%s is a pull request; use gt pr delete %d", refLabel(target.Repo, n, items[i].Title), n)
 				}
 			}
 			prompt := "Delete issue " + refLabel(target.Repo, numbers[0], items[0].Title) + "?"

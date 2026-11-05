@@ -83,7 +83,7 @@ func TestIssueLockPinAndDelete(t *testing.T) {
 		require.Equal(t, []string{"DELETE /issues/5", "DELETE /issues/6"}, writes)
 
 		_, err = run("issue", "delete", "5", "7", "--yes")
-		require.ErrorContains(t, err, "is a pull request; gt does not delete pull requests")
+		require.ErrorContains(t, err, "is a pull request; use gt pr delete 7")
 		require.Empty(t, writes, "a pull request stops the batch before any issue is deleted")
 
 		_, err = run("issue", "delete", "404", "--yes")
