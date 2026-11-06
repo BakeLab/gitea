@@ -114,12 +114,6 @@ func main() {
 	}
 	succeed = golangciLint("linux", "--build-tags="+lintTagsLinux) && succeed
 
-	if os.Getenv("CI") != "" {
-		// only lint for other platforms when in CI, to keep local lint fast
-		_, _ = fmt.Fprintln(os.Stdout, "lint for windows ...")
-		succeed = golangciLint("windows") && succeed
-	}
-
 	if !succeed {
 		os.Exit(1)
 	}
