@@ -405,6 +405,8 @@ func TestInstanceCompletions(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"id":1,"title":"v1.0","description":"First release"},{"id":25,"title":"23"}]`))
 		case "/api/v1/repos/alice/project/branches":
 			_, _ = w.Write([]byte(`[{"name":"main","protected":true},{"name":"docs/guide"}]`))
+		case "/api/v1/repos/alice/project/branch_protections":
+			_, _ = w.Write([]byte(`[{"rule_name":"main"},{"rule_name":"release/*"}]`))
 		case "/api/v1/repos/alice/project/tags":
 			_, _ = w.Write([]byte(`[{"name":"v0.1.0"}]`))
 		case "/api/v1/repos/alice/project/releases":
@@ -447,6 +449,7 @@ func TestInstanceCompletions(t *testing.T) {
 		{"issues", a.completeIssues("open"), nil, "", []string{"4\tCrash when config is missing"}, cobra.ShellCompDirectiveNoFileComp},
 		{"milestones", a.completeMilestones(), nil, "", []string{"v1.0\tFirst release", "25\t23"}, cobra.ShellCompDirectiveNoFileComp},
 		{"branches", a.completeBranches(), nil, "", []string{"main\tprotected", "docs/guide"}, cobra.ShellCompDirectiveNoFileComp},
+		{"branch protection rules", a.completeBranchRules(), nil, "", []string{"main", "release/*"}, cobra.ShellCompDirectiveNoFileComp},
 		{"tags", a.completeTags(), nil, "v", []string{"v0.1.0"}, cobra.ShellCompDirectiveNoFileComp},
 		{"releases", a.completeReleases(), nil, "", []string{"v0.1.0\tFirst release"}, cobra.ShellCompDirectiveNoFileComp},
 		{"workflows", a.completeWorkflows(), nil, "", []string{"ci.yml\tCI"}, cobra.ShellCompDirectiveNoFileComp},

@@ -50,10 +50,11 @@ func (a *application) branchCommand() *cobra.Command {
 		Use:   "branch",
 		Short: "Manage remote branches and protection rules",
 		Long: `Work with the branches of a repository on the server: list and view them, create, rename and
-delete them, and protect them from direct pushes. To work with local branches, use git.`,
+delete them, and protect them from direct pushes. gt branch protection list and view show the
+protection rules. To work with local branches, use git.`,
 	}
 	group.AddCommand(a.branchListCommand(), a.branchViewCommand(), a.branchCreateCommand(), a.branchRenameCommand(), a.branchDeleteCommand())
-	group.AddCommand(a.branchProtectCommand(), a.branchUnprotectCommand())
+	group.AddCommand(a.branchProtectCommand(), a.branchUnprotectCommand(), a.branchProtectionCommand())
 	return jsonOutput[services.Branch](group)
 }
 
@@ -304,7 +305,9 @@ glob. By default nobody can push directly and pull requests need one approving r
 
 When a branch or pattern has a rule already, change only the settings the flags name and keep
 the others; --allow-push replaces those who may push directly. An empty --allow-push= lets
-nobody push directly again, and an empty --status-check= stops requiring status checks.`,
+nobody push directly again, and an empty --status-check= stops requiring status checks.
+
+gt branch protection list and view show the rules.`,
 		Example: `# Require two approvals and passing CI on main
 $ gt branch protect main --required-approvals 2 --status-check ci/build
 
@@ -445,7 +448,7 @@ func (a *application) branchUnprotectCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:         "unprotect <branch>...",
 		Short:       "Remove branch protection",
-		Long:        "Remove the protection rules of branches, or of glob patterns such as release/*.",
+		Long:        "Remove the protection rules of branches, or of glob patterns such as release/*. gt branch protection list\nand view show the rules.",
 		Example:     "$ gt branch unprotect main\n$ gt branch unprotect 'release/*' --yes",
 		Annotations: map[string]string{"gt.confirm": "true", "gt.text": "branch unprotect does not return a resource"},
 		Args:        nonBlankArgs(cobra.MinimumNArgs(1), "branch name"),

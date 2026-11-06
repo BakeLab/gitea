@@ -193,6 +193,7 @@ gt repo list OWNER -L 100 --no-input --json full_name,description,archived
 gt repo fork --add-remote --no-input
 gt repo edit --description "A short description" --add-topic cli --no-input
 gt repo edit --enable-wiki=false --no-input
+gt branch protection list --no-input --json rule,required_approvals,push_users,status_check_required,status_checks   # the first rule that matches a branch applies
 ```
 
 - `gt repo edit` changes only the flags passed; on/off settings take `=false` to turn off.
