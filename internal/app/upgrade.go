@@ -312,7 +312,7 @@ func (a *application) upgrade(cmd *cobra.Command, want string, nightly, dryRun, 
 	label := want
 	switch {
 	case nightly:
-		want, label = "main", "the latest nightly build"
+		want, label = "main-nightly", "the latest nightly build"
 	case want == "":
 		release, err := (services.Releases{Client: a.deps.Client(releaseInstance, "", false).WithResponseTimeout(a.responseTimeout()), Repository: releaseRepository}).Latest(ctx)
 		if err != nil {

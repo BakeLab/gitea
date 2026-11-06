@@ -187,7 +187,8 @@ snapshot:
   version_template: "{{ .Branch }}-devel"
 
 nightly:
-  version_template: "{{ .Branch }}"
+  # dl.gitea.com caches a version directory for a year; only one named nightly is replaced quickly.
+  version_template: "{{ .Branch }}-nightly"
 
 gitea_urls:
   api: https://gitea.com/api/v1

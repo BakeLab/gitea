@@ -28,8 +28,8 @@ if (-not $version) {
     }
 }
 $version = $version -replace '^v', ''
-# Nightly builds of the main branch are published as version main.
-if ($version -eq 'nightly') { $version = 'main' }
+# Nightly builds of the main branch are published as version main-nightly.
+if ($version -eq 'nightly') { $version = 'main-nightly' }
 
 $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
     'AMD64' { 'amd64' }

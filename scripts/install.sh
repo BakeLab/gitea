@@ -110,8 +110,8 @@ trap 'rm -rf "$work"' EXIT INT TERM
 
 version=${requested:-$(latest_version)}
 version=${version#v}
-# Nightly builds of the main branch are published as version main.
-[ "$version" != nightly ] || version=main
+# Nightly builds of the main branch are published as version main-nightly.
+[ "$version" != nightly ] || version=main-nightly
 file="gitea-cli-$version-$(platform)"
 # The compressed file is smaller; without xz, the plain binary is downloaded instead.
 if command -v xz >/dev/null 2>&1; then

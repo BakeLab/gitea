@@ -107,6 +107,29 @@ func TestUpgrade(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, entries, 1)
 	})
+	t.Run("takes a nightly build from the directory that the CDN does not cache for long", func(t *testing.T) {
+		platform, err := releasePlatform(runtime.GOOS, runtime.GOARCH)
+		require.NoError(t, err)
+		file := "gitea-cli-main-nightly-" + platform
+		build := []byte("gt nightly")
+		digest := sha256.Sum256(build)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/gitea-cli/main-nightly/" + file:
+				_, _ = w.Write(build)
+			case "/gitea-cli/main-nightly/" + file + ".sha256":
+				_, _ = fmt.Fprintf(w, "%x  %s\n", digest, file)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer server.Close()
+		deps, executable := releaseDeps(t, server, map[string]string{"GITEA_CLI_DOWNLOAD_URL": server.URL + "/gitea-cli"})
+		require.NoError(t, Execute(context.Background(), deps, []string{"upgrade", "--nightly", "--yes"}))
+		data, err := os.ReadFile(executable)
+		require.NoError(t, err)
+		require.Equal(t, build, data)
+	})
 	t.Run("removes the old executable on Windows when it no longer runs", func(t *testing.T) {
 		dir := t.TempDir()
 		executable, staged := filepath.Join(dir, "gt.exe"), filepath.Join(dir, "gt.new")
