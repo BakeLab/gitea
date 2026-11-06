@@ -280,29 +280,22 @@ func CreateTaskForRunner(ctx context.Context, runner *ActionRunner) (*ActionTask
 	// TODO: a more efficient way to filter labels
 	log.Trace("runner labels: %v", runner.AgentLabels)
 
-	// Page through the waiting jobs oldest-first instead of loading the whole backlog into memory on every poll.
-	// Keyset pagination on (updated, id) is safe under concurrent claims:
-	// updated only moves forward, so the advancing cursor never skips a still-waiting job even as claimed jobs drop out.
-	var cursorUpdated timeutil.TimeStamp
+	// Immutable IDs keep newest-first keyset pagination stable as claims update jobs.
 	var cursorID int64
 	for {
 		cond := baseCond
 		if cursorID > 0 {
-			cond = cond.And(builder.Or(
-				builder.Gt{"updated": cursorUpdated},
-				builder.And(builder.Eq{"updated": cursorUpdated}, builder.Gt{"id": cursorID}),
-			))
+			cond = cond.And(builder.Lt{"id": cursorID})
 		}
 
 		var jobs []*ActionRunJob
-		if err := e.Where(cond).Asc("updated", "id").Limit(pickTaskBatchSize).Find(&jobs); err != nil {
+		if err := e.Where(cond).Desc("id").Limit(pickTaskBatchSize).Find(&jobs); err != nil {
 			return nil, false, err
 		}
 		// A short page means no waiting jobs remain beyond it.
 		isLastPage := len(jobs) < pickTaskBatchSize
 		if !isLastPage {
-			last := jobs[len(jobs)-1] // read before a lost claim bumps Updated
-			cursorUpdated, cursorID = last.Updated, last.ID
+			cursorID = jobs[len(jobs)-1].ID
 		}
 
 		for _, v := range jobs {

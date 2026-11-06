@@ -52,8 +52,8 @@ func (opts JobQueueOptions) statusCond() builder.Cond {
 
 // active jobs first by start time, then queued jobs in pickup order
 var jobQueueOrderBy = fmt.Sprintf(
-	"CASE WHEN `action_run_job`.status IN (%d, %d) THEN 0 ELSE 1 END ASC, CASE WHEN `action_run_job`.status IN (%d, %d) THEN `action_run_job`.started ELSE `action_run_job`.updated END ASC, `action_run_job`.id ASC",
-	StatusRunning, StatusCancelling, StatusRunning, StatusCancelling)
+	"CASE WHEN `action_run_job`.status IN (%d, %d) THEN 0 ELSE 1 END ASC, CASE WHEN `action_run_job`.status IN (%d, %d) THEN `action_run_job`.started END ASC, CASE WHEN `action_run_job`.status IN (%d, %d) THEN `action_run_job`.id END ASC, `action_run_job`.id DESC",
+	StatusRunning, StatusCancelling, StatusRunning, StatusCancelling, StatusRunning, StatusCancelling)
 
 // FindJobQueueJobs returns one page of the job queue and its total count.
 func FindJobQueueJobs(ctx context.Context, opts JobQueueOptions, page, pageSize int) ([]*ActionRunJob, int64, error) {
