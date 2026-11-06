@@ -322,6 +322,9 @@ func claimJobForRunner(ctx context.Context, runner *ActionRunner, job *ActionRun
 		if err := job.LoadAttributes(ctx); err != nil {
 			return err
 		}
+		if !nativeBuilderAllowsJob(runner, job) {
+			return nil
+		}
 		if err := job.Run.Repo.LoadUnits(ctx); err != nil {
 			return err
 		}
@@ -400,6 +403,28 @@ func claimJobForRunner(ctx context.Context, runner *ActionRunner, job *ActionRun
 		return nil, false, err
 	}
 	return resultTask, cancelled, nil
+}
+
+func nativeBuilderAllowsJob(runner *ActionRunner, job *ActionRunJob) bool {
+	const label = "guest-image-builder"
+	if !slices.ContainsFunc(runner.AgentLabels, func(value string) bool { return strings.EqualFold(value, label) }) {
+		return true
+	}
+	// A broad label subset must not give an untrusted workflow access to the host.
+	if !slices.ContainsFunc(job.RunsOn, func(value string) bool { return strings.EqualFold(value, label) }) {
+		return false
+	}
+	run := job.Run
+	if run == nil || run.Repo == nil || job.IsForkPullRequest || run.IsForkPullRequest || run.NeedApproval || run.IsScopedRun {
+		return false
+	}
+	if !strings.EqualFold(run.Repo.FullName(), "BakeLab/breadkernel") || run.Ref != "refs/heads/main" || run.WorkflowID != "guest-assets.yml" {
+		return false
+	}
+	if run.WorkflowRepoID != run.RepoID || run.WorkflowCommitSHA == "" || run.WorkflowCommitSHA != run.CommitSHA {
+		return false
+	}
+	return (run.Event == "push" && run.TriggerEvent == "push") || (run.Event == "workflow_dispatch" && run.TriggerEvent == "workflow_dispatch")
 }
 
 // ReleaseTaskForRunner reverts a freshly-claimed but undelivered task: it deletes
