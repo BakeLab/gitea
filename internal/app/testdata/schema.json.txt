@@ -182,6 +182,10 @@ gt ssh-key create	created_at:string,fingerprint:string,id:integer,key:string,rea
 gt ssh-key list	created_at:string,fingerprint:string,id:integer,key:string,read_only:boolean,title:string
 gt ssh-key view	created_at:string,fingerprint:string,id:integer,key:string,read_only:boolean,title:string
 gt status	assigned_issues:array<object>?,failing_runs:array<object>?,host:string,mentions:array<object>?,pull_requests:object,repository:string,runs_included:boolean,runs_repository:string,user:string
+gt tag create	annotated:boolean,commit:string,id:string,message:string,name:string,tagged_at:string,tagger:string,tagger_email:string,tarball_url:string,verification_reason:string,verified:boolean,zipball_url:string
+gt tag list	annotated:boolean,commit:string,id:string,message:string,name:string,tagged_at:string,tagger:string,tagger_email:string,tarball_url:string,verification_reason:string,verified:boolean,zipball_url:string
+gt tag protection list	created_at:string,id:integer,name_pattern:string,teams:array<string>?,updated_at:string,users:array<string>?
+gt tag view	annotated:boolean,commit:string,id:string,message:string,name:string,tagged_at:string,tagger:string,tagger_email:string,tarball_url:string,verification_reason:string,verified:boolean,zipball_url:string
 gt team create	access:string,all_repositories:boolean,can_create_repo:boolean,description:string,id:integer,name:string,organization:string,permission:string,units:object
 gt team edit	access:string,all_repositories:boolean,can_create_repo:boolean,description:string,id:integer,name:string,organization:string,permission:string,units:object
 gt team list	access:string,all_repositories:boolean,can_create_repo:boolean,description:string,id:integer,name:string,organization:string,permission:string,units:object

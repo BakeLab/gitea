@@ -206,6 +206,9 @@ gt branch protection list --no-input --json rule,required_approvals,push_users,s
 ```sh
 gt release list -L 5 --no-input --json tag,title,draft,published_at
 gt release create v1.2.0 dist/app.tar.gz --notes-file CHANGELOG.md --draft --no-input
+gt tag list -L 5 --no-input --json name,commit,annotated
+gt tag create v1.2.0 --target main --message "Version 1.2.0" --no-input   # a tag without a release
+gt tag protection list --no-input --json name_pattern,users,teams
 gt wiki list --no-input --json title
 gt wiki view Home --no-input --json body
 gt wiki create "Release process" --body-file docs/release.md --no-input

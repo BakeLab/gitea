@@ -287,7 +287,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		}
 		return a.policy(snapshot).Validate(a.deps.Streams)
 	}
-	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.runnerCommand(), a.labelCommand(), a.milestoneCommand(), a.projectCommand(), a.sshKeyCommand(), a.gpgKeyCommand(), a.timeCommand(), a.wikiCommand(), a.browseCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.webhookCommand(), a.packageCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false), a.extensionCommand())
+	root.AddCommand(a.configCommand(), a.aliasCommand(), a.authCommand(), a.apiCommand(), a.repoCommand(), a.issueCommand(), a.prCommand(), a.doctorCommand(), a.workflowCommand(), a.runCommand(), a.runnerCommand(), a.labelCommand(), a.milestoneCommand(), a.projectCommand(), a.sshKeyCommand(), a.gpgKeyCommand(), a.timeCommand(), a.wikiCommand(), a.browseCommand(), a.actionValueCommand(true), a.actionValueCommand(false), a.releaseCommand(), a.organizationCommand(), a.notificationCommand(), a.teamCommand(), a.branchCommand(), a.tagCommand(), a.webhookCommand(), a.packageCommand(), a.adminCommand(), a.searchCommand(), a.statusCommand(false), a.extensionCommand())
 	a.addDryRun(root)
 	root.AddCommand(a.manCommand(), a.schemaCommand(), a.upgradeCommand())
 	root.AddCommand(&cobra.Command{Use: "version", Short: "Print gt's version", Example: "$ gt version", Args: argsExact(0), Annotations: textOutput("version prints text"), RunE: func(cmd *cobra.Command, _ []string) error {

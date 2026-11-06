@@ -143,6 +143,10 @@ var dryRunWriteCases = []struct {
 	{[]string{"secret", "set", "DEPLOY", "--body", "s3cret"}, "PUT"},
 	{[]string{"ssh-key", "create", "{pubkey}", "--title", "laptop"}, "POST"},
 	{[]string{"ssh-key", "delete", "3"}, "DELETE"},
+	{[]string{"tag", "create", "v2.0.0", "--target", "main", "--message", "Two"}, "POST"},
+	{[]string{"tag", "delete", "v1"}, "DELETE"},
+	{[]string{"tag", "protect", "rel-*", "--allow-user", "bob"}, "POST"},
+	{[]string{"tag", "unprotect", "v*"}, "DELETE"},
 	{[]string{"team", "create", "acme", "devs"}, "POST"},
 	{[]string{"team", "delete", "1"}, "DELETE"},
 	{[]string{"team", "edit", "1", "--description", "d"}, "PATCH"},
@@ -204,7 +208,7 @@ func expandDryRunArgs(t *testing.T, args []string) []string {
 }
 
 // dryRunLists are the last segments of the Gitea API paths that answer a list.
-var dryRunLists = []string{"columns", "files", "milestones", "projects", "pulls", "repos", "reviews", "times", "users"}
+var dryRunLists = []string{"tag_protections", "columns", "files", "milestones", "projects", "pulls", "repos", "reviews", "times", "users"}
 
 // dryRunGeneric is a resource with the fields that commands read from the many kinds of resource, so
 // that one answer serves a command whatever it asks for.
@@ -260,6 +264,8 @@ func dryRunFixture(path, page string) (status int, body string, ok bool) {
 		return 200, `{"id":1,"event":"item_added_to_project","enabled":true}`, true
 	case strings.HasSuffix(path, "/projects/1/workflows/2"):
 		return 200, `{"id":2,"event":"item_closed","enabled":false}`, true
+	case strings.HasSuffix(path, "/tag_protections"):
+		return 200, `[{"id":4,"name_pattern":"v*","whitelist_usernames":["alice"],"whitelist_teams":[]}]`, true
 	case strings.HasSuffix(path, "/user/stopwatches"):
 		if page != "" && page != "1" {
 			return 200, `[]`, true
@@ -396,6 +402,7 @@ func TestDryRunPreviewsDependencyChanges(t *testing.T) {
 		{[]string{"issue", "edit", "5", "--remove-blocked-by", "9"}, "DELETE " + repo + "/issues/5/dependencies"},
 		{[]string{"pr", "edit", "7", "--add-blocked-by", "9"}, "POST " + repo + "/issues/7/dependencies"},
 		{[]string{"pr", "edit", "7", "--remove-blocks", "9"}, "DELETE " + repo + "/issues/7/blocks"},
+		{[]string{"tag", "protect", "v*", "--allow-user", "bob"}, "PATCH " + repo + "/tag_protections/4"},
 	} {
 		out, _, err := dryRun(t, server, tc.args...)
 		require.NoError(t, err, "%v", tc.args)
