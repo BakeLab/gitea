@@ -274,13 +274,27 @@ func TestReleaseTaskForRunner(t *testing.T) {
 			}
 			require.NoError(t, db.Insert(t.Context(), run))
 
+			job := &ActionRunJob{
+				RunID:           run.ID,
+				RepoID:          run.RepoID,
+				OwnerID:         run.OwnerID,
+				CommitSHA:       run.CommitSHA,
+				Name:            tt.jobName,
+				Attempt:         1,
+				JobID:           tt.jobName,
+				Status:          StatusWaiting,
+				RunsOn:          []string{"ubuntu-latest"},
+				WorkflowPayload: []byte("on: push\njobs:\n  " + tt.jobName + ":\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"),
+			}
+			require.NoError(t, db.Insert(t.Context(), job))
+
 			disabledRun := &ActionRun{RepoID: 2, TriggerUserID: 2}
 			require.NoError(t, db.Insert(t.Context(), disabledRun))
 			disabledJob := &ActionRunJob{RunID: disabledRun.ID, RepoID: 2, Status: StatusWaiting, RunsOn: []string{"ubuntu-latest"}}
 			require.NoError(t, db.Insert(t.Context(), disabledJob))
 
 			if tt.batchSize != 0 {
-				// Five waiting jobs the runner cannot run, then one it can.
+				// Newer non-matching jobs must not hide a matching job on a later page.
 				for i := range 5 {
 					mismatch := &ActionRunJob{
 						RunID:     run.ID,
@@ -296,20 +310,6 @@ func TestReleaseTaskForRunner(t *testing.T) {
 					require.NoError(t, db.Insert(t.Context(), mismatch))
 				}
 			}
-
-			job := &ActionRunJob{
-				RunID:           run.ID,
-				RepoID:          run.RepoID,
-				OwnerID:         run.OwnerID,
-				CommitSHA:       run.CommitSHA,
-				Name:            tt.jobName,
-				Attempt:         1,
-				JobID:           tt.jobName,
-				Status:          StatusWaiting,
-				RunsOn:          []string{"ubuntu-latest"},
-				WorkflowPayload: []byte("on: push\njobs:\n  " + tt.jobName + ":\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"),
-			}
-			require.NoError(t, db.Insert(t.Context(), job))
 
 			runner := &ActionRunner{
 				UUID:        tt.name + "-runner-uuid",
@@ -549,4 +549,46 @@ func newRunningTaskForCancelling(t *testing.T, name string, hasCancellingSupport
 	require.NoError(t, err)
 
 	return task, job
+}
+
+func TestCreateTaskForRunnerNewestMatchingJob(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+	originalBatchSize := pickTaskBatchSize
+	pickTaskBatchSize = 2
+	t.Cleanup(func() { pickTaskBatchSize = originalBatchSize })
+	run := &ActionRun{RepoID: 1, OwnerID: 2, TriggerUserID: 2, WorkflowID: "newest.yaml", Index: 9904, Status: StatusWaiting}
+	require.NoError(t, db.Insert(ctx, run))
+	require.NoError(t, db.Insert(ctx, &repo_model.RepoUnit{RepoID: run.RepoID, Type: unit.TypeActions}))
+	insert := func(name, label string) *ActionRunJob {
+		job := &ActionRunJob{RunID: run.ID, RepoID: run.RepoID, OwnerID: run.OwnerID, Name: name, JobID: name, Attempt: 1, Status: StatusWaiting, RunsOn: []string{label}, WorkflowPayload: []byte("on: push\njobs:\n  " + name + ":\n    runs-on: " + label + "\n    steps:\n      - run: echo hi\n")}
+		require.NoError(t, db.Insert(ctx, job))
+		return job
+	}
+	older := insert("older", "ubuntu-latest")
+	newer := insert("newer", "ubuntu-latest")
+	// A retried or recently updated old job must not displace a newly created one.
+	_, err := db.GetEngine(ctx).ID(older.ID).NoAutoTime().Cols("updated").Update(&ActionRunJob{Updated: newer.Updated + 100})
+	require.NoError(t, err)
+	for i := range 5 {
+		insert("mismatch-"+string(rune('a'+i)), "windows-latest")
+	}
+	foreignRun := &ActionRun{RepoID: 2, OwnerID: 2, TriggerUserID: 2}
+	require.NoError(t, db.Insert(ctx, foreignRun))
+	foreign := &ActionRunJob{RunID: foreignRun.ID, RepoID: 2, Status: StatusWaiting, RunsOn: []string{"ubuntu-latest"}}
+	require.NoError(t, db.Insert(ctx, foreign))
+	runner := &ActionRunner{RepoID: run.RepoID, UUID: "newest-runner", Name: "newest-runner", AgentLabels: []string{"ubuntu-latest"}}
+	runner.GenerateAndFillToken()
+	require.NoError(t, db.Insert(ctx, runner))
+	for _, want := range []*ActionRunJob{newer, older} {
+		task, cancelled, err := CreateTaskForRunner(ctx, runner)
+		require.NoError(t, err)
+		require.NotNil(t, task)
+		assert.Equal(t, want.ID, task.JobID)
+		assert.Empty(t, cancelled)
+	}
+	task, _, err := CreateTaskForRunner(ctx, runner)
+	require.NoError(t, err)
+	assert.Nil(t, task)
+	assert.Equal(t, StatusWaiting, unittest.AssertExistsAndLoadBean(t, &ActionRunJob{ID: foreign.ID}).Status)
 }
