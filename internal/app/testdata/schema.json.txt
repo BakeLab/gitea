@@ -190,6 +190,7 @@ gt team repo list	actions_enabled:boolean,archived:boolean,clone_url:string,defa
 gt team view	access:string,all_repositories:boolean,can_create_repo:boolean,description:string,id:integer,name:string,organization:string,permission:string,units:object
 gt time create	created_at:string,id:integer,issue_number:integer,issue_title:string,issue_url:string,repository:string,seconds:integer,user:string
 gt time list	created_at:string,id:integer,issue_number:integer,issue_title:string,issue_url:string,repository:string,seconds:integer,user:string
+gt time status	issue_number:integer,issue_title:string,repository:string,seconds:integer,started_at:string
 gt variable get	description:string,name:string,value:string
 gt variable list	description:string,name:string,value:string
 gt variable set	description:string,name:string,value:string

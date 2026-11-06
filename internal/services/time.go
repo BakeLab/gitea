@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -167,4 +168,100 @@ func (s Times) Reset(ctx context.Context, n int64) (bool, error) {
 		return false, nil
 	}
 	return err == nil, s.issueError(ctx, err, n)
+}
+
+// Stopwatch is a running timer of the account on an issue or pull request.
+type Stopwatch struct {
+	Repository  string `json:"repository"`
+	IssueNumber int64  `json:"issue_number"`
+	IssueTitle  string `json:"issue_title"`
+	// Seconds is how long it has run, as Gitea reads it when asked.
+	Seconds   int64  `json:"seconds"`
+	StartedAt string `json:"started_at"`
+}
+
+func stopwatchFrom(watch *gitea.StopWatch) Stopwatch {
+	return Stopwatch{
+		Repository: watch.RepoOwnerName + "/" + watch.RepoName, IssueNumber: watch.IssueIndex, IssueTitle: watch.IssueTitle,
+		Seconds: watch.Seconds, StartedAt: timestamp(watch.Created),
+	}
+}
+
+// Running lists the stopwatches that the account has running, in any repository.
+func (s Times) Running(ctx context.Context) ([]Stopwatch, error) {
+	watches, err := callAll(ctx, s.Client, 50, func(ctx context.Context, c *gitea.Client, list gitea.ListOptions) ([]*gitea.StopWatch, *gitea.Response, error) {
+		return c.Issues.ListMyStopwatches(ctx, gitea.ListStopwatchesOptions{ListOptions: list})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return convertAll(watches, stopwatchFrom), nil
+}
+
+// RunningOn returns the stopwatch that the listing shows on issue n, for its title and elapsed time.
+// Only Gitea's answer to a request about the stopwatch tells whether one runs: the listing can fail
+// on a token that may change the issue, and knows nothing of a missing or renamed repository.
+func (s Times) RunningOn(ctx context.Context, n int64) (Stopwatch, bool) {
+	running, err := s.Running(ctx)
+	if err != nil {
+		return Stopwatch{}, false
+	}
+	for _, watch := range running {
+		if watch.IssueNumber == n && strings.EqualFold(watch.Repository, s.Repository) {
+			return watch, true
+		}
+	}
+	return Stopwatch{}, false
+}
+
+// ErrNoStopwatch reports that the account has no stopwatch running on an issue.
+var ErrNoStopwatch = errors.New("no stopwatch is running")
+
+// stopwatchError words the refusals of Gitea about a stopwatch.
+func (s Times) stopwatchError(ctx context.Context, err error, n int64) error {
+	if apiErr, ok := errors.AsType[*transport.APIError](err); ok {
+		message := strings.ToLower(apiErr.Message)
+		switch {
+		case apiErr.Status == http.StatusConflict && strings.Contains(message, "again if it already exists"):
+			return fmt.Errorf("a stopwatch is already running on %s#%d", s.Repository, n)
+		case apiErr.Status == http.StatusConflict && strings.Contains(message, "non-existent stopwatch"):
+			return fmt.Errorf("%w on %s#%d", ErrNoStopwatch, s.Repository, n)
+		case apiErr.Status == http.StatusForbidden && apiErr.Message == "": // others name the cause, such as a token scope
+			return s.stopwatchRefusal(ctx, err, n)
+		}
+	}
+	return s.issueError(ctx, err, n)
+}
+
+// stopwatchRefusal explains the bare 403 that Gitea answers for a stopwatch on issue n, which stands
+// for time tracking being disabled as well as for missing write access.
+func (s Times) stopwatchRefusal(ctx context.Context, err error, n int64) error {
+	if repo, lookupErr := (Repositories{Client: s.Client}).get(ctx, s.Repository); lookupErr == nil && repo.InternalTracker != nil && !repo.InternalTracker.EnableTimeTracker {
+		return s.trackingError()
+	}
+	return &RefusedError{Text: fmt.Sprintf("a stopwatch on %s#%d requires write access to the issue or pull request", s.Repository, n), Err: err}
+}
+
+// Start starts a stopwatch on issue n.
+func (s Times) Start(ctx context.Context, n int64) error {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+		return c.Issues.StartIssueStopWatch(ctx, owner, repo, n)
+	})
+	return s.stopwatchError(ctx, err, n)
+}
+
+// Stop stops the stopwatch on issue n and logs the time it ran as tracked time.
+func (s Times) Stop(ctx context.Context, n int64) error {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+		return c.Issues.StopIssueStopWatch(ctx, owner, repo, n)
+	})
+	return s.stopwatchError(ctx, err, n)
+}
+
+// Cancel discards the stopwatch on issue n without logging its time.
+func (s Times) Cancel(ctx context.Context, n int64) error {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) (*gitea.Response, error) {
+		return c.Issues.DeleteIssueStopwatch(ctx, owner, repo, n)
+	})
+	return s.stopwatchError(ctx, err, n)
 }

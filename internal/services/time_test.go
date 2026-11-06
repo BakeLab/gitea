@@ -66,6 +66,33 @@ func TestTimeListSelectsScopeAndFilters(t *testing.T) {
 	}
 }
 
+func TestStopwatchExplainsForbidden(t *testing.T) {
+	const scopes = "token does not have at least one of required scope(s), required=[write:issue]"
+	for name, test := range map[string]struct {
+		tracker, body string
+		want          string
+	}{
+		"time tracking off": {tracker: "false", want: "time tracking is disabled in alice/project"},
+		"no write access":   {tracker: "true", want: "a stopwatch on alice/project#12 requires write access to the issue or pull request"},
+		"a reason given":    {tracker: "false", body: `{"message":"` + scopes + `"}`, want: "permission denied by the Gitea instance"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					_, _ = w.Write([]byte(`{"full_name":"alice/project","internal_tracker":{"enable_time_tracker":` + test.tracker + `}}`))
+					return
+				}
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			service := Times{Client: client, Repository: "alice/project"}
+			for _, change := range []func(context.Context, int64) error{service.Start, service.Stop, service.Cancel} {
+				require.ErrorContains(t, change(context.Background(), 12), test.want)
+			}
+		})
+	}
+}
+
 func TestTimeExplainsDisabledTimeTracking(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/alice/project/times" {

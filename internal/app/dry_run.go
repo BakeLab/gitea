@@ -74,7 +74,7 @@ var dryRunCommands = []string{
 	"runner delete", "runner disable", "runner enable", "runner token",
 	"secret delete", "secret set", "ssh-key create", "ssh-key delete",
 	"team create", "team delete", "team edit", "team member add", "team member remove", "team repo add", "team repo remove",
-	"time create", "time delete", "time reset",
+	"time cancel", "time create", "time delete", "time reset", "time start", "time stop",
 	"variable delete", "variable set",
 	"webhook create", "webhook delete", "webhook edit", "webhook test",
 	"wiki create", "wiki delete", "wiki edit",

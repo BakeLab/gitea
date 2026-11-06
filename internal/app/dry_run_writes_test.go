@@ -150,9 +150,12 @@ var dryRunWriteCases = []struct {
 	{[]string{"team", "member", "remove", "1", "bob"}, "DELETE"},
 	{[]string{"team", "repo", "add", "1", "acme/project"}, "PUT"},
 	{[]string{"team", "repo", "remove", "1", "acme/project"}, "DELETE"},
+	{[]string{"time", "cancel", "5"}, "DELETE"},
 	{[]string{"time", "create", "5", "1h"}, "POST"},
 	{[]string{"time", "delete", "5", "1"}, "DELETE"},
 	{[]string{"time", "reset", "5"}, "DELETE"},
+	{[]string{"time", "start", "5"}, "POST"},
+	{[]string{"time", "stop", "5"}, "POST"},
 	{[]string{"variable", "delete", "V"}, "DELETE"},
 	{[]string{"variable", "set", "V", "--body", "value"}, "PUT"},
 	{[]string{"webhook", "create", "https://example.com/hook", "--events", "push"}, "POST"},
@@ -257,6 +260,11 @@ func dryRunFixture(path, page string) (status int, body string, ok bool) {
 		return 200, `{"id":1,"event":"item_added_to_project","enabled":true}`, true
 	case strings.HasSuffix(path, "/projects/1/workflows/2"):
 		return 200, `{"id":2,"event":"item_closed","enabled":false}`, true
+	case strings.HasSuffix(path, "/user/stopwatches"):
+		if page != "" && page != "1" {
+			return 200, `[]`, true
+		}
+		return 200, `[{"seconds":3661,"duration":"1h1m1s","issue_index":5,"issue_title":"Bug","repo_owner_name":"alice","repo_name":"project","created":"2026-01-01T00:00:00Z"}]`, true
 	case strings.HasSuffix(path, "/actions/workflows/ci.yml"):
 		return 200, `{"id":"ci.yml","name":"ci","path":".gitea/workflows/ci.yml","state":"active"}`, true
 	case strings.HasSuffix(path, "/actions/workflows/off.yml"):

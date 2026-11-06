@@ -56,8 +56,10 @@ func spent(seconds int64) string {
 
 func (a *application) timeCommand() *cobra.Command {
 	group := &cobra.Command{Use: "time", Short: "Track time spent on issues and pull requests", Long: `Log the time spent on issues and pull requests, list it for a repository, an issue or
-yourself across repositories, and delete it.`}
-	group.AddCommand(a.timeListCommand(), a.timeCreateCommand(), a.timeDeleteCommand(), a.timeResetCommand())
+yourself across repositories, and delete it. Instead of adding up the time yourself, run a stopwatch:
+gt time start begins one on an issue, gt time stop logs the time it ran and gt time cancel throws it
+away; gt time status shows the one that runs.`}
+	group.AddCommand(a.timeListCommand(), a.timeCreateCommand(), a.timeDeleteCommand(), a.timeResetCommand(), a.timeStartCommand(), a.timeStopCommand(), a.timeCancelCommand(), a.timeStatusCommand())
 	return jsonOutput[services.TrackedTime](group)
 }
 
@@ -241,4 +243,118 @@ func (a *application) timeResetCommand() *cobra.Command {
 		a.done(cmd, "Deleted %s", subject)
 		return nil
 	}}
+}
+
+// stopwatchLabel names the issue of a stopwatch in messages: owner/repo#12 (Title).
+func stopwatchLabel(repo string, n int64, title string) string {
+	return strings.TrimSuffix(refLabel(repo, n, title), " ()")
+}
+
+func (a *application) timeStartCommand() *cobra.Command {
+	return &cobra.Command{
+		Use: "start {<number> | <url>}", Short: "Start a stopwatch on an issue", Long: `Start a stopwatch on an issue or pull request, to log the time it runs with gt time stop. Gitea runs
+one stopwatch per user: starting one stops the one running on another issue and logs its time, which
+gt time start reports. gt time status shows the one that runs. The repository needs time tracking
+turned on.`, Example: `$ gt time start 12
+$ gt time stop 12`, Annotations: map[string]string{"gt.text": "time start does not return a resource", "gt.arguments": issueArguments}, Args: argsExact(1), ValidArgsFunction: firstArg(a.completeIssues("open")),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, n, err := a.resolveRef(cmd, args[0], issueRef)
+			if err != nil {
+				return err
+			}
+			service := services.Times{Client: target.client, Repository: target.Repo}
+			running, _ := service.Running(cmd.Context()) // only to name what the start stops, so it must not prevent it
+			if err := service.Start(cmd.Context(), n); err != nil {
+				return err
+			}
+			if !a.options.dryRun {
+				for _, watch := range running {
+					a.warn(cmd, "Stopped the stopwatch on %s after %s and logged its time", stopwatchLabel(watch.Repository, watch.IssueNumber, watch.IssueTitle), spent(watch.Seconds))
+				}
+			}
+			a.done(cmd, "Started a stopwatch on %s#%d", target.Repo, n)
+			return nil
+		},
+	}
+}
+
+func (a *application) timeStopCommand() *cobra.Command {
+	return &cobra.Command{
+		Use: "stop {<number> | <url>}", Short: "Stop the stopwatch on an issue and log its time", Long: `Stop the stopwatch that you started on an issue or pull request with gt time start, and log the
+time it ran, which gt time list shows.`, Example: "$ gt time stop 12", Annotations: map[string]string{"gt.text": "time stop does not return a resource", "gt.arguments": issueArguments}, Args: argsExact(1), ValidArgsFunction: firstArg(a.completeIssues("open")),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, n, err := a.resolveRef(cmd, args[0], issueRef)
+			if err != nil {
+				return err
+			}
+			service := services.Times{Client: target.client, Repository: target.Repo}
+			watch, listed := service.RunningOn(cmd.Context(), n)
+			if err := service.Stop(cmd.Context(), n); err != nil {
+				if errors.Is(err, services.ErrNoStopwatch) {
+					return explain(err, "%s; start one with: gt time start %d%s", err, n, a.suggestedRepo(target))
+				}
+				return err
+			}
+			ran := ""
+			if listed {
+				ran = " after " + spent(watch.Seconds)
+			}
+			a.done(cmd, "Stopped the stopwatch on %s%s and logged the time", stopwatchLabel(target.Repo, n, watch.IssueTitle), ran)
+			return nil
+		},
+	}
+}
+
+func (a *application) timeCancelCommand() *cobra.Command {
+	return &cobra.Command{
+		Use: "cancel {<number> | <url>}", Aliases: []string{"discard"}, Short: "Discard the stopwatch on an issue without logging its time", Long: `Discard the stopwatch that you started on an issue or pull request, and the time it ran: nothing
+is logged. To log it, use gt time stop.`, Example: "$ gt time cancel 12 --yes", Annotations: map[string]string{"gt.text": "time cancel does not return a resource", "gt.confirm": "true", "gt.arguments": issueArguments}, Args: argsExact(1), ValidArgsFunction: firstArg(a.completeIssues("open")),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, n, err := a.resolveRef(cmd, args[0], issueRef)
+			if err != nil {
+				return err
+			}
+			service := services.Times{Client: target.client, Repository: target.Repo}
+			watch, listed := service.RunningOn(cmd.Context(), n)
+			subject := "the stopwatch on " + stopwatchLabel(target.Repo, n, watch.IssueTitle)
+			if listed {
+				subject += ", which has run for " + spent(watch.Seconds)
+			}
+			return a.deleteConfirmed(cmd, subject, func() error { return service.Cancel(cmd.Context(), n) })
+		},
+	}
+}
+
+func (a *application) timeStatusCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "status", Short: "Show your running stopwatch", Long: "Show the stopwatch that you have running, in any repository, and how long it has run. Gitea runs one\nstopwatch per user.",
+		Example: `$ gt time status
+$ gt time status --json repository,issue_number,seconds`, Args: argsExact(0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := a.rejectRepoFlag(cmd, func(string) string { return "gt time status" }); err != nil {
+				return err
+			}
+			target, err := a.resolve(cmd.Context(), false)
+			if err != nil {
+				return err
+			}
+			running, err := (services.Times{Client: target.client}).Running(cmd.Context())
+			if err != nil {
+				return err
+			}
+			exact := !a.display().TTY
+			return writeTable(a, cmd, running, listSpec[services.Stopwatch]{
+				Columns: []terminal.Column{{Header: "Issue", Flex: true}, {Header: "Running"}, {Header: "Started"}},
+				Row: func(item services.Stopwatch) []terminal.Cell {
+					return []terminal.Cell{
+						{Text: terminal.SafeLine(strings.TrimSpace(fmt.Sprintf("%s#%d %s", item.Repository, item.IssueNumber, item.IssueTitle)))},
+						{Text: spentFor(exact, item.Seconds)},
+						{Time: terminal.ParseTime(item.StartedAt)},
+					}
+				},
+				Context: "your running stopwatches", Empty: "no stopwatch is running",
+			}, listPage{Number: 1})
+		},
+	}
+	return jsonOutput[services.Stopwatch](cmd)
 }

@@ -188,6 +188,12 @@ func TestDryRunRunsToTheEnd(t *testing.T) {
 			require.Contains(t, out, "Dry run: would send", "%v", args)
 		}
 	})
+	t.Run("a start reports no stopwatch as stopped", func(t *testing.T) {
+		out, stderr, err := dryRun(t, server, "time", "start", "7")
+		require.NoError(t, err)
+		require.Contains(t, out, "POST "+repo+"/issues/7/stopwatch/start")
+		require.Empty(t, stderr)
+	})
 	t.Run("failure of another item", func(t *testing.T) {
 		out, _, err := dryRun(t, server, "issue", "close", "5", "404")
 		require.ErrorContains(t, err, "issue 404")
