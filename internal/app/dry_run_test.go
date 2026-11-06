@@ -252,7 +252,7 @@ func TestDryRunFlagsHaveCases(t *testing.T) {
 }
 
 // dryRunReadVerbs are the last words of commands that only read.
-var dryRunReadVerbs = []string{"list", "view", "get", "status", "logs", "diff", "download", "jobs", "timeline", "checks", "revisions", "comments", "watch", "export", "versions", "show"}
+var dryRunReadVerbs = []string{"list", "view", "get", "status", "logs", "diff", "download", "jobs", "timeline", "checks", "revisions", "comments", "watch", "export", "versions", "show", "activity"}
 
 // dryRunExempt are the commands, with their subcommands, that have no --dry-run although they are not
 // read-only, and why.

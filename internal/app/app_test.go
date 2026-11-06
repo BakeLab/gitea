@@ -280,7 +280,7 @@ func TestRootHelpGroupsCommandsAndTopics(t *testing.T) {
 		"\nCORE COMMANDS\n  auth:          ",
 		"\n  repo:          ",
 		"\nACTIONS COMMANDS\n  run:           ",
-		"\nADDITIONAL COMMANDS\n  admin:         ",
+		"\nADDITIONAL COMMANDS\n  activity:      ",
 		"\n  completion:    Generate shell completion scripts\n",
 		"\nALIAS COMMANDS\n  co:            Alias for \"pr checkout\"\n",
 		"\nHELP TOPICS\n  environment:   ",
