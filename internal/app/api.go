@@ -130,8 +130,9 @@ otherwise:
 
 --paginate follows the next-page links of a GET request, or asks for the next page of
 a list that Gitea counts in X-Total-Count without links, and prints every page on its
-own line. --jq filters each JSON response with a jq expression and prints strings
-without quotes; jq does not need to be installed.
+own line. --slurp prints the pages as one JSON array of them instead, so that a script
+parses one document; it cannot be combined with --jq. --jq filters each JSON response with
+a jq expression and prints strings without quotes; jq does not need to be installed.
 
 On a terminal, JSON responses are indented and colored. A response outside 2xx prints
 its body, then fails with the HTTP status.`
@@ -139,16 +140,18 @@ its body, then fails with the HTTP status.`
 const apiExamples = `$ gt api user --jq .login
 # Create an issue: -f sends strings, -F typed values
 $ gt api repos/{owner}/{repo}/issues -f title="Crash on start" -F labels='[3]'
-$ gt api user/repos --paginate --jq '.[].full_name'`
+$ gt api user/repos --paginate --jq '.[].full_name'
+# All the pages as one array of arrays
+$ gt api user/repos --paginate --slurp`
 
 // apiMethods are the HTTP methods the Gitea API serves.
 var apiMethods = []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions}
 
 type apiFlags struct {
-	method, input, output              string
-	raw, typed, headerValues           []string
-	include, verbose, paginate, silent bool
-	maxPages                           int
+	method, input, output                     string
+	raw, typed, headerValues                  []string
+	include, verbose, paginate, silent, slurp bool
+	maxPages                                  int
 }
 
 func (a *application) apiCommand() *cobra.Command {
@@ -166,6 +169,7 @@ func (a *application) apiCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&f.verbose, "verbose", false, "Print the request and the response status and headers to stderr")
 	cmd.Flags().BoolVar(&f.silent, "silent", false, "Do not print the response body")
 	cmd.Flags().BoolVar(&f.paginate, "paginate", false, "Follow next-page links and print every page")
+	cmd.Flags().BoolVar(&f.slurp, "slurp", false, "With --paginate, print the pages as one JSON array of them")
 	cmd.Flags().IntVar(&f.maxPages, "max-pages", 1000, "Stop --paginate after this many pages; reaching the default fails")
 	return cmd
 }
@@ -201,6 +205,12 @@ func (a *application) runAPI(cmd *cobra.Command, args []string, f *apiFlags) err
 	f.method = strings.ToUpper(f.method)
 	if !slices.Contains(apiMethods, f.method) {
 		return usage(fmt.Errorf("invalid HTTP method %q; use one of %s", f.method, strings.Join(apiMethods, ", ")))
+	}
+	if f.slurp && !f.paginate {
+		return usage(errors.New("--slurp requires --paginate"))
+	}
+	if f.slurp && a.options.jq != "" {
+		return usage(errors.New("--slurp cannot be combined with --jq"))
 	}
 	if f.paginate && (f.method != http.MethodGet || f.input != "") {
 		return usage(errors.New("--paginate requires a body-free GET request"))
@@ -287,6 +297,7 @@ func (a *application) runAPI(cmd *cobra.Command, args []string, f *apiFlags) err
 	}
 	return writeOutput(cmd, f.output, func(destination io.Writer) error {
 		response := apiResponse{paginate: f.paginate, query: a.options.jq}
+		var pages [][]byte
 		if f.output == "" || f.output == "-" {
 			response.tty = a.deps.Streams.OutTTY
 			response.color = response.tty && a.colorEnabled()
@@ -306,6 +317,20 @@ func (a *application) runAPI(cmd *cobra.Command, args []string, f *apiFlags) err
 				_, err := io.Copy(io.Discard, r.Body)
 				return err
 			}
+			if f.slurp && r.StatusCode >= 200 && r.StatusCode < 300 {
+				page, err := io.ReadAll(r.Body)
+				if err != nil {
+					return err
+				}
+				if page = bytes.TrimSpace(page); len(page) == 0 {
+					return nil
+				}
+				if !json.Valid(page) {
+					return fmt.Errorf("--slurp needs JSON pages, but %s did not answer with JSON", endpoint)
+				}
+				pages = append(pages, page)
+				return nil
+			}
 			return response.write(destination, r)
 		})
 		if errors.Is(err, services.ErrMaxPages) {
@@ -315,9 +340,12 @@ func (a *application) runAPI(cmd *cobra.Command, args []string, f *apiFlags) err
 			}
 			// --max-pages asks to stop, so the pages it allows are a complete answer.
 			a.warn(cmd, "Stopped after %s as --max-pages asks; more pages exist", terminal.Plural(f.maxPages, "page"))
-			return nil
+			err = nil
 		}
-		return err
+		if err != nil || !f.slurp || f.silent {
+			return err
+		}
+		return response.writeSlurped(destination, pages)
 	})
 }
 
@@ -372,6 +400,21 @@ func (o apiResponse) write(w io.Writer, r *http.Response) error {
 		return err
 	}
 	return nil
+}
+
+// writeSlurped writes pages, each as received, as one JSON array, indented and colored on a terminal.
+func (o apiResponse) writeSlurped(w io.Writer, pages [][]byte) error {
+	array := slices.Concat([]byte("["), bytes.Join(pages, []byte(",")), []byte("]\n"))
+	if !o.tty {
+		_, err := w.Write(array)
+		return err
+	}
+	pretty, err := terminal.IndentJSON(array, o.color)
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(w, pretty)
+	return err
 }
 
 // lastByte remembers the last byte written through it.

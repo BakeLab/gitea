@@ -405,7 +405,7 @@ func (a *application) completeTags() cobra.CompletionFunc {
 // completeReleases completes release tags with their titles.
 func (a *application) completeReleases() cobra.CompletionFunc {
 	return a.apiCompletion(true, func(ctx context.Context, t target, _ string) ([]cobra.Completion, error) {
-		items, err := services.Releases{Client: t.client, Repository: t.Repo}.ListPage(ctx, completionLimit, 1)
+		items, err := services.Releases{Client: t.client, Repository: t.Repo}.ListPage(ctx, completionLimit, 1, services.ReleaseListOptions{})
 		return describe(items.Items, func(item services.Release) (string, string) { return item.Tag, item.Title }), err
 	})
 }

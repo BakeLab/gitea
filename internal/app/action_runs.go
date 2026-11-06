@@ -234,23 +234,57 @@ func runStateCell(status, conclusion string) terminal.Cell {
 }
 
 func (a *application) runViewCommand() *cobra.Command {
-	var noJobs, web, log bool
+	var noJobs, web, log, logFailed bool
+	var job string
 	cmd := &cobra.Command{
 		Use:   "view [<run-id>]",
 		Short: "View a workflow run",
-		Long:  "View a workflow run with its jobs and their steps.",
+		Long: `View a workflow run with its jobs and their steps. --job views one job of the run, by name or
+ID, and the URL of a job selects that job, like --job. --log prints the logs of every job, or of --job,
+and --log-failed those of the jobs that failed or were canceled, which is gt run logs --failed.`,
 		Example: `# view a run with its jobs and steps
 $ gt run view 34
 # print the logs of every job of a run
 $ gt run view 34 --log
+# print the logs of the jobs that failed
+$ gt run view 34 --log-failed
+# view one job with its steps
+$ gt run view 34 --job build
 # get the conclusion of each job as JSON
 $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 		Args:        usageArgs(cobra.MaximumNArgs(1)),
 		Annotations: map[string]string{"gt.arguments": runArguments},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if log && (web || a.options.json != "") {
-				return clierr.Wrap(clierr.Usage, errors.New("--log cannot be combined with --web, --json, --jq or --csv"))
+			if cmd.Flags().Changed("job") && strings.TrimSpace(job) == "" {
+				return clierr.Wrap(clierr.Usage, errors.New("--job requires a job name or ID"))
 			}
+			if (log || logFailed) && (web || a.options.json != "") {
+				return clierr.Wrap(clierr.Usage, errors.New("--log and --log-failed cannot be combined with --web, --json, --jq or --csv"))
+			}
+			switch {
+			case log && logFailed:
+				return clierr.Wrap(clierr.Usage, errors.New("--log cannot be combined with --log-failed"))
+			case logFailed && job != "":
+				return clierr.Wrap(clierr.Usage, errors.New("--log-failed cannot be combined with --job"))
+			case web && job != "":
+				return clierr.Wrap(clierr.Usage, errors.New("--web cannot be combined with --job"))
+			case noJobs && (job != "" || log || logFailed):
+				return clierr.Wrap(clierr.Usage, errors.New("--no-jobs cannot be combined with --job, --log or --log-failed"))
+			}
+			conflicting := ""
+			switch {
+			case logFailed:
+				conflicting = "--log-failed"
+			case web:
+				conflicting = "--web"
+			case noJobs:
+				conflicting = "--no-jobs"
+			}
+			selected, urlJob, err := jobOfRunURL(args, job, conflicting)
+			if err != nil {
+				return err
+			}
+			job = selected
 			t, id, err := a.runArg(cmd, args, false)
 			if err != nil {
 				return err
@@ -259,10 +293,18 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 				return a.openBrowser(cmd, fmt.Sprintf("%s/actions/runs/%d", repositoryURL(t), id))
 			}
 			service := services.Actions{Client: t.client, Repository: t.Repo}
-			if log {
+			if log || logFailed {
 				jobs, err := service.Jobs(cmd.Context(), id)
 				if err != nil {
 					return err
+				}
+				if jobs, err = selectJobs(cmd.Context(), service, jobs, job, logFailed, id); err != nil {
+					return err
+				}
+				if job != "" {
+					if err := sameJob(job, jobs[0], urlJob); err != nil {
+						return err
+					}
 				}
 				return a.printJobLogs(cmd, service, id, jobs, 0)
 			}
@@ -273,6 +315,16 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 			if noJobs {
 				run.Jobs = nil
 			}
+			if job != "" {
+				selected, err := runJob(cmd.Context(), service, run.Jobs, job, id)
+				if err != nil {
+					return err
+				}
+				if err := sameJob(job, selected, urlJob); err != nil {
+					return err
+				}
+				run.Jobs = []services.Job{selected}
+			}
 			if a.options.json != "" {
 				return a.writeJSON(cmd, run)
 			}
@@ -282,6 +334,9 @@ $ gt run view 34 --json jobs --jq '.jobs[] | {name, conclusion}'`,
 	cmd.Flags().BoolVar(&noJobs, "no-jobs", false, "Leave out the jobs")
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the run in the browser")
 	cmd.Flags().BoolVar(&log, "log", false, "Print the logs of every job instead, like gt run logs")
+	cmd.Flags().BoolVar(&logFailed, "log-failed", false, "Print the logs of the jobs that failed or were canceled instead, like gt run logs --failed")
+	cmd.Flags().StringVarP(&job, "job", "j", "", "Only this job, by `name or ID`")
+	_ = cmd.RegisterFlagCompletionFunc("job", a.completeJobs())
 	cmd.ValidArgsFunction = firstArg(a.completeRuns())
 	return jsonOutput[services.Run](cmd)
 }

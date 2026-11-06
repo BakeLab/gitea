@@ -255,6 +255,8 @@ View this run on Gitea: https://gitea.test/alice/project/actions/runs/29
 			"completed_at:\t\nelapsed:\t\nurl:\thttps://gitea.test/alice/project/actions/runs/47\n--\n" +
 			"queued\t\t48\tbuild\t\thttps://gitea.test/alice/project/actions/runs/47/jobs/48\nwaiting\t\t49\ttest\t\t\n"},
 		{"json with jobs", false, []string{"29", "--json", "id,jobs", "--jq", "[.id, [.jobs[] | .name, .conclusion, .steps[0].name]]"}, `[29,["build","success","Set up job","test","failure","Run tests"]]` + "\n"},
+		{"json of one job by name", false, []string{"29", "--job", "Test", "--json", "id,jobs", "--jq", "[.id, [.jobs[] | .name]]"}, `[29,["test"]]` + "\n"},
+		{"json of one job by ID", false, []string{"29", "--job", "30", "--json", "id,jobs", "--jq", "[.id, [.jobs[] | .name]]"}, `[29,["build"]]` + "\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, out, _ := actionsDeps(t, server.URL, tc.tty)

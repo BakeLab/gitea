@@ -63,7 +63,8 @@ gt run logs 34 --output logs.zip --no-input            # whole run as a ZIP arch
 - The log goes to stdout and each job's name to stderr, so `2>/dev/null` leaves pure log.
 - Logs can be long. Search them (`| grep -n -i -E 'error|fail|panic'`) or read the end
   (`| tail -n 200`) before loading everything.
-- `gt run view 34 --log --no-input` prints the logs of every job instead of the run summary.
+- `gt run view 34 --log --no-input` prints the logs of every job instead of the run summary; `--log-failed`
+  prints those of the jobs that failed, and `--job build` narrows the view or the logs to one job.
 - Steps are in `gt run jobs 34 --json steps`: a failed step's name narrows where to look.
 
 From a failing check straight to its log:

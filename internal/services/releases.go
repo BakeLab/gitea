@@ -4,14 +4,17 @@
 package services
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
@@ -41,6 +44,14 @@ func releaseFrom(release *gitea.Release) Release {
 	}
 }
 
+// When is when a release was published, or created for a draft.
+func (r Release) When() string {
+	if r.PublishedAt != nil && !r.Draft {
+		return *r.PublishedAt
+	}
+	return r.CreatedAt
+}
+
 // ReleaseOptions distinguishes omitted fields from explicit empty or false values.
 type ReleaseOptions struct {
 	Tag        *string `json:"tag_name,omitempty"`
@@ -59,12 +70,36 @@ type Releases struct {
 
 func (s Releases) endpoint() string { return "repos/" + s.Repository + "/releases" }
 
+// ReleaseListOptions narrows a listing of releases.
+type ReleaseListOptions struct {
+	// ExcludeDrafts and ExcludePrereleases leave those out, which Gitea does itself.
+	ExcludeDrafts, ExcludePrereleases bool
+	// Order is "asc" or "desc" to sort the releases by when they were made, oldest or newest first, or ""
+	// for the order of Gitea, the newest first. Gitea sorts no other way, so asc reads every
+	// release and sorts them here.
+	Order string
+}
+
+func (o ReleaseListOptions) filters(list gitea.ListOptions) gitea.ListReleasesOptions {
+	options := gitea.ListReleasesOptions{ListOptions: list}
+	if o.ExcludeDrafts {
+		options.IsDraft = new(false)
+	}
+	if o.ExcludePrereleases {
+		options.IsPreRelease = new(false)
+	}
+	return options
+}
+
 // ListPage lists a page of releases, with whether more follow and how many there are.
-func (s Releases) ListPage(ctx context.Context, limit, page int) (Page[Release], error) {
+func (s Releases) ListPage(ctx context.Context, limit, page int, opts ReleaseListOptions) (Page[Release], error) {
+	if opts.Order != "" {
+		return s.listSorted(ctx, limit, page, opts)
+	}
 	window, err := instancePage(ctx, s.Client, limit, page, func(limit, page int) ([]*gitea.Release, http.Header, error) {
 		var headers http.Header
 		releases, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, repo string) ([]*gitea.Release, *gitea.Response, error) {
-			releases, resp, err := c.Releases.ListReleases(ctx, owner, repo, gitea.ListReleasesOptions{ListOptions: listOptions(limit, page)})
+			releases, resp, err := c.Releases.ListReleases(ctx, owner, repo, opts.filters(listOptions(limit, page)))
 			headers = headerOf(resp)
 			return releases, resp, err
 		})
@@ -74,6 +109,26 @@ func (s Releases) ListPage(ctx context.Context, limit, page int) (Page[Release],
 		return Page[Release]{}, Classify(err, "repository", s.Repository, "")
 	}
 	return convertPage(window, releaseFrom), nil
+}
+
+// listSorted reads every release, sorts them by when they were published and cuts the window of limit at page.
+func (s Releases) listSorted(ctx context.Context, limit, page int, opts ReleaseListOptions) (Page[Release], error) {
+	unordered := opts
+	unordered.Order = ""
+	releases, err := listEvery(100, func(limit, page int) (Page[Release], error) { return s.ListPage(ctx, limit, page, unordered) })
+	if err != nil {
+		return Page[Release]{}, err
+	}
+	// created_at of a published release is the date of its commit, and migrated releases get their IDs in any order.
+	when := func(r Release) time.Time {
+		parsed, _ := time.Parse(time.RFC3339Nano, r.When())
+		return parsed
+	}
+	slices.SortFunc(releases, func(x, y Release) int { return cmp.Or(when(x).Compare(when(y)), cmp.Compare(x.ID, y.ID)) })
+	if opts.Order == "desc" {
+		slices.Reverse(releases)
+	}
+	return PageOf(releases, limit, page)
 }
 
 // View retrieves a release by its tag, including numeric tags.

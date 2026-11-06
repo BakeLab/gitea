@@ -21,6 +21,7 @@ gt api 'repos/{owner}/{repo}/issues/17/reactions' -f content=+1
 - `--input body.json` (or `-`) sends a prepared JSON body.
 - `--paginate` follows the pages of a list and prints each page on its own line; add `--jq`
   to flatten (`--jq '.[]'`). `--max-pages` limits it.
+  `--slurp` prints the pages as one JSON array of them instead; it cannot be combined with `--jq`.
 - A response outside 2xx prints its body and fails; read the message before retrying.
 - `--include` prints the status and headers to stderr, `--silent` drops the body.
 

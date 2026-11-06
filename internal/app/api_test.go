@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -251,6 +252,10 @@ func TestAPIFiltersAndFormatsJSONResponses(t *testing.T) {
 		{name: "jq without --json", args: []string{"version", "--jq", ".version"}, want: "28.1.0\n"},
 		{name: "jq shorthand on a terminal", tty: true, args: []string{"version", "-q", "."}, want: "{\n  \"b\": 1,\n  \"version\": \"28.1.0\"\n}\n"},
 		{name: "jq on every page", args: []string{"repos", "--paginate", "--jq", ".[].name"}, want: "one\ntwo\n"},
+		{name: "slurp the pages into one array", args: []string{"repos", "--paginate", "--slurp"}, want: "[[{\"name\":\"one\"}],[{\"name\":\"two\"}]]\n"},
+		{name: "slurp on a terminal", tty: true, args: []string{"repos", "--paginate", "--slurp"}, want: "[\n  [\n    {\n      \"name\": \"one\"\n    }\n  ],\n  [\n    {\n      \"name\": \"two\"\n    }\n  ]\n]\n"},
+		{name: "slurp needs paginate", args: []string{"repos", "--slurp"}, err: "--slurp requires --paginate"},
+		{name: "slurp needs JSON", args: []string{"text", "--paginate", "--slurp"}, err: "--slurp needs JSON pages"},
 		{name: "terminal keeps key order", tty: true, args: []string{"version"}, want: "{\n  \"version\": \"28.1.0\",\n  \"b\": 1\n}\n"},
 		{name: "piped JSON ends with a newline", args: []string{"version"}, want: "{\"version\":\"28.1.0\",\"b\":1}\n"},
 		{name: "error body ends with a newline", args: []string{"repos/alice/nope"}, want: "{\"message\":\"not found\"}\n", err: "HTTP 404"},
@@ -278,6 +283,41 @@ func TestAPIFiltersAndFormatsJSONResponses(t *testing.T) {
 	requireUsageBeforeRequests(t, "api returns raw responses; --json is not supported", "api", "version", "--json")
 	requireUsageBeforeRequests(t, `invalid HTTP method "FOO"`, "api", "version", "-X", "foo")
 	requireUsageBeforeRequests(t, `invalid HTTP method ""`, "api", "version", "-X", "")
+}
+
+func TestAPISlurpKeepsThePagesAsReceived(t *testing.T) {
+	const first = `{"z":1,"a":12345678901234567890,"html":"<a&b>"}`
+	serve := func(pages ...string) *httptest.Server {
+		return newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			page, _ := strconv.Atoi(cmp.Or(r.URL.Query().Get("page"), "1"))
+			if page < len(pages) {
+				w.Header().Set("Link", fmt.Sprintf(`<?page=%d>; rel="next"`, page+1))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(pages[page-1]))
+		}))
+	}
+	for _, tc := range []struct {
+		name  string
+		tty   bool
+		pages []string
+		want  string
+	}{
+		{name: "piped", pages: []string{first, "[2.50]\n"}, want: "[" + first + ",[2.50]]\n"},
+		{name: "terminal", tty: true, pages: []string{first}, want: "[\n  {\n    \"z\": 1,\n    \"a\": 12345678901234567890,\n    \"html\": \"<a&b>\"\n  }\n]\n"},
+		{name: "an empty page is skipped", pages: []string{"[1]", "", " \n", "[2]"}, want: "[[1],[2]]\n"},
+		{name: "every page is empty", pages: []string{"", ""}, want: "[]\n"},
+		{name: "every page is empty on a terminal", tty: true, pages: []string{""}, want: "[]\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := serve(tc.pages...)
+			defer server.Close()
+			deps, out, _ := serverDeps(t, server.URL)
+			deps.Streams.OutTTY = tc.tty
+			require.NoError(t, Execute(context.Background(), deps, []string{"api", "repos", "--paginate", "--slurp"}))
+			require.Equal(t, tc.want, withoutANSI(out.String()))
+		})
+	}
 }
 
 func TestAPIMaxPagesStopsWithTheAllowedPages(t *testing.T) {

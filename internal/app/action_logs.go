@@ -130,20 +130,12 @@ $ gt run logs 34 --output logs.zip`,
 			if err != nil {
 				return err
 			}
-			switch {
-			case job != "":
-				selected, err := runJob(cmd.Context(), service, jobs, job, run)
-				if err != nil {
+			if jobs, err = selectJobs(cmd.Context(), service, jobs, job, failed, run); err != nil {
+				return err
+			}
+			if job != "" {
+				if err := sameJob(job, jobs[0], urlJob); err != nil {
 					return err
-				}
-				if err := sameJob(job, selected, urlJob); err != nil {
-					return err
-				}
-				jobs = []services.Job{selected}
-			case failed:
-				jobs = slices.DeleteFunc(jobs, func(job services.Job) bool { return !failedJob(job) })
-				if len(jobs) == 0 {
-					return fmt.Errorf("run %d has no failed or canceled jobs", run)
 				}
 			}
 			if !follow {
@@ -175,6 +167,28 @@ func runJob(ctx context.Context, service services.Actions, jobs []services.Job, 
 		return job, err
 	}
 	return service.RunJob(ctx, run, id)
+}
+
+// selectJobs narrows jobs of run to the one that raw names, when set, or else with failed to those
+// that failed or were canceled.
+func selectJobs(ctx context.Context, service services.Actions, jobs []services.Job, raw string, failed bool, run int64) ([]services.Job, error) {
+	switch {
+	case raw != "":
+		selected, err := runJob(ctx, service, jobs, raw, run)
+		if err != nil {
+			return nil, err
+		}
+		return []services.Job{selected}, nil
+	case failed:
+		running := slices.ContainsFunc(jobs, func(job services.Job) bool { return !job.Completed() })
+		if jobs = slices.DeleteFunc(jobs, func(job services.Job) bool { return !failedJob(job) }); len(jobs) == 0 {
+			if running {
+				return nil, fmt.Errorf("run %d has no failed or canceled jobs yet; it is still running", run)
+			}
+			return nil, fmt.Errorf("run %d has no failed or canceled jobs", run)
+		}
+	}
+	return jobs, nil
 }
 
 // printJobLogs prints the logs of jobs on stdout, each headed by its name on stderr. Jobs that

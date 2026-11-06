@@ -44,22 +44,23 @@ func releaseKind(item services.Release, latest int64) terminal.Cell {
 	return terminal.Cell{}
 }
 
-// releaseTime is when a release was published, or created for a draft.
-func releaseTime(item services.Release) string {
-	if item.PublishedAt != nil && !item.Draft {
-		return *item.PublishedAt
-	}
-	return item.CreatedAt
-}
-
 func (a *application) releaseListCommand() *cobra.Command {
 	var limit, page int
-	var selecting bool
+	var selecting, excludeDrafts, excludePrereleases bool
+	var order string
 	command := &cobra.Command{
 		Use:   "list",
 		Short: "List releases",
+		Long: `List the releases of a repository, in the order of Gitea, which goes by the date of each release's
+tag. --exclude-drafts and --exclude-pre-releases leave those out.
+
+--order asc lists the oldest first and --order desc the newest first. Both read every release and sort
+them in gt, by when each was published, or created for a draft, before printing the page. Without
+--order the releases stay in Gitea's order.`,
 		Example: `$ gt release list
-$ gt release list -R alice/project --json tag,title,draft`,
+$ gt release list -R alice/project --json tag,title,draft
+$ gt release list --exclude-drafts --exclude-pre-releases --limit 5
+$ gt release list --order asc --limit 1 --json tag --jq '.[0].tag'`,
 		Args: argsExact(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := a.checkSelect(cmd, selecting); err != nil {
@@ -69,7 +70,8 @@ $ gt release list -R alice/project --json tag,title,draft`,
 			if err != nil {
 				return err
 			}
-			result, err := (services.Releases{Client: target.client, Repository: target.Repo}).ListPage(cmd.Context(), limit, page)
+			sorted := order != ""
+			result, err := (services.Releases{Client: target.client, Repository: target.Repo}).ListPage(cmd.Context(), limit, page, services.ReleaseListOptions{ExcludeDrafts: excludeDrafts, ExcludePrereleases: excludePrereleases, Order: order})
 			if err != nil {
 				return err
 			}
@@ -81,7 +83,7 @@ $ gt release list -R alice/project --json tag,title,draft`,
 			published := slices.IndexFunc(result.Items, func(item services.Release) bool { return !item.Draft && !item.Prerelease })
 			switch {
 			case published < 0 || a.options.json != "":
-			case page == 1:
+			case page == 1 && !sorted:
 				latest = result.Items[published].ID
 			default:
 				item, err := (services.Releases{Client: target.client, Repository: target.Repo}).Latest(cmd.Context())
@@ -93,7 +95,7 @@ $ gt release list -R alice/project --json tag,title,draft`,
 			spec := listSpec[services.Release]{
 				Columns: []terminal.Column{{Header: "Title", Flex: true}, {Header: "Type"}, {Header: "Tag"}, {Header: "Published"}, {Header: "URL", PipedOnly: true}},
 				Row: func(item services.Release) []terminal.Cell {
-					return []terminal.Cell{{Text: cmp.Or(item.Title, item.Tag), Link: item.URL}, releaseKind(item, latest), {Text: item.Tag}, {Time: terminal.ParseTime(releaseTime(item))}, {Text: item.URL}}
+					return []terminal.Cell{{Text: cmp.Or(item.Title, item.Tag), Link: item.URL}, releaseKind(item, latest), {Text: item.Tag}, {Time: terminal.ParseTime(item.When())}, {Text: item.URL}}
 				},
 				Context: "releases in " + target.Repo, Empty: "no releases in " + target.Repo,
 			}
@@ -101,6 +103,9 @@ $ gt release list -R alice/project --json tag,title,draft`,
 		},
 	}
 	pageFlags(command, &limit, &page)
+	command.Flags().BoolVar(&excludeDrafts, "exclude-drafts", false, "Leave out draft releases")
+	command.Flags().BoolVar(&excludePrereleases, "exclude-pre-releases", false, "Leave out pre-releases")
+	enumFlag(command, &order, "order", "", "", "Read every release and sort by when each was published, oldest (asc) or newest (desc) first (default: the order of Gitea)", "asc", "desc")
 	selectFlag(command, &selecting)
 	return command
 }
@@ -168,7 +173,7 @@ func (a *application) releaseView(item services.Release, latest int64) terminal.
 		verb = "drafted"
 	}
 	var meta []string
-	if when := terminal.ParseTime(releaseTime(item)); !when.IsZero() {
+	if when := terminal.ParseTime(item.When()); !when.IsZero() {
 		meta = append(meta, strings.TrimSpace(item.Author+" "+verb+" this "+terminal.RelativeTime(a.deps.Now(), when)))
 	}
 	if item.Target != "" {

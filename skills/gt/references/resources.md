@@ -204,7 +204,7 @@ gt branch protection list --no-input --json rule,required_approvals,push_users,s
 ## Releases and wiki
 
 ```sh
-gt release list -L 5 --no-input --json tag,title,draft,published_at
+gt release list -L 5 --no-input --json tag,title,draft,published_at   # --exclude-drafts, --exclude-pre-releases, --order asc
 gt release create v1.2.0 dist/app.tar.gz --notes-file CHANGELOG.md --draft --no-input
 gt tag list -L 5 --no-input --json name,commit,annotated
 gt tag create v1.2.0 --target main --message "Version 1.2.0" --no-input   # a tag without a release

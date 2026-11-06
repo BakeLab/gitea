@@ -184,7 +184,7 @@ func TestReleaseListAndViewEscapeTags(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":2,"tag_name":"v1/beta one"}`))
 	}))
 	service := Releases{Client: client, Repository: "alice/project"}
-	items, err := service.ListPage(context.Background(), 10, 2)
+	items, err := service.ListPage(context.Background(), 10, 2, ReleaseListOptions{})
 	require.NoError(t, err)
 	require.Equal(t, []Release{{ID: 1, Tag: "v1", Assets: []ReleaseAsset{}}}, items.Items)
 	item, err := service.View(context.Background(), "v1/beta one")
@@ -290,7 +290,7 @@ func TestReleaseListNamesAMissingRepository(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"message":"not found"}`))
 	}))
-	_, err := Releases{Client: client, Repository: "alice/missing"}.ListPage(context.Background(), 30, 1)
+	_, err := Releases{Client: client, Repository: "alice/missing"}.ListPage(context.Background(), 30, 1, ReleaseListOptions{})
 	require.EqualError(t, err, "repository alice/missing not found")
 }
 
@@ -398,4 +398,86 @@ func TestReleaseEditRefusesATagAnotherReleaseHas(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "v3", item.Tag)
 	require.Equal(t, []string{"GET /api/v1/repos/alice/project/releases/tags/v3", "PATCH /api/v1/repos/alice/project/releases/7"}, requests)
+}
+
+func TestReleaseListOrderGoesByPublicationTime(t *testing.T) {
+	// As after a migration: the IDs run against the publication times, and created_at is the commit date.
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") != "1" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[
+			{"id":1,"tag_name":"v3","created_at":"2020-01-01T00:00:00Z","published_at":"2026-03-01T00:00:00Z"},
+			{"id":2,"tag_name":"v2","created_at":"2020-01-03T00:00:00Z","published_at":"2026-02-01T01:00:00+01:00"},
+			{"id":3,"tag_name":"v1","created_at":"2020-01-02T00:00:00Z","published_at":"2026-01-01T00:00:00Z"},
+			{"id":4,"tag_name":"draft","draft":true,"created_at":"2026-02-15T00:00:00Z"},
+			{"id":6,"tag_name":"same-b","created_at":"2020-01-01T00:00:00Z","published_at":"2026-04-01T00:00:00Z"},
+			{"id":5,"tag_name":"same-a","created_at":"2020-01-01T00:00:00Z","published_at":"2026-04-01T00:00:00Z"}
+		]`))
+	}))
+	service := Releases{Client: client, Repository: "alice/project"}
+	for order, want := range map[string][]string{
+		"asc":  {"v1", "v2", "draft", "v3", "same-a", "same-b"},
+		"desc": {"same-b", "same-a", "v3", "draft", "v2", "v1"},
+	} {
+		page, err := service.ListPage(context.Background(), 10, 1, ReleaseListOptions{Order: order})
+		require.NoError(t, err)
+		tags := make([]string, 0, len(page.Items))
+		for _, item := range page.Items {
+			tags = append(tags, item.Tag)
+		}
+		require.Equal(t, want, tags, order)
+	}
+}
+
+func TestReleaseListFiltersAndOrder(t *testing.T) {
+	var queries []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.RawQuery)
+		// Five releases, the newest first as Gitea lists them, three to a page.
+		switch r.URL.Query().Get("page") {
+		case "2":
+			_, _ = w.Write([]byte(`[{"id":2,"tag_name":"v2","created_at":"2026-10-02T00:00:00Z"},{"id":1,"tag_name":"v1","created_at":"2026-10-01T00:00:00Z"}]`))
+		case "3":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			_, _ = w.Write([]byte(`[{"id":5,"tag_name":"v5","created_at":"2026-10-05T00:00:00Z"},{"id":3,"tag_name":"v3","draft":true,"created_at":"2026-10-03T00:00:00Z"},{"id":4,"tag_name":"v4","created_at":"2026-10-04T00:00:00Z"}]`))
+		}
+	}))
+	service := Releases{Client: client, Repository: "alice/project"}
+	tags := func(items []Release) (list []string) {
+		for _, item := range items {
+			list = append(list, item.Tag)
+		}
+		return list
+	}
+
+	page, err := service.ListPage(context.Background(), 3, 1, ReleaseListOptions{ExcludeDrafts: true, ExcludePrereleases: true})
+	require.NoError(t, err)
+	require.Equal(t, []string{"v5", "v3", "v4"}, tags(page.Items), "in the order Gitea gives")
+	require.Contains(t, queries[0], "draft=false")
+	require.Contains(t, queries[0], "pre-release=false")
+
+	queries = nil
+	page, err = service.ListPage(context.Background(), 3, 1, ReleaseListOptions{})
+	require.NoError(t, err)
+	require.NotContains(t, queries[0], "draft", "without the options Gitea decides")
+	require.NotContains(t, queries[0], "pre-release")
+
+	page, err = service.ListPage(context.Background(), 2, 1, ReleaseListOptions{Order: "asc", ExcludeDrafts: true})
+	require.NoError(t, err)
+	require.Equal(t, []string{"v1", "v2"}, tags(page.Items), "the oldest first, cut to the limit")
+	require.True(t, page.More)
+	require.Equal(t, 5, page.Total)
+	page, err = service.ListPage(context.Background(), 2, 3, ReleaseListOptions{Order: "asc"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"v5"}, tags(page.Items), "the last page of the oldest-first order")
+	require.False(t, page.More)
+	page, err = service.ListPage(context.Background(), 5, 1, ReleaseListOptions{Order: "desc"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"v5", "v4", "v3", "v2", "v1"}, tags(page.Items), "desc sorts by when they were made, whatever order Gitea gave")
+	page, err = service.ListPage(context.Background(), 2, 9, ReleaseListOptions{Order: "asc"})
+	require.NoError(t, err)
+	require.Empty(t, page.Items, "a page past the end is empty")
 }

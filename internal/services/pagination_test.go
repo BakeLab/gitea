@@ -219,7 +219,7 @@ func TestCappedLaterPagesOfReleasesReviewsAndActions(t *testing.T) {
 		list func(client *transport.Client, limit, page int) ([]int64, error)
 	}{
 		"releases": {nil, func(client *transport.Client, limit, page int) ([]int64, error) {
-			window, err := (Releases{Client: client, Repository: "o/r"}).ListPage(context.Background(), limit, page)
+			window, err := (Releases{Client: client, Repository: "o/r"}).ListPage(context.Background(), limit, page, ReleaseListOptions{})
 			return ids(len(window.Items), func(i int) int64 { return window.Items[i].ID }), err
 		}},
 		"reviews": {nil, func(client *transport.Client, limit, page int) ([]int64, error) {
