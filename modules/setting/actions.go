@@ -25,6 +25,7 @@ const (
 var (
 	Actions = struct {
 		Enabled               bool
+		BBExecutorConfig      string            `ini:"BB_EXECUTOR_CONFIG"`
 		LogStorage            *Storage          // how the created logs should be stored
 		LogRetentionDays      int64             `ini:"LOG_RETENTION_DAYS"`
 		LogCompression        logCompression    `ini:"LOG_COMPRESSION"`

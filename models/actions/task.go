@@ -266,6 +266,19 @@ func CreateTaskForRunner(ctx context.Context, runner *ActionRunner) (task *Actio
 	if db.InTransaction(ctx) {
 		return nil, nil, errors.New("CreateTaskForRunner must not be called within a database transaction")
 	}
+	if binding, err := GetBBTaskForRunner(ctx, runner.ID); err != nil {
+		return nil, nil, err
+	} else if binding != nil {
+		job, has, err := db.GetByID[ActionRunJob](ctx, binding.JobID)
+		if err != nil || !has || binding.Completed || job.Status != StatusWaiting || job.TaskID != 0 {
+			return nil, nil, err
+		}
+		task, cancelled, err := claimJobForRunner(ctx, runner, job)
+		if cancelled {
+			cancelledJobs = append(cancelledJobs, job)
+		}
+		return task, cancelledJobs, err
+	}
 
 	// TODO: a more efficient way to filter labels
 	log.Trace("runner labels: %v", runner.AgentLabels)
