@@ -96,7 +96,6 @@ func initBBExecutor(ctx context.Context) error {
 	defer f.Close()
 	var config bbExecutorConfig
 	decoder := json.NewDecoder(f)
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&config); err != nil {
 		return err
 	}
@@ -378,7 +377,11 @@ func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.A
 	}
 	var task bbTaskResult
 	if row.TaskID == "" {
-		if err := config.request(ctx, http.MethodPost, "/v1/tasks", "gitea-bb-"+row.Key, json.RawMessage(row.RequestJSON), &task); err != nil {
+		var request json.Value
+		if err := json.Unmarshal([]byte(row.RequestJSON), &request); err != nil {
+			return fmt.Errorf("decode persisted BB task request: %w", err)
+		}
+		if err := config.request(ctx, http.MethodPost, "/v1/tasks", "gitea-bb-"+row.Key, request, &task); err != nil {
 			var responseError *bbRequestError
 			if !errors.As(err, &responseError) || responseError.status != http.StatusBadRequest {
 				return err
