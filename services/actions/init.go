@@ -67,5 +67,8 @@ func Init(ctx context.Context) error {
 	go graceful.GetManager().RunWithCancel(jobEmitterQueue)
 
 	notify_service.RegisterNotifier(NewNotifier())
-	return initGlobalRunnerToken(ctx)
+	if err := initGlobalRunnerToken(ctx); err != nil {
+		return err
+	}
+	return initBBExecutor(ctx)
 }
