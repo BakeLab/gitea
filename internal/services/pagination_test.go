@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"gitea.dev/cli/internal/transport"
@@ -19,17 +20,17 @@ import (
 )
 
 // cappedServer serves total items in pages of at most maxItems, like Gitea's MAX_RESPONSE_ITEMS.
-func cappedServer(t *testing.T, total, maxItems int, link, count bool) (*httptest.Server, *int) {
+func cappedServer(t *testing.T, total, maxItems int, link, count bool) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
 	return wrappedCappedServer(t, total, maxItems, link, count, func(items string, _ int) string { return items })
 }
 
 // wrappedCappedServer is cappedServer for endpoints that wrap the JSON array of a page in an object.
-func wrappedCappedServer(t *testing.T, total, maxItems int, link, count bool, wrap func(items string, total int) string) (*httptest.Server, *int) {
+func wrappedCappedServer(t *testing.T, total, maxItems int, link, count bool, wrap func(items string, total int) string) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
-	requests := 0
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
+		requests.Add(1)
 		if r.URL.Path == "/api/v1/settings/api" {
 			_, _ = fmt.Fprintf(w, `{"max_response_items":%d}`, maxItems)
 			return
@@ -94,7 +95,7 @@ func TestListsCollectPagesBeyondServerPageSize(t *testing.T) {
 			}
 			require.Equal(t, want, got)
 			require.Equal(t, tc.total > tc.page*tc.limit, orgs.More)
-			require.LessOrEqual(t, *requests, tc.limit/min(tc.limit, tc.maxItems)+2)
+			require.LessOrEqual(t, int(requests.Load()), tc.limit/min(tc.limit, tc.maxItems)+2)
 			repos, more, err := (Repositories{Client: client}).List(context.Background(), RepositoryListOptions{Limit: tc.limit, Page: tc.page})
 			require.NoError(t, err)
 			got = []int64{}
@@ -154,7 +155,7 @@ func TestFullListingsStopAtTheCountedEnd(t *testing.T) {
 			for i, label := range labels {
 				require.Equal(t, int64(i+1), label.ID)
 			}
-			require.Equal(t, tc.requests, *requests)
+			require.Equal(t, tc.requests, int(requests.Load()))
 		})
 	}
 }
@@ -187,7 +188,7 @@ func TestPullListingsStopAtTheCountedEnd(t *testing.T) {
 				client := transport.New(server.URL, "", false)
 				// The instance's page size is read once per client, not once per listing.
 				require.Equal(t, 200, maxPageSize(context.Background(), client))
-				*requests = 0
+				requests.Store(0)
 				got, err := lister.list(client)
 				require.NoError(t, err)
 				require.Equal(t, tc.total, got)
@@ -196,7 +197,7 @@ func TestPullListingsStopAtTheCountedEnd(t *testing.T) {
 					// Without a count only an empty page ends the listing.
 					want++
 				}
-				require.Equal(t, want, *requests)
+				require.Equal(t, want, int(requests.Load()))
 			})
 		}
 	}
