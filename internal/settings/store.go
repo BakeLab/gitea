@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/filelock"
+
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
 )

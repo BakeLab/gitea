@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
+
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -109,7 +110,7 @@ func TestSchemaIsBackwardCompatible(t *testing.T) {
 		name, fields, _ := strings.Cut(line, "\t")
 		now, ok := current[name]
 		require.True(t, ok, "%s no longer outputs JSON", name)
-		for _, field := range strings.Split(fields, ",") {
+		for field := range strings.SplitSeq(fields, ",") {
 			require.Contains(t, now, field, "%s lost or changed the JSON field %s", name, field)
 		}
 	}

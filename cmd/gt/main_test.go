@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -57,7 +59,7 @@ func TestSignalInterruptReturns130(t *testing.T) {
 		}
 		environment = append(environment, entry)
 	}
-	command.Env = append(environment, "GITEA_CLI_CONFIG_DIR="+t.TempDir(), "GITEA_CLI_HOST="+server.URL, "GITEA_TOKEN=disposable-test-token")
+	command.Env = slices.Concat(environment, []string{"GITEA_CLI_CONFIG_DIR=" + t.TempDir(), "GITEA_CLI_HOST=" + server.URL, "GITEA_TOKEN=disposable-test-token"})
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	require.NoError(t, command.Start())
@@ -72,7 +74,7 @@ func TestSignalInterruptReturns130(t *testing.T) {
 	select {
 	case err := <-done:
 		var exit *exec.ExitError
-		require.True(t, errors.As(err, &exit))
+		require.ErrorAs(t, err, &exit)
 		require.Equal(t, 130, exit.ExitCode())
 	case <-ctx.Done():
 		t.Fatal("CLI did not exit after interrupt")

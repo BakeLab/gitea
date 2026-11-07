@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/git/gittest"
+
 	"github.com/kballard/go-shellquote"
 	"github.com/stretchr/testify/require"
 )

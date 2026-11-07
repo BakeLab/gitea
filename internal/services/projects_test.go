@@ -6,12 +6,14 @@ package services
 import (
 	"context"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -105,9 +107,7 @@ func TestProjectMoveRefusals(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			routes := roadmapRoutes(tc.projects)
-			for path, page := range tc.change {
-				routes[path] = page
-			}
+			maps.Copy(routes, tc.change)
 			client, sent := projectServer(t, routes)
 			_, err := (Projects{Client: client, Repository: "alice/project"}).Move(context.Background(), 7, tc.column, tc.project)
 			require.EqualError(t, err, tc.err)

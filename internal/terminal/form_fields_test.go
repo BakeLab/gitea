@@ -7,12 +7,14 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
+	"gitea.dev/cli/internal/clierr"
+
 	gt "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
-	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +27,7 @@ func view(form *huh.Form, width, height int) string {
 
 func TestMultiSelectShowsEveryOption(t *testing.T) {
 	for _, count := range []int{1, 2, 5, maxVisibleOptions, 12} {
-		t.Run(fmt.Sprint(count), func(t *testing.T) {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
 			var options []string
 			for i := range count {
 				options = append(options, fmt.Sprintf("user%02d", i))

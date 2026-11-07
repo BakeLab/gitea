@@ -152,17 +152,17 @@ func (e *ElsewhereError) Error() string {
 	return fmt.Sprintf("notification %d belongs to %s, not selected repository %s", e.ID, e.Repository, e.Selected)
 }
 
-// LatestComment returns the latest comment on the subject of a notification, or nil without one.
-func (s Notifications) LatestComment(ctx context.Context, item Notification) (*Comment, error) {
+// LatestComment returns the latest comment on the subject of a notification and whether it exists.
+func (s Notifications) LatestComment(ctx context.Context, item Notification) (Comment, bool, error) {
 	id := lastPathNumber(item.latestComment)
 	if id == 0 || item.Repository == "" {
-		return nil, nil
+		return Comment{}, false, nil
 	}
 	comment, err := (Comments{Client: s.Client, Repository: item.Repository}).View(ctx, id)
 	if err != nil {
-		return nil, err
+		return Comment{}, false, err
 	}
-	return &comment, nil
+	return comment, true, nil
 }
 
 // Mark changes the selected notification status.

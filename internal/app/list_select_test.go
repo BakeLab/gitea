@@ -14,6 +14,7 @@ import (
 
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -98,7 +99,8 @@ func selectDeps(t *testing.T, serverURL string, answers ...string) (Dependencies
 func TestListSelectViewsTheItemAndRunsAnAction(t *testing.T) {
 	server, writes := selectServer(t, `[{"number":5,"title":"Bug","state":"open"},{"number":6,"title":"Other","state":"open"}]`)
 	deps, prompter := selectDeps(t, server.URL, "#5 Bug", "Close")
-	out := deps.Streams.Out.(interface{ String() string })
+	out, ok := deps.Streams.Out.(interface{ String() string })
+	require.True(t, ok)
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "list", "--select", "-R", "alice/project"}))
 	require.Equal(t, []string{"Select an issue (/ to filter)", "What next?"}, prompter.titles)
 	require.Equal(t, []string{"#5 Bug", "#6 Other"}, prompter.offered[0])
@@ -120,7 +122,9 @@ func TestListSelectWithNothingListedAsksNothing(t *testing.T) {
 	deps, prompter := selectDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"issue", "list", "--select", "-R", "alice/project"}))
 	require.Empty(t, prompter.titles)
-	require.Contains(t, deps.Streams.ErrOut.(interface{ String() string }).String(), "no open issues")
+	diagnostics, ok := deps.Streams.ErrOut.(interface{ String() string })
+	require.True(t, ok)
+	require.Contains(t, diagnostics.String(), "no open issues")
 }
 
 func TestListSelectOffersWhatTheStateOfAPullRequestAllows(t *testing.T) {

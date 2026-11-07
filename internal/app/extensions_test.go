@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,6 +31,7 @@ import (
 	"gitea.dev/cli/internal/git/gittest"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -153,6 +155,13 @@ func extensionDeps(t *testing.T, repo *fakeExtensionRepo, env map[string]string)
 	return deps, runs, server
 }
 
+func extensionBuffer(t *testing.T, writer io.Writer) *bytes.Buffer {
+	t.Helper()
+	buffer, ok := writer.(*bytes.Buffer)
+	require.True(t, ok)
+	return buffer
+}
+
 func installedExtension(t *testing.T, deps Dependencies, name string) extensions.Extension {
 	t.Helper()
 	extension, err := (extensions.Store{Dir: filepath.Join(deps.DataDir, "extensions")}).Lookup(name)
@@ -199,9 +208,9 @@ func TestExtensionInstallRunAndRemove(t *testing.T) {
 	runs.code = 0
 	require.NoError(t, Execute(context.Background(), deps, []string{"--no-input", "--yes", "hello"}), "every command accepts --no-input and --yes")
 
-	deps.Streams.Out.(interface{ Reset() }).Reset()
+	extensionBuffer(t, deps.Streams.Out).Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "list", "--json", "name,tag,credentials,shadowed"}))
-	assert.JSONEq(t, `[{"name":"hello","tag":"v1.0.0","credentials":false,"shadowed":false}]`, deps.Streams.Out.(fmt.Stringer).String())
+	assert.JSONEq(t, `[{"name":"hello","tag":"v1.0.0","credentials":false,"shadowed":false}]`, extensionBuffer(t, deps.Streams.Out).String())
 
 	require.NoError(t, os.WriteFile(extension.Path(), []byte("replaced"), 0o755))
 	err = Execute(context.Background(), deps, []string{"hello"})
@@ -241,7 +250,7 @@ func TestExtensionInstallWithoutDigestAsks(t *testing.T) {
 	require.ErrorIs(t, err, terminal.ErrCanceled)
 	assert.Equal(t, []string{"Install extension hello, which gt cannot verify?"}, prompter.confirmations)
 	assert.Equal(t, []bool{false}, prompter.defaults)
-	assert.Contains(t, deps.Streams.ErrOut.(fmt.Stringer).String(), "(not published; recorded now and checked before each run)")
+	assert.Contains(t, extensionBuffer(t, deps.Streams.ErrOut).String(), "(not published; recorded now and checked before each run)")
 	_, err = (extensions.Store{Dir: filepath.Join(deps.DataDir, "extensions")}).Lookup("hello")
 	require.ErrorIs(t, err, extensions.ErrNotInstalled)
 	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "install", "alice/gt-hello", "--yes"}))
@@ -293,9 +302,9 @@ func TestExtensionsCanBeTurnedOff(t *testing.T) {
 
 	deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_NO_EXTENSIONS": "1"})
 	require.ErrorContains(t, Execute(context.Background(), deps, []string{"hello"}), "disabled by GITEA_CLI_NO_EXTENSIONS")
-	deps.Streams.Out.(interface{ Reset() }).Reset()
+	extensionBuffer(t, deps.Streams.Out).Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"help"}))
-	assert.NotContains(t, deps.Streams.Out.(fmt.Stringer).String(), "EXTENSION COMMANDS", "help offers no extension that cannot run")
+	assert.NotContains(t, extensionBuffer(t, deps.Streams.Out).String(), "EXTENSION COMMANDS", "help offers no extension that cannot run")
 	deps.Getenv = serverEnv(server.URL, nil)
 
 	policy := filepath.Join(t.TempDir(), "policy.yml")
@@ -373,9 +382,9 @@ func TestExtensionUpgradeRefusesChangedSources(t *testing.T) {
 	require.EqualError(t, err, "confirmation required to upgrade extension hello; rerun with --yes")
 	assert.Equal(t, downloads, repo.downloads, "nothing is downloaded that cannot be installed")
 
-	deps.Streams.Out.(interface{ Reset() }).Reset()
+	extensionBuffer(t, deps.Streams.Out).Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "upgrade", "--all", "--dry-run"}))
-	assert.Equal(t, "hello\tv1.0.0\tv2.0.0\n", deps.Streams.Out.(fmt.Stringer).String())
+	assert.Equal(t, "hello\tv1.0.0\tv2.0.0\n", extensionBuffer(t, deps.Streams.Out).String())
 	require.Equal(t, "v1.0.0", installedExtension(t, deps, "hello").Tag)
 	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "upgrade", "--all", "--yes"}))
 	upgraded := installedExtension(t, deps, "hello")
@@ -386,7 +395,7 @@ func TestExtensionUpgradeRefusesChangedSources(t *testing.T) {
 	repo.tag = "v3.0.0"
 	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "upgrade", "hello", "--yes"}))
 	assert.Equal(t, "v2.0.0", installedExtension(t, deps, "hello").Tag, "a pinned extension stays")
-	assert.Contains(t, deps.Streams.ErrOut.(fmt.Stringer).String(), "reinstall it with gt extension install --force "+server.URL+"/alice/gt-hello to change that")
+	assert.Contains(t, extensionBuffer(t, deps.Streams.ErrOut).String(), "reinstall it with gt extension install --force "+server.URL+"/alice/gt-hello to change that")
 }
 
 func TestExtensionMetadataIsChecked(t *testing.T) {
@@ -398,10 +407,10 @@ func TestExtensionMetadataIsChecked(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "install", "alice/gt-hello", "--yes"}))
 	assert.Equal(t, "Say hello", installedExtension(t, deps, "hello").Metadata.Description)
 	assert.False(t, installedExtension(t, deps, "hello").Credentials, "gt cannot ask")
-	assert.Contains(t, deps.Streams.ErrOut.(fmt.Stringer).String(), "Extension hello asks for your Gitea token; allow it with gt extension install --force --allow-credentials "+server.URL+"/alice/gt-hello")
-	deps.Streams.Out.(interface{ Reset() }).Reset()
+	assert.Contains(t, extensionBuffer(t, deps.Streams.ErrOut).String(), "Extension hello asks for your Gitea token; allow it with gt extension install --force --allow-credentials "+server.URL+"/alice/gt-hello")
+	extensionBuffer(t, deps.Streams.Out).Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"help"}))
-	assert.Contains(t, deps.Streams.Out.(fmt.Stringer).String(), "EXTENSION COMMANDS\n  hello:")
+	assert.Contains(t, extensionBuffer(t, deps.Streams.Out).String(), "EXTENSION COMMANDS\n  hello:")
 }
 
 func TestGitHubExtensionsAreReadAnonymously(t *testing.T) {
@@ -492,7 +501,7 @@ func TestLocalExtensionRunsInPlace(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "gt-extension.yml"), []byte("credentials: true\n"), 0o644))
 	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "install", dir, "--force"}))
 	assert.False(t, installedExtension(t, deps, "dev").Credentials, "gt cannot ask")
-	assert.Contains(t, deps.Streams.ErrOut.(fmt.Stringer).String(), "Extension dev asks for your Gitea token; allow it with gt extension install --force --allow-credentials "+dir)
+	assert.Contains(t, extensionBuffer(t, deps.Streams.ErrOut).String(), "Extension dev asks for your Gitea token; allow it with gt extension install --force --allow-credentials "+dir)
 	prompt := &scriptedPrompter{accept: true}
 	deps.Prompter = prompt
 	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
@@ -645,7 +654,7 @@ func TestChangedExtensionIsNotAskedToComplete(t *testing.T) {
 	repo.metadata = "completion: cobra\n"
 	deps, runs, _ := extensionDeps(t, repo, nil)
 	require.NoError(t, Execute(context.Background(), deps, []string{"extension", "install", "alice/gt-hello", "--yes"}))
-	out := deps.Streams.Out.(*bytes.Buffer)
+	out := extensionBuffer(t, deps.Streams.Out)
 	complete(t, deps, out, "hello", "")
 	require.Len(t, runs.commands, 1)
 	require.NoError(t, os.WriteFile(installedExtension(t, deps, "hello").Path(), []byte("replaced"), 0o755))
@@ -810,7 +819,7 @@ func TestExtensionGetsNoTokenOfAnotherInstance(t *testing.T) {
 	// Without its instance, the token cannot be passed, which gt explains as for its own commands.
 	deps.Getenv = envFunc(map[string]string{"GITEA_TOKEN": "unbound"})
 	require.NoError(t, Execute(context.Background(), deps, []string{"hello"}))
-	assert.Contains(t, deps.Streams.ErrOut.(fmt.Stringer).String(), "Could not pass your credentials to extension hello: GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance")
+	assert.Contains(t, extensionBuffer(t, deps.Streams.ErrOut).String(), "Could not pass your credentials to extension hello: GITEA_TOKEN requires GITEA_CLI_HOST or GITEA_INSTANCE_URL naming its instance")
 }
 
 func TestExtensionGetsARefreshedOAuthToken(t *testing.T) {
@@ -911,7 +920,7 @@ func TestExtensionCreateReleaseWorkflowPublishesFromAFreshRunner(t *testing.T) {
 	require.True(t, ok, step.Run)
 	var args []string
 	shell := strings.NewReplacer(`"$GITHUB_REF_NAME"`, "v1.0.0", `"$GITHUB_SERVER_URL"`, server.URL, `"$GITHUB_REPOSITORY"`, "alice/gt-hello")
-	for _, arg := range strings.Fields(shell.Replace(command)) {
+	for arg := range strings.FieldsSeq(shell.Replace(command)) {
 		if arg != "dist/*" && arg != `\` {
 			args = append(args, arg)
 		}

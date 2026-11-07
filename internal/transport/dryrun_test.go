@@ -19,8 +19,9 @@ func TestDryRunRedactsTheWithheldRequest(t *testing.T) {
 	defer server.Close()
 	var rec DryRunRecorder
 	ctx := WithSecrets(context.Background(), "hunter2")
-	_, err := New(server.URL, "token", false).DryRun(&rec).Do(ctx, http.MethodPost, "repos/a/b/hooks?access_token=abc&page=2", strings.NewReader(`{"secret":"hunter2"}`), nil)
+	response, err := New(server.URL, "token", false).DryRun(&rec).Do(ctx, http.MethodPost, "repos/a/b/hooks?access_token=abc&page=2", strings.NewReader(`{"secret":"hunter2"}`), nil)
 	require.NoError(t, err)
+	defer response.Body.Close()
 	requests := rec.Requests()
 	require.Len(t, requests, 1)
 	require.Equal(t, server.URL+"/api/v1/repos/a/b/hooks?access_token=REDACTED&page=2", requests[0].URL)
@@ -105,8 +106,9 @@ func TestDryRunMasksSecretsInTheReport(t *testing.T) {
 		"repos/x":                          `{"client_secret":"cl-s3c","token":["list-t0k"],"new_password":{"v":"nested-pw"},"api_key":12345}`,
 		"repos/y":                          `{"text":"<b>&","id":9007199254740993,"authorization_header":""}`,
 	} {
-		_, err := client.Do(context.Background(), http.MethodPost, path, strings.NewReader(body), nil)
+		response, err := client.Do(context.Background(), http.MethodPost, path, strings.NewReader(body), nil)
 		require.NoError(t, err)
+		defer response.Body.Close()
 	}
 	var all strings.Builder
 	for _, request := range rec.Requests() {

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/git/gittest"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -172,7 +174,7 @@ func TestPullBackportOpensAPullRequestPerTarget(t *testing.T) {
 		for j, commit := range commits {
 			require.Contains(t, s.git(s.work, "log", "-1", "--format=%B", commit), "(cherry picked from commit "+s.pullCommits[j]+")")
 		}
-		require.Equal(t, fmt.Sprint(12+i), s.git(s.work, "config", "--get", "branch."+branch+".gitea-cli-pr"))
+		require.Equal(t, strconv.Itoa(12+i), s.git(s.work, "config", "--get", "branch."+branch+".gitea-cli-pr"))
 	}
 	require.Equal(t, "work", s.git(s.work, "branch", "--show-current"))
 
@@ -181,7 +183,9 @@ func TestPullBackportOpensAPullRequestPerTarget(t *testing.T) {
 	require.Len(t, outputs, 2)
 	require.Equal(t, "release/v1", outputs[0]["target"])
 	require.Equal(t, []any{s.pullCommits[0], s.pullCommits[1]}, outputs[0]["picked"])
-	require.Equal(t, float64(12), outputs[0]["pull"].(map[string]any)["number"])
+	pull, ok := outputs[0]["pull"].(map[string]any)
+	require.True(t, ok)
+	require.InDelta(t, float64(12), pull["number"], 0)
 }
 
 func TestPullBackportConflicts(t *testing.T) {
@@ -277,7 +281,7 @@ func TestPullBackportChecksBeforeCherryPicking(t *testing.T) {
 	require.Empty(t, s.created)
 	_, _, err := s.run("pr", "backport", "7", "--to", "release/v1", "--milestone", "1.3.0", "--yes")
 	require.NoError(t, err)
-	require.Equal(t, float64(9), s.created[0]["milestone"])
+	require.InDelta(t, float64(9), s.created[0]["milestone"], 0)
 }
 
 func TestPullBackportRefusesAnOpenPullRequest(t *testing.T) {

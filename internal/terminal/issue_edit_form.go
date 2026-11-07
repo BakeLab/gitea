@@ -87,7 +87,10 @@ func (p *FormPrompter) EditIssue(ctx context.Context, choices IssueEditFormChoic
 	if strings.TrimSpace(fields.deadline) == deadline {
 		return values, nil
 	}
-	values.Deadline, err = parseDueDate(fields.deadline)
+	parsed, ok, err := parseDueDate(fields.deadline)
+	if ok {
+		values.Deadline = &parsed
+	}
 	values.ClearDeadline = values.Deadline == nil && deadline != ""
 	return values, err
 }

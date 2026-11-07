@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/git/gittest"
+
 	"github.com/stretchr/testify/require"
 )
 

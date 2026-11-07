@@ -21,6 +21,7 @@ import (
 	"gitea.dev/cli/internal/git/gittest"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"

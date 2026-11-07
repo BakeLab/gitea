@@ -16,6 +16,7 @@ import (
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -50,7 +51,7 @@ func TestDownloadsPublishOnlyCompleteFiles(t *testing.T) {
 	output := filepath.Join(directory, "logs.zip")
 	require.ErrorIs(t, publish(cmd, output, false, false, copyBody(failingDownload{})), io.ErrUnexpectedEOF)
 	_, err := os.Stat(output)
-	require.True(t, errors.Is(err, os.ErrNotExist))
+	require.ErrorIs(t, err, os.ErrNotExist)
 	entries, err := os.ReadDir(directory)
 	require.NoError(t, err)
 	require.Empty(t, entries)

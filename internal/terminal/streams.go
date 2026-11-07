@@ -14,10 +14,11 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"gitea.dev/cli/internal/clierr"
+
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
-	"gitea.dev/cli/internal/clierr"
 	"github.com/charmbracelet/colorprofile"
 	"golang.org/x/term"
 )

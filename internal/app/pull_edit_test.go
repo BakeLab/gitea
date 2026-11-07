@@ -18,6 +18,7 @@ import (
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
 	gitea "gitea.dev/sdk"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -239,10 +240,14 @@ func (f *pullEditServer) state() string {
 		pull["milestone"] = map[string]any{"id": f.milestone, "title": "Release"}
 	}
 	for _, id := range f.labels {
-		pull["labels"] = append(pull["labels"].([]any), map[string]any{"id": id, "name": "bug"})
+		labels, ok := pull["labels"].([]any)
+		require.True(f.t, ok)
+		pull["labels"] = append(labels, map[string]any{"id": id, "name": "bug"})
 	}
 	for _, name := range f.assignees {
-		pull["assignees"] = append(pull["assignees"].([]any), map[string]any{"login": name})
+		assignees, ok := pull["assignees"].([]any)
+		require.True(f.t, ok)
+		pull["assignees"] = append(assignees, map[string]any{"login": name})
 	}
 	data, err := json.Marshal(pull)
 	require.NoError(f.t, err)

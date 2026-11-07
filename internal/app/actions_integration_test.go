@@ -9,10 +9,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
 	"gitea.dev/cli/internal/services"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -58,7 +60,7 @@ func TestGiteaActionsQueuedRunLifecycle(t *testing.T) {
 
 	require.NoError(t, json.Unmarshal(execute("run", "list", "-R", repo.FullName, "--branch", "does-not-exist", "--json"), &matching))
 	require.Empty(t, matching)
-	id := fmt.Sprint(runs[0].ID)
+	id := strconv.FormatInt(runs[0].ID, 10)
 	var jobs []services.Job
 	require.NoError(t, json.Unmarshal(execute("run", "jobs", id, "-R", repo.FullName, "--json"), &jobs))
 	require.NotEmpty(t, jobs)
@@ -69,7 +71,7 @@ func TestGiteaActionsQueuedRunLifecycle(t *testing.T) {
 	require.NotNil(t, artifacts)
 	out.Reset()
 	diagnostics.Reset()
-	err = Execute(context.Background(), deps, []string{"run", "logs", id, "-R", repo.FullName, "--job", fmt.Sprint(jobs[0].ID), "--follow", "--interval=10ms", "--timeout=100ms"})
+	err = Execute(context.Background(), deps, []string{"run", "logs", id, "-R", repo.FullName, "--job", strconv.FormatInt(jobs[0].ID, 10), "--follow", "--interval=10ms", "--timeout=100ms"})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Empty(t, out.String())
 	var canceled services.Run

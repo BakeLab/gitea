@@ -5,7 +5,7 @@ package services
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	gitea "gitea.dev/sdk"
@@ -49,7 +49,7 @@ func (s Issues) SearchPage(ctx context.Context, opts DiscussionSearchOptions) (P
 		kind, resultType = gitea.IssueTypePull, KindPull
 	}
 	if opts.Team != "" && opts.Owner == "" {
-		return Page[SearchItem]{}, fmt.Errorf("team search requires an organization owner")
+		return Page[SearchItem]{}, errors.New("team search requires an organization owner")
 	}
 	search := s.searchInstance
 	if s.Repository != "" {

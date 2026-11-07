@@ -10,11 +10,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"gitea.dev/cli/internal/services"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -93,7 +95,7 @@ func TestGiteaRunViewOneJobAndLogFailed(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, runs, "the workflow did not produce a run")
-	id := fmt.Sprint(runs[0].ID)
+	id := strconv.FormatInt(runs[0].ID, 10)
 	run := func(args ...string) (string, string, error) {
 		out.Reset()
 		diagnostics.Reset()
@@ -109,7 +111,7 @@ func TestGiteaRunViewOneJobAndLogFailed(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(got), &one))
 	require.Len(t, one.Jobs, 1, "one job of the two")
 	require.Equal(t, "test", one.Jobs[0].Name)
-	got, _, err = run("--json", "jobs", "--job", fmt.Sprint(all.Jobs[0].ID))
+	got, _, err = run("--json", "jobs", "--job", strconv.FormatInt(all.Jobs[0].ID, 10))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal([]byte(got), &one))
 	require.Equal(t, all.Jobs[0].ID, one.Jobs[0].ID, "a job by ID")

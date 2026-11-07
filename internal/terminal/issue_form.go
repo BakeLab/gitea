@@ -182,24 +182,23 @@ func editBody(ctx context.Context, edit BodyEditor, body string) (string, Draft,
 // otherwise panic.
 func dueDateInput(title string, value *string) *lineInput {
 	field := lineField(title, value, true).Validate(func(s string) error {
-		_, err := parseDueDate(s)
+		_, _, err := parseDueDate(s)
 		return err
 	})
 	field.Placeholder("YYYY-MM-DD").CharLimit(len(time.DateOnly))
 	return field
 }
 
-// parseDueDate returns nil for an empty value.
-func parseDueDate(value string) (*time.Time, error) {
+func parseDueDate(value string) (time.Time, bool, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return nil, nil
+		return time.Time{}, false, nil
 	}
 	parsed, err := time.Parse(time.DateOnly, value)
 	if err != nil {
-		return nil, errors.New("use YYYY-MM-DD")
+		return time.Time{}, false, errors.New("use YYYY-MM-DD")
 	}
-	return &parsed, nil
+	return parsed, true, nil
 }
 
 // What the create form does after the title and body.
@@ -258,6 +257,9 @@ func (p *FormPrompter) collectIssueProperties(ctx context.Context, title, body s
 			return values, err
 		}
 	}
-	values.Deadline, err = parseDueDate(fields.deadline)
+	deadline, ok, err := parseDueDate(fields.deadline)
+	if ok {
+		values.Deadline = &deadline
+	}
 	return values, err
 }

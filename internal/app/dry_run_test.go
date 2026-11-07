@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/auth"
+
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )

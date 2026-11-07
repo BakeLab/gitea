@@ -66,7 +66,7 @@ func TestSafeWriter(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if !tc.allowSGR {
-				require.Equal(t, SafeText(hostile), tc.want)
+				require.Equal(t, tc.want, SafeText(hostile))
 			}
 			for _, chunk := range []int{len(hostile), 1, 3} {
 				var out bytes.Buffer

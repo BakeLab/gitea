@@ -14,6 +14,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 )
 
@@ -295,11 +296,11 @@ $ gt org delete acme-old --yes`,
 			if err != nil {
 				return err
 			}
-			repos, err := service.RepositoryCount(cmd.Context(), org.Name)
+			repos, counted, err := service.RepositoryCount(cmd.Context(), org.Name)
 			if err != nil {
 				return err
 			}
-			if repos != nil && *repos > 0 {
+			if counted && repos > 0 {
 				return &services.ConflictError{Reason: services.ReasonOwnsRepos, Kind: "organization", Key: org.Name, Hint: "transfer them with gt repo transfer or delete them first (see gt repo list " + org.Name + ")"}
 			}
 			if err := a.confirmAction(cmd, terminal.Confirmation{

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/clierr"
@@ -18,6 +19,7 @@ import (
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 )
 
@@ -210,7 +212,7 @@ $ gt repo clone alice/project -- --branch develop --recurse-submodules`,
 			} else if strings.Contains(args[0], "://") {
 				t.gitProtocol = "https"
 			}
-			if _, err := a.cloneRepository(cmd, t, item, opts); err != nil {
+			if err := a.cloneRepository(cmd, t, item, opts); err != nil {
 				return err
 			}
 			return a.jsonResult(cmd, item)
@@ -420,7 +422,7 @@ $ gt repo fork alice/project --clone -- --depth 1`,
 				a.done(cmd, "Forked %s to %s", t.Repo, fork.FullName)
 			}
 			if clone {
-				if _, err := a.cloneRepository(cmd, t, fork, cloneOptions{gitFlags: gitFlags, upstream: "upstream"}); err != nil {
+				if err := a.cloneRepository(cmd, t, fork, cloneOptions{gitFlags: gitFlags, upstream: "upstream"}); err != nil {
 					return err
 				}
 			}
@@ -558,8 +560,7 @@ type cloneOptions struct {
 }
 
 // cloneRepository clones item with the configured Git protocol and adds fork and mirror remotes.
-// It returns the path of the clone.
-func (a *application) cloneRepository(cmd *cobra.Command, t target, item services.Repository, opts cloneOptions) (string, error) {
+func (a *application) cloneRepository(cmd *cobra.Command, t target, item services.Repository, opts cloneOptions) error {
 	directory, depth := opts.directory, opts.depth
 	protocol := t.gitProtocol
 	host := t.host
@@ -569,15 +570,15 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 	hosts := map[string]settings.Host{t.Host: host}
 	remote, remoteIsSSH, err := cloneURLForProtocol(item.CloneURL, item.SSHURL, protocol)
 	if err != nil {
-		return "", err
+		return err
 	}
 	cloneHost, cloneRepo, err := settings.RepositoryURL(remote, hosts)
 	if err != nil || cloneHost != t.Host || !strings.EqualFold(cloneRepo, item.FullName) || (protocol == "ssh") != remoteIsSSH {
-		return "", errors.New("Gitea clone URL does not match the selected instance and repository; check the server root URL and configured ssh_host")
+		return errors.New("Gitea clone URL does not match the selected instance and repository; check the server root URL and configured ssh_host")
 	}
 	gitArgs := []string{"clone"}
 	if depth > 0 {
-		gitArgs = append(gitArgs, "--depth", fmt.Sprint(depth))
+		gitArgs = append(gitArgs, "--depth", strconv.Itoa(depth))
 	}
 	gitArgs = append(gitArgs, opts.gitFlags...)
 	if directory == "" {
@@ -595,11 +596,11 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 	}
 	credentialArgs, err := a.gitTransportArguments(t, remoteIsSSH)
 	if err != nil {
-		return "", err
+		return err
 	}
 	gitArgs = append(credentialArgs, gitArgs...)
 	if _, err := a.git(cmd.Context(), gitArgs...); err != nil {
-		return "", err
+		return err
 	}
 	clone := directory
 	if !filepath.IsAbs(clone) {
@@ -612,7 +613,7 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 			err = git.SetupTLS(cmd.Context(), a.deps.Git, clone, true, t.Host, stored.ClientCert, stored.ClientKey, stored.Insecure)
 		}
 		if err != nil {
-			return clone, fmt.Errorf("cloned the repository, but could not configure its TLS settings: %w", err)
+			return fmt.Errorf("cloned the repository, but could not configure its TLS settings: %w", err)
 		}
 	}
 	if host.SSHHost != t.host.SSHHost {
@@ -621,42 +622,42 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 	if item.Fork && item.Parent != nil && opts.upstream != "" {
 		upstream, upstreamSSH, err := cloneURLForProtocol(item.Parent.CloneURL, item.Parent.SSHURL, protocol)
 		if err != nil {
-			return clone, errors.New("cloned the fork, but Gitea did not return a parent clone URL")
+			return errors.New("cloned the fork, but Gitea did not return a parent clone URL")
 		}
 		upstreamHost, upstreamRepo, err := settings.RepositoryURL(upstream, hosts)
 		if err != nil || upstreamHost != t.Host || !strings.EqualFold(upstreamRepo, item.Parent.FullName) || (protocol == "ssh") != upstreamSSH {
-			return clone, errors.New("cloned the fork, but its parent clone URL does not match the selected instance")
+			return errors.New("cloned the fork, but its parent clone URL does not match the selected instance")
 		}
 		// Git flags or clone.defaultRemoteName may have renamed origin.
 		origin, err := a.gitIn(cmd.Context(), clone, "remote")
 		if err != nil {
-			return clone, fmt.Errorf("cloned the fork, but could not list its remotes: %w", err)
+			return fmt.Errorf("cloned the fork, but could not list its remotes: %w", err)
 		}
 		origin, _, _ = strings.Cut(origin, "\n")
 		if _, err := a.gitIn(cmd.Context(), clone, "remote", "add", "--", opts.upstream, upstream); err != nil {
-			return clone, fmt.Errorf("cloned the fork, but could not add the %s remote: %w", opts.upstream, err)
+			return fmt.Errorf("cloned the fork, but could not add the %s remote: %w", opts.upstream, err)
 		}
 		// Fetched, so that the default branch does not track a missing upstream branch. The parent
 		// is on the same instance with the same protocol, so the clone's credentials apply.
 		fetchArgs := append(append([]string{}, credentialArgs...), "fetch", "--quiet")
 		if depth > 0 {
-			fetchArgs = append(fetchArgs, "--depth", fmt.Sprint(depth))
+			fetchArgs = append(fetchArgs, "--depth", strconv.Itoa(depth))
 		}
 		if _, err := a.gitIn(cmd.Context(), clone, append(fetchArgs, "--", opts.upstream)...); err != nil {
-			return clone, fmt.Errorf("cloned the fork and added the %s remote, but could not fetch it: %w", opts.upstream, err)
+			return fmt.Errorf("cloned the fork and added the %s remote, but could not fetch it: %w", opts.upstream, err)
 		}
 		// The default branch pulls from upstream, but pushes stay on the fork.
 		if branch := item.Parent.DefaultBranch; branch != "" {
 			for _, setting := range [][2]string{{"remote", opts.upstream}, {"merge", "refs/heads/" + branch}, {"pushRemote", origin}} {
 				if _, err := a.gitIn(cmd.Context(), clone, "config", "branch."+branch+"."+setting[0], setting[1]); err != nil {
-					return clone, fmt.Errorf("cloned the fork and added %s, but could not configure branch tracking: %w", opts.upstream, err)
+					return fmt.Errorf("cloned the fork and added %s, but could not configure branch tracking: %w", opts.upstream, err)
 				}
 			}
 		}
 		// Discovery tells the parent from the fork by the names upstream and origin only.
 		if opts.upstream != "upstream" || origin != "origin" {
 			if _, err := a.gitIn(cmd.Context(), clone, "config", "--local", "gt.repository", t.Host+"/"+item.Parent.FullName); err != nil {
-				return clone, fmt.Errorf("cloned the fork and added %s, but could not save it as the default repository: %w", opts.upstream, err)
+				return fmt.Errorf("cloned the fork and added %s, but could not save it as the default repository: %w", opts.upstream, err)
 			}
 		}
 		a.done(cmd, "Added remote %s for %s; gt commands in the clone target it (change with gt repo set-default)", opts.upstream, item.Parent.FullName)
@@ -664,9 +665,9 @@ func (a *application) cloneRepository(cmd *cobra.Command, t target, item service
 	// The remote is named source because repository discovery prefers a remote named upstream.
 	if source := mirrorSourceURL(item); source != "" && opts.upstream != "" {
 		if _, err := a.gitIn(cmd.Context(), clone, "remote", "add", "--", "source", source); err != nil {
-			return clone, fmt.Errorf("cloned the mirror, but could not add the source remote: %w", err)
+			return fmt.Errorf("cloned the mirror, but could not add the source remote: %w", err)
 		}
 		a.done(cmd, "Added remote source for %s", source)
 	}
-	return clone, nil
+	return nil
 }

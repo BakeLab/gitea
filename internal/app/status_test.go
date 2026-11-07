@@ -12,6 +12,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/stretchr/testify/require"
 )
 

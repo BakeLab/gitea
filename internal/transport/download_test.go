@@ -34,12 +34,18 @@ func TestDownloadScopeAndRedirects(t *testing.T) {
 	// Even a substituted HTTP client cannot re-enable automatic redirects.
 	client.HTTP = server.Client()
 	for _, raw := range []string{server.URL + "/outside", server.URL + "/base/../outside", server.URL + "/base/%2e%2e/outside", "https://example.test/base/file"} {
-		_, err := client.Download(context.Background(), raw)
+		rejectedResponse, err := client.Download(context.Background(), raw)
 		require.Error(t, err)
+		if rejectedResponse != nil {
+			defer rejectedResponse.Body.Close()
+		}
 	}
 	require.Zero(t, requests)
-	_, err := client.Download(context.Background(), server.URL+"/base/redirect")
+	redirectResponse, err := client.Download(context.Background(), server.URL+"/base/redirect")
 	require.Error(t, err)
+	if redirectResponse != nil {
+		defer redirectResponse.Body.Close()
+	}
 	require.Equal(t, 1, requests)
 	response, err := client.Download(context.Background(), server.URL+"/base/file")
 	require.NoError(t, err)
@@ -150,21 +156,29 @@ func TestURLAndDownloadShareScopeRejections(t *testing.T) {
 	} {
 		_, err := client.URL(raw)
 		require.Error(t, err, raw)
-		_, err = client.Download(context.Background(), raw)
+		response, err := client.Download(context.Background(), raw)
 		require.Error(t, err, raw)
+		if response != nil {
+			defer response.Body.Close()
+		}
 	}
 	require.Zero(t, requests)
 }
 
 func TestSignedDownloadRejectsInvalidInstanceURL(t *testing.T) {
-	_, err := New("http://[invalid", "sensitive", false).DownloadSigned(context.Background(), "http://example.test/file")
+	response, err := New("http://[invalid", "sensitive", false).DownloadSigned(context.Background(), "http://example.test/file")
 	require.ErrorContains(t, err, "invalid instance URL")
+	if response != nil {
+		defer response.Body.Close()
+	}
 }
 
 func TestDownloadsOutlastTheRequestTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for range 10 {
-			w.(http.Flusher).Flush()
+			flusher, ok := w.(http.Flusher)
+			require.True(t, ok)
+			flusher.Flush()
 			time.Sleep(30 * time.Millisecond)
 			_, _ = w.Write([]byte("x"))
 		}
@@ -184,7 +198,9 @@ func TestResponseTimeoutBoundsABodyThatStalls(t *testing.T) {
 	stalled := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("x"))
-		w.(http.Flusher).Flush()
+		flusher, ok := w.(http.Flusher)
+		require.True(t, ok)
+		flusher.Flush()
 		select {
 		case <-stalled:
 		case <-r.Context().Done():
@@ -241,8 +257,11 @@ func TestConfiguredHeaderValuesAreRedactedWhenEchoed(t *testing.T) {
 	defer server.Close()
 	var log bytes.Buffer
 	client := New(server.URL, "", false).Debug(&log).WithHeaders(http.Header{"X-Proxy-Secret": {"hdrsecret"}, "X-Tenant": {"acme"}})
-	_, err := client.Do(context.Background(), http.MethodGet, "version", nil, nil)
+	response, err := client.Do(context.Background(), http.MethodGet, "version", nil, nil)
 	require.EqualError(t, err, "permission denied by the Gitea instance: proxy rejected secret [REDACTED] for tenant acme")
+	if response != nil {
+		defer response.Body.Close()
+	}
 	require.Contains(t, log.String(), "proxy rejected secret [REDACTED] for tenant acme")
 	require.NotContains(t, log.String(), "hdrsecret")
 }
@@ -267,8 +286,11 @@ func TestResponseTimeoutBoundsOnlyTheWaitForAnAnswer(t *testing.T) {
 	}))
 	defer server.Close()
 	client := New(server.URL, "", false).WithResponseTimeout(20 * time.Millisecond)
-	_, err := client.Send(context.Background(), http.MethodGet, "version", nil, nil)
+	timedOutResponse, err := client.Send(context.Background(), http.MethodGet, "version", nil, nil)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+	if timedOutResponse != nil {
+		defer timedOutResponse.Body.Close()
+	}
 	// A synchronous migration answers only once it is done.
 	response, err := client.Send(UnboundedResponse(context.Background()), http.MethodGet, "version", nil, nil)
 	require.NoError(t, err)
@@ -337,8 +359,11 @@ func TestResponseTimeoutBoundsAnUploadThatStopsGoingOut(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	time.AfterFunc(5*time.Second, cancel)
-	_, err = client.Send(ctx, http.MethodPost, "repos/a/b/releases/1/assets", io.LimitReader(zeros{}, 64<<20), nil)
+	response, err := client.Send(ctx, http.MethodPost, "repos/a/b/releases/1/assets", io.LimitReader(zeros{}, 64<<20), nil)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+	if response != nil {
+		defer response.Body.Close()
+	}
 	require.ErrorContains(t, err, "no progress sending the request within 100ms")
 }
 

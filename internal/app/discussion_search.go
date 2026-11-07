@@ -11,6 +11,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 )
 
@@ -100,7 +101,7 @@ search would return %[1]s with any of them.`, nouns), Example: example, RunE: fu
 	flags.StringVarP(&opts.Author, "author", "A", "", "Filter by author; @me for yourself")
 	flags.StringSliceVarP(&labels, "label", "l", nil, "Filter by label `names`; a result must have all of them (several require --repo)")
 	flags.StringSliceVarP(&milestones, "milestone", "m", nil, "Filter by milestone `titles`")
-	updated.register(command, "since", "Updated since a date, timestamp, or duration ago", "until", "Updated before a date, timestamp, or duration ago")
+	updated.register(command, "Updated since a date, timestamp, or duration ago", "Updated before a date, timestamp, or duration ago")
 	flags.BoolVar(&opts.Assigned, "assigned", false, "Assigned to you")
 	flags.BoolVar(&opts.Authored, "authored", false, "Created by you")
 	flags.BoolVar(&opts.Mentioned, "mentioned", false, "Mentioning you")

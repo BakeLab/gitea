@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/services"
+
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )

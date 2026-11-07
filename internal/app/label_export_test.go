@@ -25,7 +25,7 @@ func TestLabelExportReadsAllPagesAndPublishesOnlyCompleteFiles(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"name":"good first issue","color":"ff0000","description":"Help wanted"}]`))
 		case "2":
 			if fail {
-				w.WriteHeader(403)
+				w.WriteHeader(http.StatusForbidden)
 				return
 			}
 			_, _ = w.Write([]byte(`[{"name":"bug","color":"00ff00","description":""}]`))

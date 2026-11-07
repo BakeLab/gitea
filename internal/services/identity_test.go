@@ -5,12 +5,12 @@ package services
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +49,7 @@ func TestCurrentAccountValidatesIdentityAndPropagatesErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := CurrentAccount(ctx, transport.New("https://example.org", "secret", false))
-	require.True(t, errors.Is(err, context.Canceled))
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestCurrentAccountAsksOncePerClientAndSudoUser(t *testing.T) {

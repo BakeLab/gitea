@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/filelock"
+
 	"github.com/kballard/go-shellquote"
 	"gopkg.in/yaml.v3"
 )
@@ -100,7 +101,7 @@ func ParseMetadata(data []byte) (Metadata, error) {
 		return Metadata{}, fmt.Errorf("parse gt-extension.yml: %w", err)
 	}
 	if metadata.Completion != "" && metadata.Completion != "cobra" {
-		return Metadata{}, fmt.Errorf("parse gt-extension.yml: completion must be cobra")
+		return Metadata{}, errors.New("parse gt-extension.yml: completion must be cobra")
 	}
 	return metadata, nil
 }

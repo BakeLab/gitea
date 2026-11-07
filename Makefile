@@ -3,10 +3,7 @@ GO ?= go
 
 export PATH := $(shell $(GO) env GOPATH)/bin:$(PATH)
 
-GOFILES := $(shell find . -name "*.go" -type f)
-
 # Tool packages with pinned versions
-GOFUMPT_PACKAGE ?= mvdan.cc/gofumpt@v0.12.0 # renovate: datasource=go
 GOLANGCI_LINT_PACKAGE ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 # renovate: datasource=go
 DEADCODE_PACKAGE ?= golang.org/x/tools/cmd/deadcode@v0.52.0 # renovate: datasource=go
 WINDOWS_TEST_IMAGE ?= dockurr/windows:6.06@sha256:16fd7c39a3e48bb946d29c59dc6015942e5b900a1fa5d7e5552053bfc48ee2ea # renovate: datasource=docker
@@ -43,7 +40,7 @@ clean:
 
 .PHONY: fmt
 fmt:
-	$(GO) run $(GOFUMPT_PACKAGE) -w $(GOFILES)
+	$(GO) run $(GOLANGCI_LINT_PACKAGE) fmt
 
 .PHONY: vet
 vet:
@@ -76,13 +73,7 @@ lint-pr-title: ## lint PR title against Conventional Commits (set PR_TITLE=...)
 
 .PHONY: fmt-check
 fmt-check:
-	# get all go files and run gofumpt on them
-	@diff=$$($(GO) run $(GOFUMPT_PACKAGE) -d $(GOFILES)); \
-	if [ -n "$$diff" ]; then \
-		echo "Please run 'make fmt' and commit the result:"; \
-		echo "$${diff}"; \
-		exit 1; \
-	fi;
+	@$(GO) run $(GOLANGCI_LINT_PACKAGE) fmt --diff || { echo "Please run 'make fmt' and commit the result"; exit 1; }
 
 # Man pages are dated by the last commit unless SOURCE_DATE_EPOCH is already set.
 .PHONY: docs

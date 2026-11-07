@@ -112,7 +112,10 @@ func (s Organizations) Size(ctx context.Context, name string) (OrganizationSize,
 	}
 	totals := make([]*int, len(counts))
 	_ = concurrently(len(counts), func(i int) error {
-		totals[i], _ = listTotal(ctx, s.Client, counts[i])
+		total, counted, _ := listTotal(ctx, s.Client, counts[i])
+		if counted {
+			totals[i] = &total
+		}
 		return nil
 	})
 	if ctx.Err() != nil {
@@ -121,17 +124,16 @@ func (s Organizations) Size(ctx context.Context, name string) (OrganizationSize,
 	return OrganizationSize{Members: totals[0], Teams: totals[1], Repositories: totals[2]}, nil
 }
 
-// RepositoryCount counts the repositories of an organization, or returns nil when the account
-// cannot read the count.
-func (s Organizations) RepositoryCount(ctx context.Context, name string) (*int, error) {
-	total, err := listTotal(ctx, s.Client, orgRepos(name))
+// RepositoryCount counts the repositories of an organization and reports whether the count is available.
+func (s Organizations) RepositoryCount(ctx context.Context, name string) (int, bool, error) {
+	total, counted, err := listTotal(ctx, s.Client, orgRepos(name))
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return 0, false, ctx.Err()
 	}
 	if err != nil {
-		return nil, nil
+		return 0, false, nil
 	}
-	return total, nil
+	return total, counted, nil
 }
 
 // orgRepos requests the first repository of an organization, to count them.
@@ -142,19 +144,19 @@ func orgRepos(name string) func(context.Context, *gitea.Client) (*gitea.Response
 	}
 }
 
-// listTotal returns the collection size a list request reports, or nil when the server does not count it.
-func listTotal(ctx context.Context, client *transport.Client, list func(context.Context, *gitea.Client) (*gitea.Response, error)) (*int, error) {
+// listTotal returns the collection size a list request reports and whether the server counted it.
+func listTotal(ctx context.Context, client *transport.Client, list func(context.Context, *gitea.Client) (*gitea.Response, error)) (int, bool, error) {
 	_, resp, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) (struct{}, *gitea.Response, error) {
 		resp, err := list(ctx, c)
 		return struct{}{}, resp, err
 	})
 	if err != nil {
-		return nil, err
+		return 0, false, err
 	}
 	if _, total, counted := pageHints(headerOf(resp)); counted {
-		return &total, nil
+		return total, true, nil
 	}
-	return nil, nil
+	return 0, false, nil
 }
 
 func createOrgOption(opts OrganizationOptions) gitea.CreateOrgOption {

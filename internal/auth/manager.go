@@ -6,6 +6,7 @@ package auth
 import (
 	"cmp"
 	"errors"
+	"slices"
 	"strings"
 
 	"gitea.dev/cli/internal/settings"
@@ -91,8 +92,8 @@ func (m Manager) register(instance, user string, account settings.Account, optio
 		var undo []func() error
 		rollback := func() error {
 			var err error
-			for i := len(undo) - 1; i >= 0; i-- {
-				err = errors.Join(err, undo[i]())
+			for _, compensate := range slices.Backward(undo) {
+				err = errors.Join(err, compensate())
 			}
 			return err
 		}

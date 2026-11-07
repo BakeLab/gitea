@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -143,7 +144,7 @@ func (c IssueLabelCatalog) resolve(names []string, ids bool) ([]int64, error) {
 	matches := map[string][]int64{}
 	for _, input := range names {
 		if strings.TrimSpace(input) == "" {
-			return nil, fmt.Errorf("label names cannot be empty")
+			return nil, errors.New("label names cannot be empty")
 		}
 		scope, name := splitLabelScope(input)
 		matches[input] = c.index[labelKey{scope, name}]
@@ -170,7 +171,7 @@ func (s Labels) ResolveIssueNames(ctx context.Context, names []string) ([]int64,
 	}
 	for _, name := range names {
 		if strings.TrimSpace(name) == "" {
-			return nil, fmt.Errorf("label names cannot be empty")
+			return nil, errors.New("label names cannot be empty")
 		}
 	}
 	catalog, err := s.IssueCatalog(ctx)

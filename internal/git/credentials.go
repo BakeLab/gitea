@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"gitea.dev/cli/internal/settings"
+
 	"github.com/kballard/go-shellquote"
 )
 
@@ -271,8 +272,9 @@ func (s System) Input(ctx context.Context, dir, input string, args ...string) (s
 	if env == nil {
 		env = os.Environ()
 	}
-	s.Env, s.In = setEnv(env, "GIT_TERMINAL_PROMPT", "0"), strings.NewReader(input)
-	return s.Output(ctx, dir, true, args...)
+	runner := s
+	runner.Env, runner.In = setEnv(env, "GIT_TERMINAL_PROMPT", "0"), strings.NewReader(input)
+	return runner.Output(ctx, dir, true, args...)
 }
 
 // RejectCredentials asks Git's credential helpers to erase the copies of token they stored for user on

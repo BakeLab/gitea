@@ -100,9 +100,12 @@ func TestPullFormAsksTitleBodyThenWhatsNext(t *testing.T) {
 
 func mustDueDate(t *testing.T, raw string) *time.Time {
 	t.Helper()
-	due, err := parseDueDate(raw)
+	due, ok, err := parseDueDate(raw)
 	require.NoError(t, err)
-	return due
+	if !ok {
+		return nil
+	}
+	return &due
 }
 
 func TestCreatePullPreservesDraftOnEditorFailure(t *testing.T) {

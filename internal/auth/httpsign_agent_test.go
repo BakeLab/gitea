@@ -9,7 +9,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"net"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,11 +18,8 @@ import (
 )
 
 func TestAgentConnectionClosesWhenNoKeyMatches(t *testing.T) {
-	// t.TempDir can exceed the length limit of Unix socket paths.
-	dir, err := os.MkdirTemp("", "gt-agent")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	socket := filepath.Join(dir, "agent.sock")
+	t.Setenv("TMPDIR", "/tmp")
+	socket := filepath.Join(t.TempDir(), "agent.sock")
 	listener, err := net.Listen("unix", socket)
 	require.NoError(t, err)
 	defer listener.Close()

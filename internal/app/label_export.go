@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 )
 

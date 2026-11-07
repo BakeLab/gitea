@@ -4,7 +4,6 @@
 package settings
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,7 +20,7 @@ func TestLoadDoesNotCreateFiles(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "enabled", snapshot.Preferences.Prompt)
 	_, err = os.Stat(dir)
-	require.True(t, errors.Is(err, os.ErrNotExist))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestMalformedFilesAreNeverOverwritten(t *testing.T) {
@@ -38,7 +37,7 @@ func TestMalformedFilesAreNeverOverwritten(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, input, string(actual))
 			_, err = os.Stat(filepath.Join(s.Dir, "settings.lock"))
-			require.True(t, errors.Is(err, os.ErrNotExist))
+			require.ErrorIs(t, err, os.ErrNotExist)
 		})
 	}
 }

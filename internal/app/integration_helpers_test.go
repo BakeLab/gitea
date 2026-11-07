@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -24,6 +25,7 @@ import (
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/kballard/go-shellquote"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
@@ -123,9 +125,9 @@ func verifyEditorSubmission(t *testing.T, deps Dependencies, repository, number 
 	require.Equal(t, "Editor integration body", result.Body)
 	require.Positive(t, result.ID)
 	defer func() {
-		args := []string{"issue", "comment", "delete", fmt.Sprint(result.ID)}
+		args := []string{"issue", "comment", "delete", strconv.FormatInt(result.ID, 10)}
 		if review {
-			args = []string{"pr", "review", "delete", number, fmt.Sprint(result.ID)}
+			args = []string{"pr", "review", "delete", number, strconv.FormatInt(result.ID, 10)}
 		}
 		if err := Execute(context.Background(), deps, append(args, "--repo", repository, "--yes")); err != nil {
 			t.Errorf("editor submission cleanup: %v", err)
@@ -190,7 +192,7 @@ func verifyIssueAttachmentLifecycle(t *testing.T, deps Dependencies, group, repo
 	require.Positive(t, item.ID)
 	require.Equal(t, "attachment.txt", item.Name)
 	require.EqualValues(t, 30, item.Size)
-	id := fmt.Sprint(item.ID)
+	id := strconv.FormatInt(item.ID, 10)
 	downloaded := filepath.Join(t.TempDir(), "downloaded.txt")
 	require.NoError(t, Execute(context.Background(), deps, []string{group, "attachment", "download", number, id, "--repo", repository, "--no-input", "--output", downloaded}))
 	content, err := os.ReadFile(downloaded)
@@ -241,7 +243,7 @@ func verifySSHCloneAndCheckout(t *testing.T, deps Dependencies, repo services.Re
 	var registered services.SSHKey
 	require.NoError(t, json.Unmarshal(out.Bytes(), &registered))
 	t.Cleanup(func() {
-		if err := Execute(context.Background(), deps, []string{"ssh-key", "delete", fmt.Sprint(registered.ID), "--yes"}); err != nil {
+		if err := Execute(context.Background(), deps, []string{"ssh-key", "delete", strconv.FormatInt(registered.ID, 10), "--yes"}); err != nil {
 			t.Errorf("SSH key cleanup: %v", err)
 		}
 	})
@@ -281,7 +283,7 @@ func verifySSHCloneAndCheckout(t *testing.T, deps Dependencies, repo services.Re
 	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", repo.FullName, clone, "--no-input", "--json=id"}))
 	require.JSONEq(t, fmt.Sprintf(`{"id":%d}`, repo.ID), out.String())
 	out.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", fmt.Sprint(pull.Number), "--repo", repo.FullName, "--cwd", clone, "--detach", "--no-input", "--json"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", strconv.FormatInt(pull.Number, 10), "--repo", repo.FullName, "--cwd", clone, "--detach", "--no-input", "--json"}))
 	var checkout git.CheckoutResult
 	require.NoError(t, json.Unmarshal(out.Bytes(), &checkout))
 	require.Equal(t, pull.HeadSHA, checkout.Commit)

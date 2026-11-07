@@ -190,15 +190,15 @@ type MilestoneOptions struct {
 }
 
 // deadline parses the RFC 3339 deadline; the zero time clears it.
-func (o MilestoneOptions) deadline() (*time.Time, error) {
+func (o MilestoneOptions) deadline() (time.Time, error) {
 	if o.Deadline == nil {
-		return nil, nil
+		return time.Time{}, nil
 	}
 	deadline, err := time.Parse(time.RFC3339, *o.Deadline)
 	if err != nil {
-		return nil, fmt.Errorf("invalid milestone deadline %q: %w", *o.Deadline, err)
+		return time.Time{}, fmt.Errorf("invalid milestone deadline %q: %w", *o.Deadline, err)
 	}
-	return &deadline, nil
+	return deadline, nil
 }
 
 // Milestones implements repository milestone operations.
@@ -225,9 +225,13 @@ func (s Milestones) Create(ctx context.Context, opts MilestoneOptions) (Mileston
 	if err != nil {
 		return Milestone{}, err
 	}
-	deadline, err := opts.deadline()
+	parsedDeadline, err := opts.deadline()
 	if err != nil {
 		return Milestone{}, err
+	}
+	var deadline *time.Time
+	if opts.Deadline != nil {
+		deadline = &parsedDeadline
 	}
 	milestone, _, err := call(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Milestone, *gitea.Response, error) {
 		return c.Repositories.CreateMilestone(ctx, owner, repo, gitea.CreateMilestoneOption{
@@ -246,10 +250,11 @@ func (s Milestones) Edit(ctx context.Context, id int64, opts MilestoneOptions) (
 	if err != nil {
 		return Milestone{}, err
 	}
-	deadline, err := opts.deadline()
+	parsedDeadline, err := opts.deadline()
 	if err != nil {
 		return Milestone{}, err
 	}
+	deadline := &parsedDeadline
 	// Gitea before 28.3 clears omitted due_on, 28.3 panics on null (https://github.com/go-gitea/gitea/pull/40171), so resend the date or the zero time.
 	if opts.Deadline == nil {
 		current, err := s.get(ctx, owner, repo, id)

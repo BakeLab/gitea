@@ -232,7 +232,7 @@ func (s Reviews) closedPullError(ctx context.Context, n int64, err error, hint s
 	if !ok || (apiErr.Status != http.StatusUnprocessableEntity && apiErr.Status != http.StatusForbidden) || !strings.Contains(apiErr.Message, "closed or merged PR") {
 		return err
 	}
-	pull, pullErr := (Pulls{Client: s.Client, Repository: s.Repository}).get(ctx, n)
+	pull, pullErr := Pulls(s).get(ctx, n)
 	if pullErr != nil {
 		return err
 	}
@@ -441,7 +441,7 @@ func (s Reviews) Reply(ctx context.Context, n, id int64, body string) (ReviewCom
 	}
 	// Gitea answers a bare "not found" for a missing pull request and for a comment on another
 	// one, so look the pull request, and with it the repository, up before blaming the comment.
-	if _, pullErr := (Pulls{Client: s.Client, Repository: s.Repository}).get(ctx, n); IsNotFound(pullErr) {
+	if _, pullErr := Pulls(s).get(ctx, n); IsNotFound(pullErr) {
 		return item, pullErr
 	}
 	return item, &NotFoundError{Kind: "review comment", Key: strconv.FormatInt(id, 10), Scope: "pull request #" + strconv.FormatInt(n, 10) + " of " + s.Repository, Err: err}

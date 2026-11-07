@@ -14,6 +14,7 @@ import (
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -460,7 +461,7 @@ func TestReleaseListFiltersAndOrder(t *testing.T) {
 	require.Contains(t, queries[0], "pre-release=false")
 
 	queries = nil
-	page, err = service.ListPage(context.Background(), 3, 1, ReleaseListOptions{})
+	_, err = service.ListPage(context.Background(), 3, 1, ReleaseListOptions{})
 	require.NoError(t, err)
 	require.NotContains(t, queries[0], "draft", "without the options Gitea decides")
 	require.NotContains(t, queries[0], "pre-release")

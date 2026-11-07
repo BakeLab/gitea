@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,8 +34,8 @@ func TestReviewRequestNamesValidatedBeforeNetwork(t *testing.T) {
 func TestReviewRequestPartialFailureStopsFurtherEdits(t *testing.T) {
 	mutations := 0
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/v1/users/") {
-			_, _ = w.Write([]byte(`{"login":"` + strings.TrimPrefix(r.URL.Path, "/api/v1/users/") + `"}`))
+		if username, ok := strings.CutPrefix(r.URL.Path, "/api/v1/users/"); ok {
+			_, _ = w.Write([]byte(`{"login":"` + username + `"}`))
 			return
 		}
 		switch r.URL.Path {

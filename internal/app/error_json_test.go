@@ -8,15 +8,19 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
+
 	"github.com/stretchr/testify/require"
 )
 
 func TestErrorFormatEnvironment(t *testing.T) {
-	for value, want := range map[string]bool{"": false, "text": false, "json": true, " json ": true} {
+	for _, test := range []struct {
+		value string
+		want  bool
+	}{{"", false}, {"text", false}, {"json", true}, {" json ", true}} {
 		deps, _, _ := testDeps(t)
-		deps.Getenv = envFunc(map[string]string{errorFormatEnv: value})
-		require.Equal(t, want, JSONErrors(deps), value)
-		require.NoError(t, Execute(context.Background(), deps, []string{"alias", "list"}), value)
+		deps.Getenv = envFunc(map[string]string{errorFormatEnv: test.value})
+		require.Equal(t, test.want, JSONErrors(deps), test.value)
+		require.NoError(t, Execute(context.Background(), deps, []string{"alias", "list"}), test.value)
 	}
 	deps, _, _ := testDeps(t)
 	deps.Getenv = envFunc(map[string]string{errorFormatEnv: "yaml"})

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -82,7 +84,7 @@ func TestGiteaGitCredentialHelperClonesPrivateRepository(t *testing.T) {
 	var pull services.Pull
 	require.NoError(t, json.Unmarshal(out.Bytes(), &pull))
 	out.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", fmt.Sprint(pull.Number), "-R", repo.FullName, "--cwd", gtClone, "--no-input", "--json"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", strconv.FormatInt(pull.Number, 10), "-R", repo.FullName, "--cwd", gtClone, "--no-input", "--json"}))
 	var checkout git.CheckoutResult
 	require.NoError(t, json.Unmarshal(out.Bytes(), &checkout))
 	require.Equal(t, pull.HeadSHA, checkout.Commit)
@@ -90,7 +92,7 @@ func TestGiteaGitCredentialHelperClonesPrivateRepository(t *testing.T) {
 	branchesBefore, err := runner.Output(context.Background(), gtClone, false, "for-each-ref", "--format=%(refname):%(objectname)", "refs/heads/")
 	require.NoError(t, err)
 	out.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", fmt.Sprint(pull.Number), "-R", repo.FullName, "--cwd", gtClone, "--detach", "--no-input", "--json"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", strconv.FormatInt(pull.Number, 10), "-R", repo.FullName, "--cwd", gtClone, "--detach", "--no-input", "--json"}))
 	require.NoError(t, json.Unmarshal(out.Bytes(), &checkout))
 	require.True(t, checkout.Detached)
 	require.Empty(t, checkout.Branch)
@@ -99,7 +101,7 @@ func TestGiteaGitCredentialHelperClonesPrivateRepository(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, branchesBefore, branchesAfter)
 	out.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", fmt.Sprint(pull.Number), "-R", repo.FullName, "--cwd", gtClone, "--no-input", "--json"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", strconv.FormatInt(pull.Number, 10), "-R", repo.FullName, "--cwd", gtClone, "--no-input", "--json"}))
 	require.NoError(t, json.Unmarshal(out.Bytes(), &checkout))
 	require.False(t, checkout.Detached)
 	require.Equal(t, "feature", checkout.Branch)
@@ -115,10 +117,10 @@ func TestGiteaGitCredentialHelperClonesPrivateRepository(t *testing.T) {
 	deps.Streams.In = strings.NewReader(`{"branch":"feature","content":"bmV4dAo=","message":"Disposable fast-forward fixture"}`)
 	require.NoError(t, Execute(context.Background(), deps, []string{"api", "repos/" + repo.FullName + "/contents/next.txt", "--input", "-"}))
 	out.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "view", fmt.Sprint(pull.Number), "-R", repo.FullName, "--json"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "view", strconv.FormatInt(pull.Number, 10), "-R", repo.FullName, "--json"}))
 	require.NoError(t, json.Unmarshal(out.Bytes(), &pull))
 	out.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", fmt.Sprint(pull.Number), "-R", repo.FullName, "--cwd", gtClone, "--update", "--no-input", "--json"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", strconv.FormatInt(pull.Number, 10), "-R", repo.FullName, "--cwd", gtClone, "--update", "--no-input", "--json"}))
 	require.NoError(t, json.Unmarshal(out.Bytes(), &checkout))
 	require.Equal(t, pull.HeadSHA, checkout.Commit)
 	localHead, err := runner.Output(context.Background(), gtClone, false, "rev-parse", "HEAD")
@@ -159,9 +161,9 @@ func TestGiteaGitCredentialHelperClonesPrivateRepository(t *testing.T) {
 	remote, err := runner.Output(context.Background(), destination, false, "remote", "get-url", "origin")
 	require.NoError(t, err)
 	require.Equal(t, repo.CloneURL, remote)
-	require.False(t, strings.Contains(remote, gitea.token), "remote contains credentials")
+	require.NotContains(t, remote, gitea.token, "remote contains credentials")
 	helper, err := runner.Output(context.Background(), "", false, "config", "--global", "--get-all", "credential."+gitea.url+".helper")
 	require.NoError(t, err)
 	require.Len(t, strings.Split(helper, "\n"), 1)
-	require.False(t, strings.Contains(helper, gitea.token), "helper command contains credentials")
+	require.NotContains(t, helper, gitea.token, "helper command contains credentials")
 }

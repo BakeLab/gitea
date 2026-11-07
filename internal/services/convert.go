@@ -42,7 +42,7 @@ func repositoryFrom(repo *gitea.Repository) Repository {
 func organizationFrom(org *gitea.Organization) Organization {
 	name := org.Name
 	if name == "" {
-		name = org.UserName
+		name = org.UserName //nolint:staticcheck // Older servers return only username.
 	}
 	return Organization{
 		ID: org.ID, Name: name, FullName: org.FullName, Description: org.Description, Website: org.Website,

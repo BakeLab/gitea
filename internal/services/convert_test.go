@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	gitea "gitea.dev/sdk"
+
 	"github.com/stretchr/testify/require"
 )
 

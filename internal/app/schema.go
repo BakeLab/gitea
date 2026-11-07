@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
+
 	"github.com/spf13/cobra"
 )
 
@@ -88,8 +89,10 @@ $ gt schema --jq '.commands[] | select(.command == "gt pr view") | .fields[].nam
 func describeFields(cmd *cobra.Command, names []string) []fieldSchema {
 	known := map[string]fieldSchema{}
 	if t, ok := outputTypes.Load(fieldsDeclaration(cmd).Annotations[outputTypeAnnotation]); ok {
-		for _, field := range structFieldSchemas(t.(reflect.Type)) {
-			known[field.Name] = field
+		if outputType, ok := t.(reflect.Type); ok {
+			for _, field := range structFieldSchemas(outputType) {
+				known[field.Name] = field
+			}
 		}
 	}
 	described := make([]fieldSchema, len(names))

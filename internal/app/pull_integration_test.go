@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/services"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,7 +61,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	var milestone services.Milestone
 	require.NoError(t, json.Unmarshal(execute("milestone", "create", "--title", "Disposable", "-R", repo.FullName, "--json"), &milestone))
 	var dated services.Milestone
-	require.NoError(t, json.Unmarshal(execute("milestone", "edit", fmt.Sprint(milestone.ID), "-R", repo.FullName, "--deadline", "2028-01-15", "--json"), &dated))
+	require.NoError(t, json.Unmarshal(execute("milestone", "edit", strconv.FormatInt(milestone.ID, 10), "-R", repo.FullName, "--deadline", "2028-01-15", "--json"), &dated))
 	require.NotNil(t, dated.Deadline)
 	preserved := *dated.Deadline
 	for _, verb := range []string{"view", "close", "reopen"} {
@@ -74,7 +76,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 			require.Equal(t, "open", selected.State)
 		}
 	}
-	require.NoError(t, json.Unmarshal(execute("milestone", "edit", fmt.Sprint(milestone.ID), "-R", repo.FullName, "--deadline=", "--json"), &dated))
+	require.NoError(t, json.Unmarshal(execute("milestone", "edit", strconv.FormatInt(milestone.ID, 10), "-R", repo.FullName, "--deadline=", "--json"), &dated))
 	require.Nil(t, dated.Deadline)
 	var secondMilestone services.Milestone
 	require.NoError(t, json.Unmarshal(execute("milestone", "create", "--title", "Bulk milestone", "-R", repo.FullName, "--json"), &secondMilestone))
@@ -99,7 +101,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.Equal(t, &services.IssueMilestone{ID: milestone.ID, Title: milestone.Title}, pull.Milestone)
 	require.NotNil(t, pull.Deadline)
 	require.Equal(t, "2028-01-15T23:59:59Z", *pull.Deadline)
-	n := fmt.Sprint(pull.Number)
+	n := strconv.FormatInt(pull.Number, 10)
 	require.Equal(t, "[]\n", string(execute("pr", "attachment", "list", n, "-R", repo.FullName, "--json")))
 	verifyResourceBrowser(t, deps, pull.URL, "pr", "view", n, "--repo", repo.FullName)
 	verifyBodyEditorIntegration(t, deps, "pr", repo.FullName, n, pull.Body)
@@ -114,7 +116,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.Equal(t, repo.FullName, pullStatus.Assigned[0].Repository)
 	require.Empty(t, pullStatus.ReviewRequested)
 	var filtered []services.Pull
-	require.NoError(t, json.Unmarshal(execute("pr", "list", "-R", repo.FullName, "--author", strings.SplitN(repo.FullName, "/", 2)[0], "--base", repo.DefaultBranch, "--sort", "oldest", "--milestone", fmt.Sprint(milestone.ID), "--label", "review", "--json"), &filtered))
+	require.NoError(t, json.Unmarshal(execute("pr", "list", "-R", repo.FullName, "--author", strings.SplitN(repo.FullName, "/", 2)[0], "--base", repo.DefaultBranch, "--sort", "oldest", "--milestone", strconv.FormatInt(milestone.ID, 10), "--label", "review", "--json"), &filtered))
 	require.Len(t, filtered, 1)
 	require.Equal(t, pull.Number, filtered[0].Number)
 	require.Equal(t, strings.SplitN(repo.FullName, "/", 2)[0], filtered[0].Author)
@@ -198,7 +200,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.Equal(t, []string{owner}, issue.Assignees)
 	require.NotNil(t, issue.Milestone)
 	require.Equal(t, milestone.ID, issue.Milestone.ID)
-	issueNumber := fmt.Sprint(issue.Number)
+	issueNumber := strconv.FormatInt(issue.Number, 10)
 	require.NoError(t, json.Unmarshal(execute("issue", "edit", issueNumber, "-R", repo.FullName, "--ref", repo.DefaultBranch, "--json"), &issue))
 	require.Equal(t, repo.DefaultBranch, issue.Ref)
 	require.NoError(t, json.Unmarshal(execute("issue", "edit", issueNumber, "-R", repo.FullName, "--ref=", "--set-assignees=", "--milestone=0", "--json"), &issue))
@@ -224,7 +226,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.Len(t, comments, 1)
 	require.Equal(t, "change.txt", comments[0].Path)
 	require.EqualValues(t, 1, comments[0].Line)
-	commentID := fmt.Sprint(comments[0].ID)
+	commentID := strconv.FormatInt(comments[0].ID, 10)
 	require.Contains(t, string(execute("pr", "review", "reply", n, commentID, "-R", repo.FullName, "--body", "Disposable reply", "--json", "body")), "Disposable reply")
 	require.NoError(t, json.Unmarshal(execute("pr", "review", "comments", n, "-R", repo.FullName, "--json"), &comments))
 	require.Len(t, comments, 2)
@@ -234,7 +236,7 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "resolve", commentID, "-R", repo.FullName}))
 	require.Empty(t, out.String())
 	require.Empty(t, diagnostics.String(), "feedback is for terminals")
-	require.NoError(t, json.Unmarshal(execute("pr", "review", "comments", n, "-R", repo.FullName, "--review", fmt.Sprint(review.ID), "--json"), &comments))
+	require.NoError(t, json.Unmarshal(execute("pr", "review", "comments", n, "-R", repo.FullName, "--review", strconv.FormatInt(review.ID, 10), "--json"), &comments))
 	require.NotEmpty(t, comments[0].Resolver)
 	out.Reset()
 	diagnostics.Reset()
@@ -246,12 +248,12 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 	require.NoError(t, json.Unmarshal(execute("pr", "review", n, "-R", repo.FullName, "--pending", "--body", "Preserved draft text", "--json"), &pending))
 	require.Equal(t, "PENDING", pending.State)
 	var submitted services.Review
-	require.NoError(t, json.Unmarshal(executeWithEditorIntegration(t, deps, pending.Body, "Edited draft text", "pr", "review", "submit", n, fmt.Sprint(pending.ID), "-R", repo.FullName, "--comment"), &submitted))
+	require.NoError(t, json.Unmarshal(executeWithEditorIntegration(t, deps, pending.Body, "Edited draft text", "pr", "review", "submit", n, strconv.FormatInt(pending.ID, 10), "-R", repo.FullName, "--comment"), &submitted))
 	require.Equal(t, "COMMENT", submitted.State)
 	require.Equal(t, "Edited draft text", submitted.Body)
 	out.Reset()
 	diagnostics.Reset()
-	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "delete", n, fmt.Sprint(submitted.ID), "-R", repo.FullName, "--yes"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "review", "delete", n, strconv.FormatInt(submitted.ID, 10), "-R", repo.FullName, "--yes"}))
 	verifyEditorSubmission(t, deps, repo.FullName, n, true)
 	require.Empty(t, out.String())
 	require.Empty(t, diagnostics.String(), "feedback is for terminals")
@@ -293,9 +295,9 @@ func TestGiteaPullEditLifecycle(t *testing.T) {
 		require.NoError(t, Execute(context.Background(), reviewerDeps, []string{"pr", "status", "-R", repo.FullName, "--json"}))
 		require.NoError(t, json.Unmarshal(out.Bytes(), &pullStatus))
 		require.Empty(t, pullStatus.ReviewRequested)
-		require.NoError(t, json.Unmarshal(executeWithEditorIntegration(t, deps, "", "Disposable dismissal reason", "pr", "review", "dismiss", n, fmt.Sprint(approval.ID), "-R", repo.FullName, "--yes"), &approval))
+		require.NoError(t, json.Unmarshal(executeWithEditorIntegration(t, deps, "", "Disposable dismissal reason", "pr", "review", "dismiss", n, strconv.FormatInt(approval.ID, 10), "-R", repo.FullName, "--yes"), &approval))
 		require.True(t, approval.Dismissed)
-		require.NoError(t, json.Unmarshal(execute("pr", "review", "undismiss", n, fmt.Sprint(approval.ID), "-R", repo.FullName, "--json"), &approval))
+		require.NoError(t, json.Unmarshal(execute("pr", "review", "undismiss", n, strconv.FormatInt(approval.ID, 10), "-R", repo.FullName, "--json"), &approval))
 		require.False(t, approval.Dismissed)
 		testTeamReviewRequests(t, &deps, execute, reviewer.Login)
 	}
@@ -317,7 +319,7 @@ func testTeamReviewRequests(t *testing.T, deps *Dependencies, execute func(...st
 	})
 	var team services.Team
 	require.NoError(t, json.Unmarshal(execute("team", "create", orgName, "--name", "Reviewers", "--unit", "repo.code=read,repo.pulls=write", "--json"), &team))
-	teamID := fmt.Sprint(team.ID)
+	teamID := strconv.FormatInt(team.ID, 10)
 	execute("team", "member", "add", teamID, reviewer)
 	var repo services.Repository
 	require.NoError(t, json.Unmarshal(execute("repo", "create", "review-target", "--org", orgName, "--auto-init", "--private", "--json"), &repo))
@@ -332,7 +334,7 @@ func testTeamReviewRequests(t *testing.T, deps *Dependencies, execute func(...st
 	execute("api", "repos/"+repo.FullName+"/contents/change.txt", "--input", "-")
 	var pull services.Pull
 	require.NoError(t, json.Unmarshal(execute("pr", "create", "-R", repo.FullName, "--title", "Team review fixture", "--head", "feature", "--base", repo.DefaultBranch, "--json"), &pull))
-	n := fmt.Sprint(pull.Number)
+	n := strconv.FormatInt(pull.Number, 10)
 	require.NoError(t, json.Unmarshal(execute("pr", "edit", n, "-R", repo.FullName, "--add-reviewer-team", team.Name, "--json"), &pull))
 	require.Equal(t, []string{team.Name}, pull.ReviewerTeams)
 	require.Empty(t, pull.Reviewers)

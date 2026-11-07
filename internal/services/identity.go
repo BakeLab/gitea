@@ -26,7 +26,9 @@ type accountKey struct {
 func CurrentAccount(ctx context.Context, client *transport.Client) (string, error) {
 	key := accountKey{client, client.Sudo}
 	if cached, ok := accountCache.Load(key); ok {
-		return cached.(string), nil
+		if account, ok := cached.(string); ok {
+			return account, nil
+		}
 	}
 	user, _, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) (*gitea.User, *gitea.Response, error) {
 		return c.Users.GetMyUserInfo(ctx)

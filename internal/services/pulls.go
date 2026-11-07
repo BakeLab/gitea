@@ -19,6 +19,7 @@ import (
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -371,7 +372,7 @@ func (r *approvalRules) ignoresStale(ctx context.Context, s Pulls, rule string) 
 // request again, for merged_by; with reviews, its reviews, for WithReviews.
 func (s Pulls) Detail(ctx context.Context, items []Pull, view, reviews bool) ([]Pull, error) {
 	detailed := slices.Clone(items)
-	service := Reviews{Client: s.Client, Repository: s.Repository}
+	service := Reviews(s)
 	rules := &approvalRules{}
 	err := concurrently(len(items), func(i int) (err error) {
 		if view {
@@ -635,7 +636,7 @@ func (s Pulls) EditFrom(ctx context.Context, n int64, opts PullEdit, before *Pul
 	if opts.ReviewerChanges == nil {
 		return s.edit(ctx, n, opts, before, nil)
 	}
-	reviews, changes := Reviews{Client: s.Client, Repository: s.Repository}, opts.ReviewerChanges
+	reviews, changes := Reviews(s), opts.ReviewerChanges
 	opts.ReviewerChanges = nil
 	if opts == (PullEdit{}) {
 		return reviews.ChangeRequests(ctx, n, *changes)

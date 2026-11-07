@@ -311,14 +311,14 @@ func landedCommits(run func(...string) (string, error), merge, mergeBase, head s
 	// some of the pull request's commits.
 	var commits []string
 	next := len(pulled) - 1
-	for i := len(landed) - 1; i >= 0; i-- {
-		for next >= 0 && pulled[next][1] != landed[i][1] {
+	for _, commit := range slices.Backward(landed) {
+		for next >= 0 && pulled[next][1] != commit[1] {
 			next--
 		}
 		if next < 0 {
 			break
 		}
-		commits = append(commits, landed[i][0])
+		commits = append(commits, commit[0])
 		next--
 	}
 	if len(commits) == 0 {

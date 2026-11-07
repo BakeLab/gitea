@@ -107,7 +107,7 @@ func TestMarkdownSanitizesServerText(t *testing.T) {
 	require.NotContains(t, rendered, "\x1b]0;")
 	require.NotContains(t, rendered, "\x1b[2J")
 	require.Contains(t, rendered, "]0;PWNEDworld")
-	for _, line := range strings.Split(Markdown(strings.Repeat("word ", 50), Display{Width: 40}), "\n") {
+	for line := range strings.SplitSeq(Markdown(strings.Repeat("word ", 50), Display{Width: 40}), "\n") {
 		require.LessOrEqual(t, len(line), 40, line)
 		require.Equal(t, strings.TrimRight(line, " "), line)
 	}

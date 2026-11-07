@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/services"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,7 +27,7 @@ func TestDiscussionViews(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/repos/alice/project/issues/3":
-			_, _ = w.Write([]byte(`{"number":3,"title":"Crash\u001b[2J","body":"Steps:\r\n\u001b]52;c;aGk=\u0007run‮\r","html_url":"https://example.org/i/3","state":"open","user":{"login":"bob"},"created_at":"2026-01-01T00:00:00Z","labels":[{"name":"bug","color":"ff0000"}],"assignees":[{"login":"alice"}],"comments":1}`))
+			_, _ = w.Write([]byte(`{"number":3,"title":"Crash\u001b[2J","body":"Steps:\r\n\u001b]52;c;aGk=\u0007run` + "\u202e" + `\r","html_url":"https://example.org/i/3","state":"open","user":{"login":"bob"},"created_at":"2026-01-01T00:00:00Z","labels":[{"name":"bug","color":"ff0000"}],"assignees":[{"login":"alice"}],"comments":1}`))
 		case "/api/v1/repos/alice/project/issues/3/dependencies", "/api/v1/repos/alice/project/issues/3/blocks":
 			_, _ = w.Write([]byte(`[]`))
 		case "/api/v1/repos/alice/project/pulls/4/reviews":

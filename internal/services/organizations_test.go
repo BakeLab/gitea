@@ -5,13 +5,13 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,7 +55,7 @@ func TestOrganizationLookupTreatsMissingOrganizationAsUser(t *testing.T) {
 			id, isOrg, err := organization(context.Background(), client, "acme")
 			if tc.wantStatusErr != 0 {
 				var failure *transport.APIError
-				require.True(t, errors.As(err, &failure))
+				require.ErrorAs(t, err, &failure)
 				require.Equal(t, tc.wantStatusErr, failure.Status)
 				return
 			}
@@ -386,12 +386,13 @@ func TestOrganizationRepositoryCountAndDelete(t *testing.T) {
 		}
 	}))
 	service := Organizations{Client: client}
-	count, err := service.RepositoryCount(context.Background(), "acme")
+	count, counted, err := service.RepositoryCount(context.Background(), "acme")
 	require.NoError(t, err)
-	require.Equal(t, 12, *count)
-	count, err = service.RepositoryCount(context.Background(), "hidden")
+	require.True(t, counted)
+	require.Equal(t, 12, count)
+	_, counted, err = service.RepositoryCount(context.Background(), "hidden")
 	require.NoError(t, err)
-	require.Nil(t, count, "a count the account cannot read is unknown")
+	require.False(t, counted, "a count the account cannot read is unknown")
 	require.NoError(t, service.Delete(context.Background(), "acme"))
 }
 

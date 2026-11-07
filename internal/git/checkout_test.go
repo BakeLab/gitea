@@ -5,12 +5,14 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
 
 	"gitea.dev/cli/internal/git/gittest"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,7 +30,7 @@ type checkoutRunner struct {
 
 func (r *checkoutRunner) Output(_ context.Context, dir string, prompt bool, args ...string) (string, error) {
 	if dir != "/work" || prompt {
-		return "", fmt.Errorf("unexpected Git execution policy")
+		return "", errors.New("unexpected Git execution policy")
 	}
 	command := strings.Join(args, " ")
 	r.calls = append(r.calls, command)

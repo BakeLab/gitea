@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,7 +27,7 @@ func TestRawBodyCancellationPreservesContextError(t *testing.T) {
 	started := make(chan struct{})
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"incomplete":`))
-		w.(http.Flusher).Flush()
+		require.NoError(t, http.NewResponseController(w).Flush())
 		close(started)
 		<-r.Context().Done()
 	}))
@@ -43,7 +44,7 @@ func TestRawBodyThatBreaksOffIsARequestFailure(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/stalled":
 			_, _ = w.Write([]byte(`{"incomplete":`))
-			w.(http.Flusher).Flush()
+			require.NoError(t, http.NewResponseController(w).Flush())
 			select {
 			case <-release:
 			case <-r.Context().Done():

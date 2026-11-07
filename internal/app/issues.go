@@ -17,6 +17,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 )
 
@@ -111,7 +112,7 @@ $ gt issue list --select`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ 
 	flags.StringVar(&opts.Mentions, "mentions", "", "Filter by mentioned user; @me for yourself")
 	flags.StringSliceVarP(&labels, "label", "l", nil, "Filter by label `names`; an issue must have all of them")
 	flags.StringSliceVarP(&milestones, "milestone", "m", nil, "Filter by milestone `titles` or IDs, a number being an ID first")
-	updated.register(cmd, "since", "Updated since a date, timestamp, or duration ago", "until", "Updated before a date, timestamp, or duration ago")
+	updated.register(cmd, "Updated since a date, timestamp, or duration ago", "Updated before a date, timestamp, or duration ago")
 	flags.BoolVarP(&web, "web", "w", false, "Open the issue list in the browser")
 	_ = cmd.RegisterFlagCompletionFunc("label", a.completeLabels())
 	_ = cmd.RegisterFlagCompletionFunc("milestone", commaSeparated(a.completeMilestones()))

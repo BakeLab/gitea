@@ -59,7 +59,9 @@ func TestSSHKeyAddTitlesKeysByTheirComment(t *testing.T) {
 		case http.MethodPost:
 			var body map[string]any
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			titles = append(titles, body["title"].(string))
+			title, ok := body["title"].(string)
+			require.True(t, ok)
+			titles = append(titles, title)
 			if len(titles) > 1 {
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				_, _ = w.Write([]byte(`{"message":"Key content has been used as non-deploy key"}`))
@@ -120,7 +122,9 @@ func TestSSHKeyAddAcceptsRFC4716KeysAndExplicitStdinOnATerminal(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		titles = append(titles, body["title"].(string))
+		title, ok := body["title"].(string)
+		require.True(t, ok)
+		titles = append(titles, title)
 		w.WriteHeader(http.StatusCreated)
 		_, _ = fmt.Fprintf(w, `{"id":3,"title":%q,"fingerprint":%q}`, body["title"], fingerprint)
 	}))

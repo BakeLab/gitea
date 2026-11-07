@@ -21,6 +21,7 @@ import (
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -728,18 +729,19 @@ func (f *partialEditServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 		return
 	}
+	labels, assignees := []any{}, []any{}
+	for _, id := range f.labels {
+		labels = append(labels, map[string]any{"id": id})
+	}
+	for _, name := range f.assignees {
+		assignees = append(assignees, map[string]any{"login": name})
+	}
 	pull := map[string]any{
 		"number": 7, "title": f.title, "body": f.body, "state": cmp.Or(f.state, "open"), "base": map[string]any{"ref": f.base},
-		"allow_maintainer_edit": f.maintainers, "labels": []any{}, "assignees": []any{},
+		"allow_maintainer_edit": f.maintainers, "labels": labels, "assignees": assignees,
 	}
 	if f.milestone != 0 {
 		pull["milestone"] = map[string]any{"id": f.milestone}
-	}
-	for _, id := range f.labels {
-		pull["labels"] = append(pull["labels"].([]any), map[string]any{"id": id})
-	}
-	for _, name := range f.assignees {
-		pull["assignees"] = append(pull["assignees"].([]any), map[string]any{"login": name})
 	}
 	_ = json.NewEncoder(w).Encode(pull)
 }
@@ -985,7 +987,7 @@ func TestPullEditNamesWhatTheAnswersSavedWhenTheReadBackFails(t *testing.T) {
 			require.ErrorContains(t, err, "; gt pr view 7 shows the current state")
 			require.NotContains(t, err.Error(), "changing the base branch")
 			require.Error(t, partial.ReadErr)
-			require.True(t, errors.Is(err, partial.ReadErr), "the error of the read goes with the edit's")
+			require.ErrorIs(t, err, partial.ReadErr, "the error of the read goes with the edit's")
 			require.Equal(t, []int64{3}, server.labels, "the labels go after the issue fields were taken")
 			require.Zero(t, item.Number)
 		})

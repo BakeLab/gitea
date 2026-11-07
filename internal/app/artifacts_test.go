@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,7 +34,7 @@ func TestRunDownloadZipToStdoutKeepsBinaryOutputClean(t *testing.T) {
 			_, _ = w.Write([]byte{0x50, 0x4b, 0, 0xff})
 		default:
 			t.Errorf("unexpected endpoint %s", r.URL.Path)
-			w.WriteHeader(404)
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer server.Close()

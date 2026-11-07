@@ -84,7 +84,7 @@ func TestTable(t *testing.T) {
 		{
 			"strips hostile text in both outputs",
 			nil,
-			[][]Cell{row("1", "a\x1b]52;c;cHduZWQ=\x07b\x1b[2J\u009b31m‮txt.exe\r\ntail\tend", "open")},
+			[][]Cell{row("1", "a\x1b]52;c;cHduZWQ=\x07b\x1b[2J\u009b31m\u202etxt.exe\r\ntail\tend", "open")},
 			Display{},
 			"1\ta]52;c;cHduZWQ=b[2J31mtxt.exe tail end\topen\n",
 		},
@@ -126,7 +126,7 @@ func TestSafeText(t *testing.T) {
 		{"drops lone carriage returns", "safe\rFAKE", "safeFAKE", "safeFAKE"},
 		{
 			"strips hostile body",
-			"Steps:\r\n\x1b]52;c;cHduZWQ=\x07run\x1b[2J\u009b31m‮​it\x7f\n\x00done",
+			"Steps:\r\n\x1b]52;c;cHduZWQ=\x07run\x1b[2J\u009b31m\u202e​it\x7f\n\x00done",
 			"Steps:\n]52;c;cHduZWQ=run[2J31mit\ndone",
 			"Steps: ]52;c;cHduZWQ=run[2J31mit done",
 		},

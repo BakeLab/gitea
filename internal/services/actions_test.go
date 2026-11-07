@@ -7,20 +7,21 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/stretchr/testify/require"
 )
 
 func TestDispatchSendsOneRequest(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusUnprocessableEntity, http.StatusInternalServerError} {
-		t.Run(fmt.Sprint(status), func(t *testing.T) {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			dispatches := 0
 			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				dispatches++
@@ -107,7 +108,7 @@ func TestWatchReportsEveryPollWithJobsUntilTheRunCompletes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err = service.Watch(ctx, 1, time.Millisecond, nil)
-	require.True(t, errors.Is(err, context.Canceled))
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestActionMutationsUseTheirEndpoints(t *testing.T) {

@@ -18,6 +18,7 @@ import (
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -131,7 +132,10 @@ func TestExplainWordsCredentialAndConnectionFailures(t *testing.T) {
 	// An unreachable proxy is named instead of the instance behind it.
 	proxy, err := url.Parse(closed.URL)
 	require.NoError(t, err)
-	_, err = (&http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}}).Get("http://example.test/api/v1/user")
+	response, err := (&http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}}).Get("http://example.test/api/v1/user")
+	if response != nil {
+		defer response.Body.Close()
+	}
 	err = transport.RequestError(context.Background(), "API request failed", err)
 	require.EqualError(t, Explain(context.Background(), deps, err), "cannot reach the proxy "+proxy.Host+" (connection refused); check HTTPS_PROXY and HTTP_PROXY")
 

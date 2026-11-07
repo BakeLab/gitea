@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
 	"github.com/spf13/pflag"

@@ -14,9 +14,10 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/services"
+
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/openpgp"       //nolint:staticcheck // frozen but enough to make a throwaway key and sign with it, with no new dependency
-	"golang.org/x/crypto/openpgp/armor" //nolint:staticcheck // see above
+	"golang.org/x/crypto/openpgp"
+	"golang.org/x/crypto/openpgp/armor"
 )
 
 // integrationGPGKey makes a key with one email address and returns it, with its armored public key.

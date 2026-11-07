@@ -17,6 +17,7 @@ import (
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
+
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +38,7 @@ var browsePages = []struct{ flag, page, usage string }{
 
 func (a *application) browseCommand() *cobra.Command {
 	var branch, commit string
-	var print bool
+	var printURL bool
 	pages := make([]bool, len(browsePages))
 	command := &cobra.Command{
 		Use:   "browse [<number> | <path>[:<line>] | <commit-sha>]",
@@ -173,7 +174,7 @@ $ gt browse --no-browser docs/README.md`,
 					link += "?display=source" + lines // Line anchors exist only in the source view of rendered files such as Markdown.
 				}
 			}
-			if print {
+			if printURL {
 				_, err := fmt.Fprintln(cmd.OutOrStdout(), link)
 				return err
 			}
@@ -184,7 +185,7 @@ $ gt browse --no-browser docs/README.md`,
 	flags.StringVarP(&branch, "branch", "b", "", "Open a path, or the root, of this branch")
 	flags.StringVarP(&commit, "commit", "c", "", "Open a path, or the root, at this commit; without a value, at HEAD of the clone")
 	flags.Lookup("commit").NoOptDefVal = "HEAD"
-	flags.BoolVarP(&print, "no-browser", "n", false, "Print the URL instead of opening it")
+	flags.BoolVarP(&printURL, "no-browser", "n", false, "Print the URL instead of opening it")
 	for i, page := range browsePages {
 		flags.BoolVarP(&pages[i], page.flag, page.flag[:1], false, page.usage)
 	}

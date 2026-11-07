@@ -56,7 +56,8 @@ type safeWriter struct {
 }
 
 func (s *safeWriter) Write(p []byte) (int, error) {
-	data := append(s.pending, p...)
+	data := s.pending
+	data = append(data, p...)
 	out := make([]byte, 0, len(data))
 	i := 0
 	for i < len(data) {

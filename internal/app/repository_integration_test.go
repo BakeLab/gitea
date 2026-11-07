@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/services"
+
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )

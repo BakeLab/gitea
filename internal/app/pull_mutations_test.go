@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -763,7 +764,7 @@ func TestPullCloseReportsTheDeletedHeadBranch(t *testing.T) {
 
 func TestPullDeleteBranchDeletesAForkBranchOnlyWhereYouCanPush(t *testing.T) {
 	for _, push := range []bool{true, false} {
-		t.Run(fmt.Sprint(push), func(t *testing.T) {
+		t.Run(strconv.FormatBool(push), func(t *testing.T) {
 			pull := fmt.Sprintf(`{"number":3,"title":"Add login","state":"STATE","base":{"ref":"main","repo":{"full_name":"alice/project"}},"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"bob/project","permissions":{"push":%t}}}}`, push)
 			deletes := 0
 			server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

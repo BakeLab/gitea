@@ -23,6 +23,7 @@ import (
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -249,7 +250,9 @@ func TestPullCreatePushesWithYesWhenHeadUnpublished(t *testing.T) {
 	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", "alice/project", "--title", "PR", "--head", "feature", "--base", "main", "--json=number,reviews", "--no-input", "--yes"}))
 	require.Equal(t, 1, creates)
 	require.Contains(t, runner.calls, pushKey)
-	require.Contains(t, deps.Streams.Out.(*bytes.Buffer).String(), `"reviews":[{"author":"carol"`)
+	out, ok := deps.Streams.Out.(*bytes.Buffer)
+	require.True(t, ok)
+	require.Contains(t, out.String(), `"reviews":[{"author":"carol"`)
 }
 
 func TestPullCreateRefusesARepositoryWithoutPullRequestsBeforePushing(t *testing.T) {
@@ -910,7 +913,7 @@ func TestPullCreateImplicitInteractiveForm(t *testing.T) {
 	require.Equal(t, "feature", createPayload["head"])
 	require.Equal(t, true, createPayload["allow_maintainer_edit"])
 	require.Equal(t, []any{"alice"}, createPayload["assignees"])
-	require.Equal(t, float64(4), createPayload["milestone"])
+	require.InDelta(t, float64(4), createPayload["milestone"], 0)
 	require.Equal(t, []any{float64(2)}, createPayload["labels"])
 	require.Equal(t, "2028-01-15T23:59:59Z", createPayload["due_date"])
 	require.JSONEq(t, `{"number":9,"url":"https://example.org/alice/project/pulls/9"}`, out.String())

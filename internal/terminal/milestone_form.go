@@ -39,6 +39,10 @@ func (p *FormPrompter) EditMilestone(ctx context.Context, heading string, curren
 	).Title(SafeLine(heading)))); err != nil {
 		return MilestoneFormValues{}, err
 	}
-	parsed, err := parseDueDate(deadline)
-	return MilestoneFormValues{Title: titleResult(current.Title, title), Description: fieldResult(current.Description, description), Deadline: parsed}, err
+	parsed, ok, err := parseDueDate(deadline)
+	values := MilestoneFormValues{Title: titleResult(current.Title, title), Description: fieldResult(current.Description, description)}
+	if ok {
+		values.Deadline = &parsed
+	}
+	return values, err
 }

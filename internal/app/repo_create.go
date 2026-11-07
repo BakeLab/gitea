@@ -17,6 +17,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 )
 
@@ -231,7 +232,7 @@ func (a *application) runRepoCreate(cmd *cobra.Command, args []string, f *repoCr
 		if err := a.created(cmd, item, item.URL); err != nil {
 			return err
 		}
-		if _, err := a.cloneRepository(cmd, target, item, cloneOptions{upstream: "upstream"}); err != nil {
+		if err := a.cloneRepository(cmd, target, item, cloneOptions{upstream: "upstream"}); err != nil {
 			return fmt.Errorf("created %s, but could not clone it: %w", item.FullName, err)
 		}
 		return nil

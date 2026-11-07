@@ -20,6 +20,7 @@ import (
 
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/42wim/httpsig"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"

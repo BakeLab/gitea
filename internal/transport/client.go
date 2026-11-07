@@ -171,7 +171,11 @@ func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error)
 // minutes to start. insecure skips certificate verification for the instance's host only; other
 // hosts, such as the storage a download redirects to, are still verified.
 func New(instance, token string, insecure bool) *Client {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		panic("http.DefaultTransport must be an *http.Transport")
+	}
+	tr := base.Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	tr.TLSHandshakeTimeout = 10 * time.Second
 	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecure} // user-controlled, instance-scoped

@@ -80,8 +80,11 @@ func TestAPIRetriesOnlyTransientFailures(t *testing.T) {
 			retry := retryTransport{base: roundTripFunc(func(*http.Request) (*http.Response, error) { calls++; return nil, tc.err }), retries: 2}
 			req, err := http.NewRequest(http.MethodGet, "https://example.test/api/v1/user", nil)
 			require.NoError(t, err)
-			_, err = retry.RoundTrip(req)
+			response, err := retry.RoundTrip(req)
 			require.ErrorIs(t, err, tc.err)
+			if response != nil {
+				defer response.Body.Close()
+			}
 			require.Equal(t, tc.calls, calls)
 		})
 	}
@@ -94,8 +97,11 @@ func TestAPIDoesNotRetryAReadWithoutAnswer(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}))
 	defer server.Close()
-	_, err := New(server.URL, "", false).WithResponseTimeout(20*time.Millisecond).Do(context.Background(), http.MethodGet, "user", nil, nil)
+	response, err := New(server.URL, "", false).WithResponseTimeout(20*time.Millisecond).Do(context.Background(), http.MethodGet, "user", nil, nil)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+	if response != nil {
+		defer response.Body.Close()
+	}
 	require.Equal(t, int32(1), calls.Load())
 }
 
@@ -127,8 +133,11 @@ func TestAPIRetryRecoversAndStopsOnCancellation(t *testing.T) {
 	defer unavailable.Close()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, unavailable.URL+"/api/v1/user", nil)
 	require.NoError(t, err)
-	_, err = New(unavailable.URL, "", false).API().Do(req)
+	canceledResponse, err := New(unavailable.URL, "", false).API().Do(req)
 	require.ErrorIs(t, err, context.Canceled)
+	if canceledResponse != nil {
+		defer canceledResponse.Body.Close()
+	}
 	require.Equal(t, 1, calls)
 }
 
@@ -250,7 +259,7 @@ func TestCaptureErrorsSanitizesAndKeepsBodyReadable(t *testing.T) {
 		name, body, message string
 		status              int
 	}{
-		{"message", `{"message":"branch exists‮"}`, "branch exists", http.StatusUnprocessableEntity},
+		{"message", `{"message":"branch exists` + "\u202e" + `"}`, "branch exists", http.StatusUnprocessableEntity},
 		{"oversized", long, "", http.StatusInternalServerError},
 		{"redirect", ``, "", http.StatusMovedPermanently},
 	} {
@@ -355,8 +364,14 @@ func TestAPINamesTheRepositoryAWriteWasRedirectedTo(t *testing.T) {
 	}))
 	defer server.Close()
 	client := New(server.URL, "", false)
-	_, err := client.Do(context.Background(), http.MethodPost, "repos/alice/old/labels", strings.NewReader(`{}`), nil)
+	postResponse, err := client.Do(context.Background(), http.MethodPost, "repos/alice/old/labels", strings.NewReader(`{}`), nil)
 	require.EqualError(t, err, "repository moved to bob/new name; address it by its new name to change it")
-	_, err = client.Do(context.Background(), http.MethodDelete, "repos/alice/old/topics/x", nil, nil)
+	if postResponse != nil {
+		defer postResponse.Body.Close()
+	}
+	deleteResponse, err := client.Do(context.Background(), http.MethodDelete, "repos/alice/old/topics/x", nil, nil)
 	require.EqualError(t, err, "Gitea API returned HTTP 301 for DELETE /api/v1/repos/alice/old/topics/x")
+	if deleteResponse != nil {
+		defer deleteResponse.Body.Close()
+	}
 }

@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/spf13/cobra"
 )
 
@@ -299,12 +301,12 @@ func (a *application) writeAuthStatus(cmd *cobra.Command, rows []authStatusRow) 
 		return writeTable(a, cmd, rows, listSpec[authStatusRow]{Row: func(row authStatusRow) []terminal.Cell {
 			verified, expires := "", terminal.Cell{}
 			if row.Verified != nil {
-				verified = fmt.Sprint(*row.Verified)
+				verified = strconv.FormatBool(*row.Verified)
 			}
 			if row.ExpiresAt != nil {
 				expires.Time = *row.ExpiresAt
 			}
-			return []terminal.Cell{{Text: row.Host}, {Text: row.User}, {Text: fmt.Sprint(row.Active)}, {Text: row.Method}, {Text: row.Store}, {Text: fmt.Sprint(row.Available)}, {Text: verified}, expires, {Text: row.Error}}
+			return []terminal.Cell{{Text: row.Host}, {Text: row.User}, {Text: strconv.FormatBool(row.Active)}, {Text: row.Method}, {Text: row.Store}, {Text: strconv.FormatBool(row.Available)}, {Text: verified}, expires, {Text: row.Error}}
 		}}, listPage{Number: 1})
 	}
 	byHost := map[string][]authStatusRow{}

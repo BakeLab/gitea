@@ -20,6 +20,7 @@ import (
 
 	"gitea.dev/cli/internal/transport"
 	"gitea.dev/cli/internal/version"
+
 	"github.com/stretchr/testify/require"
 )
 

@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -47,7 +48,7 @@ type Status struct {
 func (s Status) Pulls(ctx context.Context, limit int) (PullStatus, error) {
 	result := PullStatus{Authored: []SearchItem{}, Assigned: []SearchItem{}, ReviewRequested: []SearchItem{}}
 	if limit < 1 || limit > 100 {
-		return result, fmt.Errorf("status limit must be 1..100")
+		return result, errors.New("status limit must be 1..100")
 	}
 	scoped := Issues{Client: s.Client, Repository: s.Repository}
 	opts := DiscussionSearchOptions{Pulls: true, State: "open", Limit: limit, Page: 1, Authored: true}
@@ -96,7 +97,7 @@ func (s Status) Pulls(ctx context.Context, limit int) (PullStatus, error) {
 func (s Status) Summary(ctx context.Context, limit int, runsRepository string, discovered bool) (AccountStatus, error) {
 	result := AccountStatus{Host: s.Client.BaseURL, Repository: s.Repository, AssignedIssues: []SearchItem{}, Mentions: []SearchItem{}, FailingRuns: []Run{}}
 	if limit < 1 || limit > 100 {
-		return result, fmt.Errorf("status limit must be 1..100")
+		return result, errors.New("status limit must be 1..100")
 	}
 	account, err := CurrentAccount(ctx, s.Client)
 	if err != nil {

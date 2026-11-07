@@ -18,6 +18,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 )
@@ -103,7 +104,7 @@ $ gt run list --since 24h --json id,status,conclusion,workflow`,
 		},
 	}
 	pageFlags(cmd, &filters.Limit, &filters.Page)
-	created.register(cmd, "since", "Runs created at or after a date, RFC3339 timestamp, or duration ago (24h)", "until", "Runs created at or before a date, RFC3339 timestamp, or duration ago")
+	created.register(cmd, "Runs created at or after a date, RFC3339 timestamp, or duration ago (24h)", "Runs created at or before a date, RFC3339 timestamp, or duration ago")
 	cmd.Flags().StringVarP(&filters.Workflow, "workflow", "w", "", "Filter by workflow file or name")
 	cmd.Flags().StringVarP(&filters.Branch, "branch", "b", "", "Filter by branch")
 	cmd.Flags().StringVarP(&filters.Event, "event", "e", "", "Filter by the event that triggered the run, such as push")

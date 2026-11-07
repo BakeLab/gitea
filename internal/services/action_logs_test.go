@@ -9,11 +9,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,7 +43,7 @@ func TestFollowLogsEmitsOnlyAppendedBytesAndStops(t *testing.T) {
 			}
 		default:
 			t.Errorf("unexpected endpoint %s", r.URL.Path)
-			w.WriteHeader(404)
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	service := Actions{Client: client, Repository: "owner/repo"}
@@ -58,7 +60,7 @@ func TestFollowLogsEmitsOnlyAppendedBytesAndStops(t *testing.T) {
 
 func TestFollowLogsWaitsForQueuedJobAndRejectsChangedSnapshots(t *testing.T) {
 	for _, changed := range []bool{false, true} {
-		t.Run(fmt.Sprint(changed), func(t *testing.T) {
+		t.Run(strconv.FormatBool(changed), func(t *testing.T) {
 			reads := 0
 			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {

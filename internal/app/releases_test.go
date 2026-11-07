@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/stretchr/testify/require"
 )
 

@@ -18,6 +18,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )

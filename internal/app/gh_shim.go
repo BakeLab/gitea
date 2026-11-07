@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"gitea.dev/cli/internal/clierr"
 )
@@ -18,10 +19,7 @@ import (
 func ExecuteGH(ctx context.Context, deps Dependencies, args []string) error {
 	supported := len(args) > 0 && args[0] == "api" || len(args) > 1 && (args[0] == "repo" && args[1] == "view" || args[0] == "auth" && args[1] == "token")
 	if !supported {
-		command := "gh"
-		for _, arg := range args[:min(len(args), 2)] {
-			command += " " + arg
-		}
+		command := strings.Join(append([]string{"gh"}, args[:min(len(args), 2)]...), " ")
 		return clierr.Wrap(clierr.Usage, fmt.Errorf("%s is not supported by the gh shim of gt; it answers gh api, gh repo view and gh auth token", command))
 	}
 	if args[0] == "repo" {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/settings"
+
 	"github.com/stretchr/testify/require"
 	"github.com/zalando/go-keyring"
 )
@@ -20,7 +21,7 @@ type memoryKeyring struct {
 	fail   bool
 }
 
-func (m *memoryKeyring) Get(_ string, k string) (string, error) {
+func (m *memoryKeyring) Get(_, k string) (string, error) {
 	if m.fail {
 		return "", errors.New("unavailable")
 	}
@@ -95,7 +96,7 @@ func TestFailedConfigPublishRollsBackCredentials(t *testing.T) {
 	require.Error(t, manager.Register("https://example.org", "alice", "keyring", "invalid", HostOptions{}, Credential{AccessToken: "secret"}))
 	require.Empty(t, keyring.values)
 	_, err := os.Stat(filepath.Join(config.Dir, "hosts.yml"))
-	require.True(t, errors.Is(err, os.ErrNotExist))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestNoSilentCredentialFallback(t *testing.T) {
@@ -272,13 +273,13 @@ func TestReplacingATokenKeepsTheAccountSSHSettings(t *testing.T) {
 	credentials := &Store{Dir: config.Dir, Keyring: &memoryKeyring{values: map[string]string{}}}
 	manager := newTestManager(t, config, credentials)
 	require.NoError(t, manager.Register("https://example.org", "alice", settings.StoreFile, settings.AuthToken, HostOptions{}, Credential{AccessToken: "old"}))
-	require.NoError(t, config.Transaction(settings.TargetHosts, func(s *settings.Snapshot) (func() error, error) {
+	require.NoError(t, config.Update(settings.TargetHosts, func(s *settings.Snapshot) error {
 		host := s.Hosts.Hosts["https://example.org"]
 		account := host.Users["alice"]
 		account.SSHKey, account.SSHAgent = "/keys/id", true
 		host.Users["alice"] = account
 		s.Hosts.Hosts["https://example.org"] = host
-		return nil, nil
+		return nil
 	}))
 	require.NoError(t, manager.Register("https://example.org", "alice", settings.StoreKeyring, settings.AuthOAuth, HostOptions{Replace: true}, Credential{AccessToken: "new"}))
 	s, err := config.Load()

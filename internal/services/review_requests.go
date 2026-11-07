@@ -57,7 +57,7 @@ func (s Reviews) ChangeRequests(ctx context.Context, n int64, changes ReviewRequ
 	if err := s.changeRequests(ctx, n, changes); err != nil {
 		return Pull{}, err
 	}
-	item, err := (Pulls{Client: s.Client, Repository: s.Repository}).View(ctx, n)
+	item, err := Pulls(s).View(ctx, n)
 	if err != nil {
 		return Pull{}, fmt.Errorf("review requests were updated, but reading the pull request failed: %w", err)
 	}
@@ -76,7 +76,7 @@ func (s Reviews) changeRequests(ctx context.Context, n int64, changes ReviewRequ
 	}
 	// Gitea refuses an unknown user with a 404 that does not say whether other requests were applied.
 	users := append(append([]string{}, changes.Add.Users...), changes.Remove.Users...)
-	if err := (Pulls{Client: s.Client, Repository: s.Repository}).CheckUsers(ctx, nil, users); err != nil {
+	if err := Pulls(s).CheckUsers(ctx, nil, users); err != nil {
 		return err
 	}
 	mutated := false

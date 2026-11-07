@@ -218,19 +218,23 @@ func (s Teams) Sizes(ctx context.Context, teams []Team) ([]TeamSize, error) {
 	sizes := make([]TeamSize, len(teams))
 	err := concurrently(len(teams), func(i int) error {
 		id, first := teams[i].ID, listOptions(1, 1)
-		members, err := listTotal(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+		members, membersCounted, err := listTotal(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 			_, resp, err := c.Organizations.ListTeamMembers(ctx, id, gitea.ListTeamMembersOptions{ListOptions: first})
 			return resp, err
 		})
+		if membersCounted {
+			sizes[i].Members = &members
+		}
 		if err != nil || teams[i].AllRepositories {
-			sizes[i] = TeamSize{Members: members}
 			return err
 		}
-		repositories, err := listTotal(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+		repositories, repositoriesCounted, err := listTotal(ctx, s.Client, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 			_, resp, err := c.Organizations.ListTeamRepositories(ctx, id, gitea.ListTeamRepositoriesOptions{ListOptions: first})
 			return resp, err
 		})
-		sizes[i] = TeamSize{Members: members, Repositories: repositories}
+		if repositoriesCounted {
+			sizes[i].Repositories = &repositories
+		}
 		return err
 	})
 	return sizes, err
@@ -345,7 +349,7 @@ func (s Teams) Members(ctx context.Context, id int64, limit, page int) (Page[Tea
 
 // IsMember reports whether username belongs to the team.
 func (s Teams) IsMember(ctx context.Context, id int64, username string) (bool, error) {
-	return Organizations{Client: s.Client}.check(ctx, "", username, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
+	return Organizations(s).check(ctx, "", username, func(ctx context.Context, c *gitea.Client) (*gitea.Response, error) {
 		_, resp, err := c.Organizations.GetTeamMember(ctx, id, username)
 		return resp, err
 	})

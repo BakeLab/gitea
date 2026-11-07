@@ -31,6 +31,7 @@ import (
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )

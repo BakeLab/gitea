@@ -49,7 +49,7 @@ func TestParseTimeRangeRejectsOnlyInvertedBounds(t *testing.T) {
 	} {
 		cmd := &cobra.Command{}
 		var bounds timeRange
-		bounds.register(cmd, "since", "", "until", "")
+		bounds.register(cmd, "", "")
 		require.NoError(t, cmd.Flags().Parse([]string{"--since=" + tc.since, "--until=" + tc.until}))
 		_, _, err := bounds.parse(time.Now())
 		require.Equal(t, tc.wantErr, err != nil, tc.since+".."+tc.until)

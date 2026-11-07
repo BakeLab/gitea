@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"gitea.dev/cli/internal/clierr"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,7 +36,7 @@ func TestRunLogsStreamWithoutMixingDiagnosticsAndVerifyJobMembership(t *testing.
 			_, _ = w.Write([]byte("exact log\n"))
 		default:
 			t.Errorf("unexpected endpoint %s", r.URL.Path)
-			w.WriteHeader(404)
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer server.Close()

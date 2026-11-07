@@ -6,11 +6,12 @@ package app
 import (
 	"cmp"
 	"context"
-	"fmt"
+	"strconv"
 	"strings"
 
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 )
 
@@ -132,7 +133,7 @@ $ gt branch protection list --json rule,required_approvals,status_check_required
 				Row: func(rule services.BranchRule) []terminal.Cell {
 					return []terminal.Cell{
 						{Text: terminal.SafeLine(rule.Rule), Bold: true},
-						{Text: fmt.Sprint(rule.RequiredApprovals)},
+						{Text: strconv.FormatInt(rule.RequiredApprovals, 10)},
 						{Text: terminal.SafeLine(rulePushers(rule))},
 						{Text: terminal.SafeLine(ruleChecks(rule))},
 						{Text: terminal.SafeLine(ruleNotes(rule)), Muted: true},
@@ -165,7 +166,7 @@ $ gt branch protection view 'release/*' --json push_users,push_teams`,
 			d := a.display()
 			return writeView(a, cmd, rule, func(rule services.BranchRule) terminal.View {
 				fields := []terminal.Field{
-					{Label: "Required approvals", Value: fmt.Sprint(rule.RequiredApprovals)},
+					{Label: "Required approvals", Value: strconv.FormatInt(rule.RequiredApprovals, 10)},
 					{Label: "May push", Value: rulePushers(rule)},
 					{Label: "May merge", Value: ruleMergers(rule)},
 					{Label: "Status checks", Value: ruleChecks(rule)},

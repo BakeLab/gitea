@@ -17,6 +17,7 @@ import (
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
+
 	"github.com/spf13/cobra"
 )
 

@@ -114,7 +114,7 @@ const wikiPageSize = 50
 // while the server links a next one, until one page past the requested page is found.
 func (s Wiki) ListPage(ctx context.Context, limit, page int) (Page[WikiPage], error) {
 	if limit < 1 || page < 1 {
-		return Page[WikiPage]{}, fmt.Errorf("limit and page must be positive")
+		return Page[WikiPage]{}, errors.New("limit and page must be positive")
 	}
 	all, wanted := []WikiPage{}, page*limit+1
 	for window := 1; ; window++ {

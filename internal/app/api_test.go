@@ -21,6 +21,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,7 +36,8 @@ func TestAPIFieldsPlaceholdersAndAtomicPagination(t *testing.T) {
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&fields))
 			require.Equal(t, "123", fields["title"])
 			require.Equal(t, true, fields["closed"])
-			require.Equal(t, float64(2), fields["number"])
+			require.IsType(t, float64(0), fields["number"])
+			require.InDelta(t, float64(2), fields["number"], 0)
 			_, _ = w.Write([]byte(`{"number":2}`))
 			return
 		}
@@ -44,7 +46,7 @@ func TestAPIFieldsPlaceholdersAndAtomicPagination(t *testing.T) {
 		w.Header().Set("X-Gt-Test", "header-on-stderr")
 		if r.URL.Query().Get("page") == "2" {
 			if failSecond {
-				w.WriteHeader(403)
+				w.WriteHeader(http.StatusForbidden)
 				return
 			}
 			_, _ = w.Write([]byte(`[{"number":2}]`))
@@ -121,10 +123,11 @@ func TestAPIDebugLogsRequestsToStderr(t *testing.T) {
 }
 
 func TestAPIWritesErrorResponses(t *testing.T) {
+	const body = `{"message":"invalid","errors":["title"]}`
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Gt-Test", "error-header")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_, _ = w.Write([]byte(`{"message":"invalid","errors":["title"]}`))
+		_, _ = w.Write([]byte(body))
 	}))
 	defer server.Close()
 	deps, out, diagnostics := serverDeps(t, server.URL)
@@ -132,7 +135,9 @@ func TestAPIWritesErrorResponses(t *testing.T) {
 	var apiErr *transport.APIError
 	require.ErrorAs(t, err, &apiErr)
 	require.Equal(t, http.StatusUnprocessableEntity, apiErr.Status)
-	require.Equal(t, `{"message":"invalid","errors":["title"]}`, out.String())
+	if out.String() != body {
+		t.Fatalf("output = %q, want %q", out.String(), body)
+	}
 	require.Contains(t, diagnostics.String(), "422 Unprocessable Entity")
 	require.Contains(t, diagnostics.String(), "X-Gt-Test: error-header")
 }
@@ -409,7 +414,9 @@ func TestAPIHelpShowsJQ(t *testing.T) {
 
 func TestAPIIncludeSanitizesTheStatusLine(t *testing.T) {
 	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		conn, rw, err := w.(http.Hijacker).Hijack()
+		hijacker, ok := w.(http.Hijacker)
+		require.True(t, ok)
+		conn, rw, err := hijacker.Hijack()
 		if err != nil {
 			return
 		}

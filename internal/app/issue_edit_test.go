@@ -18,8 +18,8 @@ import (
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
-
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -77,7 +77,7 @@ func TestIssueEditImplicitInteractiveForm(t *testing.T) {
 	require.Equal(t, "Edited", patchPayload["title"])
 	require.Equal(t, "New body", patchPayload["body"])
 	require.Equal(t, []any{"bob"}, patchPayload["assignees"])
-	require.Equal(t, float64(4), patchPayload["milestone"])
+	require.InDelta(t, float64(4), patchPayload["milestone"], 0)
 	require.Equal(t, "2028-02-01T23:59:59Z", patchPayload["due_date"], "a date is the end of that day, as with --deadline")
 	require.Equal(t, []any{float64(3)}, labelPayload["labels"])
 	require.JSONEq(t, `{"number":5,"title":"Edited"}`, out.String())
@@ -170,7 +170,7 @@ func TestIssueEditFormOffersMetadataWithoutPushAndNamesWhatGiteaLeftOut(t *testi
 	require.Equal(t, clierr.Failure, clierr.ExitCode(err))
 	require.Len(t, patches, 1)
 	require.Equal(t, []any{"bob"}, patches[0]["assignees"])
-	require.Equal(t, float64(4), patches[0]["milestone"])
+	require.InDelta(t, float64(4), patches[0]["milestone"], 0)
 	require.JSONEq(t, `{"number":5,"title":"Edited"}`, out.String(), "the edited issue is still reported")
 }
 
@@ -306,7 +306,9 @@ func TestIssueEditMergesAssigneesWithOneRead(t *testing.T) {
 		}
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		patched = body["assignees"].([]any)
+		var ok bool
+		patched, ok = body["assignees"].([]any)
+		require.True(t, ok)
 		_, _ = w.Write([]byte(`{"number":7,"assignees":[{"login":"alice"},{"login":"carol"}]}`))
 	}))
 	defer server.Close()

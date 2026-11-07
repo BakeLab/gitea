@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/auth"
-
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/transport"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -123,7 +123,7 @@ func TestNotificationWatchStreamsOneJSONObjectPerLine(t *testing.T) {
 	defer server.Close()
 	deps, out, _ := serverDeps(t, server.URL)
 	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "watch", "--json", "id,title", "--interval", "20ms", "--timeout", "500ms"}))
-	require.Equal(t, "{\"id\":1,\"title\":\"First\"}\n{\"id\":2,\"title\":\"Second\"}\n", out.String())
+	require.Equal(t, []string{`{"id":1,"title":"First"}`, `{"id":2,"title":"Second"}`, ""}, strings.Split(out.String(), "\n"))
 	polls.Store(0)
 	out.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"notification", "watch", "--csv", "id,title", "--interval", "20ms", "--timeout", "500ms"}))

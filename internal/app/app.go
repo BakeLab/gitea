@@ -32,6 +32,7 @@ import (
 	"gitea.dev/cli/internal/terminal"
 	"gitea.dev/cli/internal/transport"
 	"gitea.dev/cli/internal/version"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

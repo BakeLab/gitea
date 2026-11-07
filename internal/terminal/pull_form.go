@@ -128,8 +128,12 @@ func (p *FormPrompter) CreatePull(ctx context.Context, choices PullFormChoices) 
 		values.AsDraft = next == pullSubmitDraft
 	}
 	values.Title, values.Assignees, values.Milestone, values.Labels = strings.TrimSpace(fields.title), fields.assignees, fields.milestone, fields.labels
-	if values.Deadline, err = parseDueDate(fields.deadline); err != nil {
+	deadline, ok, err := parseDueDate(fields.deadline)
+	if err != nil {
 		return values, err
+	}
+	if ok {
+		values.Deadline = &deadline
 	}
 	values.Agit, values.Base, values.Topic, values.AllowMaintainerEdits = branches.agit, strings.TrimSpace(branches.base), strings.TrimSpace(branches.topic), branches.allowEdits
 	values.Head = branches.head(choices.BaseOwner)

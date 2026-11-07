@@ -6,6 +6,7 @@
 package filelock
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
@@ -27,7 +28,7 @@ func lockFile(file *os.File, timeout time.Duration) error {
 		}
 
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for file lock")
+			return errors.New("timeout waiting for file lock")
 		}
 		time.Sleep(FileLockPollInterval)
 	}

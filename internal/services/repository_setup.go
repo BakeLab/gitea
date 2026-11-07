@@ -106,7 +106,7 @@ func (s Repositories) CreateChoices(ctx context.Context) (RepositoryCreateChoice
 	err := loadTogether(
 		func() error {
 			orgs, err := listEvery(50, func(limit, page int) (Page[Organization], error) {
-				return Organizations{Client: s.Client}.List(ctx, true, "", limit, page)
+				return Organizations(s).List(ctx, true, "", limit, page)
 			})
 			for _, org := range orgs {
 				choices.Organizations = append(choices.Organizations, org.Name)

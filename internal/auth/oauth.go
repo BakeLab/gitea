@@ -17,6 +17,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/transport"
+
 	"golang.org/x/oauth2"
 )
 

@@ -151,14 +151,15 @@ Unit and integration tests live beside their packages; see [Testing redux](#test
 
 ### Code Style
 Use `make fmt`, check with `make lint`.
-Group imports into the standard library, then all other packages (local and
-external) in one sorted block, as gofumpt keeps them:
+Group imports into the standard library, then `gitea.dev` packages, then other
+external packages, as `make fmt` sorts them:
 ```go
 import (
   "encoding/json"
   "fmt"
 
   "gitea.dev/cli/internal/services"
+
   "github.com/foo/bar"
   "gopkg.io/baz.v1"
 )

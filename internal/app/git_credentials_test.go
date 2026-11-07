@@ -15,6 +15,7 @@ import (
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/git/gittest"
 	"gitea.dev/cli/internal/settings"
+
 	"github.com/stretchr/testify/require"
 )
 

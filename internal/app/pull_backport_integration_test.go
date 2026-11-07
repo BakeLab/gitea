@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,7 +68,7 @@ func TestGiteaPullBackport(t *testing.T) {
 		var pull services.Pull
 		require.NoError(t, json.Unmarshal(execute("pr", "create", "-R", repo.FullName, "--head", branch, "--base", repo.DefaultBranch,
 			"--title", "Add "+style, "--body", "Body of "+style, "--label", "kind/bug", "--json"), &pull))
-		return fmt.Sprint(pull.Number)
+		return strconv.FormatInt(pull.Number, 10)
 	}
 	merge := func(number, style string) {
 		// Gitea checks mergeability in the background after a pull request is created or its base moves.
@@ -107,7 +109,7 @@ func TestGiteaPullBackport(t *testing.T) {
 		require.Equal(t, "release/v1", result.Pull.Base, style)
 		require.Equal(t, fmt.Sprintf("Add %s (#%s)", style, numbers[style]), result.Pull.Title, style)
 		var backport services.Pull
-		require.NoError(t, json.Unmarshal(execute("pr", "view", fmt.Sprint(result.Pull.Number), "-R", repo.FullName, "--json"), &backport))
+		require.NoError(t, json.Unmarshal(execute("pr", "view", strconv.FormatInt(result.Pull.Number, 10), "-R", repo.FullName, "--json"), &backport))
 		require.Equal(t, fmt.Sprintf("Backport #%s by @%s\n\nBody of %s", numbers[style], user, style), backport.Body, style)
 		require.Len(t, backport.Labels, 1, style)
 		require.Equal(t, "kind/bug", backport.Labels[0].Name, style)

@@ -5,6 +5,7 @@
 package aliases
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -34,16 +35,16 @@ func validate(name, expansion string, builtins map[string]bool) error {
 		return fmt.Errorf("invalid alias expansion: %w", err)
 	}
 	if len(words) == 0 {
-		return fmt.Errorf("alias expansion cannot be empty")
+		return errors.New("alias expansion cannot be empty")
 	}
 	if strings.HasPrefix(words[0], "!") {
-		return fmt.Errorf("shell aliases are not supported")
+		return errors.New("shell aliases are not supported")
 	}
 	// Expansion never runs a shell; rejecting common operators only flags misleading shortcuts.
 	for _, word := range words {
 		switch word {
 		case "|", "||", "&", "&&", ";", "<", ">", ">>", "2>":
-			return fmt.Errorf("shell aliases are not supported")
+			return errors.New("shell aliases are not supported")
 		}
 	}
 	return nil
@@ -140,13 +141,13 @@ func ExpandCompletion(args []string, definitions map[string]string, builtins map
 	for index, word := range expanded {
 		if strings.Contains(word, marker) {
 			if word != marker || position != -1 {
-				return nil, fmt.Errorf("completion of embedded or repeated placeholders is ambiguous")
+				return nil, errors.New("completion of embedded or repeated placeholders is ambiguous")
 			}
 			position = index
 		}
 	}
 	if position == -1 {
-		return nil, fmt.Errorf("alias completion lost its current argument")
+		return nil, errors.New("alias completion lost its current argument")
 	}
 	result := append([]string{}, expanded[:position]...)
 	result = append(result, expanded[position+1:]...)

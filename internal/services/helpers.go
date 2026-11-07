@@ -23,7 +23,7 @@ const maxListPages = 100
 // pageOf applies CLI pagination to a collection the API returns unpaginated.
 func pageOf[T any](items []T, limit, page int) ([]T, error) {
 	if limit < 1 || page < 1 {
-		return nil, fmt.Errorf("limit and page must be positive")
+		return nil, errors.New("limit and page must be positive")
 	}
 	if page-1 > len(items)/limit {
 		return []T{}, nil
@@ -139,8 +139,10 @@ type instancePageSizes struct{ max, standard int }
 
 // pageSizesOf returns the page sizes of client's instance. It asks once per client.
 func pageSizesOf(ctx context.Context, client *transport.Client) instancePageSizes {
-	if sizes, ok := pageSizes.Load(client); ok {
-		return sizes.(instancePageSizes)
+	if cached, ok := pageSizes.Load(client); ok {
+		if sizes, ok := cached.(instancePageSizes); ok {
+			return sizes
+		}
 	}
 	settings, _, err := call(ctx, client, func(ctx context.Context, c *gitea.Client) (*gitea.GlobalAPISettings, *gitea.Response, error) {
 		return c.Settings.GetGlobalAPISettings(ctx)
@@ -332,8 +334,9 @@ func (n NameOrID[T]) FindAll(items []T, raws []string) ([]T, error) {
 // would then no longer address. With update it runs edit on that item instead and reports true;
 // otherwise a *ConflictError refuses it.
 func (n NameOrID[T]) CreateUnique(existing []T, name string, update bool, create func() (T, error), edit func(T) (T, error)) (T, bool, error) {
-	n.ByName = true
-	current, err := n.Find(existing, name)
+	byName := n
+	byName.ByName = true
+	current, err := byName.Find(existing, name)
 	if errors.As(err, new(*NotFoundError)) {
 		item, err := create()
 		return item, false, err

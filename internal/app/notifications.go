@@ -17,6 +17,7 @@ import (
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/settings"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 )
 
@@ -155,7 +156,7 @@ func notificationFilters(cmd *cobra.Command, opts *services.NotificationOptions,
 	enumValues(cmd, "status", "unread", "read", "pinned")
 	cmd.Flags().StringSliceVar(&opts.Types, "type", nil, "Only notifications about these subjects: issue, pull, commit, repository")
 	enumValues(cmd, "type", "issue", "pull", "commit", "repository")
-	updated.register(cmd, "since", "Only notifications updated since a date, timestamp, or duration such as 24h", "until", "Only notifications updated before a date, timestamp, or duration such as 1h")
+	updated.register(cmd, "Only notifications updated since a date, timestamp, or duration such as 24h", "Only notifications updated before a date, timestamp, or duration such as 1h")
 	renameFlag(cmd, "before", "until")
 }
 
@@ -439,8 +440,12 @@ pinned.`,
 			}
 			var comment *services.Comment
 			if a.options.json == "" {
-				if comment, err = s.LatestComment(cmd.Context(), item); err != nil {
+				latest, found, err := s.LatestComment(cmd.Context(), item)
+				if err != nil {
 					return err
+				}
+				if found {
+					comment = &latest
 				}
 			}
 			// Marking is a side effect of viewing: a token without write:notification, or an

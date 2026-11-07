@@ -12,6 +12,7 @@ import (
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -259,7 +260,7 @@ func flagUsages(flags []*pflag.Flag) string {
 func wrap(text string, width int) string {
 	var lines []string
 	line := ""
-	for _, word := range strings.Fields(text) {
+	for word := range strings.FieldsSeq(text) {
 		if line != "" && len(line)+1+len(word) > width {
 			lines, line = append(lines, line), ""
 		}

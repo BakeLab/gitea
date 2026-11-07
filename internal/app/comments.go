@@ -6,6 +6,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 )
 
@@ -175,9 +177,9 @@ func lastComment(cmd *cobra.Command, t target, n int64) (services.Comment, error
 	if err != nil {
 		return services.Comment{}, err
 	}
-	for i := len(items) - 1; i >= 0; i-- {
-		if strings.EqualFold(items[i].Author, t.login()) {
-			return items[i], nil
+	for _, item := range slices.Backward(items) {
+		if strings.EqualFold(item.Author, t.login()) {
+			return item, nil
 		}
 	}
 	return services.Comment{}, fmt.Errorf("%s has no comments on %s#%d", t.login(), t.Repo, n)
@@ -267,7 +269,7 @@ func (a *application) writeComments(cmd *cobra.Command, t target, n int64, items
 	var text strings.Builder
 	for i, comment := range items {
 		if !d.TTY {
-			text.WriteString(fmt.Sprintf("id:\t%d\nauthor:\t%s\ncreated_at:\t%s\nurl:\t%s\n--\n", comment.ID, terminal.SafeLine(comment.Author), pipedTime(comment.CreatedAt), terminal.SafeLine(comment.URL)))
+			fmt.Fprintf(&text, "id:\t%d\nauthor:\t%s\ncreated_at:\t%s\nurl:\t%s\n--\n", comment.ID, terminal.SafeLine(comment.Author), pipedTime(comment.CreatedAt), terminal.SafeLine(comment.URL))
 			text.WriteString(strings.TrimRight(terminal.SafeText(comment.Body), "\n") + "\n--\n")
 			continue
 		}

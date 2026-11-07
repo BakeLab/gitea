@@ -17,6 +17,7 @@ import (
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/version"
+
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )

@@ -75,9 +75,9 @@ func TestMilestoneDeleteReturnsJSONSnapshotOnlyAfterSuccess(t *testing.T) {
 		require.Equal(t, "/api/v1/repos/alice/project/milestones/9", r.URL.Path)
 		require.Equal(t, http.MethodDelete, r.Method)
 		if fail {
-			w.WriteHeader(403)
+			w.WriteHeader(http.StatusForbidden)
 		} else {
-			w.WriteHeader(204)
+			w.WriteHeader(http.StatusNoContent)
 		}
 	}))
 	defer server.Close()
@@ -265,7 +265,7 @@ func TestBulkMilestoneStateContinuesAfterFailureAndKeepsJSONClean(t *testing.T) 
 		}
 		mutations = append(mutations, id)
 		if id == "10" {
-			w.WriteHeader(403)
+			w.WriteHeader(http.StatusForbidden)
 			return
 		}
 		_, _ = fmt.Fprintf(w, `{"id":%s,"title":"Milestone %s","state":"closed"}`, id, id)

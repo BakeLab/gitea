@@ -25,18 +25,15 @@ func outageServer(t *testing.T, statuses ...int) *Actions {
 			_, _ = w.Write([]byte(`{"workflows":[]}`))
 		case "/api/v1/repos/owner/repo/actions/runs/1":
 			polls++
-			status := 0
-			if polls <= len(statuses) {
-				status = statuses[polls-1]
-			} else {
+			if polls > len(statuses) {
 				_, _ = w.Write([]byte(`{"id":1,"status":"completed","conclusion":"success"}`))
 				return
 			}
-			switch status {
+			switch status := statuses[polls-1]; status {
 			case 0:
 				_, _ = w.Write([]byte(`{"id":1,"status":"in_progress"}`))
 			case -1:
-				conn, _, err := w.(http.Hijacker).Hijack()
+				conn, _, err := http.NewResponseController(w).Hijack()
 				require.NoError(t, err)
 				_ = conn.Close()
 			case -2:
@@ -193,7 +190,7 @@ func notificationOutageServer(t *testing.T, statuses ...int) Notifications {
 		case 1:
 			_, _ = w.Write([]byte(`[{"id":1,"unread":true,"subject":{"title":"Changed"}}]`))
 		case -1:
-			conn, _, err := w.(http.Hijacker).Hijack()
+			conn, _, err := http.NewResponseController(w).Hijack()
 			require.NoError(t, err)
 			_ = conn.Close()
 		case -2:

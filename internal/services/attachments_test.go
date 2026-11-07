@@ -19,6 +19,7 @@ import (
 
 	"gitea.dev/cli/internal/transport"
 	gitea "gitea.dev/sdk"
+
 	"github.com/stretchr/testify/require"
 )
 

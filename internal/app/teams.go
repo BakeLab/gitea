@@ -15,6 +15,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 )
 
@@ -271,39 +272,40 @@ func (f *teamFlags) register(cmd *cobra.Command, create bool) {
 	cmd.Flags().BoolVar(&f.allRepos, "all-repositories", false, "Access every organization repository (use =false to revoke)")
 }
 
-// unitPolicy validates --unit and returns the unit policy to send: all units at the --permission
+// unitPolicy validates --unit and sets the unit policy to send: all units at the --permission
 // level when it is passed (or, on create, without --unit), with --unit overriding single units.
 // Administrator teams get no policy, since they can do everything.
-func (f *teamFlags) unitPolicy(cmd *cobra.Command, create bool) (map[string]string, error) {
+func (f *teamFlags) unitPolicy(cmd *cobra.Command, create bool, opts *services.TeamOptions) error {
 	changed := cmd.Flags().Changed("unit")
 	if changed && len(f.units) == 0 {
-		return nil, clierr.Wrap(clierr.Usage, errors.New("--unit needs at least one unit, such as repo.code=write"))
+		return clierr.Wrap(clierr.Usage, errors.New("--unit needs at least one unit, such as repo.code=write"))
 	}
 	if changed && f.permission == "admin" {
-		return nil, clierr.Wrap(clierr.Usage, errors.New("--unit cannot restrict administrator access"))
+		return clierr.Wrap(clierr.Usage, errors.New("--unit cannot restrict administrator access"))
 	}
 	for unit, access := range f.units {
 		levels := services.UnitAccess(unit)
 		if levels == nil {
-			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("unknown unit %q; use one of %s", unit, strings.Join(slices.Concat(services.TeamUnits, services.ExternalTeamUnits), ", ")))
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("unknown unit %q; use one of %s", unit, strings.Join(slices.Concat(services.TeamUnits, services.ExternalTeamUnits), ", ")))
 		}
 		if !slices.Contains(levels, access) {
-			return nil, clierr.Wrap(clierr.Usage, fmt.Errorf("--unit %s=%s: access must be %s", unit, access, strings.Join(levels, ", ")))
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--unit %s=%s: access must be %s", unit, access, strings.Join(levels, ", ")))
 		}
 	}
 	var policy map[string]string
 	switch {
 	case f.permission == "admin":
-		return nil, nil
+		return nil
 	case cmd.Flags().Changed("permission") || (create && !changed):
 		policy = services.UnitPolicy(f.permission)
 	case changed:
 		policy = map[string]string{}
 	default:
-		return nil, nil
+		return nil
 	}
 	maps.Copy(policy, f.units)
-	return policy, nil
+	opts.Units = policy
+	return nil
 }
 
 func (f *teamFlags) options(cmd *cobra.Command) services.TeamOptions {
@@ -380,15 +382,14 @@ $ gt team create acme ops --permission admin --all-repositories`,
 			if cmd.Flags().Changed("name") {
 				name = flags.name
 			}
-			units, err := flags.unitPolicy(cmd, true)
-			if err != nil {
+			opts := flags.options(cmd)
+			if err := flags.unitPolicy(cmd, true, &opts); err != nil {
 				return err
 			}
 			if _, err := a.requireInput(cmd, &name, "name", "Team name", nil); err != nil {
 				return err
 			}
-			opts := flags.options(cmd)
-			opts.Name, opts.Permission, opts.CanCreateRepo, opts.AllRepositories, opts.Units = &name, &flags.permission, &flags.createRepo, &flags.allRepos, units
+			opts.Name, opts.Permission, opts.CanCreateRepo, opts.AllRepositories = &name, &flags.permission, &flags.createRepo, &flags.allRepos
 			target, err := a.resolve(cmd.Context(), false)
 			if err != nil {
 				return err
@@ -425,18 +426,17 @@ $ gt team edit acme/developers --name devs --description "Core developers"`,
 			if replaceUnits && !cmd.Flags().Changed("unit") {
 				return clierr.Wrap(clierr.Usage, errors.New("--unit-replace requires --unit"))
 			}
-			units, err := flags.unitPolicy(cmd, false)
-			if err != nil {
+			opts := flags.options(cmd)
+			if err := flags.unitPolicy(cmd, false, &opts); err != nil {
 				return err
 			}
-			opts := flags.options(cmd)
 			if cmd.Flags().Changed("name") {
 				if strings.TrimSpace(flags.name) == "" {
 					return clierr.Wrap(clierr.Usage, errors.New("team name cannot be empty"))
 				}
 				opts.Name = &flags.name
 			}
-			opts.Units, opts.ReplaceUnits = units, replaceUnits || cmd.Flags().Changed("permission")
+			opts.ReplaceUnits = replaceUnits || cmd.Flags().Changed("permission")
 			if opts.Name == nil && opts.Description == nil && opts.Permission == nil && opts.Units == nil && opts.CanCreateRepo == nil && opts.AllRepositories == nil {
 				return clierr.Wrap(clierr.Usage, errors.New("supply team fields to edit"))
 			}

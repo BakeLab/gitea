@@ -16,6 +16,7 @@ import (
 
 	"gitea.dev/cli/internal/extensions"
 	"gitea.dev/cli/internal/services"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

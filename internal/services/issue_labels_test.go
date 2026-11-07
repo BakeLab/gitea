@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	gitea "gitea.dev/sdk"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -123,7 +124,7 @@ func TestPullEditSendsThePullFieldsBeforeTheLabels(t *testing.T) {
 			ids, base := []int64{3}, "stable"
 			item, err := (Pulls{Client: client, Repository: "alice/project"}).Edit(context.Background(), 7, PullEdit{Labels: &ids, Base: &base})
 			require.ErrorContains(t, err, tc.want)
-			require.True(t, IsForbidden(err) == (tc.status == http.StatusForbidden))
+			require.Equal(t, tc.status == http.StatusForbidden, IsForbidden(err))
 			require.Equal(t, "stable", item.Base, "the edited pull request is returned")
 			require.Equal(t, []string{
 				"GET /api/v1/repos/alice/project/pulls/7", "PATCH /api/v1/repos/alice/project/pulls/7",

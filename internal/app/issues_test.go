@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/terminal"
+
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -259,7 +259,7 @@ func TestIssueCreateImplicitInteractiveForm(t *testing.T) {
 	require.Equal(t, "Interactive", createPayload["title"])
 	require.Equal(t, "Body text", createPayload["body"])
 	require.Equal(t, []any{"alice"}, createPayload["assignees"])
-	require.Equal(t, float64(4), createPayload["milestone"])
+	require.InDelta(t, float64(4), createPayload["milestone"], 0)
 	require.Equal(t, []any{float64(2)}, createPayload["labels"])
 	require.Equal(t, "2028-01-15T23:59:59Z", createPayload["due_date"])
 	require.JSONEq(t, `{"number":9,"url":"https://example.org/alice/project/issues/9"}`, out.String())
@@ -302,7 +302,7 @@ func TestIssueCreateFormOffersMetadataWithoutPushAndNamesWhatGiteaLeftOut(t *tes
 	require.Equal(t, []terminal.IssueLabelChoice{{Name: "bug", ID: 2}, {Name: "docs", ID: 3}}, form.choices.Labels)
 	require.Equal(t, []any{float64(2), float64(3)}, created[0]["labels"], "with the labels of the template")
 	require.Equal(t, []any{"alice"}, created[0]["assignees"])
-	require.Equal(t, float64(4), created[0]["milestone"])
+	require.InDelta(t, float64(4), created[0]["milestone"], 0)
 	require.Empty(t, diagnostics.String())
 
 	out.Reset()

@@ -15,6 +15,7 @@ import (
 	"gitea.dev/cli/internal/auth"
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
+
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )

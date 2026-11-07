@@ -15,6 +15,7 @@ import (
 	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/services"
 	"gitea.dev/cli/internal/terminal"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

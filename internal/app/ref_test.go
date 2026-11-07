@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/settings"
+
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -99,9 +101,7 @@ func refApplicationWith(t *testing.T, serverURL string, gitResults map[string]st
 		"remote get-url fork":                serverURL + "/bob/project.git",
 		"remote get-url pulls/carol/project": serverURL + "/carol/project.git",
 	}
-	for key, value := range gitResults {
-		results[key] = value
-	}
+	maps.Copy(results, gitResults)
 	deps.Git = &fakeGit{results: results}
 	return &application{deps: deps}, serverURL
 }
@@ -206,7 +206,8 @@ func TestResolveRefSelectsTheReferencedRepository(t *testing.T) {
 	requireBareRefAdvice(t, a, mixed, "#2 cannot be combined with "+serverURL+"/bob/tool/issues/3; qualify it as bob/tool#2, or run a separate command for alice/project#2", "GITEA_CLI_REPO")
 	environment := a.deps.Getenv
 	a.deps.Getenv = serverEnv(serverURL, nil)
-	fake := a.deps.Git.(*fakeGit)
+	fake, ok := a.deps.Git.(*fakeGit)
+	require.True(t, ok)
 	fake.results["remote"] = "origin"
 	requireBareRefAdvice(t, a, []string{"2", "bob/tool#1"}, "2 cannot be combined with bob/tool#1; qualify it as bob/tool#2, or run a separate command for alice/project#2", "a clone of another repository")
 	for _, origin := range []string{serverURL + "/bob/tool.git", "https://github.com/foo/bar.git", "ssh://git@127.0.0.1:2222/alice/project.git"} {

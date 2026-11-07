@@ -183,7 +183,7 @@ func (s Actions) JobLogs(ctx context.Context, id int64) (io.ReadCloser, error) {
 // A shorter snapshot fails rather than silently mixing logs from different attempts.
 func (s Actions) FollowJobLogs(ctx context.Context, run, id int64, interval time.Duration, emit func([]byte) error) error {
 	if interval <= 0 {
-		return fmt.Errorf("log polling interval must be positive")
+		return errors.New("log polling interval must be positive")
 	}
 	var offset int64
 	var attempt int64
@@ -219,7 +219,7 @@ func (s Actions) FollowJobLogs(ctx context.Context, run, id int64, interval time
 			current = &earlier
 		}
 		if attempt != 0 && current.RunAttempt != attempt {
-			return fmt.Errorf("job attempt changed while following logs; restart with the current attempt")
+			return errors.New("job attempt changed while following logs; restart with the current attempt")
 		}
 		attempt = current.RunAttempt
 		logs, err := s.JobLogs(ctx, id)

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/settings"
+
 	"github.com/zalando/go-keyring"
 )
 

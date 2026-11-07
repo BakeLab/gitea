@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -74,7 +75,7 @@ func WithSecrets(ctx context.Context, values ...string) context.Context {
 	known, _ := ctx.Value(secrets{}).([]string)
 	for _, value := range values {
 		if value != "" {
-			known = append(known[:len(known):len(known)], value)
+			known = append(slices.Clip(known), value)
 		}
 	}
 	return context.WithValue(ctx, secrets{}, known)

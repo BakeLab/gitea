@@ -315,7 +315,7 @@ func (s Branches) Unprotect(ctx context.Context, repo, rule string) (bool, error
 		return c.Repositories.DeleteBranchProtection(ctx, owner, name, rule)
 	})
 	if IsNotFound(err) {
-		if _, err := (Repositories{Client: s.Client}).get(ctx, repo); err != nil {
+		if _, err := Repositories(s).get(ctx, repo); err != nil {
 			return false, err
 		}
 		return false, nil

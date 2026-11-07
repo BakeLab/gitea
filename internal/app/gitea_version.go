@@ -11,6 +11,7 @@ import (
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/extensions"
 	"gitea.dev/cli/internal/services"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

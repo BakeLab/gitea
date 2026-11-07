@@ -64,12 +64,12 @@ func (s Templates) License(ctx context.Context, key string) (License, error) {
 		}
 		return License{Key: license.Key, Name: license.Name, URL: license.URL, Body: license.Body, Implementation: license.Implementation}, nil
 	}
-	return fetchIgnoringCase(ctx, "license", key, fetch, Repositories{Client: s.Client}.Licenses)
+	return fetchIgnoringCase(ctx, "license", key, fetch, Repositories(s).Licenses)
 }
 
 // Gitignores lists the names of the .gitignore templates.
 func (s Templates) Gitignores(ctx context.Context) ([]GitignoreEntry, error) {
-	names, err := Repositories{Client: s.Client}.Gitignores(ctx)
+	names, err := Repositories(s).Gitignores(ctx)
 	entries := make([]GitignoreEntry, len(names))
 	for i, name := range names {
 		entries[i] = GitignoreEntry{Name: name}
@@ -89,7 +89,7 @@ func (s Templates) Gitignore(ctx context.Context, name string) (Gitignore, error
 		}
 		return Gitignore{Name: template.Name, Source: template.Source}, nil
 	}
-	return fetchIgnoringCase(ctx, ".gitignore template", name, fetch, Repositories{Client: s.Client}.Gitignores)
+	return fetchIgnoringCase(ctx, ".gitignore template", name, fetch, Repositories(s).Gitignores)
 }
 
 // fetchIgnoringCase fetches the template called name, or the one that list names without regard to

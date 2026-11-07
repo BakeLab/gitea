@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"gitea.dev/cli/internal/services"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,14 +38,14 @@ func TestGiteaActivityFeeds(t *testing.T) {
 	scoped := func(args ...string) []byte { return as(append(args, "-R", repo.FullName)...) }
 	var issue services.Issue
 	require.NoError(t, json.Unmarshal(scoped("issue", "create", "--title", "Crash on start", "--body", "b", "--json"), &issue))
-	scoped("issue", "comment", "create", fmt.Sprint(issue.Number), "--body", "Looks good to me")
-	scoped("issue", "close", fmt.Sprint(issue.Number))
+	scoped("issue", "comment", "create", strconv.FormatInt(issue.Number, 10), "--body", "Looks good to me")
+	scoped("issue", "close", strconv.FormatInt(issue.Number, 10))
 	scoped("branch", "create", "feature")
 	deps.Streams.In = strings.NewReader(fmt.Sprintf(`{"branch":"feature","content":%q,"message":"Add the feature"}`, base64.StdEncoding.EncodeToString([]byte("x\n"))))
 	as("api", "repos/"+repo.FullName+"/contents/feature.txt", "--input", "-")
 	var pull services.Pull
 	require.NoError(t, json.Unmarshal(scoped("pr", "create", "--title", "The feature", "--body", "b", "--head", "feature", "--base", repo.DefaultBranch, "--json"), &pull))
-	scoped("pr", "merge", fmt.Sprint(pull.Number), "--squash", "--yes")
+	scoped("pr", "merge", strconv.FormatInt(pull.Number, 10), "--squash", "--yes")
 	scoped("release", "create", "v1", "--title", "One", "--notes", "n")
 
 	run := func(args ...string) string {

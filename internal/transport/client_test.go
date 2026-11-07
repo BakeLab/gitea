@@ -30,12 +30,13 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/version"
+
 	"github.com/stretchr/testify/require"
 )
 
 func TestInstanceScopeAndRedirect(t *testing.T) {
 	leaked := false
-	outside := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked = true; w.WriteHeader(200) }))
+	outside := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked = true; w.WriteHeader(http.StatusOK) }))
 	defer outside.Close()
 	selected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/base/api/v1/user", r.URL.Path)
@@ -44,8 +45,11 @@ func TestInstanceScopeAndRedirect(t *testing.T) {
 	}))
 	defer selected.Close()
 	client := New(selected.URL+"/base", "secret", false)
-	_, err := client.Do(context.Background(), http.MethodGet, "user", nil, nil)
+	response, err := client.Do(context.Background(), http.MethodGet, "user", nil, nil)
 	require.Error(t, err)
+	if response != nil {
+		defer response.Body.Close()
+	}
 	require.False(t, leaked)
 	for _, endpoint := range []string{outside.URL + "/api/v1/user", strings.Replace(selected.URL, "http:", "https:", 1) + "/base/api/v1/user", selected.URL + "/api/v1/user", "../user", selected.URL + "/base/api/v1/../../other", "//other.example/api/v1/user", "repos/a\\b", "repos/a%5C..%5Cb"} {
 		_, err := client.URL(endpoint)
@@ -57,8 +61,11 @@ func TestCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	client := New("https://example.org", "", false)
-	_, err := client.Do(ctx, http.MethodGet, "user", nil, nil)
+	response, err := client.Do(ctx, http.MethodGet, "user", nil, nil)
 	require.ErrorIs(t, err, context.Canceled)
+	if response != nil {
+		defer response.Body.Close()
+	}
 }
 
 func TestURLPreservesEscapedSegments(t *testing.T) {
@@ -102,9 +109,12 @@ func TestAPIErrorIncludesOnlySanitizedServerMessage(t *testing.T) {
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer server.Close()
-			_, err := New(server.URL, "secret", false).Do(context.Background(), http.MethodPost, "repos/a/b/pulls/1/merge?key=abc", strings.NewReader(`{}`), nil)
+			response, err := New(server.URL, "secret", false).Do(context.Background(), http.MethodPost, "repos/a/b/pulls/1/merge?key=abc", strings.NewReader(`{}`), nil)
 			var apiErr *APIError
 			require.ErrorAs(t, err, &apiErr)
+			if response != nil {
+				defer response.Body.Close()
+			}
 			require.Equal(t, tc.status, apiErr.Status)
 			require.Equal(t, tc.want, err.Error())
 			require.NotContains(t, err.Error(), "abc")
@@ -143,7 +153,10 @@ func TestTransportBoundsOnlySetupAndSendsUserAgent(t *testing.T) {
 	client := New(server.URL, "secret", false)
 	// A whole-request timeout would cut off long uploads and downloads that are still progressing.
 	require.Zero(t, client.HTTP.Timeout)
-	tr := client.HTTP.Transport.(userAgentTransport).base.(*http.Transport)
+	transport, ok := client.HTTP.Transport.(userAgentTransport)
+	require.True(t, ok)
+	tr, ok := transport.base.(*http.Transport)
+	require.True(t, ok)
 	require.Zero(t, tr.ResponseHeaderTimeout, "a synchronous migration answers only when it is done")
 	require.Equal(t, 10*time.Second, tr.TLSHandshakeTimeout)
 	for _, open := range []func() (*http.Response, error){
@@ -164,16 +177,22 @@ func TestNetworkErrorsKeepCauseWithoutURL(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	server.Close()
 	client := New(server.URL, "secret", false)
-	_, err := client.Do(context.Background(), http.MethodPost, "user?token=query-secret", strings.NewReader(`{}`), nil)
+	apiResponse, err := client.Do(context.Background(), http.MethodPost, "user?token=query-secret", strings.NewReader(`{}`), nil)
 	var opErr *net.OpError
 	require.ErrorAs(t, err, &opErr)
+	if apiResponse != nil {
+		defer apiResponse.Body.Close()
+	}
 	require.ErrorContains(t, err, "API request failed: ")
 	require.NotContains(t, err.Error(), "query-secret")
 	var failure *RequestFailure
 	require.ErrorAs(t, err, &failure)
 	require.Equal(t, server.URL, failure.Server)
-	_, err = client.Download(context.Background(), server.URL+"/file?signature=query-secret")
+	downloadResponse, err := client.Download(context.Background(), server.URL+"/file?signature=query-secret")
 	require.ErrorAs(t, err, &opErr)
+	if downloadResponse != nil {
+		defer downloadResponse.Body.Close()
+	}
 	require.ErrorContains(t, err, "download failed: ")
 	require.NotContains(t, err.Error(), "query-secret")
 }
@@ -194,18 +213,27 @@ func TestDebugLogsRequestsWithoutSecrets(t *testing.T) {
 	defer server.Close()
 	var log bytes.Buffer
 	client := New(server.URL, "secret-token", false).Debug(&log)
-	_, err := client.Do(context.Background(), http.MethodGet, "repos/a/b?page=2&state=open&token=query-secret&access_token=query-secret", nil, nil)
+	teapotResponse, err := client.Do(context.Background(), http.MethodGet, "repos/a/b?page=2&state=open&token=query-secret&access_token=query-secret", nil, nil)
 	require.Error(t, err)
+	if teapotResponse != nil {
+		defer teapotResponse.Body.Close()
+	}
 	require.Regexp(t, `^\[debug\] GET `+regexp.QuoteMeta(server.URL)+`/api/v1/repos/a/b\?access_token=REDACTED&page=2&state=open&token=REDACTED -> 418 I'm a teapot \(\d+(\.\d+)?[µm]?s\)\n$`, log.String())
 	log.Reset()
-	_, err = client.Do(context.Background(), http.MethodGet, "repos/a/b/labels/8", nil, nil)
+	notFoundResponse, err := client.Do(context.Background(), http.MethodGet, "repos/a/b/labels/8", nil, nil)
 	require.Regexp(t, `-> 404 Not Found \(\d+(\.\d+)?[µm]?s\): label does not exist \[label_id: 8\]\n$`, log.String())
 	var apiErr *APIError
 	require.ErrorAs(t, err, &apiErr)
+	if notFoundResponse != nil {
+		defer notFoundResponse.Body.Close()
+	}
 	require.Equal(t, "label does not exist [label_id: 8]", apiErr.Message, "the logged body stays readable")
 	log.Reset()
-	_, err = client.Do(context.Background(), http.MethodGet, "repos/a/b/labels/9", nil, nil)
+	redactedResponse, err := client.Do(context.Background(), http.MethodGet, "repos/a/b/labels/9", nil, nil)
 	require.Error(t, err)
+	if redactedResponse != nil {
+		defer redactedResponse.Body.Close()
+	}
 	require.Regexp(t, `-> 404 Not Found \(\d+(\.\d+)?[µm]?s\)\n$`, log.String(), "a message echoing the token is dropped")
 	require.NotContains(t, log.String(), "secret")
 }
@@ -217,8 +245,11 @@ func TestDebugLogsWhyARequestTimedOut(t *testing.T) {
 	defer server.Close()
 	var log bytes.Buffer
 	client := New(server.URL, "", false).Debug(&log).WithResponseTimeout(20 * time.Millisecond)
-	_, err := client.Do(context.Background(), http.MethodGet, "version", nil, nil)
+	response, err := client.Do(context.Background(), http.MethodGet, "version", nil, nil)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+	if response != nil {
+		defer response.Body.Close()
+	}
 	require.ErrorIs(t, err, ErrTimeout, "told apart from the end of the caller's deadline")
 	require.ErrorContains(t, err, "no answer within 20ms")
 	require.Regexp(t, `-> error: no answer within 20ms: context deadline exceeded \(\d+(\.\d+)?[µm]?s\)\n$`, log.String())
@@ -251,7 +282,9 @@ func TestDebugRedactsOnlySensitiveQueryValues(t *testing.T) {
 
 func TestDebugStripsControlsFromTheStatusLine(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		conn, rw, err := w.(http.Hijacker).Hijack()
+		hijacker, ok := w.(http.Hijacker)
+		require.True(t, ok)
+		conn, rw, err := hijacker.Hijack()
 		if err != nil {
 			return
 		}
@@ -261,8 +294,9 @@ func TestDebugStripsControlsFromTheStatusLine(t *testing.T) {
 	}))
 	defer server.Close()
 	var log bytes.Buffer
-	_, err := New(server.URL, "t", false).Debug(&log).Do(context.Background(), http.MethodGet, "version", nil, nil)
+	response, err := New(server.URL, "t", false).Debug(&log).Do(context.Background(), http.MethodGet, "version", nil, nil)
 	require.NoError(t, err)
+	defer response.Body.Close()
 	require.NotContains(t, log.String(), "\x1b")
 	require.NotContains(t, log.String(), "\x07")
 	require.Contains(t, log.String(), "-> 200 OK")
@@ -336,7 +370,7 @@ func TestClientCertificatesAreLoadedForInstancesThatRequireThem(t *testing.T) {
 	redirecting.StartTLS()
 	defer redirecting.Close()
 	client := New(redirecting.URL, "", true).WithClientCertificate(certFile, keyFile)
-	trustOtherHosts(client, storage)
+	trustOtherHosts(t, client, storage)
 	response, err := client.DownloadSigned(context.Background(), redirecting.URL+"/attachments/x")
 	require.NoError(t, err)
 	_ = response.Body.Close()
@@ -371,10 +405,13 @@ func TestInsecureSkipsVerificationOnlyForTheInstance(t *testing.T) {
 	response, err := client.Send(context.Background(), http.MethodGet, "version", nil, nil)
 	require.NoError(t, err)
 	_ = response.Body.Close()
-	_, err = client.DownloadSigned(context.Background(), server.URL+"/attachments/x")
+	untrustedResponse, err := client.DownloadSigned(context.Background(), server.URL+"/attachments/x")
 	var untrusted *tls.CertificateVerificationError
 	require.ErrorAs(t, err, &untrusted)
-	trustOtherHosts(client, storage)
+	if untrustedResponse != nil {
+		defer untrustedResponse.Body.Close()
+	}
+	trustOtherHosts(t, client, storage)
 	response, err = client.DownloadSigned(context.Background(), server.URL+"/attachments/x")
 	require.NoError(t, err)
 	defer response.Body.Close()
@@ -399,9 +436,17 @@ func TestInstanceHostMatchesIgnoringCase(t *testing.T) {
 
 // trustOtherHosts makes the hosts other than the instance of an insecure client trust the
 // certificate of server.
-func trustOtherHosts(client *Client, server *httptest.Server) {
-	other := client.HTTP.Transport.(userAgentTransport).base.(hostTransport).other.(*http.Transport)
-	other.TLSClientConfig.RootCAs = server.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+func trustOtherHosts(t *testing.T, client *Client, server *httptest.Server) {
+	t.Helper()
+	transport, ok := client.HTTP.Transport.(userAgentTransport)
+	require.True(t, ok)
+	host, ok := transport.base.(hostTransport)
+	require.True(t, ok)
+	other, ok := host.other.(*http.Transport)
+	require.True(t, ok)
+	serverTransport, ok := server.Client().Transport.(*http.Transport)
+	require.True(t, ok)
+	other.TLSClientConfig.RootCAs = serverTransport.TLSClientConfig.RootCAs
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -430,13 +475,19 @@ func TestSignedDownloadNamesTheStorageHostThatRefusesIt(t *testing.T) {
 	}))
 	defer server.Close()
 	client := New(server.URL, "", false)
-	_, err := client.DownloadSigned(context.Background(), server.URL+"/attachments/x")
+	storageResponse, err := client.DownloadSigned(context.Background(), server.URL+"/attachments/x")
 	storageURL, _ := url.Parse(storage.URL)
 	require.EqualError(t, err, "storage host "+storageURL.Host+" refused the signed download with HTTP 403; the signed URL may have expired, so try again")
+	if storageResponse != nil {
+		defer storageResponse.Body.Close()
+	}
 	var failure *APIError
 	require.ErrorAs(t, err, &failure)
 	require.Equal(t, http.StatusForbidden, failure.Status)
 	// The instance's own refusal keeps its wording.
-	_, err = client.DownloadSigned(context.Background(), server.URL+"/attachments/gone")
+	instanceResponse, err := client.DownloadSigned(context.Background(), server.URL+"/attachments/gone")
 	require.EqualError(t, err, "permission denied by the Gitea instance")
+	if instanceResponse != nil {
+		defer instanceResponse.Body.Close()
+	}
 }

@@ -16,9 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"gitea.dev/cli/internal/clierr"
+
 	gt "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
-	"gitea.dev/cli/internal/clierr"
 	"github.com/stretchr/testify/require"
 )
 

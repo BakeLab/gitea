@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"gitea.dev/cli/internal/services"
+
 	"github.com/spf13/cobra"
 )
 

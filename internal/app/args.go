@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gitea.dev/cli/internal/clierr"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -158,24 +159,23 @@ func durationAgo(value string) (time.Duration, error) {
 	return time.ParseDuration(value)
 }
 
-// timeRange is a pair of lower and upper time bound flags.
+// timeRange is a pair of --since and --until time bound flags.
 type timeRange struct {
 	flags  *pflag.FlagSet
-	names  [2]string
 	values [2]string
 }
 
-// register adds the lower and upper bound flags to cmd.
-func (r *timeRange) register(cmd *cobra.Command, lower, lowerUsage, upper, upperUsage string) {
-	r.flags, r.names = cmd.Flags(), [2]string{lower, upper}
-	r.flags.StringVar(&r.values[0], lower, "", lowerUsage)
-	r.flags.StringVar(&r.values[1], upper, "", upperUsage)
+// register adds the --since and --until flags to cmd.
+func (r *timeRange) register(cmd *cobra.Command, sinceUsage, untilUsage string) {
+	r.flags = cmd.Flags()
+	r.flags.StringVar(&r.values[0], "since", "", sinceUsage)
+	r.flags.StringVar(&r.values[1], "until", "", untilUsage)
 }
 
 // parse returns the bounds that were set and rejects inverted ranges.
 func (r *timeRange) parse(now time.Time) (since, until *time.Time, err error) {
 	var bounds [2]*time.Time
-	for i, flag := range r.names {
+	for i, flag := range [2]string{"since", "until"} {
 		if !r.flags.Changed(flag) {
 			continue
 		}
@@ -184,7 +184,7 @@ func (r *timeRange) parse(now time.Time) (since, until *time.Time, err error) {
 		}
 	}
 	if bounds[0] != nil && bounds[1] != nil && bounds[0].After(*bounds[1]) {
-		return nil, nil, clierr.Wrap(clierr.Usage, fmt.Errorf("--%s must not be later than --%s", r.names[0], r.names[1]))
+		return nil, nil, clierr.Wrap(clierr.Usage, errors.New("--since must not be later than --until"))
 	}
 	return bounds[0], bounds[1], nil
 }

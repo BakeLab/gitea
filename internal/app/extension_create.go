@@ -13,6 +13,7 @@ import (
 
 	"gitea.dev/cli/internal/clierr"
 	"gitea.dev/cli/internal/extensions"
+
 	"github.com/spf13/cobra"
 )
 

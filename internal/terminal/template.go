@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -56,7 +57,7 @@ func (o JSONOutput) templateFuncs(rows *[][]string) template.FuncMap {
 				return "", fmt.Errorf("color: unknown modifier %q in %q", m, style)
 			}
 		}
-		attributes = append(attributes, fmt.Sprint(code))
+		attributes = append(attributes, strconv.Itoa(code))
 		return "\x1b[" + strings.Join(attributes, ";") + "m" + input + "\x1b[0m", nil
 	}
 	parse := func(v any) (time.Time, error) {
