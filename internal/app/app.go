@@ -77,7 +77,7 @@ func System() Dependencies {
 	streams := terminal.System()
 	store := settings.New(os.Getenv("GITEA_CLI_CONFIG_DIR"))
 	prompter := &terminal.FormPrompter{Streams: streams}
-	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: streams.ErrOut}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, ReleaseForm: prompter, RepoForm: prompter, LabelForm: prompter, Getenv: os.Getenv, LookupEnv: os.LookupEnv, Client: transport.New, DataDir: settings.DataDir(os.Getenv("GITEA_CLI_DATA_DIR")), PolicyFile: settings.PolicyPath(), Environ: os.Environ, RunExtension: extensions.Run, GitHub: github.New}
+	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: streams.ErrOut, Reads: &git.ReadCache{}}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, ReleaseForm: prompter, RepoForm: prompter, LabelForm: prompter, Getenv: os.Getenv, LookupEnv: os.LookupEnv, Client: transport.New, DataDir: settings.DataDir(os.Getenv("GITEA_CLI_DATA_DIR")), PolicyFile: settings.PolicyPath(), Environ: os.Environ, RunExtension: extensions.Run, GitHub: github.New}
 }
 
 type options struct {
@@ -114,6 +114,8 @@ type application struct {
 	// command is the command being run; serverVersions caches each instance's Gitea version.
 	command        *cobra.Command
 	serverVersions map[string]string
+	// clients are the clients sharedClient built, by instance and token.
+	clients map[string]*transport.Client
 	// extensionAliases are the top-level aliases installed extensions declare that gt runs.
 	extensionAliases map[string]extensionAlias
 	// dryRunRequests collects the write requests that --dry-run withheld.

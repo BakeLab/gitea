@@ -51,44 +51,61 @@ func (s Status) Pulls(ctx context.Context, limit int) (PullStatus, error) {
 		return result, errors.New("status limit must be 1..100")
 	}
 	scoped := Issues{Client: s.Client, Repository: s.Repository}
-	opts := DiscussionSearchOptions{Pulls: true, State: "open", Limit: limit, Page: 1, Authored: true}
-	var err error
-	result.Authored, err = scoped.Search(ctx, opts)
-	if err != nil {
-		return result, err
+	search := func(dest *[]SearchItem, opts DiscussionSearchOptions) func() error {
+		opts.Pulls, opts.State, opts.Limit, opts.Page = true, "open", limit, 1
+		return func() (err error) {
+			*dest, err = scoped.Search(ctx, opts)
+			return err
+		}
 	}
-	opts.Authored, opts.Assigned = false, true
-	result.Assigned, err = scoped.Search(ctx, opts)
-	if err != nil {
-		return result, err
+	loaders := []func() error{
+		search(&result.Authored, DiscussionSearchOptions{Authored: true}),
+		search(&result.Assigned, DiscussionSearchOptions{Assigned: true}),
 	}
-	opts.Assigned, opts.ReviewRequested = false, true
 	if s.Repository == "" {
-		result.ReviewRequested, err = scoped.Search(ctx, opts)
-		return result, err
-	}
-	// Gitea exposes review filters only on instance-wide search. Filter after
-	// pagination so requests from other repositories do not consume the limit.
-	opts.Owner = strings.SplitN(s.Repository, "/", 2)[0]
-	opts.Limit = 100
-	for opts.Page = 1; opts.Page <= maxListPages; opts.Page++ {
-		items, err := (Issues{Client: s.Client}).Search(ctx, opts)
-		if err != nil {
+		loaders = append(loaders, search(&result.ReviewRequested, DiscussionSearchOptions{ReviewRequested: true}))
+	} else {
+		// The repository searches share this lookup, which concurrent callers would each send.
+		if _, err := CurrentAccount(ctx, s.Client); err != nil {
 			return result, err
 		}
-		if len(items) == 0 {
-			return result, nil
+		loaders = append(loaders, func() (err error) {
+			result.ReviewRequested, err = s.requestedReviews(ctx, limit, result.ReviewRequested)
+			return err
+		})
+	}
+	err := loadFirstError(loaders...)
+	return result, err
+}
+
+// requestedReviews appends up to limit open pull requests of the repository that request a review.
+// Gitea exposes review filters only on instance-wide search. Filter after pagination so requests
+// from other repositories do not consume the limit.
+func (s Status) requestedReviews(ctx context.Context, limit int, found []SearchItem) ([]SearchItem, error) {
+	opts := DiscussionSearchOptions{
+		Pulls: true, State: "open", Limit: 100, ReviewRequested: true,
+		Owner: strings.SplitN(s.Repository, "/", 2)[0],
+	}
+	seen := 0
+	for opts.Page = 1; opts.Page <= maxListPages; opts.Page++ {
+		page, err := (Issues{Client: s.Client}).SearchPage(ctx, opts)
+		if err != nil {
+			return found, err
 		}
-		for _, item := range items {
+		for _, item := range page.Items {
 			if strings.EqualFold(item.Repository, s.Repository) {
-				result.ReviewRequested = append(result.ReviewRequested, item)
-				if len(result.ReviewRequested) == limit {
-					return result, nil
+				found = append(found, item)
+				if len(found) == limit {
+					return found, nil
 				}
 			}
 		}
+		seen += len(page.Items)
+		if len(page.Items) == 0 || page.Counted && !page.More && seen == page.Total {
+			return found, nil
+		}
 	}
-	return result, fmt.Errorf("review requests exceeded %d pages", maxListPages)
+	return found, fmt.Errorf("review requests exceeded %d pages", maxListPages)
 }
 
 // Summary reports open assigned issues and pull requests and mentions. Failing Actions runs of
@@ -104,22 +121,30 @@ func (s Status) Summary(ctx context.Context, limit int, runsRepository string, d
 		return result, err
 	}
 	result.User = account
-	result.PullRequests, err = s.Pulls(ctx, limit)
-	if err != nil {
-		return result, err
-	}
 	scoped := Issues{Client: s.Client, Repository: s.Repository}
-	result.AssignedIssues, err = scoped.Search(ctx, DiscussionSearchOptions{State: "open", Assigned: true, Limit: limit, Page: 1})
+	var mentionedIssues, mentionedPulls []SearchItem
+	err = loadFirstError(
+		func() (err error) {
+			result.PullRequests, err = s.Pulls(ctx, limit)
+			return err
+		},
+		func() (err error) {
+			result.AssignedIssues, err = scoped.Search(ctx, DiscussionSearchOptions{State: "open", Assigned: true, Limit: limit, Page: 1})
+			return err
+		},
+		func() (err error) {
+			mentionedIssues, err = scoped.Search(ctx, DiscussionSearchOptions{State: "open", Mentioned: true, Limit: limit, Page: 1})
+			return err
+		},
+		func() (err error) {
+			mentionedPulls, err = scoped.Search(ctx, DiscussionSearchOptions{State: "open", Mentioned: true, Pulls: true, Limit: limit, Page: 1})
+			return err
+		},
+	)
 	if err != nil {
 		return result, err
 	}
-	for _, pulls := range []bool{false, true} {
-		mentions, err := scoped.Search(ctx, DiscussionSearchOptions{State: "open", Mentioned: true, Pulls: pulls, Limit: limit, Page: 1})
-		if err != nil {
-			return result, err
-		}
-		result.Mentions = append(result.Mentions, mentions...)
-	}
+	result.Mentions = slices.Concat(result.Mentions, mentionedIssues, mentionedPulls)
 	slices.SortStableFunc(result.Mentions, func(x, y SearchItem) int { return strings.Compare(y.UpdatedAt, x.UpdatedAt) })
 	result.Mentions = result.Mentions[:min(len(result.Mentions), limit)]
 	if runsRepository != "" {

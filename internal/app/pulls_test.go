@@ -4,14 +4,17 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -402,4 +405,56 @@ func TestPullCommandsNameTheIssueAPullRequestNumberBelongsTo(t *testing.T) {
 		err := Execute(context.Background(), deps, tc.args)
 		require.EqualError(t, err, tc.want, tc.args)
 	}
+}
+
+func TestPullViewReadsReviewsOnlyWhenTheOutputNeedsThem(t *testing.T) {
+	var reviews atomic.Int32
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/alice/project/pulls/7":
+			_, _ = fmt.Fprint(w, `{"number":7,"title":"Fix","state":"open"}`)
+		case "/api/v1/repos/alice/project/pulls/7/reviews":
+			reviews.Add(1)
+			w.Header().Set("X-Total-Count", "1")
+			_, _ = fmt.Fprint(w, `[{"id":1,"state":"APPROVED","user":{"login":"bob"}}]`)
+		default:
+			_, _ = fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer server.Close()
+	run := func(args ...string) string {
+		deps, out, _ := serverDeps(t, server.URL)
+		require.NoError(t, Execute(t.Context(), deps, append([]string{"pr", "view", "7", "-R", "alice/project", "--no-input"}, args...)))
+		return out.String()
+	}
+	require.JSONEq(t, `{"number":7,"title":"Fix"}`, run("--json", "number,title"))
+	require.Zero(t, reviews.Load())
+	require.Contains(t, run("--json", "number,reviews"), "bob")
+	require.Equal(t, int32(1), reviews.Load())
+}
+
+func TestPullStatusResolvingTwiceKeepsItsClient(t *testing.T) {
+	var accounts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/user":
+			accounts.Add(1)
+			_, _ = fmt.Fprintf(w, `{"login":%q}`, cmp.Or(r.Header.Get("Sudo"), "alice"))
+		default:
+			_, _ = fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer server.Close()
+	run := func(args ...string) {
+		t.Helper()
+		accounts.Store(0)
+		deps, _, _ := serverDeps(t, server.URL)
+		deps.Getenv = serverEnv(server.URL, map[string]string{"GITEA_CLI_REPO": "alice/project"})
+		deps.Git = &fakeGit{results: map[string]string{"symbolic-ref --quiet HEAD": "feature"}}
+		require.NoError(t, Execute(t.Context(), deps, append([]string{"pr", "status", "--json=authored"}, args...)))
+	}
+	run()
+	require.Equal(t, int32(1), accounts.Load())
+	// The token's owner is checked without Sudo on every resolve, not as the impersonated user.
+	run("--user", "alice", "--sudo", "bob")
 }

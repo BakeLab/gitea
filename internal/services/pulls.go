@@ -276,6 +276,23 @@ func (s Pulls) View(ctx context.Context, n int64) (Pull, error) {
 	return pullFrom(pull), nil
 }
 
+// ViewWithReviews reads pull request n and its reviews together.
+func (s Pulls) ViewWithReviews(ctx context.Context, n int64) (Pull, []Review, error) {
+	var pull Pull
+	var reviews []Review
+	err := loadFirstError(
+		func() (err error) {
+			pull, err = s.View(ctx, n)
+			return err
+		},
+		func() (err error) {
+			reviews, err = Reviews(s).All(ctx, n)
+			return err
+		},
+	)
+	return pull, reviews, err
+}
+
 // WithReviews returns p with its reviewers, reviewer teams, reviews and review decision taken
 // from reviews, all of its reviews. While the protection of the base branch requires approvals,
 // the decision is approved only with as many official ones as Gitea counts for merging, and

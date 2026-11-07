@@ -26,11 +26,14 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"gitea.dev/cli/internal/version"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -490,4 +493,36 @@ func TestSignedDownloadNamesTheStorageHostThatRefusesIt(t *testing.T) {
 	if instanceResponse != nil {
 		defer instanceResponse.Body.Close()
 	}
+}
+
+func TestConcurrentRequestsKeepTheirConnections(t *testing.T) {
+	const inFlight = 8
+	var opened atomic.Int32
+	var arrived sync.WaitGroup
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		arrived.Done()
+		arrived.Wait()
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			opened.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+	client := New(server.URL, "", false)
+	for range 2 {
+		arrived.Add(inFlight)
+		var requests sync.WaitGroup
+		for range inFlight {
+			requests.Go(func() {
+				response, err := client.HTTP.Get(server.URL)
+				if assert.NoError(t, err) {
+					_ = response.Body.Close()
+				}
+			})
+		}
+		requests.Wait()
+	}
+	require.Equal(t, int32(inFlight), opened.Load())
 }

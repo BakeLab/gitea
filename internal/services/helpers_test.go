@@ -5,10 +5,14 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"gitea.dev/cli/internal/transport"
 
@@ -112,4 +116,78 @@ func TestPageOfCountsTheWholeCollection(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, Page[int]{Items: tc.want, More: tc.more, Total: 4, Counted: true}, result)
 	}
+}
+
+// waitTogether fails unless every request wg counts arrives while the others wait.
+func waitTogether(t *testing.T, wg *sync.WaitGroup) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Error("the requests did not run concurrently")
+	}
+}
+
+func TestListEveryReadsCountedPagesTogether(t *testing.T) {
+	const pages = 4
+	var arrived sync.WaitGroup
+	arrived.Add(pages - 1)
+	got, err := listEvery(2, func(limit, page int) (Page[int], error) {
+		if page > 1 {
+			arrived.Done()
+			waitTogether(t, &arrived)
+		}
+		return Page[int]{Items: []int{page*2 - 1, page * 2}, More: page < pages, Total: pages * 2, Counted: true}, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8}, got)
+}
+
+func TestListEveryOutlivesAWrongCount(t *testing.T) {
+	window := func(items []int, more bool, total int) Page[int] {
+		return Page[int]{Items: items, More: more, Total: total, Counted: true}
+	}
+	t.Run("too few", func(t *testing.T) {
+		got, err := listEvery(2, func(_, page int) (Page[int], error) {
+			switch page {
+			case 1:
+				return window([]int{1, 2}, true, 3), nil
+			case 2:
+				return window([]int{3, 4}, true, 3), nil
+			case 3:
+				return window([]int{5}, false, 3), nil
+			}
+			return window(nil, false, 3), nil
+		})
+		require.NoError(t, err)
+		require.Equal(t, []int{1, 2, 3, 4, 5}, got)
+	})
+	t.Run("too many", func(t *testing.T) {
+		got, err := listEvery(2, func(_, page int) (Page[int], error) {
+			if page == 1 {
+				return window([]int{1, 2}, true, 8), nil
+			}
+			if page == 3 {
+				return Page[int]{}, errors.New("past the empty window")
+			}
+			return window(nil, false, 8), nil
+		})
+		require.NoError(t, err)
+		require.Equal(t, []int{1, 2}, got)
+	})
+}
+
+func TestListEveryFailsWithTheFirstFailedPage(t *testing.T) {
+	_, err := listEvery(2, func(_, page int) (Page[int], error) {
+		if page > 1 {
+			return Page[int]{}, fmt.Errorf("page %d", page)
+		}
+		return Page[int]{Items: []int{1, 2}, More: true, Total: 8, Counted: true}, nil
+	})
+	require.EqualError(t, err, "page 2")
 }

@@ -247,21 +247,23 @@ func (a *application) pullViewCommand() *cobra.Command {
 			return err
 		}
 		service := services.Pulls{Client: t.client, Repository: t.Repo}
-		item, err := service.View(cmd.Context(), n)
+		if web || a.options.json != "" {
+			item, err := service.View(cmd.Context(), n)
+			if err != nil {
+				return err
+			}
+			if web {
+				return a.openBrowser(cmd, item.URL)
+			}
+			return a.pullResult(cmd, t, item)
+		}
+		var details pullDetails
+		item, reviews, err := service.ViewWithReviews(cmd.Context(), n)
 		if err != nil {
 			return err
 		}
-		if web {
-			return a.openBrowser(cmd, item.URL)
-		}
-		var details pullDetails
-		if details.reviews, err = (services.Reviews{Client: t.client, Repository: t.Repo}).All(cmd.Context(), n); err != nil {
-			return err
-		}
-		item = service.WithReviews(cmd.Context(), item, details.reviews)
-		if a.options.json != "" {
-			return a.writePullJSON(cmd, t, item)
-		}
+		details.reviews = reviews
+		item = service.WithReviews(cmd.Context(), item, reviews)
 		if item.State == "open" && item.HeadSHA != "" {
 			if details.checks, err = service.CommitChecks(cmd.Context(), item.HeadSHA); err != nil {
 				return err

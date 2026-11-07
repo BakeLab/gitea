@@ -178,6 +178,7 @@ func New(instance, token string, insecure bool) *Client {
 	tr := base.Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	tr.TLSHandshakeTimeout = 10 * time.Second
+	tr.MaxIdleConnsPerHost = 8                                                                   // as many as services keeps in flight, so HTTP/1.1 reuses them
 	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecure} // user-controlled, instance-scoped
 	var transport http.RoundTripper = tr
 	if base, err := url.Parse(instance); insecure && err == nil {

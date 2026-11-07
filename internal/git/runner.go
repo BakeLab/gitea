@@ -43,6 +43,8 @@ type System struct {
 	Env    []string
 	In     io.Reader
 	ErrOut io.Writer
+	// Reads, when set, spares repeated probes, which are the reads whose ErrOut is io.Discard.
+	Reads *ReadCache
 }
 
 func setEnv(env []string, key, value string) []string {
@@ -133,6 +135,20 @@ func plink(variant, sshCommand string) bool {
 
 // Output runs Git, suppressing credential prompts when interaction is disabled.
 func (s System) Output(ctx context.Context, dir string, prompt bool, args ...string) (string, error) {
+	if s.Reads == nil {
+		return s.run(ctx, dir, prompt, args...)
+	}
+	if !cacheableRead(args) {
+		s.Reads.clear()
+		return s.run(ctx, dir, prompt, args...)
+	}
+	if prompt || s.ErrOut != io.Discard {
+		return s.run(ctx, dir, prompt, args...)
+	}
+	return s.Reads.read(ctx, dir, args, func(args ...string) (string, error) { return s.run(ctx, dir, false, args...) })
+}
+
+func (s System) run(ctx context.Context, dir string, prompt bool, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Stderr = s.ErrOut

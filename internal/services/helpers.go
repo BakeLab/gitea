@@ -4,6 +4,7 @@
 package services
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -43,20 +44,48 @@ func loadTogether(loaders ...func() error) error {
 	return concurrently(len(loaders), func(i int) error { return loaders[i]() })
 }
 
+// loadFirstError runs the loaders concurrently and returns the first failure in their order, for
+// loaders that a bad credential or server fails alike, which should be reported once.
+func loadFirstError(loaders ...func() error) error {
+	errs := make([]error, len(loaders))
+	_ = concurrently(len(loaders), func(i int) error {
+		errs[i] = loaders[i]()
+		return nil
+	})
+	return cmp.Or(errs...)
+}
+
 // listEvery collects every item of a collection from fetch, which reads a window of limit items
 // with instancePage. It stops at an empty window, or at the window that reaches the size the server
 // counts, without asking for an empty page after it. A server that counts nothing, or counts
-// fewer items than it lists, is read until an empty window.
+// fewer items than it lists, is read until an empty window. The pages the first window's count
+// announces are read concurrently, then taken in order under those same rules.
 func listEvery[T any](limit int, fetch func(limit, page int) (Page[T], error)) ([]T, error) {
 	result := []T{}
+	var ahead []Page[T]
+	var aheadErrs []error
 	for page := 1; page <= maxListPages; page++ {
-		window, err := fetch(limit, page)
+		var window Page[T]
+		var err error
+		if at := page - 2; at >= 0 && at < len(ahead) {
+			window, err = ahead[at], aheadErrs[at]
+		} else {
+			window, err = fetch(limit, page)
+		}
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, window.Items...)
 		if len(window.Items) == 0 || window.Counted && !window.More && len(result) == window.Total {
 			return result, nil
+		}
+		if page == 1 && window.Counted && window.More && len(window.Items) == limit {
+			rest := min((window.Total-1)/limit, maxListPages-1)
+			ahead, aheadErrs = make([]Page[T], rest), make([]error, rest)
+			_ = concurrently(rest, func(i int) error {
+				ahead[i], aheadErrs[i] = fetch(limit, i+2)
+				return nil
+			})
 		}
 	}
 	return nil, fmt.Errorf("listing exceeded %d pages", maxListPages)

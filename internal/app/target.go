@@ -267,7 +267,7 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 		}
 		token = credential.AccessToken
 	}
-	t.client = newClient(token)
+	t.client = a.sharedClient(t.Host, token, newClient)
 	if environmentCredential && !req.offline {
 		actual, err := services.CurrentAccount(ctx, t.client)
 		if err != nil {
@@ -287,6 +287,30 @@ func (a *application) connect(ctx context.Context, req targetRequest) (target, e
 	// Set after the environment-token identity check, which must see the authenticated account.
 	t.client.Sudo = a.options.sudo
 	return t, nil
+}
+
+// sharedClient returns the client of this command for instance and token, so that resolving the
+// target again keeps its connections and what it has learned. One with Sudo set is not shared: the
+// identity check of GITEA_TOKEN must see the authenticated account.
+func (a *application) sharedClient(instance, token string, build func(string) *transport.Client) *transport.Client {
+	if a.options.sudo != "" {
+		return build(token)
+	}
+	key := instance + "\x00" + token
+	a.mu.Lock()
+	client, ok := a.clients[key]
+	a.mu.Unlock()
+	if ok {
+		return client
+	}
+	client = build(token) // reads preferences under a.mu
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.clients == nil {
+		a.clients = map[string]*transport.Client{}
+	}
+	a.clients[key] = client
+	return client
 }
 
 // instanceClient builds a client for instance with the TLS setting and headers of its host settings.
@@ -407,6 +431,9 @@ func (a *application) repoOptionSource() string {
 func (a *application) discoverRepository(ctx context.Context, t *target, s settings.Snapshot) (string, error) {
 	// Discovery probes fail outside a checkout; Git's diagnostics would only precede gt's own error.
 	probe := func(args ...string) (string, error) { return a.gitProbe().Output(ctx, a.options.cwd, false, args...) }
+	if system, ok := a.gitProbe().(git.System); ok && a.options.remote == "" {
+		system.Warm(ctx, a.options.cwd)
+	}
 	if a.options.remote == "" {
 		if saved, err := probe("config", "--get", "gt.repository"); err == nil && saved != "" {
 			t.RepoSource = "git config gt.repository"
