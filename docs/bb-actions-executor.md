@@ -18,7 +18,7 @@ Example configuration (replace the project, OAuth settings and SHA-256):
 {
   "endpoint": "https://bmetal.int.bb.pub:18092",
   "project": "prj_example",
-  "token_url": "https://id.bb.pub/token",
+  "token_url": "https://id.bb.pub/api/oidc/token",
   "client_id": "gitea-actions",
   "client_secret_file": "/etc/gitea/bb-client-secret",
   "resource": "https://breadboard.int.bb.pub/api",
@@ -44,9 +44,12 @@ Example configuration (replace the project, OAuth settings and SHA-256):
 }
 ```
 
-Use the token endpoint published by your issuer's discovery document. The BB
-service account needs operator access to the selected project, including its
-secrets and task APIs. OAuth access tokens refresh automatically. Alternatively,
+Use the token endpoint published by your issuer's discovery document. For
+Pocket ID, the token endpoint is `https://id.bb.pub/api/oidc/token`. Configure a
+dedicated confidential client for Gitea with the client-credentials grant and
+operator access to the selected BB project, including its secrets and task
+APIs. This does not require a BB CLI profile or keyring. OAuth access tokens
+refresh automatically. Alternatively,
 replace the OAuth fields with `token_file`; Gitea rereads that bearer-token file
 for each request, allowing an external credential refresher to rotate it. Keep
 credential files readable only by the Gitea service account.
