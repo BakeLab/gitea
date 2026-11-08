@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	actions_model "gitea.dev/models/actions"
@@ -99,11 +100,8 @@ func enqueueRunsWithSkippedRunnerLabelJobs(ctx context.Context) error {
 			break
 		}
 		for _, job := range jobs {
-			for _, label := range job.RunsOn {
-				if setting.IsRunnerLabelSkipped(label) {
-					runIDs[job.RunID] = struct{}{}
-					break
-				}
+			if slices.ContainsFunc(job.RunsOn, setting.IsRunnerLabelSkipped) {
+				runIDs[job.RunID] = struct{}{}
 			}
 		}
 		cursorID = jobs[len(jobs)-1].ID
