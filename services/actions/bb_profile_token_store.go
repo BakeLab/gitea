@@ -58,9 +58,8 @@ func (s *bbProfileTokenStore) Load(ctx context.Context) (bbStoredToken, error) {
 	}
 	defer file.Close()
 	var record bbStoredTokenFile
-	decoder := json.NewDecoder(io.LimitReader(file, 64*1024))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&record); err != nil {
+	data, err := io.ReadAll(io.LimitReader(file, 64*1024+1))
+	if err != nil || len(data) > 64*1024 || json.Unmarshal(data, &record) != nil {
 		return token, errors.New("invalid BB profile token file")
 	}
 	if record.AccessToken == "" || record.RefreshToken == "" || record.ExpiresAt <= 0 {
