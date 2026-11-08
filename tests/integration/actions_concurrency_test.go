@@ -20,6 +20,7 @@ import (
 	user_model "gitea.dev/models/user"
 	"gitea.dev/modules/setting"
 	api "gitea.dev/modules/structs"
+	"gitea.dev/modules/test"
 	"gitea.dev/modules/timeutil"
 	webhook_module "gitea.dev/modules/webhook"
 	actions_web "gitea.dev/routers/web/repo/actions"
@@ -444,6 +445,8 @@ jobs:
 
 func TestMatrixConcurrency(t *testing.T) {
 	onGiteaRun(t, func(t *testing.T, u *url.URL) {
+		// This test supplies a Windows runner and exercises cross-platform concurrency.
+		defer test.MockVariableValue(&setting.Actions.SkipRunnerLabels, []string{})()
 		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 		session := loginUser(t, user2.Name)
 		token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository, auth_model.AccessTokenScopeWriteUser)
