@@ -6,6 +6,7 @@ package setting
 import (
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ var (
 		EndlessTaskTimeout    time.Duration     `ini:"ENDLESS_TASK_TIMEOUT"`
 		AbandonedJobTimeout   time.Duration     `ini:"ABANDONED_JOB_TIMEOUT"`
 		SkipWorkflowStrings   []string          `ini:"SKIP_WORKFLOW_STRINGS"`
+		SkipRunnerLabels      []string          `ini:"SKIP_RUNNER_LABELS"`
 		WorkflowDirs          []string          `ini:"WORKFLOW_DIRS"`
 		ScopedWorkflowDirs    []string          `ini:"SCOPED_WORKFLOW_DIRS"`
 		MaxRerunAttempts      int64             `ini:"MAX_RERUN_ATTEMPTS"`
@@ -50,6 +52,7 @@ var (
 		Enabled:                true,
 		DefaultActionsURL:      defaultActionsURLGitHub,
 		SkipWorkflowStrings:    []string{"[skip ci]", "[ci skip]", "[no ci]", "[skip actions]", "[actions skip]"},
+		SkipRunnerLabels:       []string{"windows", "windows-*"},
 		WorkflowDirs:           []string{".gitea/workflows", ".github/workflows"},
 		ScopedWorkflowDirs:     []string{".gitea/scoped_workflows"},
 		MaxRerunAttempts:       defaultMaxRerunAttempts,
@@ -138,6 +141,10 @@ func loadActionsFrom(rootCfg ConfigProvider) error {
 	if !Actions.LogCompression.IsValid() {
 		return fmt.Errorf("invalid [actions] LOG_COMPRESSION: %q", Actions.LogCompression)
 	}
+	Actions.SkipRunnerLabels, err = normalizeRunnerLabelPatterns(Actions.SkipRunnerLabels)
+	if err != nil {
+		return fmt.Errorf("invalid [actions] SKIP_RUNNER_LABELS: %w", err)
+	}
 
 	workflowDirs := normalizeWorkflowDirs(Actions.WorkflowDirs)
 	if len(workflowDirs) == 0 {
@@ -159,6 +166,34 @@ func loadActionsFrom(rootCfg ConfigProvider) error {
 	}
 
 	return nil
+}
+
+// IsRunnerLabelSkipped reports whether a label matches the configured runner-label skip policy.
+// Patterns are case-insensitive and follow path.Match syntax (for example, "windows-*").
+func IsRunnerLabelSkipped(label string) bool {
+	label = strings.ToLower(strings.TrimSpace(label))
+	for _, pattern := range Actions.SkipRunnerLabels {
+		matched, err := path.Match(pattern, label)
+		if err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeRunnerLabelPatterns(patterns []string) ([]string, error) {
+	normalized := make([]string, 0, len(patterns))
+	for _, pattern := range patterns {
+		pattern = strings.ToLower(strings.TrimSpace(pattern))
+		if pattern == "" {
+			continue
+		}
+		if _, err := path.Match(pattern, ""); err != nil {
+			return nil, fmt.Errorf("invalid pattern %q: %w", pattern, err)
+		}
+		normalized = append(normalized, pattern)
+	}
+	return normalized, nil
 }
 
 // normalizeWorkflowDirs trims, normalizes separators and drops empty/trailing-slash entries.

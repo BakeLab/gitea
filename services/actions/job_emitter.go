@@ -341,7 +341,7 @@ func checkJobsOfCurrentRunAttempt(ctx context.Context, run *actions_model.Action
 				continue
 			}
 
-			if err := updateBlockedJobStatus(ctx, job, status); err != nil {
+			if err := updateResolvedJobStatus(ctx, job, status); err != nil {
 				return err
 			}
 			result.UpdatedJobs = append(result.UpdatedJobs, job)
@@ -489,7 +489,7 @@ func (r *jobStatusResolver) Resolve(ctx context.Context) (map[int64]actions_mode
 		}
 		for id, status := range updated {
 			if status.IsDone() { // later rounds evaluate `if:` against needs read from the database
-				if err := updateBlockedJobStatus(ctx, r.jobMap[id], status); err != nil {
+				if err := updateResolvedJobStatus(ctx, r.jobMap[id], status); err != nil {
 					return nil, err
 				}
 			}
@@ -527,14 +527,29 @@ func (r *jobStatusResolver) resolveCheckNeeds(id int64) (allDone, allSucceed boo
 	return allDone, allSucceed
 }
 
-func updateBlockedJobStatus(ctx context.Context, job *actions_model.ActionRunJob, status actions_model.Status) error {
+func updateResolvedJobStatus(ctx context.Context, job *actions_model.ActionRunJob, status actions_model.Status) error {
+	previousStatus := job.Status
 	job.Status = status
-	if n, err := actions_model.UpdateRunJob(ctx, job, builder.Eq{"status": actions_model.StatusBlocked}, "status"); err != nil {
+	if n, err := actions_model.UpdateRunJob(ctx, job, builder.Eq{"status": previousStatus}, "status"); err != nil {
 		return err
 	} else if n != 1 {
-		return fmt.Errorf("no affected for updating blocked job %v", job.ID)
+		return fmt.Errorf("no affected for updating job %v from %s", job.ID, previousStatus)
 	}
 	return nil
+}
+
+func matchingSkippedRunnerLabel(runsOn []string) string {
+	for _, label := range runsOn {
+		if setting.IsRunnerLabelSkipped(label) {
+			return label
+		}
+	}
+	return ""
+}
+
+func skipJobForRunnerLabelPolicy(ctx context.Context, job *actions_model.ActionRunJob, label string) error {
+	content := fmt.Sprintf("Job skipped by this Gitea instance because runner label `%s` is configured in `[actions] SKIP_RUNNER_LABELS`. This policy is local to this instance and does not affect GitHub Actions.\n", label)
+	return actions_model.UpsertActionRunJobSummary(ctx, job.RepoID, job.RunID, job.RunAttemptID, job.ID, 0, actions_model.JobSummaryContentTypeMarkdown, []byte(content))
 }
 
 func (r *jobStatusResolver) updateStatus(ctx context.Context, job *actions_model.ActionRunJob, status actions_model.Status) error {
@@ -562,6 +577,15 @@ func (r *jobStatusResolver) resolve(ctx context.Context) (map[int64]actions_mode
 	for _, id := range r.sortedIDs {
 		status := r.statuses[id]
 		actionRunJob := r.jobMap[id]
+		if status == actions_model.StatusWaiting {
+			if label := matchingSkippedRunnerLabel(actionRunJob.RunsOn); label != "" {
+				if err := skipJobForRunnerLabelPolicy(ctx, actionRunJob, label); err != nil {
+					return nil, err
+				}
+				ret[id] = actions_model.StatusSkipped
+			}
+			continue
+		}
 		if !status.In(actions_model.StatusPending, actions_model.StatusBlocked) {
 			continue
 		}
@@ -623,6 +647,13 @@ func (r *jobStatusResolver) resolve(ctx context.Context) (map[int64]actions_mode
 		}
 		if len(siblings) > 0 {
 			r.matrixChanged, r.matrixInserted = true, true
+		}
+		if label := matchingSkippedRunnerLabel(actionRunJob.RunsOn); label != "" {
+			if err := skipJobForRunnerLabelPolicy(ctx, actionRunJob, label); err != nil {
+				return nil, err
+			}
+			ret[id] = actions_model.StatusSkipped
+			continue
 		}
 
 		// A slot-starved job cannot start, skip the following checks.
