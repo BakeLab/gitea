@@ -90,7 +90,7 @@ func (task bbTaskResult) terminal() bool {
 
 func bbHTTPS(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") {
 		return nil, errors.New("BB executor URLs must use HTTPS without credentials, query or fragment")
 	}
 	return u, nil

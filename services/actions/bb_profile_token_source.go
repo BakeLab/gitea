@@ -66,7 +66,7 @@ func newBBProfileTokenSource(ctx context.Context, profile bbExecutorProfileAuth,
 		return nil, errors.New("BB profile OIDC discovery document is too large")
 	}
 	var provider bbOIDCProvider
-	if err := json.Unmarshal(data, &provider); err != nil || provider.Issuer != strings.TrimRight(profile.Issuer, "/") || provider.TokenEndpoint == "" {
+	if err := json.Unmarshal(data, &provider); err != nil || provider.Issuer != profile.Issuer || provider.TokenEndpoint == "" {
 		return nil, errors.New("BB profile OIDC discovery document is invalid")
 	}
 	tokenURL, err := bbHTTPS(provider.TokenEndpoint)
