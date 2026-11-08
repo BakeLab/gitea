@@ -5,6 +5,8 @@ on:
     outputs:
       backend:
         value: ${{ jobs.detect.outputs.backend }}
+      go_dependencies:
+        value: ${{ jobs.detect.outputs.go_dependencies }}
       frontend:
         value: ${{ jobs.detect.outputs.frontend }}
       docs:
@@ -35,6 +37,7 @@ jobs:
     timeout-minutes: 3
     outputs:
       backend: ${{ steps.changes.outputs.backend }}
+      go_dependencies: ${{ steps.changes.outputs.go_dependencies }}
       frontend: ${{ steps.changes.outputs.frontend }}
       docs: ${{ steps.changes.outputs.docs }}
       actions: ${{ steps.changes.outputs.actions }}
@@ -66,6 +69,10 @@ jobs:
               - "tests/gitea-repositories-meta/**"
               - "tests/testdata/**"
               - "tools/test-integration.sh"
+
+            go_dependencies:
+              - "go.mod"
+              - "go.sum"
 
             frontend:
               - "*.ts"

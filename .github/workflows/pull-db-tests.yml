@@ -10,6 +10,7 @@ concurrency:
 
 permissions:
   contents: read
+  statuses: read
 
 jobs:
   files-changed:
@@ -47,6 +48,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/go-setup
+        with:
+          wait-private-module-cache: ${{ needs.files-changed.outputs.go_dependencies == 'true' }}
       - uses: ./.github/actions/pgsql-shard
         with:
           shard: 1
@@ -85,6 +88,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/go-setup
+        with:
+          wait-private-module-cache: ${{ needs.files-changed.outputs.go_dependencies == 'true' }}
       - uses: ./.github/actions/pgsql-shard
         with:
           shard: 2
@@ -134,6 +139,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/go-setup
+        with:
+          wait-private-module-cache: ${{ needs.files-changed.outputs.go_dependencies == 'true' }}
       - name: Add hosts to /etc/hosts
         run: '[ -e "/.dockerenv" ] || [ -e "/run/.containerenv" ] || echo "127.0.0.1 minio devstoreaccount1.azurite.local elasticsearch meilisearch smtpimap" | sudo tee -a /etc/hosts'
       - run: make deps-backend

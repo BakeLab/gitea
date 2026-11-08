@@ -8,6 +8,9 @@ inputs:
   lint-cache:
     description: Also restore the golangci-lint cache
     default: "false"
+  wait-private-module-cache:
+    description: Wait for the trusted private-module cache when Go dependencies change
+    default: "false"
 
 runs:
   using: composite
@@ -19,6 +22,33 @@ runs:
         go-version-file: go.mod
         check-latest: true
         cache: false
+    - if: ${{ inputs.wait-private-module-cache == 'true' && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        API_URL: ${{ github.api_url }}
+        REPOSITORY: ${{ github.repository }}
+        STATUS_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      run: |
+        set -euo pipefail
+        endpoint="$API_URL/repos/$REPOSITORY/commits/$STATUS_SHA/status"
+        for attempt in $(seq 1 60); do
+          response="$(curl --fail --silent --show-error --retry 2 \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "$endpoint")"
+          state="$(jq -r '[.statuses[] | select(.context == "private-breadboard-module-cache")] | sort_by(.created_at) | last | .state // "missing"' <<< "$response")"
+          if [[ "$state" == "success" ]]; then
+            exit 0
+          fi
+          if [[ "$state" == "failure" || "$state" == "error" ]]; then
+            echo "::error::The trusted private-module prefetch failed; inspect the private-go-module-cache workflow and configure the BB SDK read-only App credentials."
+            exit 1
+          fi
+          sleep 10
+        done
+        echo "::error::Timed out waiting for the trusted private-module prefetch workflow."
+        exit 1
     - if: ${{ inputs.cache == 'true' }}
       uses: ./.github/actions/go-cache
       with:

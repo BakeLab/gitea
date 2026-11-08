@@ -10,6 +10,7 @@ concurrency:
 
 permissions:
   contents: read
+  statuses: read
 
 jobs:
   files-changed:
@@ -24,6 +25,7 @@ jobs:
       - uses: ./.github/actions/go-setup
         with:
           lint-cache: "true"
+          wait-private-module-cache: ${{ needs.files-changed.outputs.go_dependencies == 'true' }}
       - run: make deps-backend deps-tools
       - run: TAGS="bindata" make generate-go lint-backend # lint-go can lint with "bindata" tags
 
@@ -61,6 +63,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/go-setup
+        with:
+          wait-private-module-cache: ${{ needs.files-changed.outputs.go_dependencies == 'true' }}
       - run: make deps-backend deps-tools
       - run: make --always-make checks-backend # ensure the "go-licenses" make target runs
 
@@ -85,6 +89,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/go-setup
+        with:
+          wait-private-module-cache: ${{ needs.files-changed.outputs.go_dependencies == 'true' }}
       - run: make deps-backend generate-go
       # no frontend build here as backend should be able to build, even without any frontend files
       # CGO is not used when cross-compile, so these steps also test if the code is compatible with CGO disabled

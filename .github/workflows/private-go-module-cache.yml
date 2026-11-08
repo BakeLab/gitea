@@ -1,0 +1,162 @@
+name: private-go-module-cache
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - go.mod
+      - go.sum
+  push:
+    branches: [main]
+    paths:
+      - go.mod
+      - go.sum
+      - .github/workflows/private-go-module-cache.yml
+      - .github/actions/go-cache/action.yml
+      - .github/actions/go-setup/action.yml
+      - .github/workflows/cache-seeder.yml
+
+permissions: {}
+
+jobs:
+  prefetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Mark private module cache pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          STATUS_SHA: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+          TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api --method POST "repos/$REPOSITORY/statuses/$STATUS_SHA" \
+            -f state=pending \
+            -f context=private-breadboard-module-cache \
+            -f description="Preparing the private Breadboard SDK cache" \
+            -f target_url="$TARGET_URL"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request_target'
+        with:
+          repository: ${{ github.repository }}
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          sparse-checkout: |
+            go.mod
+            go.sum
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+          path: pr
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: ${{ github.event_name == 'pull_request_target' && 'pr/go.mod' || 'go.mod' }}
+          check-latest: true
+          cache: false
+
+      - name: Find the private Breadboard SDK requirement
+        id: sdk
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          manifest=go.mod
+          sums=go.sum
+          if [[ "$EVENT_NAME" == "pull_request_target" ]]; then
+            manifest=pr/go.mod
+            sums=pr/go.sum
+          fi
+          if [[ ! -f "$manifest" || -L "$manifest" || ! -f "$sums" || -L "$sums" ]]; then
+            echo "::error::The Go dependency manifests must be regular files."
+            exit 1
+          fi
+          version="$(go mod edit -json "$manifest" | jq -er '[.Require[]? | select(.Path == "github.com/BakeLab/breadboard/sdk/go") | .Version] | if length == 1 then .[0] else "" end')"
+          if [[ -z "$version" ]]; then
+            echo "required=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::The Breadboard SDK dependency must use a valid Go module version."
+            exit 1
+          fi
+          if go mod edit -json "$manifest" | jq -e '[.Replace[]? | select(.Old.Path == "github.com/BakeLab/breadboard/sdk/go")] | length > 0' >/dev/null; then
+            echo "::error::The Breadboard SDK dependency cannot use a replace directive in CI."
+            exit 1
+          fi
+          echo "required=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sums=$sums" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.sdk.outputs.required == 'true'
+        id: module-cache
+        with:
+          path: ~/go/pkg/mod
+          key: gomod-private-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.version }}
+
+      - name: Check GitHub App configuration
+        if: steps.sdk.outputs.required == 'true' && steps.module-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          APP_CLIENT_ID: ${{ vars.BB_SDK_READ_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.BB_SDK_READ_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$APP_CLIENT_ID" || -z "$APP_PRIVATE_KEY" ]]; then
+            echo "::error::Configure repository variable BB_SDK_READ_APP_CLIENT_ID and secret BB_SDK_READ_APP_PRIVATE_KEY. The GitHub App must have Contents:read and be installed only on BakeLab/breadboard."
+            exit 1
+          fi
+
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        if: steps.sdk.outputs.required == 'true' && steps.module-cache.outputs.cache-hit != 'true'
+        id: breadboard-token
+        with:
+          client-id: ${{ vars.BB_SDK_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BB_SDK_READ_APP_PRIVATE_KEY }}
+          owner: BakeLab
+          repositories: breadboard
+          permission-contents: read
+
+      - name: Prefetch the private module
+        if: steps.sdk.outputs.required == 'true' && steps.module-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          TOKEN: ${{ steps.breadboard-token.outputs.token }}
+          VERSION: ${{ steps.sdk.outputs.version }}
+          SUMS: ${{ steps.sdk.outputs.sums }}
+        run: |
+          set -euo pipefail
+          temp="$(mktemp -d)"
+          trap 'git config --global --unset-all http.https://github.com/BakeLab/breadboard.extraheader || true; rm -rf "$temp"' EXIT
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git config --global http.https://github.com/BakeLab/breadboard.extraheader "AUTHORIZATION: basic $auth"
+          cd "$temp"
+          go mod init prefetch.invalid/gitea
+          go mod edit -require="github.com/BakeLab/breadboard/sdk/go@$VERSION"
+          cp "$GITHUB_WORKSPACE/$SUMS" go.sum
+          GOPRIVATE=github.com/BakeLab/breadboard/sdk/go \
+            GONOSUMDB=github.com/BakeLab/breadboard/sdk/go \
+            go mod download "github.com/BakeLab/breadboard/sdk/go@$VERSION"
+
+  status:
+    if: always() && (github.event_name == 'pull_request_target' || github.event_name == 'push')
+    needs: prefetch
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Publish private module cache result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          STATUS_SHA: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+          STATUS: ${{ needs.prefetch.result == 'success' && 'success' || 'failure' }}
+          TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api --method POST "repos/$REPOSITORY/statuses/$STATUS_SHA" \
+            -f state="$STATUS" \
+            -f context=private-breadboard-module-cache \
+            -f description="Trusted private SDK module prefetch $STATUS" \
+            -f target_url="$TARGET_URL"
