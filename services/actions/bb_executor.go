@@ -435,7 +435,7 @@ func (config bbExecutorConfig) prepare(ctx context.Context, job *actions_model.A
 	return row, err
 }
 
-func bbSecretName(row *actions_model.ActionBBTask) string {
+func bbRegistrationCapabilityName(row *actions_model.ActionBBTask) string {
 	return "GITEA_BB_RUNNER_" + row.Key
 }
 
@@ -446,24 +446,30 @@ func (config bbExecutorConfig) taskRequest(row *actions_model.ActionBBTask, prof
 	if err != nil {
 		return nil, err
 	}
-	script := "set -eu\numask 077\nmkdir -p /opt/gitea-bb\nexport HOME=/opt/gitea-bb\ncd /opt/gitea-bb\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\ncurl --fail --silent --show-error --location " + bbShellQuote(profile.RunnerURL) + " -o runner\nprintf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | sha256sum --check --status\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
-	return json.Marshal(map[string]any{"sandbox": profile.Sandbox, "package_sets": profile.PackageSets, "max_duration_s": config.MaxDurationS, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": "root", "timeout_s": config.MaxDurationS, "secrets": []string{bbSecretName(row)}}})
+	capability := bbRegistrationCapabilityName(row)
+	script := "set -eu\numask 077\nmkdir -p /opt/gitea-bb\nexport HOME=/opt/gitea-bb\ncd /opt/gitea-bb\nprintf '%s' \"$" + capability + "\" > .runner\nunset " + capability + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\ncurl --fail --silent --show-error --location " + bbShellQuote(profile.RunnerURL) + " -o runner\nprintf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | sha256sum --check --status\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
+	return json.Marshal(map[string]any{"sandbox": profile.Sandbox, "package_sets": profile.PackageSets, "max_duration_s": config.MaxDurationS, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": "root", "timeout_s": config.MaxDurationS, "secrets": []string{capability}}})
 }
 
 func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.ActionBBTask) error {
-	registration, err := secret.DecryptSecret(setting.SecretKey, row.Registration)
-	if err != nil {
-		return err
-	}
-	if err := config.request(ctx, http.MethodPost, "/v1/secrets", "", map[string]string{"name": bbSecretName(row), "value": registration}, nil); err != nil {
-		return err
-	}
 	var task bbTaskResult
 	if row.TaskID == "" {
-		var request json.Value
+		var request map[string]json.Value
 		if err := json.Unmarshal([]byte(row.RequestJSON), &request); err != nil {
 			return fmt.Errorf("decode persisted BB task request: %w", err)
 		}
+		if request == nil {
+			return errors.New("decode persisted BB task request: expected JSON object")
+		}
+		registration, err := secret.DecryptSecret(setting.SecretKey, row.Registration)
+		if err != nil {
+			return err
+		}
+		capability, err := json.Marshal(map[string]string{bbRegistrationCapabilityName(row): registration})
+		if err != nil {
+			return err
+		}
+		request["task_secrets"] = json.Value(capability)
 		if err := config.request(ctx, http.MethodPost, "/v1/tasks", "gitea-bb-"+row.Key, request, &task); err != nil {
 			var responseError *bbRequestError
 			if !errors.As(err, &responseError) || responseError.status != http.StatusBadRequest {
@@ -540,9 +546,6 @@ func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.A
 		if changed {
 			notifyAndEmitFinishedJobs(ctx, []*actions_model.ActionRunJob{job})
 		}
-	}
-	if err := config.request(ctx, http.MethodDelete, "/v1/secrets/"+bbSecretName(row), "", nil, nil); err != nil {
-		return err
 	}
 	if _, err := db.DeleteByID[actions_model.ActionRunner](ctx, row.RunnerID); err != nil && !errors.Is(err, util.ErrNotExist) {
 		return err
