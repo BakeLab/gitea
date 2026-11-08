@@ -70,5 +70,49 @@ func Init(ctx context.Context) error {
 	if err := initGlobalRunnerToken(ctx); err != nil {
 		return err
 	}
-	return initBBExecutor(ctx)
+	if err := initBBExecutor(ctx); err != nil {
+		return err
+	}
+	if err := enqueueRunsWithSkippedRunnerLabelJobs(ctx); err != nil {
+		log.Error("reconcile queued Actions jobs for SKIP_RUNNER_LABELS: %v", err)
+	}
+	return nil
+}
+
+// enqueueRunsWithSkippedRunnerLabelJobs rechecks pre-existing waiting jobs when the
+// instance policy changes or the server restarts. Keyset pagination keeps concurrent
+// runner claims from shifting the scan and skips only unclaimed jobs.
+func enqueueRunsWithSkippedRunnerLabelJobs(ctx context.Context) error {
+	if len(setting.Actions.SkipRunnerLabels) == 0 {
+		return nil
+	}
+
+	const pageSize = 100
+	runIDs := make(map[int64]struct{})
+	var cursorID int64
+	for {
+		jobs, err := actions_model.FindWaitingJobsAfterID(ctx, cursorID, pageSize)
+		if err != nil {
+			return fmt.Errorf("list waiting jobs after %d: %w", cursorID, err)
+		}
+		if len(jobs) == 0 {
+			break
+		}
+		for _, job := range jobs {
+			for _, label := range job.RunsOn {
+				if setting.IsRunnerLabelSkipped(label) {
+					runIDs[job.RunID] = struct{}{}
+					break
+				}
+			}
+		}
+		cursorID = jobs[len(jobs)-1].ID
+	}
+
+	for runID := range runIDs {
+		if err := EmitJobsIfReadyByRun(runID); err != nil {
+			return fmt.Errorf("enqueue run %d: %w", runID, err)
+		}
+	}
+	return nil
 }
