@@ -31,7 +31,6 @@ import (
 	"gitea.dev/modules/timeutil"
 	"gitea.dev/modules/util"
 
-	bbAuth "github.com/BakeLab/breadboard/sdk/go/auth"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 	"xorm.io/builder"
@@ -133,13 +132,11 @@ func initBBExecutor(ctx context.Context) error {
 		if _, err := store.Load(ctx); err != nil {
 			return errors.New("BB executor profile token file is unavailable or invalid")
 		}
-		source, err := bbAuth.NewProfileTokenSource(graceful.GetManager().ShutdownContext(), &http.Client{Timeout: 20 * time.Second}, bbAuth.Profile{
-			Issuer: profile.Issuer, ClientID: profile.ClientID, Resource: profile.Resource, Scopes: profile.Scopes,
-		}, store)
+		source, err := newBBProfileTokenSource(graceful.GetManager().ShutdownContext(), *profile, store)
 		if err != nil {
 			return errors.New("BB executor profile authentication initialization failed")
 		}
-		config.client, err = bbAuth.AuthenticatedHTTPClient(&http.Client{Timeout: 20 * time.Second}, config.Endpoint, source)
+		config.client, err = newBBProfileHTTPClient(&http.Client{Timeout: 20 * time.Second}, config.Endpoint, source)
 		if err != nil {
 			return err
 		}

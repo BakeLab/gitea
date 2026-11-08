@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-
-	bbAuth "github.com/BakeLab/breadboard/sdk/go/auth"
 )
 
 // Gitea's BB reconciliation is protected by the database-wide
@@ -42,8 +40,14 @@ func (s *bbProfileTokenStore) WithLock(ctx context.Context, fn func() error) err
 	return fn()
 }
 
-func (s *bbProfileTokenStore) Load(ctx context.Context) (bbAuth.StoredToken, error) {
-	var token bbAuth.StoredToken
+type bbStoredToken struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    time.Time
+}
+
+func (s *bbProfileTokenStore) Load(ctx context.Context) (bbStoredToken, error) {
+	var token bbStoredToken
 	if err := ctx.Err(); err != nil {
 		return token, err
 	}
@@ -61,10 +65,10 @@ func (s *bbProfileTokenStore) Load(ctx context.Context) (bbAuth.StoredToken, err
 	if record.AccessToken == "" || record.RefreshToken == "" || record.ExpiresAt <= 0 {
 		return token, errors.New("BB profile token file is incomplete")
 	}
-	return bbAuth.StoredToken{AccessToken: record.AccessToken, RefreshToken: record.RefreshToken, ExpiresAt: time.Unix(record.ExpiresAt, 0)}, nil
+	return bbStoredToken{AccessToken: record.AccessToken, RefreshToken: record.RefreshToken, ExpiresAt: time.Unix(record.ExpiresAt, 0)}, nil
 }
 
-func (s *bbProfileTokenStore) Save(ctx context.Context, token bbAuth.StoredToken) error {
+func (s *bbProfileTokenStore) Save(ctx context.Context, token bbStoredToken) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
