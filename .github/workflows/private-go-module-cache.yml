@@ -1,7 +1,10 @@
 name: private-go-module-cache
 
 on:
-  pull_request_target:
+  # Required to make a trusted, scoped GitHub App token available for private
+  # module prefetch. This workflow only sparse-checks PR go.mod/go.sum as data;
+  # it never checks out or executes PR code. The token is confined to this job.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, reopened, synchronize, ready_for_review]
     paths:
       - go.mod
