@@ -5,13 +5,14 @@ package actions
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"gitea.dev/modules/json"
 )
 
 // Gitea's BB reconciliation is protected by the database-wide

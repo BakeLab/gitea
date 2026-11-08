@@ -5,7 +5,6 @@ package actions
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"gitea.dev/modules/json"
 	"golang.org/x/oauth2"
 )
 
