@@ -61,6 +61,19 @@ BB accelerator and package sets. Do not alias unavailable hardware to another
 GPU class. Task requests use the BB sandbox API shape, so other immutable
 placement constraints are available inside `sandbox`.
 
+For native macOS jobs, set `platform` to `darwin`, use an official Darwin runner
+binary, and pin `sandbox.node_name` to the macOS node (for example,
+`apricot-mac-mini-1.int.bb.pub`). Use only `:host` labels such as
+`macos-latest:host`, `self-hosted:host`, `macos:host` and `arm64:host`.
+Leave `package_sets` empty: macOS guests use their image tools rather than Linux
+package sets. The execution user defaults to `breadboard` on macOS and `root`
+on Linux; `exec_user` can select the configured guest account. The macOS task
+uses a private temporary work directory and the native `shasum` checksum tool.
+The guest image needs Git, curl, Node action support and Xcode command line tools;
+individual workflows may install Go, Rust or Homebrew LLVM themselves.
+The macOS node must declare the exact Gitea internal-service route required by
+the profile; the guest uses BB gateway networking without its own NetBird identity.
+
 The dispatcher records the job, runner identity and immutable task request before
 submitting work. The runner identity is encrypted with Gitea's `SECRET_KEY` and
 sent through a per-task BB secret; no credential is embedded in the durable task

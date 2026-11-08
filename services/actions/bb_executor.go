@@ -51,6 +51,8 @@ type bbExecutorConfig struct {
 }
 
 type bbExecutorProfile struct {
+	Platform     string         `json:"platform"`
+	ExecUser     string         `json:"exec_user"`
 	Name         string         `json:"name"`
 	Labels       []string       `json:"labels"`
 	RunnerURL    string         `json:"runner_url"`
@@ -134,7 +136,22 @@ func initBBExecutor(ctx context.Context) error {
 		if profile.Name == "" || len(profile.Labels) == 0 || profile.Sandbox == nil {
 			return errors.New("BB executor profiles require name, labels and sandbox")
 		}
-		if !slices.Contains(profile.PackageSets, "git-runner-docker") {
+		if profile.Platform != "" && profile.Platform != "linux" && profile.Platform != "darwin" {
+			return errors.New("BB executor platform must be linux or darwin")
+		}
+		if profile.Platform == "darwin" {
+			if node, _ := profile.Sandbox["node_name"].(string); node == "" {
+				return errors.New("BB executor darwin profiles require an explicit macOS node_name")
+			}
+			for _, label := range profile.Labels {
+				if !strings.HasSuffix(label, ":host") {
+					return errors.New("BB executor darwin profiles require host runner labels")
+				}
+			}
+			if len(profile.PackageSets) != 0 {
+				return errors.New("BB executor darwin profiles use guest image tools, not Linux package sets")
+			}
+		} else if !slices.Contains(profile.PackageSets, "git-runner-docker") {
 			return errors.New("BB executor profiles must prepare git-runner-docker")
 		}
 		if _, err := bbHTTPS(profile.RunnerURL); err != nil {
@@ -359,12 +376,23 @@ func bbSecretName(row *actions_model.ActionBBTask) string {
 func bbShellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
 
 func (config bbExecutorConfig) taskRequest(row *actions_model.ActionBBTask, profile bbExecutorProfile) ([]byte, error) {
-	runnerConfig, err := json.Marshal(map[string]any{"runner": map[string]any{"file": "/opt/gitea-bb/.runner", "capacity": 1, "timeout": fmt.Sprintf("%ds", config.MaxDurationS)}, "container": map[string]any{"network": "host", "bind_workdir": true}, "host": map[string]any{"workdir_parent": "/opt/gitea-bb/work"}})
+	workdir, user, platform := "/opt/gitea-bb", "root", "Linux"
+	checksum := "sha256sum --check --status"
+	createDirectory := "mkdir -p "
+	if profile.Platform == "darwin" {
+		workdir, user, platform = "/tmp/gitea-bb-"+row.Key, "breadboard", "Darwin"
+		checksum = "shasum -a 256 --check"
+		createDirectory = "mkdir -m 700 "
+	}
+	if profile.ExecUser != "" {
+		user = profile.ExecUser
+	}
+	runnerConfig, err := json.Marshal(map[string]any{"runner": map[string]any{"file": workdir + "/.runner", "capacity": 1, "timeout": fmt.Sprintf("%ds", config.MaxDurationS)}, "container": map[string]any{"network": "host", "bind_workdir": true}, "host": map[string]any{"workdir_parent": workdir + "/work"}})
 	if err != nil {
 		return nil, err
 	}
-	script := "set -eu\numask 077\nmkdir -p /opt/gitea-bb\ncd /opt/gitea-bb\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\ncurl --fail --silent --show-error --location " + bbShellQuote(profile.RunnerURL) + " -o runner\nprintf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | sha256sum --check --status\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
-	return json.Marshal(map[string]any{"sandbox": profile.Sandbox, "package_sets": profile.PackageSets, "max_duration_s": config.MaxDurationS, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": "root", "timeout_s": config.MaxDurationS, "secrets": []string{bbSecretName(row)}}})
+	script := "set -eu\numask 077\ntest \"$(uname -s)\" = " + bbShellQuote(platform) + "\n" + createDirectory + bbShellQuote(workdir) + "\ncd " + bbShellQuote(workdir) + "\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\ncurl --fail --silent --show-error --location " + bbShellQuote(profile.RunnerURL) + " -o runner\nprintf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | " + checksum + "\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
+	return json.Marshal(map[string]any{"sandbox": profile.Sandbox, "package_sets": profile.PackageSets, "max_duration_s": config.MaxDurationS, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": user, "timeout_s": config.MaxDurationS, "secrets": []string{bbSecretName(row)}}})
 }
 
 func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.ActionBBTask) error {
