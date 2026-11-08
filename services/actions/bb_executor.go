@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -30,24 +31,35 @@ import (
 	"gitea.dev/modules/timeutil"
 	"gitea.dev/modules/util"
 
+	bbAuth "github.com/BakeLab/breadboard/sdk/go/auth"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 	"xorm.io/builder"
 )
 
 type bbExecutorConfig struct {
-	Endpoint         string              `json:"endpoint"`
-	Project          string              `json:"project"`
-	TokenFile        string              `json:"token_file"`
-	TokenURL         string              `json:"token_url"`
-	ClientID         string              `json:"client_id"`
-	ClientSecretFile string              `json:"client_secret_file"`
-	Resource         string              `json:"resource"`
-	Scopes           []string            `json:"scopes"`
-	MaxConcurrent    int                 `json:"max_concurrent"`
-	MaxDurationS     int                 `json:"max_duration_s"`
-	Profiles         []bbExecutorProfile `json:"profiles"`
+	Endpoint         string                 `json:"endpoint"`
+	Project          string                 `json:"project"`
+	TokenFile        string                 `json:"token_file"`
+	TokenURL         string                 `json:"token_url"`
+	ClientID         string                 `json:"client_id"`
+	ClientSecretFile string                 `json:"client_secret_file"`
+	Resource         string                 `json:"resource"`
+	Scopes           []string               `json:"scopes"`
+	ProfileAuth      *bbExecutorProfileAuth `json:"profile_auth,omitempty"`
+	MaxConcurrent    int                    `json:"max_concurrent"`
+	MaxDurationS     int                    `json:"max_duration_s"`
+	Profiles         []bbExecutorProfile    `json:"profiles"`
 	tokens           oauth2.TokenSource
+	client           *http.Client
+}
+
+type bbExecutorProfileAuth struct {
+	Issuer    string   `json:"issuer"`
+	ClientID  string   `json:"client_id"`
+	Resource  string   `json:"resource"`
+	Scopes    []string `json:"scopes"`
+	TokenFile string   `json:"token_file"`
 }
 
 type bbExecutorProfile struct {
@@ -109,7 +121,29 @@ func initBBExecutor(ctx context.Context) error {
 	if config.Project == "" || config.MaxConcurrent < 1 || config.MaxConcurrent > 100 || config.MaxDurationS < 60 || config.MaxDurationS > 604800 || len(config.Profiles) == 0 {
 		return errors.New("BB executor requires project, profiles, max_concurrent (1-100) and max_duration_s (60-604800)")
 	}
-	if config.TokenFile == "" {
+	if config.ProfileAuth != nil {
+		profile := config.ProfileAuth
+		if config.TokenFile != "" || config.TokenURL != "" || config.ClientID != "" || config.ClientSecretFile != "" || config.Resource != "" || len(config.Scopes) != 0 {
+			return errors.New("BB executor profile_auth cannot be combined with token_file or OAuth credentials")
+		}
+		if profile.ClientID == "" || profile.Resource == "" || !filepath.IsAbs(profile.TokenFile) {
+			return errors.New("BB executor profile_auth requires client_id, resource and token_file")
+		}
+		store := &bbProfileTokenStore{path: profile.TokenFile}
+		if _, err := store.Load(ctx); err != nil {
+			return errors.New("BB executor profile token file is unavailable or invalid")
+		}
+		source, err := bbAuth.NewProfileTokenSource(graceful.GetManager().ShutdownContext(), &http.Client{Timeout: 20 * time.Second}, bbAuth.Profile{
+			Issuer: profile.Issuer, ClientID: profile.ClientID, Resource: profile.Resource, Scopes: profile.Scopes,
+		}, store)
+		if err != nil {
+			return errors.New("BB executor profile authentication initialization failed")
+		}
+		config.client, err = bbAuth.AuthenticatedHTTPClient(&http.Client{Timeout: 20 * time.Second}, config.Endpoint, source)
+		if err != nil {
+			return err
+		}
+	} else if config.TokenFile == "" {
 		if _, err := bbHTTPS(config.TokenURL); err != nil {
 			return err
 		}
@@ -196,36 +230,41 @@ func (config bbExecutorConfig) request(ctx context.Context, method, path, key st
 			return err
 		}
 	}
-	var bearer string
-	if config.tokens != nil {
-		token, err := config.tokens.Token()
-		if err != nil {
-			return errors.New("BB executor OAuth token acquisition failed")
-		}
-		bearer = token.AccessToken
-	} else {
-		token, err := os.ReadFile(config.TokenFile)
-		if err != nil {
-			return err
-		}
-		bearer = strings.TrimSpace(string(token))
-	}
-	if bearer == "" {
-		return errors.New("BB executor credential is empty")
-	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(config.Endpoint, "/")+path, bytes.NewReader(encoded))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
+	if config.ProfileAuth == nil {
+		var bearer string
+		if config.tokens != nil {
+			token, err := config.tokens.Token()
+			if err != nil {
+				return errors.New("BB executor OAuth token acquisition failed")
+			}
+			bearer = token.AccessToken
+		} else {
+			token, err := os.ReadFile(config.TokenFile)
+			if err != nil {
+				return err
+			}
+			bearer = strings.TrimSpace(string(token))
+		}
+		if bearer == "" {
+			return errors.New("BB executor credential is empty")
+		}
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
 	req.Header.Set("X-Breadboard-Project", config.Project)
 	req.Header.Set("Content-Type", "application/json")
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)
 	}
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := config.client
+	if client == nil {
+		client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		return err

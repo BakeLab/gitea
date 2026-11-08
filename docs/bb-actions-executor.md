@@ -12,17 +12,20 @@ Sandbox placement requires the declaration; a missing route keeps the sandbox
 queued. No SSH forwarding or runner NetBird identity is used. The route declaration
 does not establish upstream connectivity, so verify it before enabling profiles.
 
-Example configuration (replace the project, OAuth settings and SHA-256):
+Example configuration using the previously authorized human profile (replace
+the project, token record path and SHA-256):
 
 ```json
 {
   "endpoint": "https://bmetal.int.bb.pub:18092",
   "project": "prj_example",
-  "token_url": "https://id.bb.pub/api/oidc/token",
-  "client_id": "gitea-actions",
-  "client_secret_file": "/etc/gitea/bb-client-secret",
-  "resource": "https://breadboard.int.bb.pub/api",
-  "scopes": ["breadboard:operate"],
+  "profile_auth": {
+    "issuer": "https://id.bb.pub",
+    "client_id": "breadboard-cli",
+    "resource": "https://breadboard.int.bb.pub/api",
+    "scopes": ["openid", "profile", "groups", "offline_access", "breadboard:read", "breadboard:operate"],
+    "token_file": "/etc/gitea/bb-profile/token.json"
+  },
   "max_concurrent": 4,
   "max_duration_s": 25200,
   "profiles": [{
@@ -44,15 +47,17 @@ Example configuration (replace the project, OAuth settings and SHA-256):
 }
 ```
 
-Use the token endpoint published by your issuer's discovery document. For
-Pocket ID, the token endpoint is `https://id.bb.pub/api/oidc/token`. Configure a
-dedicated confidential client for Gitea with the client-credentials grant and
-operator access to the selected BB project, including its secrets and task
-APIs. This does not require a BB CLI profile or keyring. OAuth access tokens
-refresh automatically. Alternatively,
-replace the OAuth fields with `token_file`; Gitea rereads that bearer-token file
-for each request, allowing an external credential refresher to rotate it. Keep
-credential files readable only by the Gitea service account.
+`profile_auth.token_file` uses the BB CLI token-record format (`access_token`,
+`refresh_token`, `expires_at` as a Unix timestamp). Provision the already
+authorized profile's token record to this path without printing it; create the
+parent directory as mode `0700` and the token file as mode `0600`, owned by the
+Gitea service account. Gitea refreshes access tokens and atomically saves token
+rotation. Do not configure the same rotating refresh token in another
+independent store. Profile authentication uses the configured issuer and
+resource and does not require a client secret. Alternatively, the OAuth
+client-credentials mode remains available for a dedicated machine identity;
+the legacy `token_file` mode continues to reread a raw bearer token for each
+request.
 
 Profiles are considered in order. All job `runs-on` labels must match the label
 names before `:host` or `:docker://IMAGE`. Give ARM64 profiles an ARM64 sandbox
