@@ -266,33 +266,39 @@ func CreateTaskForRunner(ctx context.Context, runner *ActionRunner) (task *Actio
 	if db.InTransaction(ctx) {
 		return nil, nil, errors.New("CreateTaskForRunner must not be called within a database transaction")
 	}
+	if binding, err := GetBBTaskForRunner(ctx, runner.ID); err != nil {
+		return nil, nil, err
+	} else if binding != nil {
+		job, has, err := db.GetByID[ActionRunJob](ctx, binding.JobID)
+		if err != nil || !has || binding.Completed || job.Status != StatusWaiting || job.TaskID != 0 {
+			return nil, nil, err
+		}
+		task, cancelled, err := claimJobForRunner(ctx, runner, job)
+		if cancelled {
+			cancelledJobs = append(cancelledJobs, job)
+		}
+		return task, cancelledJobs, err
+	}
 
 	// TODO: a more efficient way to filter labels
 	log.Trace("runner labels: %v", runner.AgentLabels)
 
-	// Page through the waiting jobs oldest-first instead of loading the whole backlog into memory on every poll.
-	// Keyset pagination on (updated, id) is safe under concurrent claims:
-	// updated only moves forward, so the advancing cursor never skips a still-waiting job even as claimed jobs drop out.
-	var cursorUpdated timeutil.TimeStamp
+	// Immutable IDs keep newest-first keyset pagination stable as claims update jobs.
 	var cursorID int64
 	for {
 		sess := JobQueueOptions{RepoID: runner.RepoID, OwnerID: runner.OwnerID, Status: StatusWaiting}.session(ctx)
 		if cursorID > 0 {
-			sess.And(builder.Or(
-				builder.Gt{"updated": cursorUpdated},
-				builder.And(builder.Eq{"updated": cursorUpdated}, builder.Gt{"id": cursorID}),
-			))
+			sess.And(builder.Lt{"id": cursorID})
 		}
 
 		var jobs []*ActionRunJob
-		if err := sess.Asc("updated", "id").Limit(pickTaskBatchSize).Find(&jobs); err != nil {
+		if err := sess.Desc("id").Limit(pickTaskBatchSize).Find(&jobs); err != nil {
 			return nil, cancelledJobs, err
 		}
 		// A short page means no waiting jobs remain beyond it.
 		isLastPage := len(jobs) < pickTaskBatchSize
 		if !isLastPage {
-			last := jobs[len(jobs)-1] // read before a lost claim bumps Updated
-			cursorUpdated, cursorID = last.Updated, last.ID
+			cursorID = jobs[len(jobs)-1].ID
 		}
 
 		for _, v := range jobs {
@@ -328,6 +334,9 @@ func claimJobForRunner(ctx context.Context, runner *ActionRunner, job *ActionRun
 
 		if err := job.LoadAttributes(ctx); err != nil {
 			return err
+		}
+		if !nativeBuilderAllowsJob(runner, job) {
+			return nil
 		}
 		if err := job.Run.Repo.LoadUnits(ctx); err != nil {
 			return err
@@ -407,6 +416,28 @@ func claimJobForRunner(ctx context.Context, runner *ActionRunner, job *ActionRun
 		return nil, false, err
 	}
 	return resultTask, cancelled, nil
+}
+
+func nativeBuilderAllowsJob(runner *ActionRunner, job *ActionRunJob) bool {
+	const label = "guest-image-builder"
+	if !slices.ContainsFunc(runner.AgentLabels, func(value string) bool { return strings.EqualFold(value, label) }) {
+		return true
+	}
+	// A broad label subset must not give an untrusted workflow access to the host.
+	if !slices.ContainsFunc(job.RunsOn, func(value string) bool { return strings.EqualFold(value, label) }) {
+		return false
+	}
+	run := job.Run
+	if run == nil || run.Repo == nil || job.IsForkPullRequest || run.IsForkPullRequest || run.NeedApproval || run.IsScopedRun {
+		return false
+	}
+	if !strings.EqualFold(run.Repo.FullName(), "BakeLab/breadkernel") || run.Ref != "refs/heads/main" || run.WorkflowID != "guest-assets.yml" {
+		return false
+	}
+	if run.WorkflowRepoID != run.RepoID || run.WorkflowCommitSHA == "" || run.WorkflowCommitSHA != run.CommitSHA {
+		return false
+	}
+	return (run.Event == "push" && run.TriggerEvent == "push") || (run.Event == "workflow_dispatch" && run.TriggerEvent == "workflow_dispatch")
 }
 
 // ReleaseTaskForRunner reverts a freshly-claimed but undelivered task: it deletes

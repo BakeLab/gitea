@@ -274,13 +274,27 @@ func TestReleaseTaskForRunner(t *testing.T) {
 			}
 			require.NoError(t, db.Insert(t.Context(), run))
 
+			job := &ActionRunJob{
+				RunID:           run.ID,
+				RepoID:          run.RepoID,
+				OwnerID:         run.OwnerID,
+				CommitSHA:       run.CommitSHA,
+				Name:            tt.jobName,
+				Attempt:         1,
+				JobID:           tt.jobName,
+				Status:          StatusWaiting,
+				RunsOn:          []string{"ubuntu-latest"},
+				WorkflowPayload: []byte("on: push\njobs:\n  " + tt.jobName + ":\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"),
+			}
+			require.NoError(t, db.Insert(t.Context(), job))
+
 			disabledRun := &ActionRun{RepoID: 2, TriggerUserID: 2}
 			require.NoError(t, db.Insert(t.Context(), disabledRun))
 			disabledJob := &ActionRunJob{RunID: disabledRun.ID, RepoID: 2, Status: StatusWaiting, RunsOn: []string{"ubuntu-latest"}}
 			require.NoError(t, db.Insert(t.Context(), disabledJob))
 
 			if tt.batchSize != 0 {
-				// Five waiting jobs the runner cannot run, then one it can.
+				// Newer non-matching jobs must not hide a matching job on a later page.
 				for i := range 5 {
 					mismatch := &ActionRunJob{
 						RunID:     run.ID,
@@ -296,20 +310,6 @@ func TestReleaseTaskForRunner(t *testing.T) {
 					require.NoError(t, db.Insert(t.Context(), mismatch))
 				}
 			}
-
-			job := &ActionRunJob{
-				RunID:           run.ID,
-				RepoID:          run.RepoID,
-				OwnerID:         run.OwnerID,
-				CommitSHA:       run.CommitSHA,
-				Name:            tt.jobName,
-				Attempt:         1,
-				JobID:           tt.jobName,
-				Status:          StatusWaiting,
-				RunsOn:          []string{"ubuntu-latest"},
-				WorkflowPayload: []byte("on: push\njobs:\n  " + tt.jobName + ":\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"),
-			}
-			require.NoError(t, db.Insert(t.Context(), job))
 
 			runner := &ActionRunner{
 				UUID:        tt.name + "-runner-uuid",
@@ -549,4 +549,119 @@ func newRunningTaskForCancelling(t *testing.T, name string, hasCancellingSupport
 	require.NoError(t, err)
 
 	return task, job
+}
+
+func TestCreateTaskForRunnerNewestMatchingJob(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+	originalBatchSize := pickTaskBatchSize
+	pickTaskBatchSize = 2
+	t.Cleanup(func() { pickTaskBatchSize = originalBatchSize })
+	run := &ActionRun{RepoID: 1, OwnerID: 2, TriggerUserID: 2, WorkflowID: "newest.yaml", Index: 9904, Status: StatusWaiting}
+	require.NoError(t, db.Insert(ctx, run))
+	require.NoError(t, db.Insert(ctx, &repo_model.RepoUnit{RepoID: run.RepoID, Type: unit.TypeActions}))
+	insert := func(name, label string) *ActionRunJob {
+		job := &ActionRunJob{RunID: run.ID, RepoID: run.RepoID, OwnerID: run.OwnerID, Name: name, JobID: name, Attempt: 1, Status: StatusWaiting, RunsOn: []string{label}, WorkflowPayload: []byte("on: push\njobs:\n  " + name + ":\n    runs-on: " + label + "\n    steps:\n      - run: echo hi\n")}
+		require.NoError(t, db.Insert(ctx, job))
+		return job
+	}
+	older := insert("older", "ubuntu-latest")
+	newer := insert("newer", "ubuntu-latest")
+	// A retried or recently updated old job must not displace a newly created one.
+	_, err := db.GetEngine(ctx).ID(older.ID).NoAutoTime().Cols("updated").Update(&ActionRunJob{Updated: newer.Updated + 100})
+	require.NoError(t, err)
+	for i := range 5 {
+		insert("mismatch-"+string(rune('a'+i)), "windows-latest")
+	}
+	foreignRun := &ActionRun{RepoID: 2, OwnerID: 2, TriggerUserID: 2}
+	require.NoError(t, db.Insert(ctx, foreignRun))
+	foreign := &ActionRunJob{RunID: foreignRun.ID, RepoID: 2, Status: StatusWaiting, RunsOn: []string{"ubuntu-latest"}}
+	require.NoError(t, db.Insert(ctx, foreign))
+	runner := &ActionRunner{RepoID: run.RepoID, UUID: "newest-runner", Name: "newest-runner", AgentLabels: []string{"ubuntu-latest"}}
+	runner.GenerateAndFillToken()
+	require.NoError(t, db.Insert(ctx, runner))
+	for _, want := range []*ActionRunJob{newer, older} {
+		task, cancelled, err := CreateTaskForRunner(ctx, runner)
+		require.NoError(t, err)
+		require.NotNil(t, task)
+		assert.Equal(t, want.ID, task.JobID)
+		assert.Empty(t, cancelled)
+	}
+	task, _, err := CreateTaskForRunner(ctx, runner)
+	require.NoError(t, err)
+	assert.Nil(t, task)
+	assert.Equal(t, StatusWaiting, unittest.AssertExistsAndLoadBean(t, &ActionRunJob{ID: foreign.ID}).Status)
+}
+
+func TestNativeBuilderTrustBoundary(t *testing.T) {
+	runner := &ActionRunner{AgentLabels: []string{"self-hosted", "linux", "arm64", "guest-image-builder"}}
+	trusted := func() *ActionRunJob {
+		return &ActionRunJob{RunsOn: []string{"guest-image-builder"}, Run: &ActionRun{
+			RepoID: 1, Repo: &repo_model.Repository{OwnerName: "BakeLab", Name: "breadkernel"},
+			WorkflowID: "guest-assets.yml", Ref: "refs/heads/main", Event: "push", TriggerEvent: "push",
+			CommitSHA: "trusted", WorkflowRepoID: 1, WorkflowCommitSHA: "trusted",
+		}}
+	}
+	assert.True(t, nativeBuilderAllowsJob(runner, trusted()))
+	dispatch := trusted()
+	dispatch.Run.Event, dispatch.Run.TriggerEvent = "workflow_dispatch", "workflow_dispatch"
+	assert.True(t, nativeBuilderAllowsJob(runner, dispatch))
+	for name, mutate := range map[string]func(*ActionRunJob){
+		"generic labels":          func(j *ActionRunJob) { j.RunsOn = []string{"linux"} },
+		"fork job":                func(j *ActionRunJob) { j.IsForkPullRequest = true },
+		"fork run":                func(j *ActionRunJob) { j.Run.IsForkPullRequest = true },
+		"pending approval":        func(j *ActionRunJob) { j.Run.NeedApproval = true },
+		"other owner":             func(j *ActionRunJob) { j.Run.Repo.OwnerName = "fork" },
+		"other repository":        func(j *ActionRunJob) { j.Run.Repo.Name = "other" },
+		"other ref":               func(j *ActionRunJob) { j.Run.Ref = "refs/pull/1/head" },
+		"other workflow":          func(j *ActionRunJob) { j.Run.WorkflowID = "untrusted.yml" },
+		"other event":             func(j *ActionRunJob) { j.Run.Event = "pull_request" },
+		"other trigger":           func(j *ActionRunJob) { j.Run.TriggerEvent = "pull_request_target" },
+		"scoped run":              func(j *ActionRunJob) { j.Run.IsScopedRun = true },
+		"foreign workflow source": func(j *ActionRunJob) { j.Run.WorkflowRepoID = 2 },
+		"foreign workflow commit": func(j *ActionRunJob) { j.Run.WorkflowCommitSHA = "untrusted" },
+		"missing provenance":      func(j *ActionRunJob) { j.Run.WorkflowCommitSHA = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			job := trusted()
+			mutate(job)
+			assert.False(t, nativeBuilderAllowsJob(runner, job))
+		})
+	}
+	assert.True(t, nativeBuilderAllowsJob(&ActionRunner{AgentLabels: []string{"linux"}}, &ActionRunJob{}))
+}
+
+func TestNativeBuilderClaimSkipsUntrustedNewestJob(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+	_, err := db.GetEngine(ctx).ID(1).Cols("owner_name", "name").Update(&repo_model.Repository{OwnerName: "BakeLab", Name: "breadkernel"})
+	require.NoError(t, err)
+	require.NoError(t, db.Insert(ctx, &repo_model.RepoUnit{RepoID: 1, Type: unit.TypeActions}))
+	insert := func(index int64, ref string, labels []string) *ActionRunJob {
+		run := &ActionRun{
+			RepoID: 1, OwnerID: 2, TriggerUserID: 2, WorkflowID: "guest-assets.yml", Index: index,
+			Ref: ref, Event: "push", TriggerEvent: "push", CommitSHA: "trusted", WorkflowRepoID: 1, WorkflowCommitSHA: "trusted", Status: StatusWaiting,
+		}
+		require.NoError(t, db.Insert(ctx, run))
+		job := &ActionRunJob{
+			RunID: run.ID, RepoID: 1, OwnerID: 2, JobID: "build", Name: "build", Attempt: 1, Status: StatusWaiting,
+			RunsOn: labels, WorkflowPayload: []byte("on: push\njobs:\n  build:\n    runs-on: guest-image-builder\n    steps:\n      - run: echo hi\n"),
+		}
+		require.NoError(t, db.Insert(ctx, job))
+		return job
+	}
+	trusted := insert(9905, "refs/heads/main", []string{"guest-image-builder"})
+	untrusted := insert(9906, "refs/heads/untrusted", []string{"guest-image-builder"})
+	generic := insert(9907, "refs/heads/main", []string{"linux"})
+	runner := &ActionRunner{RepoID: 1, UUID: "native-builder", Name: "native-builder", AgentLabels: []string{"linux", "guest-image-builder"}}
+	runner.GenerateAndFillToken()
+	require.NoError(t, db.Insert(ctx, runner))
+	task, cancelled, err := CreateTaskForRunner(ctx, runner)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	assert.Equal(t, trusted.ID, task.JobID)
+	assert.Empty(t, cancelled)
+	for _, job := range []*ActionRunJob{untrusted, generic} {
+		assert.Equal(t, StatusWaiting, unittest.AssertExistsAndLoadBean(t, &ActionRunJob{ID: job.ID}).Status)
+	}
 }

@@ -5,6 +5,7 @@ go 1.27
 toolchain go1.27.3
 
 require (
+	github.com/BakeLab/breadboard/sdk/go v0.0.0-20261108051400-b7d85d13c81f
 	connectrpc.com/connect/v2 v2.0.2
 	gitea.com/lunny/dingtalk_webhook v0.0.0-20171025031554-e3534c89ef96
 	gitea.com/lunny/levelqueue v0.4.2-0.20230414023320-3c0159fe0fe4
