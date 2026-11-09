@@ -95,3 +95,28 @@ instances must share the Redis global-lock backend, as other Gitea background
 services do. Drain active tasks before changing the BB endpoint/project or
 disabling the dispatcher. Completed task bindings remain as deduplication
 records; their encrypted runner identities are cleared after cleanup.
+
+## Explicitly unsupported runner labels
+
+The optional `unsupported_labels` setting contains exact `runs-on` label sets
+that this deployment cannot execute. A matching waiting job is marked Skipped
+with its labels and configured reason in the job summary, unless an online,
+enabled Gitea runner can match it. This check runs before BB capacity and
+concurrency checks, so unsupported jobs do not stay queued when BB is full or
+its capacity endpoint is unavailable. Unknown label sets and supported profiles
+with no current capacity remain queued. Configure only hardware and operating
+systems that are confirmed unavailable; do not map a specific GPU model to a
+different accelerator.
+
+```json
+{
+  "unsupported_labels": [{
+    "labels": ["linux-gfx942-1gpu-ccs-csp-ossci-rocm"],
+    "reason": "This deployment has no gfx942/MI300 accelerator."
+  }]
+}
+```
+
+Label matching is case-insensitive and order-independent, but requires an exact
+set match. Each entry needs a unique non-empty label set and a non-empty reason.
+The queue lookup and runner lookup fail open: an error leaves the job queued.
