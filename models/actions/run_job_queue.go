@@ -67,7 +67,7 @@ func FindJobQueueJobs(ctx context.Context, opts JobQueueOptions, page, pageSize 
 	jobs := make([]*ActionRunJob, 0, pageSize)
 	return jobs, total, opts.session(ctx).
 		Cols("`action_run_job`.id", "`action_run_job`.repo_id", "`action_run_job`.name", "`action_run_job`.status", // skip the payload columns
-			"`action_run_job`.run_id", "`action_run_job`.runs_on", "`action_run_job`.updated", "`action_run_job`.started", "`action_run_job`.task_id").
+			"`action_run_job`.run_id", "`action_run_job`.job_id", "`action_run_job`.commit_sha", "`action_run_job`.run_attempt_id", "`action_run_job`.parent_job_id", "`action_run_job`.is_reusable_caller", "`action_run_job`.runs_on", "`action_run_job`.updated", "`action_run_job`.started", "`action_run_job`.task_id").
 		OrderBy(jobQueueOrderBy).
 		Limit(pageSize, (page-1)*pageSize).
 		Find(&jobs)

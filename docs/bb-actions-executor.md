@@ -99,3 +99,33 @@ instances must share the Redis global-lock backend, as other Gitea background
 services do. Drain active tasks before changing the BB endpoint/project or
 disabling the dispatcher. Completed task bindings remain as deduplication
 records; their encrypted runner identities are cleared after cleanup.
+
+## GitHub Actions duplicate filtering
+
+The BB executor checks GitHub Actions before admitting a waiting job from a
+GitHub mirror. Filtering applies only to repositories marked as GitHub mirrors;
+ordinary Gitea repositories and Gitea-only workflow directories are unaffected.
+The lookup is currently enabled only for `push` events and is scoped to the same
+mirror, exact commit SHA, workflow path, and trigger event. Pull request events
+fail open because Gitea's merge commit and GitHub's head SHA are not guaranteed
+to identify the same commit. The source workflow must be in
+`.github/workflows`, and both the workflow source commit recorded by Gitea and
+the job commit must exactly match the GitHub run's `head_sha`. Any SHA mismatch
+fails open and runs Gitea.
+
+GitHub's workflow-jobs API exposes job display names rather than YAML job IDs.
+Gitea therefore matches the exact expanded display name within the workflow
+and groups all Gitea matrix siblings for the same job. It skips the Gitea
+siblings only when every name maps uniquely and every corresponding GitHub
+check succeeded. Missing or ambiguous names, failed or skipped checks, and
+unsupported workflow/event mappings run in Gitea. A pending matching GitHub
+check holds admission for at most two minutes; after that Gitea runs. Results
+are cached per mirror, SHA, workflow, and event for 30 seconds, and paginated
+GitHub responses are used to select the latest run/attempt for that key.
+
+Public mirrors use GitHub's unauthenticated API. For private mirrors, filtering
+is disabled unless `github_token_file` points to an absolute path containing a
+read-only GitHub token with Actions read access. Gitea does not reuse credentials
+embedded in mirror remotes. API errors, missing permissions, and rate limits
+fail open and allow Gitea to run; this can reduce deduplication but cannot block
+the Gitea job. Keep the token file readable only by the Gitea service account.
