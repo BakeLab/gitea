@@ -85,6 +85,28 @@ command. Secrets are refreshed while tasks are active, restoring them after a BB
 restart. BB can fail preparation if a secret is unavailable when its command
 starts; that failure is reported to the Gitea job rather than leaving it queued.
 
+## Explicitly unsupported runner labels
+
+Jobs whose `runs-on` labels do not match any BB profile normally remain queued;
+a missing profile can be a configuration mistake or temporary capacity issue.
+To stop known unsupported hardware jobs from accumulating, an administrator may
+add exact label sets to `unsupported_labels` in the executor config:
+
+```json
+"unsupported_labels": [{
+  "labels": ["linux-gfx942-1gpu-ccs-csp-ossci-rocm"],
+  "reason": "This deployment has Radeon AI PRO R9700 (gfx1201), not gfx942 hardware."
+}]
+```
+
+Label sets are compared case-insensitively and without regard to order; extra or
+missing labels do not match. The dispatcher skips a configured job only when no
+BB profile matches and no online, enabled Gitea runner can claim it. The skipped
+job gets a summary with the labels and reason. Runner lookup or database errors
+fail open and leave the job queued. A matching profile with zero current
+schedulable capacity also stays queued. Unconfigured labels always remain
+queued, so profile omissions are not silently treated as unsupported hardware.
+
 Each managed runner is bound to exactly one job. Concurrent ordinary runners may
 claim a waiting job first; the dispatcher then cancels its unused BB task.
 Deterministic idempotency keys recover submissions whose responses were lost.
