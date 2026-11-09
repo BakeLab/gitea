@@ -38,23 +38,24 @@ import (
 )
 
 type bbExecutorConfig struct {
-	Endpoint         string                 `json:"endpoint"`
-	Project          string                 `json:"project"`
-	TokenFile        string                 `json:"token_file"`
-	TokenURL         string                 `json:"token_url"`
-	ClientID         string                 `json:"client_id"`
-	ClientSecretFile string                 `json:"client_secret_file"`
-	Resource         string                 `json:"resource"`
-	Scopes           []string               `json:"scopes"`
-	ProfileAuth      *bbExecutorProfileAuth `json:"profile_auth,omitempty"`
-	MaxConcurrent    int                    `json:"max_concurrent"`
-	AutoConcurrency  bool                   `json:"auto_concurrency,omitempty"`
-	GitHubTokenFile  string                 `json:"github_token_file,omitempty"`
-	MaxDurationS     int                    `json:"max_duration_s"`
-	Profiles         []bbExecutorProfile    `json:"profiles"`
-	tokens           oauth2.TokenSource
-	client           *http.Client
-	githubDeduper    *githubStatusDeduper
+	Endpoint          string                        `json:"endpoint"`
+	Project           string                        `json:"project"`
+	TokenFile         string                        `json:"token_file"`
+	TokenURL          string                        `json:"token_url"`
+	ClientID          string                        `json:"client_id"`
+	ClientSecretFile  string                        `json:"client_secret_file"`
+	Resource          string                        `json:"resource"`
+	Scopes            []string                      `json:"scopes"`
+	ProfileAuth       *bbExecutorProfileAuth        `json:"profile_auth,omitempty"`
+	MaxConcurrent     int                           `json:"max_concurrent"`
+	AutoConcurrency   bool                          `json:"auto_concurrency,omitempty"`
+	GitHubTokenFile   string                        `json:"github_token_file,omitempty"`
+	MaxDurationS      int                           `json:"max_duration_s"`
+	Profiles          []bbExecutorProfile           `json:"profiles"`
+	UnsupportedLabels []bbExecutorUnsupportedLabels `json:"unsupported_labels,omitempty"`
+	tokens            oauth2.TokenSource
+	client            *http.Client
+	githubDeduper     *githubStatusDeduper
 }
 
 type bbExecutorProfileAuth struct {
@@ -129,6 +130,9 @@ func initBBExecutor(ctx context.Context) error {
 	}
 	if config.Project == "" || config.MaxConcurrent < 1 || config.MaxConcurrent > 100 || config.MaxDurationS < 60 || config.MaxDurationS > 604800 || len(config.Profiles) == 0 {
 		return errors.New("BB executor requires project, profiles, max_concurrent (1-100) and max_duration_s (60-604800)")
+	}
+	if err := config.validateUnsupportedLabels(); err != nil {
+		return err
 	}
 	var githubToken string
 	if config.GitHubTokenFile != "" {
@@ -302,6 +306,12 @@ func (config bbExecutorConfig) request(ctx context.Context, method, path, key st
 }
 
 func (config bbExecutorConfig) reconcile(ctx context.Context) error {
+	// Explicitly unsupported label sets must be drained even when BB has no
+	// capacity, the global concurrency limit is full, or a capacity query fails.
+	// Unknown labels remain queued so a missing profile is observable and safe.
+	if err := config.skipConfiguredUnsupportedJobs(ctx); err != nil {
+		return fmt.Errorf("skip configured unsupported BB jobs: %w", err)
+	}
 	rows, err := actions_model.ListActiveBBTasks(ctx)
 	if err != nil {
 		return err
@@ -363,20 +373,26 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 			if exists {
 				continue
 			}
-			deferred := false
+			matchingProfiles := make([]int, 0, len(config.Profiles))
+			profileLabels := make(map[int][]string, len(config.Profiles))
 			for profileIndex, profile := range config.Profiles {
+				labels := bbProfileRunnerLabels(profile)
+				runner := &actions_model.ActionRunner{AgentLabels: labels}
+				if runner.CanMatchLabels(job.RunsOn) {
+					matchingProfiles = append(matchingProfiles, profileIndex)
+					profileLabels[profileIndex] = labels
+				}
+			}
+			if len(matchingProfiles) == 0 {
+				continue
+			}
+			deferred := false
+			for _, profileIndex := range matchingProfiles {
+				profile := config.Profiles[profileIndex]
 				if config.AutoConcurrency && profileCapacity[profileIndex] <= 0 {
 					continue
 				}
-				labels := make([]string, 0, len(profile.Labels))
-				for _, label := range profile.Labels {
-					name, _, _ := strings.Cut(label, ":")
-					labels = append(labels, name)
-				}
-				runner := &actions_model.ActionRunner{AgentLabels: labels}
-				if !runner.CanMatchLabels(job.RunsOn) {
-					continue
-				}
+				labels := profileLabels[profileIndex]
 				if config.githubDeduper != nil {
 					groupKey := githubDedupKey(job)
 					if groupsSeen[groupKey] {
