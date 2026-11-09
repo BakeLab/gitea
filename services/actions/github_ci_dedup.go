@@ -17,6 +17,7 @@ import (
 	"time"
 
 	actions_model "gitea.dev/models/actions"
+	"gitea.dev/models/db"
 	repo_model "gitea.dev/models/repo"
 	"gitea.dev/modules/git"
 	"gitea.dev/modules/setting"
@@ -237,7 +238,7 @@ func (d *githubStatusDeduper) fetchStatus(ctx context.Context, owner, name, sha,
 }
 
 func githubWorkflowPath(ctx context.Context, repo *repo_model.Repository, run *actions_model.ActionRun) (string, bool) {
-	if run == nil || run.IsScopedRun || run.WorkflowSourceRepoID != repo.ID || run.WorkflowCommitSHA == "" || run.WorkflowID == "" {
+	if run == nil || run.IsScopedRun || run.WorkflowRepoID != repo.ID || run.WorkflowCommitSHA == "" || run.WorkflowID == "" {
 		return "", false
 	}
 	gitRepo, err := git.OpenRepository(ctx, repo)
@@ -250,7 +251,7 @@ func githubWorkflowPath(ctx context.Context, repo *repo_model.Repository, run *a
 		return "", false
 	}
 	for _, dir := range setting.Actions.WorkflowDirs {
-		tree, err := commit.SubTree(ctx, gitRepo, dir)
+		_, err := commit.SubTree(ctx, gitRepo, dir)
 		if err != nil {
 			if git.IsErrNotExist(err) {
 				continue
