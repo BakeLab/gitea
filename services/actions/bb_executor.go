@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 
 	actions_model "gitea.dev/models/actions"
 	"gitea.dev/models/db"
+	repo_model "gitea.dev/models/repo"
 	"gitea.dev/modules/globallock"
 	"gitea.dev/modules/graceful"
 	"gitea.dev/modules/json"
@@ -44,11 +46,24 @@ type bbExecutorConfig struct {
 	ClientSecretFile  string                        `json:"client_secret_file"`
 	Resource          string                        `json:"resource"`
 	Scopes            []string                      `json:"scopes"`
+	ProfileAuth       *bbExecutorProfileAuth        `json:"profile_auth,omitempty"`
 	MaxConcurrent     int                           `json:"max_concurrent"`
+	AutoConcurrency   bool                          `json:"auto_concurrency,omitempty"`
+	GitHubTokenFile   string                        `json:"github_token_file,omitempty"`
 	MaxDurationS      int                           `json:"max_duration_s"`
 	Profiles          []bbExecutorProfile           `json:"profiles"`
 	UnsupportedLabels []bbExecutorUnsupportedLabels `json:"unsupported_labels,omitempty"`
 	tokens            oauth2.TokenSource
+	client            *http.Client
+	githubDeduper     *githubStatusDeduper
+}
+
+type bbExecutorProfileAuth struct {
+	Issuer    string   `json:"issuer"`
+	ClientID  string   `json:"client_id"`
+	Resource  string   `json:"resource"`
+	Scopes    []string `json:"scopes"`
+	TokenFile string   `json:"token_file"`
 }
 
 type bbExecutorProfile struct {
@@ -60,6 +75,12 @@ type bbExecutorProfile struct {
 	RunnerSHA256 string         `json:"runner_sha256"`
 	Sandbox      map[string]any `json:"sandbox"`
 	PackageSets  []string       `json:"package_sets"`
+}
+
+type bbCapacityResponse struct {
+	Schedulable int   `json:"schedulable"`
+	MaxCount    int   `json:"max_count"`
+	AsOfMS      int64 `json:"as_of_ms"`
 }
 
 type bbTaskResult struct {
@@ -82,7 +103,7 @@ func (task bbTaskResult) terminal() bool {
 
 func bbHTTPS(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") {
 		return nil, errors.New("BB executor URLs must use HTTPS without credentials, query or fragment")
 	}
 	return u, nil
@@ -115,7 +136,39 @@ func initBBExecutor(ctx context.Context) error {
 	if err := config.validateUnsupportedLabels(); err != nil {
 		return err
 	}
-	if config.TokenFile == "" {
+	var githubToken string
+	if config.GitHubTokenFile != "" {
+		if !filepath.IsAbs(config.GitHubTokenFile) {
+			return errors.New("BB executor GitHub token file path must be absolute")
+		}
+		data, err := os.ReadFile(config.GitHubTokenFile)
+		if err != nil || strings.TrimSpace(string(data)) == "" {
+			return errors.New("BB executor GitHub token file is unavailable or empty")
+		}
+		githubToken = strings.TrimSpace(string(data))
+	}
+	config.githubDeduper = newGitHubStatusDeduper(githubToken)
+	if config.ProfileAuth != nil {
+		profile := config.ProfileAuth
+		if config.TokenFile != "" || config.TokenURL != "" || config.ClientID != "" || config.ClientSecretFile != "" || config.Resource != "" || len(config.Scopes) != 0 {
+			return errors.New("BB executor profile_auth cannot be combined with token_file or OAuth credentials")
+		}
+		if profile.ClientID == "" || profile.Resource == "" || !filepath.IsAbs(profile.TokenFile) {
+			return errors.New("BB executor profile_auth requires client_id, resource and token_file")
+		}
+		store := &bbProfileTokenStore{path: profile.TokenFile}
+		if _, err := store.Load(ctx); err != nil {
+			return errors.New("BB executor profile token file is unavailable or invalid")
+		}
+		source, err := newBBProfileTokenSource(graceful.GetManager().ShutdownContext(), *profile, store)
+		if err != nil {
+			return errors.New("BB executor profile authentication initialization failed")
+		}
+		config.client, err = newBBProfileHTTPClient(&http.Client{Timeout: 20 * time.Second}, config.Endpoint, source)
+		if err != nil {
+			return err
+		}
+	} else if config.TokenFile == "" {
 		if _, err := bbHTTPS(config.TokenURL); err != nil {
 			return err
 		}
@@ -217,36 +270,41 @@ func (config bbExecutorConfig) request(ctx context.Context, method, path, key st
 			return err
 		}
 	}
-	var bearer string
-	if config.tokens != nil {
-		token, err := config.tokens.Token()
-		if err != nil {
-			return errors.New("BB executor OAuth token acquisition failed")
-		}
-		bearer = token.AccessToken
-	} else {
-		token, err := os.ReadFile(config.TokenFile)
-		if err != nil {
-			return err
-		}
-		bearer = strings.TrimSpace(string(token))
-	}
-	if bearer == "" {
-		return errors.New("BB executor credential is empty")
-	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(config.Endpoint, "/")+path, bytes.NewReader(encoded))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
+	if config.ProfileAuth == nil {
+		var bearer string
+		if config.tokens != nil {
+			token, err := config.tokens.Token()
+			if err != nil {
+				return errors.New("BB executor OAuth token acquisition failed")
+			}
+			bearer = token.AccessToken
+		} else {
+			token, err := os.ReadFile(config.TokenFile)
+			if err != nil {
+				return err
+			}
+			bearer = strings.TrimSpace(string(token))
+		}
+		if bearer == "" {
+			return errors.New("BB executor credential is empty")
+		}
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
 	req.Header.Set("X-Breadboard-Project", config.Project)
 	req.Header.Set("Content-Type", "application/json")
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)
 	}
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := config.client
+	if client == nil {
+		client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		return err
@@ -265,8 +323,9 @@ func (config bbExecutorConfig) request(ctx context.Context, method, path, key st
 }
 
 func (config bbExecutorConfig) reconcile(ctx context.Context) error {
-	// Drain only explicitly unsupported labels before capacity checks or dispatch.
-	// Unknown labels stay queued so missing profiles remain visible.
+	// Explicitly unsupported label sets must be drained even when BB has no
+	// capacity, the global concurrency limit is full, or a capacity query fails.
+	// Unknown labels remain queued so a missing profile is observable and safe.
 	if err := config.skipConfiguredUnsupportedJobs(ctx); err != nil {
 		return fmt.Errorf("skip configured unsupported BB jobs: %w", err)
 	}
@@ -301,6 +360,23 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 	if remaining <= 0 {
 		return nil
 	}
+	profileCapacity := make(map[int]int, len(config.Profiles))
+	if config.AutoConcurrency {
+		// Read capacity for every profile before admitting any new work. If any
+		// query fails, fail closed for this reconciliation while leaving active
+		// tasks alone (they were advanced above).
+		for profileIndex, profile := range config.Profiles {
+			capacity, err := config.schedulableCapacity(ctx, profile, config.MaxConcurrent)
+			if err != nil {
+				return fmt.Errorf("query BB schedulable capacity for profile %q: %w", profile.Name, err)
+			}
+			profileCapacity[profileIndex] = capacity
+		}
+	}
+	admission := make(map[githubDedupGroupKey]githubDedupDecision)
+	groupsSeen := make(map[githubDedupGroupKey]bool)
+	runs := make(map[int64]*actions_model.ActionRun)
+	repos := make(map[int64]*repo_model.Repository)
 	for page := 1; remaining > 0; page++ {
 		jobs, total, err := actions_model.FindJobQueueJobs(ctx, actions_model.JobQueueOptions{Status: actions_model.StatusWaiting}, page, 100)
 		if err != nil {
@@ -314,15 +390,75 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 			if exists {
 				continue
 			}
-			for _, profile := range config.Profiles {
-				labels := make([]string, 0, len(profile.Labels))
-				for _, label := range profile.Labels {
-					name, _, _ := strings.Cut(label, ":")
-					labels = append(labels, name)
-				}
+			matchingProfiles := make([]int, 0, len(config.Profiles))
+			profileLabels := make(map[int][]string, len(config.Profiles))
+			for profileIndex, profile := range config.Profiles {
+				labels := bbProfileRunnerLabels(profile)
 				runner := &actions_model.ActionRunner{AgentLabels: labels}
-				if !runner.CanMatchLabels(job.RunsOn) {
+				if runner.CanMatchLabels(job.RunsOn) {
+					matchingProfiles = append(matchingProfiles, profileIndex)
+					profileLabels[profileIndex] = labels
+				}
+			}
+			if len(matchingProfiles) == 0 {
+				continue
+			}
+			deferred := false
+			for _, profileIndex := range matchingProfiles {
+				profile := config.Profiles[profileIndex]
+				if config.AutoConcurrency && profileCapacity[profileIndex] <= 0 {
 					continue
+				}
+				labels := profileLabels[profileIndex]
+				if config.githubDeduper != nil {
+					groupKey := githubDedupKey(job)
+					if groupsSeen[groupKey] {
+						deferred = true
+						break
+					}
+					decision, decided := admission[groupKey]
+					if !decided {
+						run := runs[job.RunID]
+						if run == nil {
+							run, err = actions_model.GetRunByRepoAndID(ctx, job.RepoID, job.RunID)
+							if err != nil {
+								log.Warn("BB executor cannot load workflow run for GitHub dedup job %d; allowing Gitea dispatch: %v", job.ID, err)
+								decision = githubDedupRun
+							} else {
+								runs[job.RunID] = run
+							}
+						}
+						repo := repos[job.RepoID]
+						if run != nil && repo == nil {
+							repo, err = repo_model.GetRepositoryByID(ctx, job.RepoID)
+							if err != nil {
+								log.Warn("BB executor cannot load repository for GitHub dedup job %d; allowing Gitea dispatch: %v", job.ID, err)
+								decision = githubDedupRun
+							} else {
+								repos[job.RepoID] = repo
+							}
+						}
+						if run != nil && repo != nil {
+							var siblings []*actions_model.ActionRunJob
+							decision, siblings, _, err = config.githubDeduper.decide(ctx, repo, run, job)
+							decision = githubDedupDecisionForLookup(decision, err)
+							if err != nil {
+								config.githubDeduper.clearPending(groupKey)
+								log.Warn("BB executor GitHub status lookup failed for job %d; allowing Gitea dispatch: %v", job.ID, err)
+							}
+							if decision == githubDedupSkip {
+								if err := markGitHubDuplicateJobsSkipped(ctx, siblings); err != nil {
+									return err
+								}
+							}
+						}
+						admission[groupKey] = decision
+					}
+					if decision == githubDedupWait || decision == githubDedupSkip {
+						groupsSeen[groupKey] = true
+						deferred = true
+						break
+					}
 				}
 				row, err := config.prepare(ctx, job, profile, labels)
 				if err != nil {
@@ -332,7 +468,13 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 					return err
 				}
 				remaining--
+				if config.AutoConcurrency {
+					profileCapacity[profileIndex]--
+				}
 				break
+			}
+			if deferred {
+				continue
 			}
 			if remaining == 0 {
 				break
@@ -343,6 +485,27 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (config bbExecutorConfig) schedulableCapacity(ctx context.Context, profile bbExecutorProfile, maxCount int) (int, error) {
+	if maxCount < 1 || maxCount > 100 {
+		return 0, errors.New("BB capacity max_count must be between 1 and 100")
+	}
+	var response bbCapacityResponse
+	request := map[string]any{"spec": profile.Sandbox, "max_count": maxCount}
+	if err := config.request(ctx, http.MethodPost, "/v1/scheduler/capacity", "", request, &response); err != nil {
+		return 0, err
+	}
+	if response.Schedulable < 0 || response.MaxCount < 1 || response.MaxCount > 100 || response.Schedulable > response.MaxCount || response.AsOfMS <= 0 {
+		return 0, errors.New("BB capacity response is invalid")
+	}
+	if response.MaxCount < maxCount {
+		maxCount = response.MaxCount
+	}
+	if response.Schedulable > maxCount {
+		return 0, errors.New("BB capacity response exceeds requested max_count")
+	}
+	return response.Schedulable, nil
 }
 
 func (config bbExecutorConfig) prepare(ctx context.Context, job *actions_model.ActionRunJob, profile bbExecutorProfile, labels []string) (*actions_model.ActionBBTask, error) {
@@ -400,7 +563,11 @@ func (config bbExecutorConfig) taskRequest(row *actions_model.ActionBBTask, prof
 	if err != nil {
 		return nil, err
 	}
-	script := "set -eu\numask 077\ntest \"$(uname -s)\" = " + bbShellQuote(platform) + "\n" + createDirectory + bbShellQuote(workdir) + "\ncd " + bbShellQuote(workdir) + "\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\ncurl --fail --silent --show-error --location " + bbShellQuote(profile.RunnerURL) + " -o runner\nprintf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | " + checksum + "\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
+	script := "set -eu\numask 077\ntest \"$(uname -s)\" = " + bbShellQuote(platform) + "\n" + createDirectory + bbShellQuote(workdir) + "\n"
+	if profile.Platform != "darwin" {
+		script += "export HOME=" + bbShellQuote(workdir) + "\n"
+	}
+	script += "cd " + bbShellQuote(workdir) + "\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\ncurl --fail --silent --show-error --location " + bbShellQuote(profile.RunnerURL) + " -o runner\nprintf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | " + checksum + "\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
 	return json.Marshal(map[string]any{"sandbox": profile.Sandbox, "package_sets": profile.PackageSets, "max_duration_s": config.MaxDurationS, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": user, "timeout_s": config.MaxDurationS, "secrets": []string{bbSecretName(row)}}})
 }
 

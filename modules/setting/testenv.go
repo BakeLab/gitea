@@ -139,8 +139,8 @@ func PrepareIntegrationTestConfig() (workPath string, err error) {
 		if isInCI {
 			return "", errors.New("GITEA_TEST_DATABASE environment variable not set")
 		}
-		// for local development, default to sqlite. CI needs to explicitly set a database to avoid unexpected results
-		testDatabase = "sqlite"
+		// PostgreSQL is the only supported integration-test database.
+		testDatabase = "pgsql"
 		_, _ = fmt.Fprintf(os.Stderr, "Environment variable GITEA_TEST_DATABASE not set - defaulting to %s\n", testDatabase)
 	}
 

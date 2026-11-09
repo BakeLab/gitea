@@ -26,11 +26,10 @@ endif
 
 MAKE_EVIDENCE_DIR := .make_evidence
 
-# Use sqlite as default database if running tests, only do so for local tests, not in CI.
-# CI should explicitly set the database to avoid unexpected results.
+# Use PostgreSQL as the default integration-test database; CI sets it explicitly.
 ifneq ($(findstring test-,$(MAKECMDGOALS)),)
 	ifeq ($(CI),)
-		GITEA_TEST_DATABASE ?= sqlite
+		GITEA_TEST_DATABASE ?= pgsql
 	endif
 endif
 
@@ -68,7 +67,7 @@ endif
 
 # GOTEST_FLAGS is for unit test and integration test
 GOTEST_FLAGS ?= -timeout 40m
-# disable race detection for the packages that slow down the tests
+# Disable race detection for the SQLite package used by internal unit-test fixtures.
 GOTEST_FLAGS := -gcflags=modernc.org/sqlite/lib=-race=false $(GOTEST_FLAGS)
 
 STORED_VERSION_FILE := VERSION
@@ -144,20 +143,12 @@ SWAGGER_SPEC_INPUT := templates/swagger/v1-input.json
 SWAGGER_SPEC := templates/swagger/v1-swagger.generated.json
 OPENAPI3_SPEC := templates/swagger/v1-openapi3.generated.json
 
-TEST_MYSQL_HOST ?= mysql:3306
-TEST_MYSQL_DBNAME ?= testgitea
-TEST_MYSQL_USERNAME ?= root
-TEST_MYSQL_PASSWORD ?=
 TEST_PGSQL_HOST ?= pgsql:5432
 TEST_PGSQL_DBNAME ?= testgitea
 TEST_PGSQL_USERNAME ?= postgres
 TEST_PGSQL_PASSWORD ?= postgres
 TEST_PGSQL_SCHEMA ?= gtestschema
 TEST_MINIO_ENDPOINT ?= minio:9000
-TEST_MSSQL_HOST ?= mssql:1433
-TEST_MSSQL_DBNAME ?= testgitea
-TEST_MSSQL_USERNAME ?= sa
-TEST_MSSQL_PASSWORD ?= MwantsaSecurePassword1
 
 # Include local Makefile
 # Makefile.local is listed in .gitignore
@@ -176,8 +167,8 @@ all: build
 help: Makefile ## print Makefile help information.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m[TARGETS] default target: build\033[0m\n\n\033[35mTargets:\033[0m\n"} /^[0-9A-Za-z._-]+:.*?##/ { printf "  \033[36m%-45s\033[0m %s\n", $$1, $$2 }' Makefile #$(MAKEFILE_LIST)
 	@printf "  \033[36m%-46s\033[0m %s\n" "test-e2e" "test end to end using playwright"
-	@printf "  \033[36m%-46s\033[0m %s\n" "test-backend[#TestSpecificName]" "run unit test (sqlite only)"
-	@printf "  \033[36m%-46s\033[0m %s\n" "test-integration[#TestSpecificName]" "run integration test for GITEA_TEST_DATABASE (sqlite, mysql, pgsql, mssql)"
+	@printf "  \033[36m%-46s\033[0m %s\n" "test-backend[#TestSpecificName]" "run backend unit tests"
+	@printf "  \033[36m%-46s\033[0m %s\n" "test-integration[#TestSpecificName]" "run integration tests against PostgreSQL"
 
 .PHONY: clean-all
 clean-all: clean ## delete backend, frontend and integration files

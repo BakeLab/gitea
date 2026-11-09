@@ -42,10 +42,10 @@ if [ ! -f ${GITEA_CUSTOM}/conf/app.ini ]; then
     SSH_PORT=${SSH_PORT:-"22"} \
     SSH_LISTEN_PORT=${SSH_LISTEN_PORT:-"${SSH_PORT}"} \
     LFS_START_SERVER=${LFS_START_SERVER:-"false"} \
-    DB_TYPE=${DB_TYPE:-"sqlite3"} \
-    DB_HOST=${DB_HOST:-"localhost:3306"} \
+    DB_TYPE=${DB_TYPE:-"postgres"} \
+    DB_HOST=${DB_HOST:-"localhost:5432"} \
     DB_NAME=${DB_NAME:-"gitea"} \
-    DB_USER=${DB_USER:-"root"} \
+    DB_USER=${DB_USER:-"gitea"} \
     DB_PASSWD=${DB_PASSWD:-""} \
     INSTALL_LOCK=${INSTALL_LOCK:-"false"} \
     DISABLE_REGISTRATION=${DISABLE_REGISTRATION:-"false"} \

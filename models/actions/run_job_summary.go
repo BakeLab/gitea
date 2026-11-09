@@ -7,7 +7,6 @@ import (
 	"context"
 
 	"gitea.dev/models/db"
-	"gitea.dev/modules/setting"
 	"gitea.dev/modules/timeutil"
 	"gitea.dev/modules/util"
 )
@@ -150,45 +149,11 @@ func upsertActionRunJobSummary(ctx context.Context, summary *ActionRunJobSummary
 		summary.Updated,
 	}
 
-	if setting.Database.Type.IsPostgreSQL() || setting.Database.Type.IsSQLite3() {
-		args := append([]any{"INSERT INTO `action_run_job_summary` (" + columns + ") VALUES (?,?,?,?,?,?,?,?,?,?) " +
-			"ON CONFLICT (`repo_id`, `run_id`, `run_attempt_id`, `job_id`, `step_index`) DO UPDATE SET " +
-			"`content` = excluded.`content`, `content_type` = excluded.`content_type`, `content_size` = excluded.`content_size`, `updated` = excluded.`updated`"}, values...)
-		_, err := engine.Exec(args...)
-		return err
-	}
-
-	if setting.Database.Type.IsMySQL() {
-		args := append([]any{
-			"INSERT INTO `action_run_job_summary` (" + columns + ") VALUES (?,?,?,?,?,?,?,?,?,?) " +
-				"ON DUPLICATE KEY UPDATE `content` = VALUES(`content`), `content_type` = VALUES(`content_type`), `content_size` = VALUES(`content_size`), `updated` = VALUES(`updated`)",
-		}, values...)
-		_, err := engine.Exec(args...)
-		return err
-	}
-
-	if setting.Database.Type.IsMSSQL() {
-		_, err := engine.Exec(`
-MERGE INTO action_run_job_summary WITH (HOLDLOCK) AS target
-USING (SELECT ? AS repo_id, ? AS run_id, ? AS run_attempt_id, ? AS job_id, ? AS step_index) AS source
-ON target.repo_id = source.repo_id
-	AND target.run_id = source.run_id
-	AND target.run_attempt_id = source.run_attempt_id
-	AND target.job_id = source.job_id
-	AND target.step_index = source.step_index
-WHEN MATCHED THEN
-	UPDATE SET content = ?, content_type = ?, content_size = ?, updated = ?
-WHEN NOT MATCHED THEN
-	INSERT (repo_id, run_id, run_attempt_id, job_id, step_index, content, content_type, content_size, created, updated)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-`,
-			summary.RepoID, summary.RunID, summary.RunAttemptID, summary.JobID, summary.StepIndex,
-			summary.Content, summary.ContentType, summary.ContentSize, summary.Updated,
-			summary.RepoID, summary.RunID, summary.RunAttemptID, summary.JobID, summary.StepIndex, summary.Content, summary.ContentType, summary.ContentSize, summary.Created, summary.Updated)
-		return err
-	}
-
-	return util.ErrInvalidArgument
+	args := append([]any{"INSERT INTO `action_run_job_summary` (" + columns + ") VALUES (?,?,?,?,?,?,?,?,?,?) " +
+		"ON CONFLICT (`repo_id`, `run_id`, `run_attempt_id`, `job_id`, `step_index`) DO UPDATE SET " +
+		"`content` = excluded.`content`, `content_type` = excluded.`content_type`, `content_size` = excluded.`content_size`, `updated` = excluded.`updated"}, values...)
+	_, err := engine.Exec(args...)
+	return err
 }
 
 // ListActionRunJobSummaries lists the stored summaries for a run attempt, ordered by job
