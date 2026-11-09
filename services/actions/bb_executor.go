@@ -36,18 +36,19 @@ import (
 )
 
 type bbExecutorConfig struct {
-	Endpoint         string              `json:"endpoint"`
-	Project          string              `json:"project"`
-	TokenFile        string              `json:"token_file"`
-	TokenURL         string              `json:"token_url"`
-	ClientID         string              `json:"client_id"`
-	ClientSecretFile string              `json:"client_secret_file"`
-	Resource         string              `json:"resource"`
-	Scopes           []string            `json:"scopes"`
-	MaxConcurrent    int                 `json:"max_concurrent"`
-	MaxDurationS     int                 `json:"max_duration_s"`
-	Profiles         []bbExecutorProfile `json:"profiles"`
-	tokens           oauth2.TokenSource
+	Endpoint          string                        `json:"endpoint"`
+	Project           string                        `json:"project"`
+	TokenFile         string                        `json:"token_file"`
+	TokenURL          string                        `json:"token_url"`
+	ClientID          string                        `json:"client_id"`
+	ClientSecretFile  string                        `json:"client_secret_file"`
+	Resource          string                        `json:"resource"`
+	Scopes            []string                      `json:"scopes"`
+	MaxConcurrent     int                           `json:"max_concurrent"`
+	MaxDurationS      int                           `json:"max_duration_s"`
+	Profiles          []bbExecutorProfile           `json:"profiles"`
+	UnsupportedLabels []bbExecutorUnsupportedLabels `json:"unsupported_labels,omitempty"`
+	tokens            oauth2.TokenSource
 }
 
 type bbExecutorProfile struct {
@@ -110,6 +111,9 @@ func initBBExecutor(ctx context.Context) error {
 	}
 	if config.Project == "" || config.MaxConcurrent < 1 || config.MaxConcurrent > 100 || config.MaxDurationS < 60 || config.MaxDurationS > 604800 || len(config.Profiles) == 0 {
 		return errors.New("BB executor requires project, profiles, max_concurrent (1-100) and max_duration_s (60-604800)")
+	}
+	if err := config.validateUnsupportedLabels(); err != nil {
+		return err
 	}
 	if config.TokenFile == "" {
 		if _, err := bbHTTPS(config.TokenURL); err != nil {
@@ -261,6 +265,11 @@ func (config bbExecutorConfig) request(ctx context.Context, method, path, key st
 }
 
 func (config bbExecutorConfig) reconcile(ctx context.Context) error {
+	// Drain only explicitly unsupported labels before capacity checks or dispatch.
+	// Unknown labels stay queued so missing profiles remain visible.
+	if err := config.skipConfiguredUnsupportedJobs(ctx); err != nil {
+		return fmt.Errorf("skip configured unsupported BB jobs: %w", err)
+	}
 	rows, err := actions_model.ListActiveBBTasks(ctx)
 	if err != nil {
 		return err
