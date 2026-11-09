@@ -22,6 +22,7 @@ import (
 
 	actions_model "gitea.dev/models/actions"
 	"gitea.dev/models/db"
+	repo_model "gitea.dev/models/repo"
 	"gitea.dev/modules/globallock"
 	"gitea.dev/modules/graceful"
 	"gitea.dev/modules/json"
@@ -48,10 +49,12 @@ type bbExecutorConfig struct {
 	ProfileAuth      *bbExecutorProfileAuth `json:"profile_auth,omitempty"`
 	MaxConcurrent    int                    `json:"max_concurrent"`
 	AutoConcurrency  bool                   `json:"auto_concurrency,omitempty"`
+	GitHubTokenFile  string                 `json:"github_token_file,omitempty"`
 	MaxDurationS     int                    `json:"max_duration_s"`
 	Profiles         []bbExecutorProfile    `json:"profiles"`
 	tokens           oauth2.TokenSource
 	client           *http.Client
+	githubDeduper    *githubStatusDeduper
 }
 
 type bbExecutorProfileAuth struct {
@@ -127,6 +130,18 @@ func initBBExecutor(ctx context.Context) error {
 	if config.Project == "" || config.MaxConcurrent < 1 || config.MaxConcurrent > 100 || config.MaxDurationS < 60 || config.MaxDurationS > 604800 || len(config.Profiles) == 0 {
 		return errors.New("BB executor requires project, profiles, max_concurrent (1-100) and max_duration_s (60-604800)")
 	}
+	var githubToken string
+	if config.GitHubTokenFile != "" {
+		if !filepath.IsAbs(config.GitHubTokenFile) {
+			return errors.New("BB executor GitHub token file path must be absolute")
+		}
+		data, err := os.ReadFile(config.GitHubTokenFile)
+		if err != nil || strings.TrimSpace(string(data)) == "" {
+			return errors.New("BB executor GitHub token file is unavailable or empty")
+		}
+		githubToken = strings.TrimSpace(string(data))
+	}
+	config.githubDeduper = newGitHubStatusDeduper(githubToken)
 	if config.ProfileAuth != nil {
 		profile := config.ProfileAuth
 		if config.TokenFile != "" || config.TokenURL != "" || config.ClientID != "" || config.ClientSecretFile != "" || config.Resource != "" || len(config.Scopes) != 0 {
@@ -331,6 +346,10 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 			profileCapacity[profileIndex] = capacity
 		}
 	}
+	admission := make(map[githubDedupGroupKey]githubDedupDecision)
+	groupsSeen := make(map[githubDedupGroupKey]bool)
+	runs := make(map[int64]*actions_model.ActionRun)
+	repos := make(map[int64]*repo_model.Repository)
 	for page := 1; remaining > 0; page++ {
 		jobs, total, err := actions_model.FindJobQueueJobs(ctx, actions_model.JobQueueOptions{Status: actions_model.StatusWaiting}, page, 100)
 		if err != nil {
@@ -344,6 +363,7 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 			if exists {
 				continue
 			}
+			deferred := false
 			for profileIndex, profile := range config.Profiles {
 				if config.AutoConcurrency && profileCapacity[profileIndex] <= 0 {
 					continue
@@ -357,6 +377,56 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 				if !runner.CanMatchLabels(job.RunsOn) {
 					continue
 				}
+				if config.githubDeduper != nil {
+					groupKey := githubDedupKey(job)
+					if groupsSeen[groupKey] {
+						deferred = true
+						break
+					}
+					decision, decided := admission[groupKey]
+					if !decided {
+						run := runs[job.RunID]
+						if run == nil {
+							run, err = actions_model.GetRunByRepoAndID(ctx, job.RepoID, job.RunID)
+							if err != nil {
+								log.Warn("BB executor cannot load workflow run for GitHub dedup job %d; allowing Gitea dispatch: %v", job.ID, err)
+								decision = githubDedupRun
+							} else {
+								runs[job.RunID] = run
+							}
+						}
+						repo := repos[job.RepoID]
+						if run != nil && repo == nil {
+							repo, err = repo_model.GetRepositoryByID(ctx, job.RepoID)
+							if err != nil {
+								log.Warn("BB executor cannot load repository for GitHub dedup job %d; allowing Gitea dispatch: %v", job.ID, err)
+								decision = githubDedupRun
+							} else {
+								repos[job.RepoID] = repo
+							}
+						}
+						if run != nil && repo != nil {
+							var siblings []*actions_model.ActionRunJob
+							decision, siblings, _, err = config.githubDeduper.decide(ctx, repo, run, job)
+							decision = githubDedupDecisionForLookup(decision, err)
+							if err != nil {
+								config.githubDeduper.clearPending(groupKey)
+								log.Warn("BB executor GitHub status lookup failed for job %d; allowing Gitea dispatch: %v", job.ID, err)
+							}
+							if decision == githubDedupSkip {
+								if err := markGitHubDuplicateJobsSkipped(ctx, siblings); err != nil {
+									return err
+								}
+							}
+						}
+						admission[groupKey] = decision
+					}
+					if decision == githubDedupWait || decision == githubDedupSkip {
+						groupsSeen[groupKey] = true
+						deferred = true
+						break
+					}
+				}
 				row, err := config.prepare(ctx, job, profile, labels)
 				if err != nil {
 					return err
@@ -369,6 +439,9 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 					profileCapacity[profileIndex]--
 				}
 				break
+			}
+			if deferred {
+				continue
 			}
 			if remaining == 0 {
 				break
