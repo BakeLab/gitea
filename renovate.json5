@@ -91,14 +91,6 @@
       "allowedVersions": "/^14($|[.-])/", // pin to oldest supported major
     },
     {
-      "matchPackageNames": ["bitnamilegacy/mysql"],
-      "allowedVersions": "/^8\\.4($|[.-])/", // pin to oldest LTS
-    },
-    {
-      "matchPackageNames": ["mcr.microsoft.com/mssql/server"],
-      "allowedVersions": "/^2019($|[.-])/", // pin to oldest in extended support
-    },
-    {
       "matchPackageNames": ["elasticsearch"],
       "allowedVersions": "/^8($|[.-])/", // pin to oldest supported major
     },

@@ -96,8 +96,12 @@ fi
 mkdir -p "$WORK_DIR/custom/conf"
 cat > "$WORK_DIR/custom/conf/app.ini" <<EOF
 [database]
-DB_TYPE = sqlite3
-PATH = $WORK_DIR/data/gitea.db
+DB_TYPE = postgres
+HOST = ${TEST_PGSQL_HOST:-localhost:5432}
+NAME = ${TEST_PGSQL_DBNAME:-testgitea}
+USER = ${TEST_PGSQL_USERNAME:-postgres}
+PASSWD = ${TEST_PGSQL_PASSWORD:-postgres}
+SSL_MODE = disable
 
 [server]
 HTTP_PORT = $FREE_PORT
