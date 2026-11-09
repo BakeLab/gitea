@@ -7,7 +7,6 @@ import (
 	"context"
 
 	"gitea.dev/modelmigration/base"
-	"gitea.dev/modules/setting"
 )
 
 func RenameWebhookOrgToOwner(ctx context.Context, x base.EngineMigration) error {
@@ -47,24 +46,8 @@ func RenameWebhookOrgToOwner(ctx context.Context, x base.EngineMigration) error 
 		}
 	}
 
-	switch {
-	case setting.Database.Type.IsMySQL():
-		inferredTable, err := x.TableInfo(new(Webhook))
-		if err != nil {
-			return err
-		}
-		sqlType := x.Dialect().SQLType(inferredTable.GetColumn("org_id"))
-		if _, err := sess.Exec("ALTER TABLE `webhook` CHANGE org_id owner_id " + sqlType); err != nil {
-			return err
-		}
-	case setting.Database.Type.IsMSSQL():
-		if _, err := sess.Exec("sp_rename 'webhook.org_id', 'owner_id', 'COLUMN'"); err != nil {
-			return err
-		}
-	default:
-		if _, err := sess.Exec("ALTER TABLE `webhook` RENAME COLUMN org_id TO owner_id"); err != nil {
-			return err
-		}
+	if _, err := sess.Exec("ALTER TABLE `webhook` RENAME COLUMN org_id TO owner_id"); err != nil {
+		return err
 	}
 
 	return sess.Commit()
