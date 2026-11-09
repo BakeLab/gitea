@@ -236,23 +236,6 @@ func (err ErrInvalidMergeStyle) Unwrap() error {
 	return util.ErrInvalidArgument
 }
 
-func addTestPullRequestTaskAfterWebOperation(pr *issues_model.PullRequest, doer *user_model.User) {
-	// This is a duplicated call to AddTestPullRequestTask (it will also be called by the post-receive hook, via a push queue).
-	// This call will do some operations (push to base repo, sync commit divergence, add PR conflict check queue task, etc)
-	// immediately instead of waiting for the "push queue"'s task. The code is from https://github.com/go-gitea/gitea/pull/7082.
-	// But it's really questionable whether it's worth to do it ahead without waiting for the "push queue" task to run.
-	// TODO: DUPLICATE-PR-TASK: maybe can try to remove this in 1.26 to see if there is any issue.
-	go AddTestPullRequestTask(TestPullRequestOptions{
-		RepoID:      pr.BaseRepoID,
-		Doer:        doer,
-		Branch:      pr.BaseBranch,
-		IsSync:      false,
-		IsForcePush: false,
-		OldCommitID: "",
-		NewCommitID: "",
-	})
-}
-
 func recordMergeIntent(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, commitID string, wasAutoMerged bool) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
 		pr.MergedUnix = timeutil.TimeStampNow()
@@ -374,11 +357,6 @@ func Merge(outerCtx context.Context, prID int64, doer *user_model.User, mergeSty
 		return err
 	}
 
-	pr, err := issues_model.GetPullRequestByID(ctx, prID)
-	if err != nil {
-		return err
-	}
-	addTestPullRequestTaskAfterWebOperation(pr, doer) // keep the same behavior as old code: always call AddTestPullRequestTask
 	return nil
 }
 

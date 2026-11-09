@@ -19,6 +19,21 @@ jobs:
     if: needs.files-changed.outputs.backend == 'true' || needs.files-changed.outputs.frontend == 'true' || needs.files-changed.outputs.e2e == 'true'
     needs: files-changed
     runs-on: ubuntu-latest
+    services:
+      pgsql:
+        image: postgres:14@sha256:156f0b253fd61366d5fc2107ad45955027d5612f695a8436ce20167f3fa79bff
+        env:
+          POSTGRES_DB: testgitea
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --mount type=tmpfs,destination=/var/lib/postgresql/data
+          --health-cmd "pg_isready -U postgres -d testgitea"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - "5432:5432"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/go-setup
@@ -36,3 +51,7 @@ jobs:
           TAGS: bindata
           FORCE_COLOR: 1
           GITEA_TEST_E2E_DEBUG: 1
+          TEST_PGSQL_HOST: localhost:5432
+          TEST_PGSQL_DBNAME: testgitea
+          TEST_PGSQL_USERNAME: postgres
+          TEST_PGSQL_PASSWORD: postgres

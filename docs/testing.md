@@ -1,8 +1,8 @@
 # Testing
 
 Gitea has four kinds of automated tests: backend unit tests, integration tests,
-end-to-end (e2e) tests, and migration tests. Local runs default to SQLite, so no
-extra services are required to get started.
+end-to-end (e2e) tests, and migration tests. Integration, end-to-end, and
+migration tests use PostgreSQL.
 
 For prerequisites see [build-setup.md](build-setup.md); for the build workflow see
 [development.md](development.md).
@@ -33,13 +33,14 @@ pnpm exec vitest <path-filter>
 
 ## Integration tests
 
-Integration tests exercise Gitea against a real database. They live in
+Integration tests exercise Gitea against PostgreSQL. They live in
 `tests/integration/` and require [Git LFS](https://git-lfs.com/) to be installed.
-The database is selected with `GITEA_TEST_DATABASE`; an empty value defaults to
-SQLite, which needs no external service:
+Start PostgreSQL and MinIO, then run the integration suite:
 
 ```bash
-make test-integration
+docker run -e "POSTGRES_DB=test" -e "POSTGRES_USER=postgres" -e "POSTGRES_PASSWORD=postgres" -p 5432:5432 --rm --name pgsql postgres:latest
+docker run --rm -p 9000:9000 -e MINIO_ROOT_USER=123456 -e MINIO_ROOT_PASSWORD=12345678 --name minio bitnamilegacy/minio:2023.8.31
+GITEA_TEST_DATABASE=pgsql TEST_MINIO_ENDPOINT=localhost:9000 TEST_PGSQL_HOST=localhost:5432 TEST_PGSQL_DBNAME=postgres TEST_PGSQL_USERNAME=postgres TEST_PGSQL_PASSWORD=postgres make test-integration
 ```
 
 Run a single integration test with the `#` selector:
@@ -48,8 +49,7 @@ Run a single integration test with the `#` selector:
 make test-integration#TestName
 ```
 
-Each run gets its own work directory under `tests/integration/` and random ports, so SQLite runs
-can execute in parallel. Runs against other databases still share the database and object storage.
+Each run gets its own work directory under `tests/integration/` and random ports.
 The work directory is removed after a passing run and kept after a failure.
 
 If you hit errors such as a mismatched database version or SSH push failures, try a
@@ -57,45 +57,6 @@ clean rebuild first:
 
 ```bash
 make clean build
-```
-
-### Running against other databases
-
-Set `GITEA_TEST_DATABASE` together with the matching `TEST_*` connection variables.
-The commands below start a throwaway database container (press `Ctrl-C` to stop and
-remove it) and then run the tests against it.
-
-#### MySQL
-
-```bash
-docker run -e "MYSQL_DATABASE=test" -e "MYSQL_ALLOW_EMPTY_PASSWORD=yes" -p 3306:3306 --rm --name mysql mysql:latest
-```
-
-```bash
-GITEA_TEST_DATABASE=mysql TEST_MYSQL_HOST=localhost:3306 TEST_MYSQL_DBNAME=test TEST_MYSQL_USERNAME=root TEST_MYSQL_PASSWORD='' make test-integration
-```
-
-#### PostgreSQL
-
-PostgreSQL tests also use a MinIO container for object storage:
-
-```bash
-docker run -e "POSTGRES_DB=test" -e "POSTGRES_USER=postgres" -e "POSTGRES_PASSWORD=postgres" -p 5432:5432 --rm --name pgsql postgres:latest
-docker run --rm -p 9000:9000 -e MINIO_ROOT_USER=123456 -e MINIO_ROOT_PASSWORD=12345678 --name minio bitnamilegacy/minio:2023.8.31
-```
-
-```bash
-GITEA_TEST_DATABASE=pgsql TEST_MINIO_ENDPOINT=localhost:9000 TEST_PGSQL_HOST=localhost:5432 TEST_PGSQL_DBNAME=postgres TEST_PGSQL_USERNAME=postgres TEST_PGSQL_PASSWORD=postgres make test-integration
-```
-
-#### MSSQL
-
-```bash
-docker run -e "ACCEPT_EULA=Y" -e "MSSQL_PID=Standard" -e "SA_PASSWORD=MwantsaSecurePassword1" -p 1433:1433 --rm --name mssql microsoft/mssql-server-linux:latest
-```
-
-```bash
-GITEA_TEST_DATABASE=mssql TEST_MSSQL_HOST=localhost:1433 TEST_MSSQL_DBNAME=gitea_test TEST_MSSQL_USERNAME=sa TEST_MSSQL_PASSWORD=MwantsaSecurePassword1 make test-integration
 ```
 
 ### Running the database test workflow with Gitea Runner
@@ -126,6 +87,9 @@ API credentials, makes it record from the live API instead. To re-record, delete
 
 End-to-end tests drive a running Gitea instance with [Playwright](https://playwright.dev/):
 
+The test instance uses PostgreSQL; set the `TEST_PGSQL_*` connection variables
+when running it outside CI.
+
 ```bash
 make test-e2e
 ```
@@ -155,7 +119,7 @@ make test-migration
 
 ## Continuous integration
 
-CI runs the unit tests, runs the integration tests against every supported database,
+CI runs the unit tests, runs integration and migration tests against PostgreSQL,
 and tests migration from several recent Gitea versions. Please submit your pull
 request with additional unit and integration tests as appropriate. Prefer unit tests
 when the logic can be tested in isolation, and keep local integration and e2e tests

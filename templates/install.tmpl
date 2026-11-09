@@ -68,14 +68,6 @@
 						</div>
 					</div>
 
-					<div class="tw-mt-4 tw-hidden" data-db-setting-for="sqlite3">
-						<div class="inline required field {{if or .Err_DbPath .Err_DbSetting}}error{{end}}">
-							<label for="db_path">{{ctx.Locale.Tr "install.path"}}</label>
-							<input id="db_path" name="db_path" value="{{.db_path}}">
-							<span class="help">{{ctx.Locale.Tr "install.sqlite_helper"}}</span>
-						</div>
-					</div>
-
 					{{if .Err_DbInstalledBefore}}
 					<div>
 						<p class="reinstall-message">{{ctx.Locale.Tr "install.reinstall_confirm_message"}}</p>

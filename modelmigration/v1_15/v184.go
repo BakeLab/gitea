@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"gitea.dev/modelmigration/base"
-	"gitea.dev/modules/setting"
 )
 
 func RenameTaskErrorsToMessage(ctx context.Context, x base.EngineMigration) error {
@@ -51,19 +50,8 @@ func RenameTaskErrorsToMessage(ctx context.Context, x base.EngineMigration) erro
 		}
 	}
 
-	switch {
-	case setting.Database.Type.IsMySQL():
-		if _, err := sess.Exec("ALTER TABLE `task` CHANGE errors message text"); err != nil {
-			return err
-		}
-	case setting.Database.Type.IsMSSQL():
-		if _, err := sess.Exec("sp_rename 'task.errors', 'message', 'COLUMN'"); err != nil {
-			return err
-		}
-	default:
-		if _, err := sess.Exec("ALTER TABLE `task` RENAME COLUMN errors TO message"); err != nil {
-			return err
-		}
+	if _, err := sess.Exec("ALTER TABLE `task` RENAME COLUMN errors TO message"); err != nil {
+		return err
 	}
 	return sess.Commit()
 }

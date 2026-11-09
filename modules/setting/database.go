@@ -11,10 +11,10 @@ import (
 const DefaultSQLiteBusyTimeout = 20 * 1000
 
 var (
-	// SupportedDatabaseTypes includes all XORM supported databases type, sqlite3 maybe added by the tag-controlled drivers
-	SupportedDatabaseTypes = []string{"mysql", "postgres", "mssql"}
-	// DatabaseTypeNames contains the friendly names for all database types
-	DatabaseTypeNames = map[string]string{"mysql": "MySQL", "postgres": "PostgreSQL", "mssql": "MSSQL", DatabaseTypeSQLite3: "SQLite3"}
+	// SupportedDatabaseTypes lists database backends available to the running application.
+	SupportedDatabaseTypes = []string{"postgres"}
+	// DatabaseTypeNames contains the friendly names for the supported database backends.
+	DatabaseTypeNames = map[string]string{"postgres": "PostgreSQL"}
 
 	// Database holds the database settings
 	Database = struct {
@@ -75,11 +75,7 @@ func loadDBSetting(rootCfg ConfigProvider) {
 	Database.SQLiteJournalMode = sec.Key("SQLITE_JOURNAL_MODE").MustString("")
 
 	Database.MaxIdleConns = sec.Key("MAX_IDLE_CONNS").MustInt(2)
-	if Database.Type.IsMySQL() {
-		Database.ConnMaxLifetime = sec.Key("CONN_MAX_LIFETIME").MustDuration(3 * time.Second)
-	} else {
-		Database.ConnMaxLifetime = sec.Key("CONN_MAX_LIFETIME").MustDuration(0)
-	}
+	Database.ConnMaxLifetime = sec.Key("CONN_MAX_LIFETIME").MustDuration(0)
 	Database.MaxOpenConns = sec.Key("MAX_OPEN_CONNS").MustInt(0)
 
 	Database.IterateBufferSize = sec.Key("ITERATE_BUFFER_SIZE").MustInt(50)
@@ -109,4 +105,8 @@ func (t DatabaseType) IsMSSQL() bool {
 
 func (t DatabaseType) IsPostgreSQL() bool {
 	return t == "postgres"
+}
+
+func (t DatabaseType) IsSupportedRuntime() bool {
+	return t.IsPostgreSQL()
 }
