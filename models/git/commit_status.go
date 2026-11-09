@@ -6,7 +6,6 @@ package git
 import (
 	"context"
 	"crypto/sha1"
-	"errors"
 	"fmt"
 	"net/url"
 	"slices"

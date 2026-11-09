@@ -5,7 +5,6 @@ package v1_13
 
 import (
 	"context"
-	"fmt"
 
 	"gitea.dev/modelmigration/base"
 )
