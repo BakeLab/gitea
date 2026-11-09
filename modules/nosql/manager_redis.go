@@ -234,25 +234,10 @@ func getRedisOptions(uri *url.URL) *redis.UniversalOptions {
 // getRedisTlsOptions parses RedisUri TLS configuration parameters and converts them to the go TLS configuration
 // equivalent fields.
 func getRedisTLSOptions(uri *url.URL) *tls.Config {
-	tlsConfig := &tls.Config{}
-
-	skipverify := uri.Query().Get("skipverify")
-
-	if len(skipverify) > 0 {
-		skipverify, err := strconv.ParseBool(skipverify)
-		if err == nil {
-			tlsConfig.InsecureSkipVerify = skipverify
+	for _, key := range []string{"skipverify", "insecureskipverify"} {
+		if skip, _ := strconv.ParseBool(uri.Query().Get(key)); skip {
+			log.Warn("Redis TLS option %q is ignored; certificate verification is always enabled", key)
 		}
 	}
-
-	insecureskipverify := uri.Query().Get("insecureskipverify")
-
-	if len(insecureskipverify) > 0 {
-		insecureskipverify, err := strconv.ParseBool(insecureskipverify)
-		if err == nil {
-			tlsConfig.InsecureSkipVerify = insecureskipverify
-		}
-	}
-
-	return tlsConfig
+	return &tls.Config{}
 }
