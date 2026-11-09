@@ -47,6 +47,7 @@ type bbExecutorConfig struct {
 	Scopes           []string               `json:"scopes"`
 	ProfileAuth      *bbExecutorProfileAuth `json:"profile_auth,omitempty"`
 	MaxConcurrent    int                    `json:"max_concurrent"`
+	AutoConcurrency  bool                   `json:"auto_concurrency,omitempty"`
 	MaxDurationS     int                    `json:"max_duration_s"`
 	Profiles         []bbExecutorProfile    `json:"profiles"`
 	tokens           oauth2.TokenSource
@@ -68,6 +69,12 @@ type bbExecutorProfile struct {
 	RunnerSHA256 string         `json:"runner_sha256"`
 	Sandbox      map[string]any `json:"sandbox"`
 	PackageSets  []string       `json:"package_sets"`
+}
+
+type bbCapacityResponse struct {
+	Schedulable int   `json:"schedulable"`
+	MaxCount    int   `json:"max_count"`
+	AsOfMS      int64 `json:"as_of_ms"`
 }
 
 type bbTaskResult struct {
@@ -311,6 +318,19 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 	if remaining <= 0 {
 		return nil
 	}
+	profileCapacity := make(map[int]int, len(config.Profiles))
+	if config.AutoConcurrency {
+		// Read capacity for every profile before admitting any new work. If any
+		// query fails, fail closed for this reconciliation while leaving active
+		// tasks alone (they were advanced above).
+		for profileIndex, profile := range config.Profiles {
+			capacity, err := config.schedulableCapacity(ctx, profile, config.MaxConcurrent)
+			if err != nil {
+				return fmt.Errorf("query BB schedulable capacity for profile %q: %w", profile.Name, err)
+			}
+			profileCapacity[profileIndex] = capacity
+		}
+	}
 	for page := 1; remaining > 0; page++ {
 		jobs, total, err := actions_model.FindJobQueueJobs(ctx, actions_model.JobQueueOptions{Status: actions_model.StatusWaiting}, page, 100)
 		if err != nil {
@@ -324,7 +344,10 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 			if exists {
 				continue
 			}
-			for _, profile := range config.Profiles {
+			for profileIndex, profile := range config.Profiles {
+				if config.AutoConcurrency && profileCapacity[profileIndex] <= 0 {
+					continue
+				}
 				labels := make([]string, 0, len(profile.Labels))
 				for _, label := range profile.Labels {
 					name, _, _ := strings.Cut(label, ":")
@@ -342,6 +365,9 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 					return err
 				}
 				remaining--
+				if config.AutoConcurrency {
+					profileCapacity[profileIndex]--
+				}
 				break
 			}
 			if remaining == 0 {
@@ -353,6 +379,27 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (config bbExecutorConfig) schedulableCapacity(ctx context.Context, profile bbExecutorProfile, maxCount int) (int, error) {
+	if maxCount < 1 || maxCount > 100 {
+		return 0, errors.New("BB capacity max_count must be between 1 and 100")
+	}
+	var response bbCapacityResponse
+	request := map[string]any{"spec": profile.Sandbox, "max_count": maxCount}
+	if err := config.request(ctx, http.MethodPost, "/v1/scheduler/capacity", "", request, &response); err != nil {
+		return 0, err
+	}
+	if response.Schedulable < 0 || response.MaxCount < 1 || response.MaxCount > 100 || response.Schedulable > response.MaxCount || response.AsOfMS <= 0 {
+		return 0, errors.New("BB capacity response is invalid")
+	}
+	if response.MaxCount < maxCount {
+		maxCount = response.MaxCount
+	}
+	if response.Schedulable > maxCount {
+		return 0, errors.New("BB capacity response exceeds requested max_count")
+	}
+	return response.Schedulable, nil
 }
 
 func (config bbExecutorConfig) prepare(ctx context.Context, job *actions_model.ActionRunJob, profile bbExecutorProfile, labels []string) (*actions_model.ActionBBTask, error) {

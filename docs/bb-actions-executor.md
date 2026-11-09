@@ -27,6 +27,7 @@ the project, token record path and SHA-256):
     "token_file": "/etc/gitea/bb-profile/token.json"
   },
   "max_concurrent": 4,
+  "auto_concurrency": true,
   "max_duration_s": 25200,
   "profiles": [{
     "name": "linux-amd64",
@@ -46,6 +47,17 @@ the project, token record path and SHA-256):
   }]
 }
 ```
+
+`max_concurrent` is always the hard upper limit across all BB-managed jobs.
+With `auto_concurrency` omitted or false, dispatch retains the fixed limit and
+does not query BB capacity. When enabled, Gitea asks
+`POST /v1/scheduler/capacity` for each profile's exact `sandbox` spec and uses
+the returned `schedulable` count as that profile's additional admission limit.
+The endpoint must return `schedulable`, `max_count` and `as_of_ms`; project
+scope comes from the configured `X-Breadboard-Project` header. Capacity checks
+are read-only and do not reserve resources. If any profile query fails or
+returns invalid data, the dispatcher starts no new BB tasks during that
+reconciliation; already active tasks continue to be reconciled normally.
 
 `profile_auth.token_file` uses the BB CLI token-record format (`access_token`,
 `refresh_token`, `expires_at` as a Unix timestamp). Provision the already
