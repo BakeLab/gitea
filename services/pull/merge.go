@@ -357,10 +357,6 @@ func Merge(outerCtx context.Context, prID int64, doer *user_model.User, mergeSty
 		return err
 	}
 
-	pr, err := issues_model.GetPullRequestByID(ctx, prID)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
