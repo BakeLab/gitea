@@ -213,7 +213,7 @@ func decode(file string, data []byte, target any) error {
 func (s *Store) Load() (Snapshot, error) {
 	snapshot := Snapshot{Preferences: Defaults(), Hosts: Hosts{Version: Version, Hosts: map[string]Host{}}, Configured: map[string]bool{}}
 	configPath := filepath.Join(s.Dir, "config.yml")
-	data, err := os.ReadFile(configPath)
+	data, err := ReadFile(configPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return snapshot, err
 	}
@@ -230,7 +230,7 @@ func (s *Store) Load() (Snapshot, error) {
 		}
 	}
 	hostsPath := filepath.Join(s.Dir, "hosts.yml")
-	hostData, err := os.ReadFile(hostsPath)
+	hostData, err := ReadFile(hostsPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return snapshot, fmt.Errorf("read %s: %w", hostsPath, err)
 	}

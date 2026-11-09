@@ -83,7 +83,7 @@ func (s *Store) Load(instance, user, backend string) (Credential, error) {
 		value, loadErr := s.Keyring.Get(keyringService, Identity(instance, user))
 		data, err = []byte(value), loadErr
 	case settings.StoreFile:
-		data, err = os.ReadFile(s.filename(instance, user))
+		data, err = settings.ReadFile(s.filename(instance, user))
 	default:
 		err = errors.New("unsupported credential store")
 	}
