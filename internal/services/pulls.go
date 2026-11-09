@@ -1258,6 +1258,8 @@ func (s Pulls) Files(ctx context.Context, n int64) ([]string, error) {
 type MergeOptions struct {
 	Method, Title, Message string
 	DeleteBranch, Auto     bool
+	// Force merges although the branch protection is not met, if Gitea lets the user bypass it.
+	Force bool
 	// HeadSHA is the head commit the user chose to merge; Gitea refuses the merge once the head
 	// moved past it. Empty merges the current head.
 	HeadSHA string
@@ -1300,6 +1302,22 @@ func (s Pulls) MergeSettings(ctx context.Context) (MergeSettings, error) {
 		settings.Default = settings.Styles[0]
 	}
 	return settings, nil
+}
+
+// CancelAutoMerge cancels the merge that Gitea scheduled for when the checks succeed. It reports
+// false when none was scheduled, which Gitea answers with a bare 404 like that of a missing pull
+// request: the caller has found the pull request already.
+func (s Pulls) CancelAutoMerge(ctx context.Context, n int64) (bool, error) {
+	err := repoDo(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Response, error) {
+		return c.PullRequests.CancelScheduledAutoMerge(ctx, owner, name, n)
+	})
+	if IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, Classify(err, "pull request", "#"+strconv.FormatInt(n, 10), s.Repository)
+	}
+	return true, nil
 }
 
 // ErrPullUpToDate reports a head branch that already has every commit of its base branch.
@@ -1380,7 +1398,7 @@ func (s Pulls) Merge(ctx context.Context, n int64, opts MergeOptions) error {
 	}
 	option := gitea.MergePullRequestOption{
 		Style: gitea.MergeStyle(opts.Method), Title: opts.Title, Message: opts.Message, DeleteBranchAfterMerge: &opts.DeleteBranch,
-		MergeWhenChecksSucceed: opts.Auto, MergeCommitID: opts.Commit,
+		MergeWhenChecksSucceed: opts.Auto, MergeCommitID: opts.Commit, ForceMerge: opts.Force,
 	}
 	if option.HeadCommitId = opts.HeadSHA; option.HeadCommitId == "" && pull.Head != nil {
 		option.HeadCommitId = pull.Head.Sha

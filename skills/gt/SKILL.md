@@ -156,7 +156,7 @@ of the diff; gt refuses lines outside the diff. See [resources.md](references/re
 | 3 | Canceled: a declined confirmation or prompt, or a wait's `--timeout` expired |
 | 4 | Authentication missing or rejected |
 | 5 | `gt run watch` and `gt workflow run --follow`: the run completed without success |
-| 6 | `gt run watch --expect-head`: the run is for another commit |
+| 6 | `gt run watch --expect-head`: the run is for another commit; `gt pr merge`: the head is not the commit to merge, such as the one `--match-head-commit` names |
 | 8 | `gt pr checks`: checks still pending |
 | 130 | Interrupted with Ctrl-C |
 

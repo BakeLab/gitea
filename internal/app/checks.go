@@ -18,18 +18,24 @@ import (
 )
 
 func (a *application) pullChecksCommand() *cobra.Command {
-	var watch, web bool
+	var watch, web, required bool
 	var interval, timeout time.Duration
 	cmd := &cobra.Command{Use: "checks [<number> | <url> | <branch>]", Short: "Show the status checks of a pull request", Long: `Show the latest status of each check of a pull request's head commit.
 
 gt exits with 8 while checks are pending and with 1 when a check failed, like gh. With
 --watch, it waits until every check finished, or one failed, and polls on through an outage of
-the instance of up to 5 minutes.`, Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+the instance of up to 5 minutes. With --required, only the checks that the branch protection of the
+base branch requires are shown and awaited, so that a flaky optional check does not hold a merge
+back. A required check that has not reported yet is pending under the name of its pattern, a rule
+without patterns requires every check, and gt fails when the base branch requires none.`, Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
 		if interval <= 0 || timeout <= 0 {
 			return clierr.Wrap(clierr.Usage, errors.New("--interval and --timeout must be positive"))
 		}
 		if web && watch {
 			return clierr.Wrap(clierr.Usage, errors.New("--watch cannot be combined with --web"))
+		}
+		if web && required {
+			return clierr.Wrap(clierr.Usage, errors.New("--required cannot be combined with --web"))
 		}
 		for _, name := range []string{"interval", "timeout"} {
 			if !watch && cmd.Flags().Changed(name) {
@@ -55,7 +61,7 @@ the instance of up to 5 minutes.`, Annotations: pullArgumentsAnnotation(nil), Ar
 			redraw, leave := a.checksRedraw(cmd, interval)
 			defer leave()
 			var latest []services.Check
-			items, err = service.WatchChecks(ctx, n, interval, func(current []services.Check) error {
+			items, err = service.WatchChecks(ctx, n, interval, required, func(current []services.Check) error {
 				latest = current
 				return redraw(current)
 			})
@@ -73,7 +79,7 @@ the instance of up to 5 minutes.`, Annotations: pullArgumentsAnnotation(nil), Ar
 				}
 				return timeoutError(err, timeout, "waiting for %s", waiting)
 			}
-		} else if items, err = service.Checks(cmd.Context(), n); err != nil {
+		} else if items, err = service.Checks(cmd.Context(), n, required); err != nil {
 			return err
 		}
 		if a.options.json != "" {
@@ -106,9 +112,13 @@ the instance of up to 5 minutes.`, Annotations: pullArgumentsAnnotation(nil), Ar
 	cmd.Flags().DurationVar(&interval, "interval", 5*time.Second, "Time between refreshes with --watch")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "Longest time to wait with --watch")
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the pull request in the browser")
+	cmd.Flags().BoolVar(&required, "required", false, "Only the checks that the branch protection requires")
 	cmd.ValidArgsFunction = firstArg(a.completePulls("open"))
 	cmd.Example = `# Show the checks of the current branch's pull request
 $ gt pr checks
+
+# Only the checks that must pass to merge
+$ gt pr checks 13 --required --watch
 
 # Wait until the checks of #13 finish, then merge it
 $ gt pr checks 13 --watch && gt pr merge 13`

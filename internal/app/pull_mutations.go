@@ -594,8 +594,8 @@ const manualMerge = "manually-merged"
 var mergeMethods = []string{"merge", "rebase", "rebase-merge", "squash", "fast-forward-only", manualMerge}
 
 func (a *application) pullMergeCommand() *cobra.Command {
-	var method, title, message, messageFile, commit string
-	var deleteBranch, useEditor, auto bool
+	var method, title, message, messageFile, commit, matchHead string
+	var deleteBranch, useEditor, auto, admin, disableAuto bool
 	var style struct{ merge, squash, rebase bool }
 	cmd := &cobra.Command{Use: "merge [<number> | <url> | <branch>]", Short: "Merge a pull request", Long: `Merge a pull request on Gitea.
 
@@ -610,7 +610,13 @@ to that fork: your own, or any as a site administrator. A fork you cannot push t
 For a pull request merged outside Gitea, such as with git merge and git push, --method
 manually-merged --commit SHA marks it as merged by that commit of the base branch. The
 repository must allow it (gt repo edit --allow-manual-merge). Gitea does not check that the
-commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+commit contains the pull request's changes.
+
+--admin merges although the branch protection is not met, if Gitea lets you bypass the branch
+protection. --match-head-commit SHA merges only while the head of the pull request is still that
+commit, so a push after you reviewed it is not merged unseen; otherwise gt exits with 6. Neither
+can be combined with --auto, as a scheduled merge does not keep them. --disable-auto cancels the
+merge that --auto scheduled, and merges nothing.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		var editorDraft terminal.Draft
 		defer finishDraft(&editorDraft, &runErr)
 		for name, set := range map[string]bool{"merge": style.merge, "squash": style.squash, "rebase": style.rebase} {
@@ -620,6 +626,22 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 			if set {
 				method = name
 			}
+		}
+		if disableAuto {
+			if err := onlyFlagsWith(cmd, "disable-auto", "it only cancels the scheduled merge", "dry-run"); err != nil {
+				return err
+			}
+		}
+		if auto {
+			for _, name := range []string{"admin", "match-head-commit"} {
+				if cmd.Flags().Changed(name) {
+					return clierr.Wrap(clierr.Usage, fmt.Errorf("--%s cannot be combined with --auto", name))
+				}
+			}
+		}
+		matchHead = strings.ToLower(matchHead)
+		if cmd.Flags().Changed("match-head-commit") && !commitSHA.MatchString(matchHead) {
+			return clierr.Wrap(clierr.Usage, fmt.Errorf("--match-head-commit requires a commit SHA of 7 to 64 hexadecimal digits, got %q", matchHead))
 		}
 		manual := method == manualMerge
 		switch {
@@ -631,7 +653,7 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 			return clierr.Wrap(clierr.Usage, fmt.Errorf("--commit requires a commit SHA of 7 to 64 hexadecimal digits, got %q", commit))
 		}
 		if manual {
-			for _, name := range []string{"auto", "title", "message", "message-file", "editor"} {
+			for _, name := range []string{"auto", "title", "message", "message-file", "editor", "admin", "match-head-commit"} {
 				if cmd.Flags().Changed(name) {
 					return clierr.Wrap(clierr.Usage, fmt.Errorf("--method manually-merged cannot be combined with --%s", name))
 				}
@@ -656,6 +678,18 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 			return err
 		}
 		ref := refLabel(t.Repo, n, item.Title)
+		if disableAuto {
+			canceled, err := service.CancelAutoMerge(cmd.Context(), n)
+			if err != nil {
+				return err
+			}
+			if canceled {
+				a.done(cmd, "Canceled the merge of pull request %s that was scheduled for when its checks succeed", ref)
+			} else {
+				a.warn(cmd, "No merge is scheduled for pull request %s", ref)
+			}
+			return a.pullResult(cmd, t, item)
+		}
 		switch {
 		case item.Merged:
 			a.warn(cmd, "Pull request %s is already merged", ref)
@@ -669,6 +703,9 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 			return fmt.Errorf("pull request %s is a draft; mark it ready with: gt pr ready %d", ref, n)
 		case item.HeadRemoteDeleted && item.Head != "" && !manual:
 			return fmt.Errorf("pull request %s cannot be merged: its head branch %s was deleted; push it again to merge", ref, item.Head)
+		}
+		if matchHead != "" && !strings.HasPrefix(item.HeadSHA, matchHead) {
+			return pullHeadMismatch(ref, item.HeadSHA, matchHead)
 		}
 		repoSettings, err := service.MergeSettings(cmd.Context())
 		if err != nil {
@@ -717,12 +754,15 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 			message = editorDraft.Body
 		}
 		// Gitea ignores delete_branch_after_merge for manual merges; gt deletes the branch itself.
-		if err := service.Merge(cmd.Context(), n, services.MergeOptions{Method: method, Title: title, Message: message, DeleteBranch: deleteBranch && !manual, Auto: auto, HeadSHA: item.HeadSHA, Commit: commit}); err != nil {
+		if err := service.Merge(cmd.Context(), n, services.MergeOptions{Method: method, Title: title, Message: message, DeleteBranch: deleteBranch && !manual, Auto: auto, Force: admin, HeadSHA: item.HeadSHA, Commit: commit}); err != nil {
 			if apiErr, ok := errors.AsType[*transport.APIError](err); ok {
 				switch {
 				case auto && apiErr.Status == http.StatusConflict && strings.Contains(apiErr.Message, "already scheduled to auto merge"):
 					a.warn(cmd, "Pull request %s is already scheduled to merge when its checks succeed", ref)
 					return a.pullResult(cmd, t, item)
+				case apiErr.Status == http.StatusConflict && strings.Contains(apiErr.Message, "head out of date"):
+					current, _ := service.View(cmd.Context(), n) // only to name the new head
+					return pullHeadMismatch(ref, current.HeadSHA, item.HeadSHA)
 				case manual && strings.Contains(apiErr.Message, "merge strategy is not allowed"):
 					return explain(err, "manual merges are disabled in %s; allow them with: gt repo edit --allow-manual-merge -R %s", t.Repo, t.Repo)
 				case manual && strings.Contains(apiErr.Message, "commit not found in base"):
@@ -766,6 +806,9 @@ commit contains the pull request's changes.`, Annotations: pullArgumentsAnnotati
 	cmd.Flags().StringVarP(&messageFile, "message-file", "F", "", "Read the merge commit message from `file`, or - for stdin")
 	cmd.Flags().BoolVarP(&useEditor, "editor", "e", false, "Write the merge commit message in your editor")
 	cmd.Flags().StringVar(&commit, "commit", "", "Commit `sha` on the base branch that merged the pull request outside Gitea (with --method manually-merged)")
+	cmd.Flags().BoolVar(&admin, "admin", false, "Merge although the branch protection is not met, if Gitea lets you bypass the branch protection")
+	cmd.Flags().StringVar(&matchHead, "match-head-commit", "", "Merge only if the head of the pull request is this commit `sha`")
+	cmd.Flags().BoolVar(&disableAuto, "disable-auto", false, "Cancel the merge that --auto scheduled, and merge nothing")
 	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
 		if strings.Contains(err.Error(), "flag needs an argument: 's' in -s") {
 			return clierr.Wrap(clierr.Usage, errors.New("-s takes a method (merge, rebase, rebase-merge, squash, fast-forward-only or manually-merged); for gh-style use --squash"))
@@ -782,9 +825,23 @@ $ gt pr merge 13 --squash --delete-branch
 # Merge once the checks pass, without prompts
 $ gt pr merge 13 --auto --yes
 
+# Merge only the commit that was reviewed, and cancel a scheduled merge
+$ gt pr merge 13 --squash --match-head-commit 4b825dc
+$ gt pr merge 13 --disable-auto
+
 # Mark #13 as merged by a commit pushed to the base branch outside Gitea
 $ gt pr merge 13 --method manually-merged --commit 4b825dc --delete-branch`
 	return a.dryRunnable(cmd)
+}
+
+// pullHeadMismatch reports a pull request whose head is not the expected commit. An empty or unchanged
+// head is one that could not be read after Gitea refused the expected one.
+func pullHeadMismatch(ref, head, expected string) error {
+	state := "is no longer " + shortSHA(expected)
+	if head != "" && head != expected {
+		state = "is " + shortSHA(head) + ", not " + shortSHA(expected)
+	}
+	return clierr.Wrap(clierr.HeadMismatch, fmt.Errorf("the head of pull request %s %s; look at what was pushed and merge again", ref, state))
 }
 
 // mergeTarget selects the pull request to merge: the argument, else the current branch's pull

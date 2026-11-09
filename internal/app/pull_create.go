@@ -4,6 +4,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ type pullCreateFlags struct {
 	bodyFile, deadline, milestone, topic                        string
 	labelNames, reviewers, reviewerTeams, attachments, projects []string
 	useEditor, draft, agit, allowMaintainerEdits, fill, web     bool
+	fillFirst, fillVerbose                                      bool
 }
 
 func (a *application) pullCreateCommand() *cobra.Command {
@@ -36,7 +38,9 @@ On a terminal without flags, gt asks for the title and body, then what to do nex
 submit as a draft, add metadata or change the branches. Any flag of this command, such as
 --fill, --head or --base (but not global flags such as --repo), skips the questions: the
 title is then --title, else the commit message of a single-commit branch, else the branch
-name.
+name. --fill-first takes the title and body from the first commit of the branch even when there
+are several. --fill-verbose takes the body from the full message of every commit, oldest first, or
+just the body of a single commit. --fill, --fill-first and --fill-verbose cannot be combined.
 
 A branch that is not on the remote yet is pushed first, with its upstream set, after a
 confirmation; without a terminal, pass --yes to push it. A branch that
@@ -64,6 +68,8 @@ else's, such as from gt pr checkout, pass --topic to open your own.`, Annotation
 	create.Flags().StringVarP(&f.options.Base, "base", "B", "", "Base branch (default: the repository's default branch)")
 	create.Flags().BoolVarP(&f.draft, "draft", "d", false, "Create a draft pull request")
 	create.Flags().BoolVarP(&f.fill, "fill", "f", false, "Skip the questions and take the title and body from the commits")
+	create.Flags().BoolVar(&f.fillFirst, "fill-first", false, "Take the title and body from the first commit of the branch, whatever their number")
+	create.Flags().BoolVar(&f.fillVerbose, "fill-verbose", false, "Take the body from the full message of every commit of the branch")
 	create.Flags().BoolVarP(&f.web, "web", "w", false, "Open the comparison of --head and --base in the browser to create the pull request there")
 	create.Flags().BoolVar(&f.allowMaintainerEdits, "allow-maintainer-edits", true, "Allow maintainers to push to the head branch")
 	create.Flags().BoolVar(&f.agit, "agit", false, "Create the pull request through AGit push (refs/for)")
@@ -97,6 +103,14 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 	if err := validateBodySources(cmd); err != nil {
 		return err
 	}
+	switch {
+	case f.fill && f.fillFirst:
+		return clierr.Wrap(clierr.Usage, errors.New("--fill cannot be combined with --fill-first"))
+	case f.fill && f.fillVerbose:
+		return clierr.Wrap(clierr.Usage, errors.New("--fill cannot be combined with --fill-verbose"))
+	case f.fillFirst && f.fillVerbose:
+		return clierr.Wrap(clierr.Usage, errors.New("--fill-first cannot be combined with --fill-verbose"))
+	}
 	if f.agit {
 		if a.options.json != "" {
 			return clierr.Wrap(clierr.Usage, errors.New("--json, --jq or --csv cannot be combined with --agit; AGit creates the pull request through git push"))
@@ -104,7 +118,7 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		if f.web {
 			return clierr.Wrap(clierr.Usage, errors.New("--web cannot be combined with --agit; AGit creates the pull request through git push, without a branch to compare"))
 		}
-		if err := onlyFlagsWith(cmd, "agit", "AGit pushes carry only a title and body", "title", "body", "body-file", "editor", "head", "base", "draft", "fill", "topic"); err != nil {
+		if err := onlyFlagsWith(cmd, "agit", "AGit pushes carry only a title and body", "title", "body", "body-file", "editor", "head", "base", "draft", "fill", "fill-first", "fill-verbose", "topic"); err != nil {
 			return err
 		}
 		if f.topic != "" && f.topic == f.options.Base {
@@ -212,12 +226,27 @@ func (a *application) runPullCreate(cmd *cobra.Command, f *pullCreateFlags) (run
 		return a.openBrowser(cmd, repositoryURL(t)+"/compare/"+compareRef(f.options.Base)+"..."+compareRef(f.options.Head))
 	}
 	var commitBody string
-	if f.options.Title == "" {
+	var messages []commitMessage
+	if f.fillFirst || f.fillVerbose {
+		if messages = a.commitMessages(cmd.Context(), f.options.Base, a.localHead(cmd.Context(), t, f.options.Head)); len(messages) == 0 {
+			flag := "--fill-verbose"
+			if f.fillFirst {
+				flag = "--fill-first"
+			}
+			return fmt.Errorf("%s needs the commits of %s that %s lacks in the local clone", flag, f.options.Head, f.options.Base)
+		}
+	}
+	if f.fillFirst {
+		f.options.Title, commitBody = cmp.Or(f.options.Title, messages[0].Subject), messages[0].Body
+	} else if f.options.Title == "" {
 		if subject, body, ok := a.singleCommitMessage(cmd.Context(), f.options.Base, a.localHead(cmd.Context(), t, f.options.Head)); ok {
 			f.options.Title, commitBody = subject, body
 		} else if f.options.Title = terminal.DefaultPullTitle(f.options.Head); f.options.Title == "" {
 			return clierr.Wrap(clierr.Usage, errors.New("pr create requires --title"))
 		}
+	}
+	if f.fillVerbose {
+		commitBody = verboseCommitBody(messages)
 	}
 	service := services.Pulls{Client: t.client, Repository: t.Repo}
 	if f.useEditor {
@@ -414,37 +443,81 @@ func (a *application) defaultPullHead(ctx context.Context) (owner, branch string
 	return owner, branch
 }
 
-// singleCommitMessage returns the subject and body of the only commit the local branch head has
-// ahead of base.
-// Any Git failure, or a head with zero or several commits, reports ok=false.
-func (a *application) singleCommitMessage(ctx context.Context, base, head string) (subject, body string, ok bool) {
+// gitAheadOfBase runs Git with args and the commits head has ahead of base, trying base on the
+// remotes before the local branch. It reports false for an unsafe ref or when every attempt fails.
+func (a *application) gitAheadOfBase(ctx context.Context, base, head string, args ...string) (string, bool) {
 	if base == "" || head == "" || strings.HasPrefix(base, "-") || strings.HasPrefix(head, "-") {
-		return "", "", false
+		return "", false
 	}
 	probe := a.gitProbe()
 	remotes := []string{"upstream", "origin"}
 	if a.options.remote != "" {
 		remotes = []string{a.options.remote}
 	}
-	count, err := "", errors.New("no base reference")
 	for _, ref := range append(remotes, "") {
 		if ref != "" {
 			ref += "/"
 		}
-		if count, err = probe.Output(ctx, a.options.cwd, false, "rev-list", "--count", ref+base+".."+head); err == nil {
-			break
+		if out, err := probe.Output(ctx, a.options.cwd, false, append(args, ref+base+".."+head)...); err == nil {
+			return out, true
 		}
 	}
-	if err != nil || count != "1" {
+	return "", false
+}
+
+// singleCommitMessage returns the subject and body of the only commit the local branch head has
+// ahead of base.
+// Any Git failure, or a head with zero or several commits, reports ok=false.
+func (a *application) singleCommitMessage(ctx context.Context, base, head string) (subject, body string, ok bool) {
+	if count, found := a.gitAheadOfBase(ctx, base, head, "rev-list", "--count"); !found || count != "1" {
 		return "", "", false
 	}
-	message, err := probe.Output(ctx, a.options.cwd, false, "log", "-1", "--format=%s%n%n%b", head)
+	message, err := a.gitProbe().Output(ctx, a.options.cwd, false, "log", "-1", "--format=%s%n%n%b", head)
 	if err != nil {
 		return "", "", false
 	}
 	subject, body, _ = strings.Cut(message, "\n")
 	subject, body = strings.TrimSpace(subject), strings.TrimSpace(body)
 	return subject, body, subject != ""
+}
+
+// commitMessage is the message of one commit.
+type commitMessage struct{ Subject, Body string }
+
+// maxFilledBody keeps a body filled from the commits within what Gitea takes.
+const maxFilledBody = 60000
+
+// commitMessages returns the messages of the commits that the local head has ahead of base, oldest
+// first, or none when Git cannot tell.
+func (a *application) commitMessages(ctx context.Context, base, head string) []commitMessage {
+	out, found := a.gitAheadOfBase(ctx, base, head, "log", "--reverse", "--format=%s%x1f%b%x1e")
+	if !found {
+		return nil
+	}
+	var messages []commitMessage
+	for entry := range strings.SplitSeq(out, "\x1e") {
+		if subject, body, _ := strings.Cut(strings.TrimSpace(entry), "\x1f"); subject != "" {
+			messages = append(messages, commitMessage{Subject: subject, Body: strings.TrimSpace(body)})
+		}
+	}
+	return messages
+}
+
+// verboseCommitBody joins the full messages of commits, oldest first, with a blank line between.
+// The subject of a single commit is the title already, so only its body remains.
+func verboseCommitBody(messages []commitMessage) string {
+	body := messages[0].Body
+	if len(messages) > 1 {
+		parts := make([]string, 0, len(messages))
+		for _, message := range messages {
+			parts = append(parts, strings.TrimSpace(message.Subject+"\n\n"+message.Body))
+		}
+		body = strings.Join(parts, "\n\n---\n\n")
+	}
+	if len(body) > maxFilledBody {
+		body = strings.ToValidUTF8(body[:maxFilledBody], "") + "\n\n…"
+	}
+	return body
 }
 
 // refuseSameBranch rejects a head that is the base branch of the same repository, before anything

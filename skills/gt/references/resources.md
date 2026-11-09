@@ -178,6 +178,9 @@ gt pr review resolve 1234 --no-input
 ```sh
 gt pr merge 18 --squash --delete-branch --no-input --yes
 gt pr merge 18 --auto --no-input --yes          # merge once required checks succeed
+gt pr merge 18 --disable-auto --no-input         # cancel that scheduled merge
+gt pr merge 18 --squash --match-head-commit 4b825dc --no-input --yes   # only the commit that was reviewed
+gt pr checks 18 --required --watch --no-input   # only the checks the branch protection requires
 gt pr clean 18 --no-input --yes                 # delete the branches of a merged pull request
 gt pr backport 18 --to release/v1.2 --no-input --yes --json pull
 ```

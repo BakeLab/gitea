@@ -6,12 +6,16 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	gitea "gitea.dev/sdk"
+
+	"github.com/gobwas/glob"
 )
 
 // Check represents the latest status of one commit context.
@@ -47,22 +51,38 @@ func Tally(items []Check) (failing, pending, passed int) {
 	return failing, pending, passed
 }
 
-// Checks returns latest contexts for the PR head in its base repository, as Gitea does.
-func (s Pulls) Checks(ctx context.Context, n int64) ([]Check, error) {
-	sha, err := s.checkHead(ctx, n)
+// Checks returns latest contexts for the PR head in its base repository, as Gitea does; with
+// required, only those that the protection of the base branch requires.
+func (s Pulls) Checks(ctx context.Context, n int64, required bool) ([]Check, error) {
+	pull, err := s.checkPull(ctx, n)
 	if err != nil {
 		return nil, err
 	}
-	return s.checksForCommit(ctx, sha)
+	var rule *requiredChecks
+	if required {
+		if rule, err = s.requiredChecks(ctx, pull); err != nil {
+			return nil, err
+		}
+	}
+	items, err := s.checksForCommit(ctx, pull.Head.Sha)
+	return rule.of(pull.Head.Sha, items), err
+}
+
+func (s Pulls) checkPull(ctx context.Context, n int64) (*gitea.PullRequest, error) {
+	pull, err := s.get(ctx, n)
+	if err != nil {
+		return nil, err
+	}
+	if pull.Head == nil || pull.Head.Sha == "" {
+		return nil, errors.New("Gitea did not return the pull request head commit")
+	}
+	return pull, nil
 }
 
 func (s Pulls) checkHead(ctx context.Context, n int64) (string, error) {
-	pull, err := s.get(ctx, n)
+	pull, err := s.checkPull(ctx, n)
 	if err != nil {
 		return "", err
-	}
-	if pull.Head == nil || pull.Head.Sha == "" {
-		return "", errors.New("Gitea did not return the pull request head commit")
 	}
 	return pull.Head.Sha, nil
 }
@@ -121,9 +141,19 @@ func (s Pulls) checksForCommit(ctx context.Context, sha string) ([]Check, error)
 
 // WatchChecks follows the current PR head until contexts finish or a check fails.
 // An empty status set waits for checks to be registered instead of claiming success.
-func (s Pulls) WatchChecks(ctx context.Context, n int64, interval time.Duration, changed func([]Check) error) ([]Check, error) {
+func (s Pulls) WatchChecks(ctx context.Context, n int64, interval time.Duration, required bool, changed func([]Check) error) ([]Check, error) {
 	if interval <= 0 {
 		return nil, errors.New("check polling interval must be positive")
+	}
+	var rule *requiredChecks
+	if required {
+		pull, err := s.checkPull(ctx, n)
+		if err != nil {
+			return nil, err
+		}
+		if rule, err = s.requiredChecks(ctx, pull); err != nil {
+			return nil, err
+		}
 	}
 	var previous []Check
 	reported := false
@@ -133,6 +163,7 @@ func (s Pulls) WatchChecks(ctx context.Context, n int64, interval time.Duration,
 		var items []Check
 		if err == nil {
 			items, err = s.checksForCommit(ctx, sha)
+			items = rule.of(sha, items)
 		}
 		if failures.retry(ctx, err) {
 			if err := sleepCtx(ctx, interval); err != nil {
@@ -174,4 +205,60 @@ func (s Pulls) WatchChecks(ctx context.Context, n int64, interval time.Duration,
 			return nil, err
 		}
 	}
+}
+
+// requiredChecks is what the protection of a base branch requires of the checks of a pull request.
+type requiredChecks struct{ patterns []*glob.Pattern }
+
+// requiredChecks reads the checks that the protection of the base branch requires from the branch
+// itself, as Gitea names its protection rule only to administrators. It fails when the branch
+// requires none.
+func (s Pulls) requiredChecks(ctx context.Context, pull *gitea.PullRequest) (*requiredChecks, error) {
+	if pull.Base == nil || pull.Base.Ref == "" {
+		return nil, errors.New("Gitea did not return the base branch of the pull request")
+	}
+	branch, err := repoCall(ctx, s.Client, s.Repository, func(ctx context.Context, c *gitea.Client, owner, name string) (*gitea.Branch, *gitea.Response, error) {
+		return c.Repositories.GetRepoBranch(ctx, owner, name, pull.Base.Ref)
+	})
+	if err != nil {
+		return nil, Classify(err, "branch", pull.Base.Ref, s.Repository)
+	}
+	if !branch.EnableStatusCheck {
+		return nil, fmt.Errorf("no required checks reported on the '%s' branch", pull.Head.Ref)
+	}
+	rule := &requiredChecks{}
+	for _, pattern := range branch.StatusCheckContexts {
+		if compiled, err := glob.Compile(pattern); err == nil { // Gitea skips a pattern it cannot read too
+			rule.patterns = append(rule.patterns, compiled)
+		}
+	}
+	return rule, nil
+}
+
+// of keeps the required checks of a commit. A pattern that no check matches yet is a pending check,
+// as Gitea waits for it, and a rule without patterns requires every check.
+func (r *requiredChecks) of(sha string, items []Check) []Check {
+	if r == nil || len(r.patterns) == 0 {
+		return items
+	}
+	matched := make([]bool, len(r.patterns))
+	kept := make([]Check, 0, len(items))
+	for _, item := range items {
+		keep := false
+		for i, pattern := range r.patterns {
+			if pattern.Match(item.Name) {
+				matched[i], keep = true, true
+			}
+		}
+		if keep {
+			kept = append(kept, item)
+		}
+	}
+	for i, found := range matched {
+		if !found {
+			kept = append(kept, Check{SHA: sha, Name: r.patterns[i].String(), State: "pending", Description: "Waiting for status to be reported"})
+		}
+	}
+	slices.SortStableFunc(kept, func(a, b Check) int { return strings.Compare(a.Name, b.Name) })
+	return kept
 }

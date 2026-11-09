@@ -47,7 +47,7 @@ func TestCheckWatchRevalidatesHeadBeforeReturning(t *testing.T) {
 	service := Pulls{Client: client, Repository: "owner/repo"}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	items, err := service.WatchChecks(ctx, 7, time.Millisecond, nil)
+	items, err := service.WatchChecks(ctx, 7, time.Millisecond, false, nil)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.Equal(t, "new", items[0].SHA)
@@ -77,7 +77,7 @@ func TestCheckWatchReportsTheEmptyStateOnce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	var reported []int
-	_, err := (Pulls{Client: client, Repository: "owner/repo"}).WatchChecks(ctx, 7, time.Millisecond, func(items []Check) error {
+	_, err := (Pulls{Client: client, Repository: "owner/repo"}).WatchChecks(ctx, 7, time.Millisecond, false, func(items []Check) error {
 		reported = append(reported, len(items))
 		return nil
 	})
@@ -105,7 +105,7 @@ func TestCheckWatchTreatsSkippedAsPassing(t *testing.T) {
 	}))
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	items, err := (Pulls{Client: client, Repository: "owner/repo"}).WatchChecks(ctx, 7, time.Millisecond, nil)
+	items, err := (Pulls{Client: client, Repository: "owner/repo"}).WatchChecks(ctx, 7, time.Millisecond, false, nil)
 	require.NoError(t, err)
 	require.Equal(t, 2, snapshots)
 	require.Equal(t, "success", items[1].State)

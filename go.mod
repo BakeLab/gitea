@@ -17,6 +17,7 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/davidmz/go-pageant v1.0.2
+	github.com/gobwas/glob v1.1.0
 	github.com/itchyny/gojq v0.12.20
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/mattn/go-runewidth v0.0.31

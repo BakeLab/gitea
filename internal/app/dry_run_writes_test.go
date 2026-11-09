@@ -410,3 +410,21 @@ func TestDryRunPreviewsDependencyChanges(t *testing.T) {
 		require.Contains(t, out, "Dry run: would send "+tc.want, "%v", tc.args)
 	}
 }
+
+// TestDryRunPreviewsTheMergeOptions covers the flags of pr merge that the one case of the command in
+// dryRunWriteCases does not send.
+func TestDryRunPreviewsTheMergeOptions(t *testing.T) {
+	server := dryRunServer(t)
+	repo := server.URL + "/api/v1/repos/alice/project"
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"pr", "merge", "7", "--disable-auto"}, "DELETE " + repo + "/pulls/7/merge"},
+		{[]string{"pr", "merge", "7", "--squash", "--admin"}, "POST " + repo + "/pulls/7/merge"},
+	} {
+		out, _, err := dryRun(t, server, tc.args...)
+		require.NoError(t, err, "%v", tc.args)
+		require.Contains(t, out, "Dry run: would send "+tc.want, "%v", tc.args)
+	}
+}

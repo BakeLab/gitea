@@ -393,7 +393,8 @@ Preferences in config.yml are described in gt config --help.`},
        or a browser authorization of gt auth login not completed within 2 minutes
   4    authentication is missing or was rejected
   5    gt run watch and gt workflow run --follow: the run completed without success
-  6    gt run watch --expect-head: the run is for another commit
+  6    gt run watch --expect-head: the run is for another commit; gt pr merge: the head of
+       the pull request is not the commit to merge, such as the one --match-head-commit names
   8    gt pr checks: some checks are still pending
   130  interrupted with Ctrl-C, also at a prompt
 

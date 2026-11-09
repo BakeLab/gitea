@@ -120,7 +120,7 @@ func TestCheckWatchRidesOutAShortOutage(t *testing.T) {
 		_, _ = w.Write([]byte(`[{"id":1,"context":"build","status":"` + state + `"}]`))
 	}))
 	client.Retries = 0
-	items, err := Pulls{Client: client, Repository: "owner/repo"}.WatchChecks(context.Background(), 7, time.Millisecond, nil)
+	items, err := Pulls{Client: client, Repository: "owner/repo"}.WatchChecks(context.Background(), 7, time.Millisecond, false, nil)
 	require.NoError(t, err)
 	require.Equal(t, "success", items[0].State)
 }
