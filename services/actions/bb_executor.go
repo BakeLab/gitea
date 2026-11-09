@@ -318,17 +318,17 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 	if remaining <= 0 {
 		return nil
 	}
-	profileCapacity := make(map[string]int, len(config.Profiles))
+	profileCapacity := make(map[int]int, len(config.Profiles))
 	if config.AutoConcurrency {
 		// Read capacity for every profile before admitting any new work. If any
 		// query fails, fail closed for this reconciliation while leaving active
 		// tasks alone (they were advanced above).
-		for _, profile := range config.Profiles {
+		for profileIndex, profile := range config.Profiles {
 			capacity, err := config.schedulableCapacity(ctx, profile, config.MaxConcurrent)
 			if err != nil {
 				return fmt.Errorf("query BB schedulable capacity for profile %q: %w", profile.Name, err)
 			}
-			profileCapacity[profile.Name] = capacity
+			profileCapacity[profileIndex] = capacity
 		}
 	}
 	for page := 1; remaining > 0; page++ {
@@ -344,8 +344,8 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 			if exists {
 				continue
 			}
-			for _, profile := range config.Profiles {
-				if config.AutoConcurrency && profileCapacity[profile.Name] <= 0 {
+			for profileIndex, profile := range config.Profiles {
+				if config.AutoConcurrency && profileCapacity[profileIndex] <= 0 {
 					continue
 				}
 				labels := make([]string, 0, len(profile.Labels))
@@ -366,7 +366,7 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 				}
 				remaining--
 				if config.AutoConcurrency {
-					profileCapacity[profile.Name]--
+					profileCapacity[profileIndex]--
 				}
 				break
 			}
