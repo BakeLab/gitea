@@ -399,7 +399,7 @@ func (config bbExecutorConfig) taskRequest(row *actions_model.ActionBBTask, prof
 	if err != nil {
 		return nil, err
 	}
-	script := "set -eu\numask 077\nmkdir -p /opt/gitea-bb\ncd /opt/gitea-bb\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\ncurl --fail --silent --show-error --location " + bbShellQuote(profile.RunnerURL) + " -o runner\nprintf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | sha256sum --check --status\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
+	script := "set -eu\numask 077\nmkdir -p /opt/gitea-bb\nexport HOME=/opt/gitea-bb\ncd /opt/gitea-bb\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\ncurl --fail --silent --show-error --location " + bbShellQuote(profile.RunnerURL) + " -o runner\nprintf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | sha256sum --check --status\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
 	return json.Marshal(map[string]any{"sandbox": profile.Sandbox, "package_sets": profile.PackageSets, "max_duration_s": config.MaxDurationS, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": "root", "timeout_s": config.MaxDurationS, "secrets": []string{bbSecretName(row)}}})
 }
 
