@@ -35,10 +35,10 @@ if [ ! -f "${GITEA_APP_INI}" ]; then
     DISABLE_SSH=${DISABLE_SSH:-"false"} \
     SSH_PORT=${SSH_PORT:-"2222"} \
     SSH_LISTEN_PORT=${SSH_LISTEN_PORT:-} \
-    DB_TYPE=${DB_TYPE:-"sqlite3"} \
-    DB_HOST=${DB_HOST:-"localhost:3306"} \
+    DB_TYPE=${DB_TYPE:-"postgres"} \
+    DB_HOST=${DB_HOST:-"localhost:5432"} \
     DB_NAME=${DB_NAME:-"gitea"} \
-    DB_USER=${DB_USER:-"root"} \
+    DB_USER=${DB_USER:-"gitea"} \
     DB_PASSWD=${DB_PASSWD:-""} \
     INSTALL_LOCK=${INSTALL_LOCK:-"false"} \
     DISABLE_REGISTRATION=${DISABLE_REGISTRATION:-"false"} \
