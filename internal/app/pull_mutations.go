@@ -503,12 +503,19 @@ func (a *application) reportCleaned(cmd *cobra.Command, t target, result git.Cle
 }
 
 func (a *application) pullDiffCommand() *cobra.Command {
-	var nameOnly, web bool
-	var color string
+	var opts diffOptions
+	var web bool
 	cmd := &cobra.Command{Use: "diff [<number> | <url> | <branch>]", Short: "Show the changes of a pull request", Long: `Show the changes of a pull request as a unified diff.
 
 On a terminal the diff is colored and paged. Piped, it is written unchanged, so that
-gt pr diff 13 | git apply works, and --name-only writes the exact file names.`, Annotations: pullArgumentsAnnotation(textOutput("diff returns patch text")), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+gt pr diff 13 | git apply works, and --name-only writes the exact file names.
+
+--path and --exclude narrow the diff to files, as the file tree of the web interface does, and
+--name-status and --stat summarize it. Gitea's API has no options for what a diff contains, such as
+ignoring whitespace, so these work on the diff after gt has read it.`, Annotations: pullArgumentsAnnotation(textOutput("diff returns patch text")), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+		if err := opts.validate(); err != nil {
+			return err
+		}
 		t, n, err := a.pullSelectorAny(cmd, args)
 		if err != nil {
 			return err
@@ -517,18 +524,16 @@ gt pr diff 13 | git apply works, and --name-only writes the exact file names.`, 
 		if web {
 			return a.openBrowser(cmd, fmt.Sprintf("%s/pulls/%d/files", repositoryURL(t), n))
 		}
-		if nameOnly {
+		if opts.nameOnly && !opts.narrowed() {
 			files, err := service.Files(cmd.Context(), n)
 			if err != nil {
 				return err
 			}
-			// Piped names stay exact, so that they can be passed on to other commands.
-			if a.display().TTY {
-				for i, file := range files {
-					files[i] = terminal.SafeLine(file)
-				}
+			changed := make([]diffFile, len(files))
+			for i, file := range files {
+				changed[i].path = file
 			}
-			_, err = fmt.Fprint(cmd.OutOrStdout(), strings.Join(append(files, ""), "\n"))
+			_, err = io.WriteString(cmd.OutOrStdout(), opts.summarize(changed, a.display().TTY))
 			return err
 		}
 		body, err := service.Diff(cmd.Context(), n)
@@ -536,28 +541,19 @@ gt pr diff 13 | git apply works, and --name-only writes the exact file names.`, 
 			return err
 		}
 		defer body.Close()
-		d := a.display()
-		colored := color == "always" || (color == "auto" && d.Color)
-		if !d.TTY && !colored {
-			_, err = io.Copy(cmd.OutOrStdout(), body)
-			return err
-		}
-		text, err := diffText(body, colored)
+		data, err := io.ReadAll(body)
 		if err != nil {
 			return err
 		}
-		if !d.TTY {
-			_, err = io.WriteString(cmd.OutOrStdout(), text)
-			return err
-		}
-		return a.writeHuman(cmd, text)
+		return a.writeDiff(cmd, data, opts)
 	}}
-	cmd.Flags().BoolVar(&nameOnly, "name-only", false, "List only the names of the changed files")
-	enumFlag(cmd, &color, "color", "", "auto", "Color the diff", "auto", "always", "never")
+	opts.register(cmd)
 	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the changed files in the browser")
 	cmd.ValidArgsFunction = firstArg(a.completePulls("all"))
 	cmd.Example = `$ gt pr diff
 $ gt pr diff 13 --name-only
+$ gt pr diff 13 --path 'internal/' --exclude '*_test.go'
+$ gt pr diff 13 --stat
 $ gt pr diff 13 | git apply`
 	return cmd
 }

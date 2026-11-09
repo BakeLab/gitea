@@ -16,6 +16,7 @@ current branch's pull request.
 - [Reviews](#reviews)
 - [Merging and cleaning up](#merging-and-cleaning-up)
 - [Repositories](#repositories)
+- [Commits](#commits)
 - [Releases and wiki](#releases-and-wiki)
 
 ## Reading an issue
@@ -200,6 +201,20 @@ gt branch protection list --no-input --json rule,required_approvals,push_users,s
 - Changing settings, renaming, transferring, archiving and deleting affect everyone; run them
   only on the user's request. `gt repo archive`, `rename`, `transfer` and `delete` need
   `--yes` without a terminal.
+
+## Commits
+
+```sh
+gt commit list main -L 20 --no-input --json sha,author_login,message
+gt commit view 3f2a9c1 --no-input --json message,files,additions,deletions
+gt commit diff 3f2a9c1 --stat                       # --path 'internal/' and --exclude '*_test.go' narrow it
+gt commit compare main...feature/login --no-input --json total_commits
+gt commit status main --no-input --json name,state  # exit 1 when a check failed, 8 while pending
+gt commit pr 3f2a9c1 --no-input --json number,title # the pull request that merged it
+```
+
+- These read the repository on the server, so no clone is needed. `gt pr diff` takes the same
+  `--path`, `--exclude`, `--name-only`, `--name-status` and `--stat`.
 
 ## Releases and wiki
 

@@ -170,10 +170,7 @@ func hunkRange(text string) (start, count int64) {
 // space in a tab; any other leading or trailing space belongs to the path.
 func diffHeaderPath(line, prefix string) string {
 	name := strings.TrimSuffix(strings.TrimRight(line[len("--- "):], "\r\n"), "\t")
-	if unquoted, err := strconv.Unquote(name); err == nil && strings.HasPrefix(name, `"`) {
-		name = unquoted
-	}
-	return strings.TrimPrefix(name, prefix)
+	return strings.TrimPrefix(unquoteDiffPath(name), prefix)
 }
 
 // keepDiffLines ends the errors about an annotated diff whose lines were changed.

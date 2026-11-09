@@ -272,6 +272,7 @@ var dryRunExempt = []struct{ path, reason string }{
 	{"gt repo sync", "updates branches of the clone"},
 	{"gt repo set-default", "changes the clone's configuration"},
 	{"gt browse", "opens a browser"},
+	{"gt commit", "reads the repository"},
 	{"gt doctor", "reads"},
 	{"gt gpg-key token", "reads"},
 	{"gt version", "reads"},

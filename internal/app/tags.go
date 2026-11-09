@@ -38,8 +38,8 @@ func tagURL(repo target, name string) string {
 	return repositoryURL(repo) + "/src/tag/" + compareRef(name)
 }
 
-// tagSubject is the first line of a tag message.
-func tagSubject(message string) string {
+// messageSubject is the first line of a commit or tag message.
+func messageSubject(message string) string {
 	subject, _, _ := strings.Cut(message, "\n")
 	return subject
 }
@@ -75,7 +75,7 @@ $ gt tag list --limit 100 --json name,commit,annotated`,
 					if tty {
 						sha = shortSHA(sha) // piped output keeps the full SHA, for scripts
 					}
-					return []terminal.Cell{{Text: terminal.SafeLine(tag.Name), Bold: true}, {Text: sha, Muted: true}, {Text: tagKind(tag), Muted: true}, {Text: terminal.SafeLine(tagSubject(tag.Message))}}
+					return []terminal.Cell{{Text: terminal.SafeLine(tag.Name), Bold: true}, {Text: sha, Muted: true}, {Text: tagKind(tag), Muted: true}, {Text: terminal.SafeLine(messageSubject(tag.Message))}}
 				},
 				Context: "tags in " + target.Repo, Empty: "no tags in " + target.Repo,
 			}, servicePage(tags, page))
