@@ -5,7 +5,6 @@ package actions
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +19,7 @@ import (
 	"gitea.dev/models/db"
 	repo_model "gitea.dev/models/repo"
 	"gitea.dev/modules/git"
+	"gitea.dev/modules/json"
 	"gitea.dev/modules/setting"
 	api "gitea.dev/modules/structs"
 	"gitea.dev/modules/timeutil"
@@ -142,10 +142,7 @@ func (d *githubStatusDeduper) request(ctx context.Context, target string, out an
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return fmt.Errorf("GitHub Actions API returned HTTP %d", res.StatusCode)
 	}
-	if err := json.NewDecoder(io.LimitReader(res.Body, 8*1024*1024)).Decode(out); err != nil {
-		return err
-	}
-	return nil
+	return json.NewDecoder(io.LimitReader(res.Body, 8*1024*1024)).Decode(out)
 }
 
 func githubPageURL(endpoint string, page int) string {
