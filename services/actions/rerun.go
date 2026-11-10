@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"gitea.dev/actionslib/pkg/model"
 	actions_model "gitea.dev/models/actions"
@@ -15,6 +16,7 @@ import (
 	"gitea.dev/models/unit"
 	user_model "gitea.dev/models/user"
 	"gitea.dev/modules/container"
+	"gitea.dev/modules/git"
 	"gitea.dev/modules/log"
 	"gitea.dev/modules/setting"
 	"gitea.dev/modules/util"
@@ -51,6 +53,22 @@ func GetFailedJobsForRerun(allJobs []*actions_model.ActionRunJob) []*actions_mod
 // Fast validations that can catch failures early (workflow disabled, run not done, etc.) are therefore
 // pushed into validateRerun so we rarely enter createOriginalAttemptForLegacyRun only to fail afterwards.
 func RerunWorkflowRunJobs(ctx context.Context, repo *repo_model.Repository, run *actions_model.ActionRun, triggerUser *user_model.User, jobsToRerun []*actions_model.ActionRunJob) (*actions_model.ActionRunAttempt, error) {
+	if run != nil && run.Status.IsDone() && repo != nil && triggerUser != nil && run.RepoID == repo.ID {
+		expired, err := IsWorkflowRunExpired(ctx, run)
+		if err != nil {
+			return nil, fmt.Errorf("check whether workflow run %d is expired: %w", run.ID, err)
+		}
+		if expired {
+			jobs, err := actions_model.GetAllRunJobsByRepoAndRunID(ctx, run.RepoID, run.ID)
+			if err != nil {
+				return nil, fmt.Errorf("load expired workflow run jobs: %w", err)
+			}
+			if err := deleteExpiredFailedJobs(ctx, run, jobs); err != nil {
+				return nil, fmt.Errorf("delete expired workflow run jobs: %w", err)
+			}
+			return nil, nil
+		}
+	}
 	if err := validateRerun(ctx, run, repo, triggerUser, jobsToRerun); err != nil {
 		return nil, err
 	}
@@ -66,6 +84,74 @@ func RerunWorkflowRunJobs(ctx context.Context, repo *repo_model.Repository, run 
 		return nil, err
 	}
 	return execRerunPlan(ctx, plan)
+}
+
+// IsWorkflowRunExpired reports whether the workflow source ref has advanced since this run.
+// Expired runs must not recreate jobs from an obsolete workflow snapshot.
+func IsWorkflowRunExpired(ctx context.Context, run *actions_model.ActionRun) (bool, error) {
+	if run == nil || run.WorkflowRepoID == 0 || run.WorkflowCommitSHA == "" {
+		return false, nil // legacy runs do not have enough source metadata to compare
+	}
+
+	workflowRepo, err := repo_model.GetRepositoryByID(ctx, run.WorkflowRepoID)
+	if err != nil {
+		return false, err
+	}
+	gitRepo, err := git.OpenRepository(ctx, workflowRepo)
+	if err != nil {
+		return false, err
+	}
+	defer gitRepo.Close()
+
+	ref := run.Ref
+	if run.IsScopedRun {
+		ref = git.BranchPrefix + workflowRepo.DefaultBranch
+	}
+	currentSHA, err := gitRepo.GetRefCommitID(ctx, ref)
+	if err != nil {
+		if git.IsErrNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	return !strings.EqualFold(currentSHA, run.WorkflowCommitSHA), nil
+}
+
+// deleteExpiredFailedJobs removes failed/cancelled job history from every attempt of a stale run.
+func deleteExpiredFailedJobs(ctx context.Context, run *actions_model.ActionRun, jobs []*actions_model.ActionRunJob) error {
+	failedJobs := GetFailedJobsForRerun(jobs)
+	if len(failedJobs) == 0 {
+		return nil
+	}
+
+	jobIDs := container.FilterSlice(failedJobs, func(job *actions_model.ActionRunJob) (int64, bool) {
+		return job.ID, true
+	})
+	tasks := make(actions_model.TaskList, 0)
+	if err := db.GetEngine(ctx).Where("repo_id = ?", run.RepoID).In("job_id", jobIDs).Find(&tasks); err != nil {
+		return err
+	}
+
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := CleanupEphemeralRunners(ctx); err != nil {
+			return err
+		}
+		recordsToDelete := make([]any, 0, len(failedJobs)*2+len(tasks)*3)
+		for _, task := range tasks {
+			recordsToDelete = append(recordsToDelete,
+				&actions_model.ActionTaskOutput{TaskID: task.ID},
+				&actions_model.ActionTaskStep{TaskID: task.ID},
+				&actions_model.ActionTask{RepoID: task.RepoID, ID: task.ID},
+			)
+		}
+		for _, job := range failedJobs {
+			recordsToDelete = append(recordsToDelete,
+				&actions_model.ActionRunJobSummary{RepoID: job.RepoID, RunID: job.RunID, RunAttemptID: job.RunAttemptID, JobID: job.ID},
+				&actions_model.ActionRunJob{RepoID: job.RepoID, ID: job.ID},
+			)
+		}
+		return db.DeleteBeans(ctx, recordsToDelete...)
+	})
 }
 
 func validateRerun(ctx context.Context, run *actions_model.ActionRun, repo *repo_model.Repository, triggerUser *user_model.User, jobsToRerun []*actions_model.ActionRunJob) error {
