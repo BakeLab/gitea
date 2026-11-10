@@ -395,6 +395,9 @@ jobs:
 		assert.Equal(t, actions_model.StatusRunning, wf2Job2ActionJob.Status)
 		// push workflow3 to trigger wf3-job1
 		opts3 := getWorkflowCreateFileOptions(user2, repo.DefaultBranch, "create %s"+wf3TreePath, wf3FileContent)
+		// Keep the default branch's workflow snapshot current so rerunning wf2
+		// below exercises concurrency behavior instead of stale-run rejection.
+		opts3.NewBranchName = "job-concurrency-cancel"
 		createWorkflowFile(t, token, user2.Name, repo.Name, wf3TreePath, opts3)
 		// fetch wf3-job1
 		wf3Job1Task := runner1.fetchTask(t)
