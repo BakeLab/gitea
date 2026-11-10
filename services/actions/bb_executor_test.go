@@ -122,6 +122,14 @@ func TestBBProfileExtends(t *testing.T) {
 		require.True(t, ok, "parent CPU settings must remain a map")
 		assert.Equal(t, "amd64", parentCPU["arch"], "parent must not be mutated")
 	})
+	t.Run("repository scope and cpu override", func(t *testing.T) {
+		profiles, err := load(t, `[ `+base+`,{"name":"rustfs-sm2","extends":"base","labels":["sm-standard-2:host"],
+			"repositories":["BakeLab/rustfs"],"sandbox":{"cpu":{"vcpus":2}}}]`)
+		require.NoError(t, err)
+		profile := profiles[1]
+		assert.Equal(t, []string{"BakeLab/rustfs"}, profile.Repositories)
+		assert.Equal(t, map[string]any{"arch": "amd64", "vcpus": float64(2)}, profile.Sandbox["cpu"])
+	})
 	t.Run("multi level", func(t *testing.T) {
 		profiles, err := load(t, `[{"name":"c","extends":"b","labels":["c:host"]},{"name":"b","extends":"base","labels":["b:host"],"sandbox":{"cpu":{"vcpus":8}}},`+base+`]`)
 		require.NoError(t, err)

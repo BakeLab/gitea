@@ -84,10 +84,12 @@ type bbExecutorProfileAuth struct {
 }
 
 type bbExecutorProfile struct {
-	Platform     string         `json:"platform"`
-	ExecUser     string         `json:"exec_user"`
-	Name         string         `json:"name"`
-	Extends      string         `json:"extends,omitempty"`
+	Platform string `json:"platform"`
+	ExecUser string `json:"exec_user"`
+	Name     string `json:"name"`
+	Extends  string `json:"extends,omitempty"`
+	// Repositories optionally limits this profile to exact owner/repository names.
+	Repositories []string       `json:"repositories,omitempty"`
 	Labels       []string       `json:"labels"`
 	RunnerURL    string         `json:"runner_url"`
 	RunnerSHA256 string         `json:"runner_sha256"`
@@ -212,6 +214,9 @@ func initBBExecutor(ctx context.Context) error {
 		if profile.Name == "" || len(profile.Labels) == 0 || profile.Sandbox == nil {
 			return errors.New("BB executor profiles require name, labels and sandbox")
 		}
+		if err := validateBBProfileRepositories(profile.Repositories); err != nil {
+			return fmt.Errorf("BB executor profile %q: %w", profile.Name, err)
+		}
 		if profile.Platform != "" && profile.Platform != "linux" && profile.Platform != "darwin" {
 			return errors.New("BB executor platform must be linux or darwin")
 		}
@@ -314,6 +319,11 @@ func resolveBBProfileExtends(profiles []bbExecutorProfile) ([]bbExecutorProfile,
 		}
 		merged := profiles[parents[0]]
 		merged.Name, merged.Extends, merged.Labels = child.Name, child.Extends, child.Labels
+		if child.Repositories != nil {
+			merged.Repositories = slices.Clone(child.Repositories)
+		} else {
+			merged.Repositories = slices.Clone(merged.Repositories)
+		}
 		if child.RunnerURL != "" {
 			merged.RunnerURL = child.RunnerURL
 		}
@@ -343,6 +353,31 @@ func resolveBBProfileExtends(profiles []bbExecutorProfile) ([]bbExecutorProfile,
 		}
 	}
 	return profiles, nil
+}
+
+func (config bbExecutorConfig) repositoryNamesForJobs(ctx context.Context, jobs []*actions_model.ActionRunJob) (map[int64]string, error) {
+	for _, profile := range config.Profiles {
+		if len(profile.Repositories) > 0 {
+			ids := make([]int64, 0, len(jobs))
+			seen := make(map[int64]bool, len(jobs))
+			for _, job := range jobs {
+				if !seen[job.RepoID] {
+					ids = append(ids, job.RepoID)
+					seen[job.RepoID] = true
+				}
+			}
+			repos, err := repo_model.GetRepositoriesMapByIDs(ctx, ids)
+			if err != nil {
+				return nil, err
+			}
+			names := make(map[int64]string, len(repos))
+			for id, repo := range repos {
+				names[id] = repo.FullName()
+			}
+			return names, nil
+		}
+	}
+	return nil, nil
 }
 
 // bbMergeSandbox deep-merges maps by key; every other value, including lists,
@@ -506,6 +541,10 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		repoNames, err := config.repositoryNamesForJobs(ctx, jobs)
+		if err != nil {
+			return fmt.Errorf("load repositories for BB profile matching: %w", err)
+		}
 		for _, job := range jobs {
 			exists, err := db.GetEngine(ctx).Where("job_id = ?", job.ID).Exist(new(actions_model.ActionBBTask))
 			if err != nil {
@@ -516,13 +555,11 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 			}
 			matchingProfiles := make([]int, 0, len(config.Profiles))
 			profileLabels := make(map[int][]string, len(config.Profiles))
-			for profileIndex, profile := range config.Profiles {
+			for _, profileIndex := range config.matchingProfiles(job, repoNames[job.RepoID]) {
+				profile := config.Profiles[profileIndex]
 				labels := bbProfileRunnerLabels(profile)
-				runner := &actions_model.ActionRunner{AgentLabels: labels}
-				if runner.CanMatchLabels(job.RunsOn) {
-					matchingProfiles = append(matchingProfiles, profileIndex)
-					profileLabels[profileIndex] = labels
-				}
+				matchingProfiles = append(matchingProfiles, profileIndex)
+				profileLabels[profileIndex] = labels
 			}
 			if len(matchingProfiles) == 0 {
 				labels, _ := json.Marshal(job.RunsOn)
