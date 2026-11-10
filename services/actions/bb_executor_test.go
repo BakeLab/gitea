@@ -99,7 +99,9 @@ func TestBBProfileExtends(t *testing.T) {
 		assert.Equal(t, "sandbox-vm", arm.Sandbox["runtime"])
 		assert.Equal(t, map[string]any{"arch": "arm64", "vcpus": float64(4)}, arm.Sandbox["cpu"])
 		assert.Equal(t, []any{"c"}, arm.Sandbox["allowed_hosts"])
-		assert.Equal(t, "amd64", profiles[0].Sandbox["cpu"].(map[string]any)["arch"], "parent must not be mutated")
+		parentCPU, ok := profiles[0].Sandbox["cpu"].(map[string]any)
+		require.True(t, ok, "parent CPU settings must remain a map")
+		assert.Equal(t, "amd64", parentCPU["arch"], "parent must not be mutated")
 	})
 	t.Run("multi level", func(t *testing.T) {
 		profiles, err := load(t, `[{"name":"c","extends":"b","labels":["c:host"]},{"name":"b","extends":"base","labels":["b:host"],"sandbox":{"cpu":{"vcpus":8}}},`+base+`]`)
