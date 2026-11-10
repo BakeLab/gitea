@@ -18423,6 +18423,9 @@
           "201": {
             "$ref": "#/components/responses/WorkflowJob"
           },
+          "204": {
+            "$ref": "#/components/responses/empty"
+          },
           "default": {
             "$ref": "#/components/responses/error"
           }
@@ -18515,6 +18518,9 @@
           "201": {
             "$ref": "#/components/responses/WorkflowRun"
           },
+          "204": {
+            "$ref": "#/components/responses/empty"
+          },
           "default": {
             "$ref": "#/components/responses/error"
           }
@@ -18559,6 +18565,9 @@
         ],
         "responses": {
           "201": {
+            "$ref": "#/components/responses/empty"
+          },
+          "204": {
             "$ref": "#/components/responses/empty"
           },
           "default": {
