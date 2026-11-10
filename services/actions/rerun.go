@@ -60,13 +60,11 @@ func RerunWorkflowRunJobs(ctx context.Context, repo *repo_model.Repository, run 
 			return nil, fmt.Errorf("check whether workflow run %d is expired: %w", run.ID, err)
 		}
 		if expired {
-			if len(jobsToRerun) == 0 {
-				jobsToRerun, err = actions_model.GetLatestAttemptJobsByRun(ctx, run)
-				if err != nil {
-					return nil, fmt.Errorf("load expired workflow run jobs: %w", err)
-				}
+			jobs, err := actions_model.GetAllRunJobsByRepoAndRunID(ctx, run.RepoID, run.ID)
+			if err != nil {
+				return nil, fmt.Errorf("load expired workflow run jobs: %w", err)
 			}
-			if err := deleteExpiredFailedJobs(ctx, run, jobsToRerun); err != nil {
+			if err := deleteExpiredFailedJobs(ctx, run, jobs); err != nil {
 				return nil, fmt.Errorf("delete expired workflow run jobs: %w", err)
 			}
 			return nil, nil
@@ -120,7 +118,7 @@ func IsWorkflowRunExpired(ctx context.Context, run *actions_model.ActionRun) (bo
 	return !strings.EqualFold(currentSHA, run.WorkflowCommitSHA), nil
 }
 
-// deleteExpiredFailedJobs removes only failed/cancelled job history from a stale run's latest attempt.
+// deleteExpiredFailedJobs removes failed/cancelled job history from every attempt of a stale run.
 func deleteExpiredFailedJobs(ctx context.Context, run *actions_model.ActionRun, jobs []*actions_model.ActionRunJob) error {
 	failedJobs := GetFailedJobsForRerun(jobs)
 	if len(failedJobs) == 0 {
