@@ -77,6 +77,25 @@ func TestBBExecutorSchedulableCapacityFailsClosed(t *testing.T) {
 	}
 }
 
+func TestBBExecutorReconcileStateUpdateUnmatchedSummary(t *testing.T) {
+	state := &bbExecutorReconcileState{}
+
+	changed, previouslyUnmatched := state.updateUnmatchedSummary("1 jobs for [\"macos-latest\"]")
+	if !changed || previouslyUnmatched {
+		t.Fatalf("first unmatched summary: changed=%t previouslyUnmatched=%t", changed, previouslyUnmatched)
+	}
+
+	changed, previouslyUnmatched = state.updateUnmatchedSummary("1 jobs for [\"macos-latest\"]")
+	if changed || !previouslyUnmatched {
+		t.Fatalf("unchanged unmatched summary: changed=%t previouslyUnmatched=%t", changed, previouslyUnmatched)
+	}
+
+	changed, previouslyUnmatched = state.updateUnmatchedSummary("")
+	if !changed || !previouslyUnmatched {
+		t.Fatalf("cleared unmatched summary: changed=%t previouslyUnmatched=%t", changed, previouslyUnmatched)
+	}
+}
+
 func TestBBProfileExtends(t *testing.T) {
 	load := func(t *testing.T, raw string) ([]bbExecutorProfile, error) {
 		var profiles []bbExecutorProfile

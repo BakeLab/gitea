@@ -56,6 +56,23 @@ type bbExecutorConfig struct {
 	tokens            oauth2.TokenSource
 	client            *http.Client
 	githubDeduper     *githubStatusDeduper
+	reconcileState    *bbExecutorReconcileState
+}
+
+type bbExecutorReconcileState struct {
+	mu                   sync.Mutex
+	lastUnmatchedSummary string
+}
+
+func (state *bbExecutorReconcileState) updateUnmatchedSummary(summary string) (changed, previouslyUnmatched bool) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.lastUnmatchedSummary == summary {
+		return false, state.lastUnmatchedSummary != ""
+	}
+	previouslyUnmatched = state.lastUnmatchedSummary != ""
+	state.lastUnmatchedSummary = summary
+	return true, previouslyUnmatched
 }
 
 type bbExecutorProfileAuth struct {
@@ -124,6 +141,7 @@ func initBBExecutor(ctx context.Context) error {
 	if err := decoder.Decode(&config); err != nil {
 		return err
 	}
+	config.reconcileState = &bbExecutorReconcileState{}
 	if _, err := bbHTTPS(config.Endpoint); err != nil {
 		return err
 	}
@@ -467,11 +485,10 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 		return err
 	}
 	remaining := config.MaxConcurrent - len(rows)
-	if remaining <= 0 {
-		return nil
-	}
+	unmatchedProfiles := make(map[string]int)
+	fullyScanned := true
 	profileCapacity := make(map[int]int, len(config.Profiles))
-	if config.AutoConcurrency {
+	if config.AutoConcurrency && remaining > 0 {
 		// Read capacity for every profile before admitting any new work. If any
 		// query fails, fail closed for this reconciliation while leaving active
 		// tasks alone (they were advanced above).
@@ -487,7 +504,7 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 	groupsSeen := make(map[githubDedupGroupKey]bool)
 	runs := make(map[int64]*actions_model.ActionRun)
 	repos := make(map[int64]*repo_model.Repository)
-	for page := 1; remaining > 0; page++ {
+	for page := 1; ; page++ {
 		jobs, total, err := actions_model.FindJobQueueJobs(ctx, actions_model.JobQueueOptions{Status: actions_model.StatusWaiting}, page, 100)
 		if err != nil {
 			return err
@@ -511,11 +528,16 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 				}
 			}
 			if len(matchingProfiles) == 0 {
+				labels, _ := json.Marshal(job.RunsOn)
+				unmatchedProfiles[string(labels)]++
 				continue
 			}
 			deferred := false
 			for _, profileIndex := range matchingProfiles {
 				profile := config.Profiles[profileIndex]
+				if remaining <= 0 {
+					continue
+				}
 				if config.AutoConcurrency && profileCapacity[profileIndex] <= 0 {
 					continue
 				}
@@ -593,8 +615,41 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 		if int64(page*100) >= total {
 			break
 		}
+		if remaining <= 0 {
+			fullyScanned = false
+			break
+		}
 	}
+	config.reportUnmatchedProfiles(unmatchedProfiles, fullyScanned)
 	return nil
+}
+
+func (config bbExecutorConfig) reportUnmatchedProfiles(unmatchedProfiles map[string]int, fullyScanned bool) {
+	if config.reconcileState == nil {
+		return
+	}
+	labels := make([]string, 0, len(unmatchedProfiles))
+	count := 0
+	for labelSet, jobs := range unmatchedProfiles {
+		labels = append(labels, fmt.Sprintf("%d jobs for %s", jobs, labelSet))
+		count += jobs
+	}
+	slices.Sort(labels)
+	summary := strings.Join(labels, "; ")
+	if summary == "" && !fullyScanned {
+		return
+	}
+	changed, previouslyUnmatched := config.reconcileState.updateUnmatchedSummary(summary)
+	if !changed {
+		return
+	}
+	if summary == "" {
+		if previouslyUnmatched {
+			log.Info("BB executor can now match all observed waiting jobs to configured profiles")
+		}
+		return
+	}
+	log.Warn("BB executor cannot schedule at least %d observed waiting jobs because no configured profile matches their runs-on labels: %s", count, summary)
 }
 
 func (config bbExecutorConfig) schedulableCapacity(ctx context.Context, profile bbExecutorProfile, maxCount int) (int, error) {
