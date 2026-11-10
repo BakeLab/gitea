@@ -90,6 +90,53 @@ func TestGitHubMirrorSourceRestrictions(t *testing.T) {
 	}
 }
 
+func TestGitHubDedupRequiresPushBranchRef(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  string
+		want string
+	}{
+		{name: "branch", ref: "refs/heads/main", want: "main"},
+		{name: "nested branch", ref: "refs/heads/release/2026", want: "release/2026"},
+		{name: "tag", ref: "refs/tags/v1.0.0"},
+		{name: "pull request", ref: "refs/pull/42/head"},
+		{name: "empty branch", ref: "refs/heads/"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := githubPushBranch(&actions_model.ActionRun{Ref: test.ref})
+			if got != test.want || ok != (test.want != "") {
+				t.Fatalf("githubPushBranch(%q) = %q, %v; want %q, %v", test.ref, got, ok, test.want, test.want != "")
+			}
+		})
+	}
+}
+
+func TestGitHubWorkflowRunRequiresSameBranchAndRepository(t *testing.T) {
+	run := githubWorkflowRun{
+		HeadSHA: "sha", HeadBranch: "main", Path: ".github/workflows/ci.yml", Event: "push",
+		Repository:     &githubWorkflowRepoInfo{FullName: "acme/project"},
+		HeadRepository: &githubWorkflowRepoInfo{FullName: "acme/project"},
+	}
+	if !githubWorkflowRunMatches(run, "acme", "project", "sha", "main", ".github/workflows/ci.yml", "push") {
+		t.Fatal("matching repository and branch were rejected")
+	}
+	run.HeadBranch = "release"
+	if githubWorkflowRunMatches(run, "acme", "project", "sha", "main", ".github/workflows/ci.yml", "push") {
+		t.Fatal("same SHA on a different branch must not match")
+	}
+	run.HeadBranch = "main"
+	run.HeadRepository.FullName = "contributor/project"
+	if githubWorkflowRunMatches(run, "acme", "project", "sha", "main", ".github/workflows/ci.yml", "push") {
+		t.Fatal("a run whose head repository is a fork must not match")
+	}
+	run.HeadRepository.FullName = "acme/project"
+	run.Repository.FullName = "contributor/project"
+	if githubWorkflowRunMatches(run, "acme", "project", "sha", "main", ".github/workflows/ci.yml", "push") {
+		t.Fatal("a run from another repository must not match")
+	}
+}
+
 func TestGitHubCommitMatchRequiresWorkflowAndJobSHA(t *testing.T) {
 	job := &actions_model.ActionRunJob{CommitSHA: "same"}
 	run := &actions_model.ActionRun{CommitSHA: "same", WorkflowCommitSHA: "same"}
@@ -114,9 +161,12 @@ func TestGitHubStatusFetchScopesWorkflowAndPaginates(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/repos/acme/project/actions/workflows/ci.yml/runs" && r.URL.Query().Get("page") == "1":
-			_, _ = fmt.Fprint(w, `{"total_count":101,"workflow_runs":[{"id":10,"path":".github/workflows/ci.yml","head_sha":"sha","event":"push","status":"completed","run_number":1,"run_attempt":1}]}`)
+			if r.URL.Query().Get("branch") != "main" {
+				t.Errorf("GitHub run query branch = %q, want main", r.URL.Query().Get("branch"))
+			}
+			_, _ = fmt.Fprint(w, `{"total_count":101,"workflow_runs":[{"id":10,"path":".github/workflows/ci.yml","head_sha":"sha","head_branch":"main","event":"push","status":"completed","run_number":1,"run_attempt":1,"repository":{"full_name":"acme/project"},"head_repository":{"full_name":"acme/project"}}]}`)
 		case r.URL.Path == "/repos/acme/project/actions/workflows/ci.yml/runs" && r.URL.Query().Get("page") == "2":
-			_, _ = fmt.Fprint(w, `{"total_count":101,"workflow_runs":[{"id":11,"path":".github/workflows/ci.yml","head_sha":"sha","event":"push","status":"completed","run_number":2,"run_attempt":1},{"id":99,"path":".github/workflows/other.yml","head_sha":"sha","event":"push","status":"completed","run_number":99,"run_attempt":1}]}`)
+			_, _ = fmt.Fprint(w, `{"total_count":101,"workflow_runs":[{"id":11,"path":".github/workflows/ci.yml","head_sha":"sha","head_branch":"main","event":"push","status":"completed","run_number":2,"run_attempt":1,"repository":{"full_name":"acme/project"},"head_repository":{"full_name":"acme/project"}},{"id":12,"path":".github/workflows/ci.yml","head_sha":"sha","head_branch":"release","event":"push","status":"completed","run_number":99,"run_attempt":1,"repository":{"full_name":"acme/project"},"head_repository":{"full_name":"acme/project"}},{"id":13,"path":".github/workflows/ci.yml","head_sha":"sha","head_branch":"main","event":"push","status":"completed","run_number":100,"run_attempt":1,"repository":{"full_name":"acme/project"},"head_repository":{"full_name":"contributor/project"}},{"id":14,"path":".github/workflows/other.yml","head_sha":"sha","head_branch":"main","event":"push","status":"completed","run_number":101,"run_attempt":1,"repository":{"full_name":"acme/project"},"head_repository":{"full_name":"acme/project"}}]}`)
 		case r.URL.Path == "/repos/acme/project/actions/runs/11/jobs" && r.URL.Query().Get("page") == "1":
 			_, _ = fmt.Fprint(w, `{"total_count":1,"jobs":[{"name":"build","status":"completed","conclusion":"success"}]}`)
 		default:
@@ -127,7 +177,7 @@ func TestGitHubStatusFetchScopesWorkflowAndPaginates(t *testing.T) {
 	defer server.Close()
 	deduper := newGitHubStatusDeduper("")
 	deduper.apiBaseURL = server.URL
-	entry, err := deduper.loadStatus(context.Background(), "acme", "project", "sha", ".github/workflows/ci.yml", "push")
+	entry, err := deduper.loadStatus(context.Background(), "acme", "project", "sha", "main", ".github/workflows/ci.yml", "push")
 	if err != nil {
 		t.Fatalf("loadStatus() error = %v", err)
 	}
@@ -146,7 +196,7 @@ func TestGitHubStatusAPIErrorIsFailOpen(t *testing.T) {
 	defer server.Close()
 	deduper := newGitHubStatusDeduper("")
 	deduper.apiBaseURL = server.URL
-	if _, err := deduper.loadStatus(context.Background(), "acme", "project", "sha", ".github/workflows/ci.yml", "push"); err == nil {
+	if _, err := deduper.loadStatus(context.Background(), "acme", "project", "sha", "main", ".github/workflows/ci.yml", "push"); err == nil {
 		t.Fatal("loadStatus() succeeded despite API rate limit")
 	} else if got := githubDedupDecisionForLookup(githubDedupSkip, err); got != githubDedupRun {
 		t.Fatalf("API error decision = %v, want fail-open run", got)
