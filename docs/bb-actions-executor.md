@@ -94,7 +94,11 @@ normal validation, which then runs on the resolved profile. Multi-level chains
 are allowed; an unknown or ambiguous parent, a cycle, or a child without a unique
 name is a load error. The child must define its own non-empty `labels` (labels
 are never inherited). `runner_url`, `runner_sha256`, `package_sets`, `platform`
-and `exec_user` replace the parent value when set. `sandbox` is deep-merged:
+and `exec_user` replace the parent value when set. `repositories` optionally
+limits a profile to exact `owner/repository` names; a child value replaces the
+parent list, and an omitted value inherits it. This keeps repository-specific
+runner aliases from claiming similarly named labels in other repositories.
+`sandbox` is deep-merged:
 child keys override, nested objects such as `cpu` merge by key, and lists such as
 `allowed_hosts` and `required_internal_services` are replaced.
 
