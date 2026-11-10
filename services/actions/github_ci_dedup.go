@@ -28,14 +28,21 @@ import (
 )
 
 type githubWorkflowRun struct {
-	ID         int64  `json:"id"`
-	Path       string `json:"path"`
-	HeadSHA    string `json:"head_sha"`
-	Event      string `json:"event"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-	RunNumber  int64  `json:"run_number"`
-	RunAttempt int64  `json:"run_attempt"`
+	ID             int64                   `json:"id"`
+	Path           string                  `json:"path"`
+	HeadSHA        string                  `json:"head_sha"`
+	HeadBranch     string                  `json:"head_branch"`
+	HeadRepository *githubWorkflowRepoInfo `json:"head_repository"`
+	Repository     *githubWorkflowRepoInfo `json:"repository"`
+	Event          string                  `json:"event"`
+	Status         string                  `json:"status"`
+	Conclusion     string                  `json:"conclusion"`
+	RunNumber      int64                   `json:"run_number"`
+	RunAttempt     int64                   `json:"run_attempt"`
+}
+
+type githubWorkflowRepoInfo struct {
+	FullName string `json:"full_name"`
 }
 
 type githubWorkflowRunsResponse struct {
@@ -153,8 +160,8 @@ func githubPageURL(endpoint string, page int) string {
 	return fmt.Sprintf("%s%sper_page=100&page=%d", endpoint, separator, page)
 }
 
-func (d *githubStatusDeduper) loadStatus(ctx context.Context, owner, name, sha, workflow, event string) (githubStatusCacheEntry, error) {
-	cacheKey := owner + "/" + name + "/" + sha + "/" + workflow + "/" + event
+func (d *githubStatusDeduper) loadStatus(ctx context.Context, owner, name, sha, branch, workflow, event string) (githubStatusCacheEntry, error) {
+	cacheKey := owner + "/" + name + "/" + sha + "/" + branch + "/" + workflow + "/" + event
 	d.mu.Lock()
 	if entry, ok := d.cache[cacheKey]; ok && time.Now().Before(entry.expiresAt) {
 		d.mu.Unlock()
@@ -165,7 +172,7 @@ func (d *githubStatusDeduper) loadStatus(ctx context.Context, owner, name, sha, 
 	defer d.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	jobs, runStatus, err := d.fetchStatus(ctx, owner, name, sha, workflow, event)
+	jobs, runStatus, err := d.fetchStatus(ctx, owner, name, sha, branch, workflow, event)
 	entry := githubStatusCacheEntry{jobs: jobs, runStatus: runStatus, err: err, expiresAt: time.Now().Add(githubStatusCacheTTL)}
 	if len(d.cache) >= 512 {
 		now := time.Now()
@@ -189,10 +196,10 @@ func (d *githubStatusDeduper) loadStatus(ctx context.Context, owner, name, sha, 
 	return entry, err
 }
 
-func (d *githubStatusDeduper) fetchStatus(ctx context.Context, owner, name, sha, workflow, event string) ([]githubWorkflowJob, string, error) {
+func (d *githubStatusDeduper) fetchStatus(ctx context.Context, owner, name, sha, branch, workflow, event string) ([]githubWorkflowJob, string, error) {
 	base := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(name)
 	workflowName := path.Base(workflow)
-	endpoint := base + "/actions/workflows/" + url.PathEscape(workflowName) + "/runs?head_sha=" + url.QueryEscape(sha)
+	endpoint := base + "/actions/workflows/" + url.PathEscape(workflowName) + "/runs?head_sha=" + url.QueryEscape(sha) + "&branch=" + url.QueryEscape(branch)
 	var latest *githubWorkflowRun
 	for page := 1; page <= githubAPIMaxPages; page++ {
 		var response githubWorkflowRunsResponse
@@ -200,7 +207,7 @@ func (d *githubStatusDeduper) fetchStatus(ctx context.Context, owner, name, sha,
 			return nil, "", err
 		}
 		for _, run := range response.WorkflowRuns {
-			if run.HeadSHA != sha || run.Path != workflow || run.Event != event {
+			if !githubWorkflowRunMatches(run, owner, name, sha, branch, workflow, event) {
 				continue
 			}
 			if latest == nil || run.RunNumber > latest.RunNumber || (run.RunNumber == latest.RunNumber && run.RunAttempt > latest.RunAttempt) {
@@ -276,6 +283,22 @@ func isSupportedGitHubDedupEvent(event string) bool {
 	return strings.EqualFold(event, "push")
 }
 
+func githubPushBranch(run *actions_model.ActionRun) (string, bool) {
+	const prefix = "refs/heads/"
+	if run == nil || !strings.HasPrefix(run.Ref, prefix) {
+		return "", false
+	}
+	branch := strings.TrimPrefix(run.Ref, prefix)
+	return branch, branch != ""
+}
+
+func githubWorkflowRunMatches(run githubWorkflowRun, owner, name, sha, branch, workflow, event string) bool {
+	repository := owner + "/" + name
+	return run.HeadSHA == sha && run.HeadBranch == branch && run.Path == workflow && run.Event == event &&
+		run.Repository != nil && run.Repository.FullName == repository &&
+		run.HeadRepository != nil && run.HeadRepository.FullName == repository
+}
+
 func githubCommitMatches(run *actions_model.ActionRun, job *actions_model.ActionRunJob) bool {
 	return run != nil && job != nil && job.CommitSHA != "" && job.CommitSHA == run.CommitSHA && job.CommitSHA == run.WorkflowCommitSHA
 }
@@ -287,7 +310,8 @@ func (d *githubStatusDeduper) decide(ctx context.Context, repo *repo_model.Repos
 		return githubDedupRun, nil, groupKey, nil
 	}
 	workflow, ok := githubWorkflowPath(ctx, repo, run)
-	if !ok || !isSupportedGitHubDedupEvent(run.TriggerEvent) {
+	branch, branchOK := githubPushBranch(run)
+	if !ok || !isSupportedGitHubDedupEvent(run.TriggerEvent) || !branchOK {
 		return githubDedupRun, nil, groupKey, nil
 	}
 	allJobs, err := actions_model.GetRunJobsByRunAndAttemptID(ctx, run.ID, job.RunAttemptID)
@@ -309,7 +333,7 @@ func (d *githubStatusDeduper) decide(ctx context.Context, repo *repo_model.Repos
 	if len(siblings) == 0 {
 		return githubDedupRun, nil, groupKey, nil
 	}
-	statuses, err := d.loadStatus(ctx, owner, name, job.CommitSHA, workflow, run.TriggerEvent)
+	statuses, err := d.loadStatus(ctx, owner, name, job.CommitSHA, branch, workflow, run.TriggerEvent)
 	if err != nil {
 		return githubDedupRun, nil, groupKey, err
 	}
