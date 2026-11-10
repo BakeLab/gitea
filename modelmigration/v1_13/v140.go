@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"gitea.dev/modelmigration/base"
-	"gitea.dev/modules/setting"
 )
 
 func FixLanguageStatsToSaveSize(_ context.Context, x base.EngineMigration) error {
@@ -34,13 +33,8 @@ func FixLanguageStatsToSaveSize(_ context.Context, x base.EngineMigration) error
 	_, _ = x.Delete(&RepoIndexerStatus{IndexerType: RepoIndexerTypeStats})
 
 	// Delete language stat statuses
-	truncExpr := "TRUNCATE TABLE"
-	if setting.Database.Type.IsSQLite3() {
-		truncExpr = "DELETE FROM"
-	}
-
 	// Delete language stats
-	if _, err := x.Exec(truncExpr + " language_stat"); err != nil {
+	if _, err := x.Exec("TRUNCATE TABLE language_stat"); err != nil {
 		return err
 	}
 

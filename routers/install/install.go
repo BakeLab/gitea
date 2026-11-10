@@ -79,7 +79,7 @@ func Install(ctx *context.Context) {
 
 	curDBType := string(setting.Database.Type)
 	if !slices.Contains(setting.SupportedDatabaseTypes, curDBType) {
-		curDBType = "mysql"
+		curDBType = "postgres"
 	}
 	ctx.Data["CurDbType"] = curDBType
 
@@ -206,6 +206,11 @@ func SubmitInstall(ctx *context.Context) {
 		ctx.Data["Err_SMTP"] = ctx.Data["Err_SMTPUser"] != nil
 		ctx.Data["Err_Admin"] = ctx.Data["Err_AdminName"] != nil || ctx.Data["Err_AdminPasswd"] != nil || ctx.Data["Err_AdminEmail"] != nil
 		ctx.HTML(http.StatusOK, tplInstall)
+		return
+	}
+	if !setting.DatabaseType(form.DbType).IsSupportedRuntime() {
+		ctx.Data["Err_DbType"] = true
+		ctx.RenderWithErrDeprecated(ctx.Tr("install.invalid_db_setting", "only PostgreSQL is supported"), tplInstall, form)
 		return
 	}
 

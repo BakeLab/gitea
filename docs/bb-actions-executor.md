@@ -12,18 +12,22 @@ Sandbox placement requires the declaration; a missing route keeps the sandbox
 queued. No SSH forwarding or runner NetBird identity is used. The route declaration
 does not establish upstream connectivity, so verify it before enabling profiles.
 
-Example configuration (replace the project, OAuth settings and SHA-256):
+Example configuration using the previously authorized human profile (replace
+the project, token record path and SHA-256):
 
 ```json
 {
   "endpoint": "https://bmetal.int.bb.pub:18092",
   "project": "prj_example",
-  "token_url": "https://id.bb.pub/api/oidc/token",
-  "client_id": "gitea-actions",
-  "client_secret_file": "/etc/gitea/bb-client-secret",
-  "resource": "https://breadboard.int.bb.pub/api",
-  "scopes": ["breadboard:operate"],
+  "profile_auth": {
+    "issuer": "https://id.bb.pub",
+    "client_id": "breadboard-cli",
+    "resource": "https://breadboard.int.bb.pub/api",
+    "scopes": ["openid", "profile", "groups", "offline_access", "breadboard:read", "breadboard:operate"],
+    "token_file": "/etc/gitea/bb-profile/token.json"
+  },
   "max_concurrent": 4,
+  "auto_concurrency": true,
   "max_duration_s": 25200,
   "profiles": [{
     "name": "linux-amd64",
@@ -44,22 +48,28 @@ Example configuration (replace the project, OAuth settings and SHA-256):
 }
 ```
 
-Use the token endpoint published by your issuer's discovery document. For
-Pocket ID, the token endpoint is `https://id.bb.pub/api/oidc/token`. Configure a
-dedicated confidential client for Gitea with the client-credentials grant and
-operator access to the selected BB project, including its secrets and task
-APIs. This does not require a BB CLI profile or keyring. OAuth access tokens
-refresh automatically. Alternatively,
-replace the OAuth fields with `token_file`; Gitea rereads that bearer-token file
-for each request, allowing an external credential refresher to rotate it. Keep
-credential files readable only by the Gitea service account.
+`max_concurrent` is always the hard upper limit across all BB-managed jobs.
+With `auto_concurrency` omitted or false, dispatch retains the fixed limit and
+does not query BB capacity. When enabled, Gitea asks
+`POST /v1/scheduler/capacity` for each profile's exact `sandbox` spec and uses
+the returned `schedulable` count as that profile's additional admission limit.
+The endpoint must return `schedulable`, `max_count` and `as_of_ms`; project
+scope comes from the configured `X-Breadboard-Project` header. Capacity checks
+are read-only and do not reserve resources. If any profile query fails or
+returns invalid data, the dispatcher starts no new BB tasks during that
+reconciliation; already active tasks continue to be reconciled normally.
 
-Profiles are considered in order. All job `runs-on` labels must match the label
-names before `:host` or `:docker://IMAGE`. Give ARM64 profiles an ARM64 sandbox
-and an ARM64 runner binary. GPU profiles must explicitly request the appropriate
-BB accelerator and package sets. Do not alias unavailable hardware to another
-GPU class. Task requests use the BB sandbox API shape, so other immutable
-placement constraints are available inside `sandbox`.
+`profile_auth.token_file` uses the BB CLI token-record format (`access_token`,
+`refresh_token`, `expires_at` as a Unix timestamp). Provision the already
+authorized profile's token record to this path without printing it; create the
+parent directory as mode `0700` and the token file as mode `0600`, owned by the
+Gitea service account. Gitea refreshes access tokens and atomically saves token
+rotation. Do not configure the same rotating refresh token in another
+independent store. Profile authentication uses the configured issuer and
+resource and does not require a client secret. Alternatively, the OAuth
+client-credentials mode remains available for a dedicated machine identity;
+the legacy `token_file` mode continues to reread a raw bearer token for each
+request.
 
 For native macOS jobs, set `platform` to `darwin`, use an official Darwin runner
 binary, and pin `sandbox.node_name` to the macOS node (for example,
@@ -74,12 +84,41 @@ individual workflows may install Go, Rust or Homebrew LLVM themselves.
 The macOS node must declare the exact Gitea internal-service route required by
 the profile; the guest uses BB gateway networking without its own NetBird identity.
 
+Profiles are considered in order. All job `runs-on` labels must match the label
+names before `:host` or `:docker://IMAGE`. Give ARM64 profiles an ARM64 sandbox
+and an ARM64 runner binary. GPU profiles must explicitly request the appropriate
+BB accelerator and package sets. Do not alias unavailable hardware to another
+GPU class. Task requests use the BB sandbox API shape, so other immutable
+placement constraints are available inside `sandbox`.
+
 The dispatcher records the job, runner identity and immutable task request before
 submitting work. The runner identity is encrypted with Gitea's `SECRET_KEY` and
 sent through a per-task BB secret; no credential is embedded in the durable task
 command. Secrets are refreshed while tasks are active, restoring them after a BB
 restart. BB can fail preparation if a secret is unavailable when its command
 starts; that failure is reported to the Gitea job rather than leaving it queued.
+
+## Explicitly unsupported runner labels
+
+Jobs whose `runs-on` labels do not match any BB profile normally remain queued;
+a missing profile can be a configuration mistake or temporary capacity issue.
+To stop known unsupported hardware jobs from accumulating, an administrator may
+add exact label sets to `unsupported_labels` in the executor config:
+
+```json
+"unsupported_labels": [{
+  "labels": ["linux-gfx942-1gpu-ccs-csp-ossci-rocm"],
+  "reason": "This deployment has Radeon AI PRO R9700 (gfx1201), not gfx942 hardware."
+}]
+```
+
+Label sets are compared case-insensitively and without regard to order; extra or
+missing labels do not match. The dispatcher skips a configured job only when no
+BB profile matches and no online, enabled Gitea runner can claim it. The skipped
+job gets a summary with the labels and reason. Runner lookup or database errors
+fail open and leave the job queued. A matching profile with zero current
+schedulable capacity also stays queued. Unconfigured labels always remain
+queued, so profile omissions are not silently treated as unsupported hardware.
 
 Each managed runner is bound to exactly one job. Concurrent ordinary runners may
 claim a waiting job first; the dispatcher then cancels its unused BB task.
@@ -96,27 +135,32 @@ services do. Drain active tasks before changing the BB endpoint/project or
 disabling the dispatcher. Completed task bindings remain as deduplication
 records; their encrypted runner identities are cleared after cleanup.
 
-## Explicitly unsupported runner labels
+## GitHub Actions duplicate filtering
 
-The optional `unsupported_labels` setting contains exact `runs-on` label sets
-that this deployment cannot execute. A matching waiting job is marked Skipped
-with its labels and configured reason in the job summary, unless an online,
-enabled Gitea runner can match it. This check runs before BB capacity and
-concurrency checks, so unsupported jobs do not stay queued when BB is full or
-its capacity endpoint is unavailable. Unknown label sets and supported profiles
-with no current capacity remain queued. Configure only hardware and operating
-systems that are confirmed unavailable; do not map a specific GPU model to a
-different accelerator.
+The BB executor checks GitHub Actions before admitting a waiting job from a
+GitHub mirror. Filtering applies only to repositories marked as GitHub mirrors;
+ordinary Gitea repositories and Gitea-only workflow directories are unaffected.
+The lookup is currently enabled only for `push` events and is scoped to the same
+mirror, exact commit SHA, workflow path, and trigger event. Pull request events
+fail open because Gitea's merge commit and GitHub's head SHA are not guaranteed
+to identify the same commit. The source workflow must be in
+`.github/workflows`, and both the workflow source commit recorded by Gitea and
+the job commit must exactly match the GitHub run's `head_sha`. Any SHA mismatch
+fails open and runs Gitea.
 
-```json
-{
-  "unsupported_labels": [{
-    "labels": ["linux-gfx942-1gpu-ccs-csp-ossci-rocm"],
-    "reason": "This deployment has no gfx942/MI300 accelerator."
-  }]
-}
-```
+GitHub's workflow-jobs API exposes job display names rather than YAML job IDs.
+Gitea therefore matches the exact expanded display name within the workflow
+and groups all Gitea matrix siblings for the same job. It skips the Gitea
+siblings only when every name maps uniquely and every corresponding GitHub
+check succeeded. Missing or ambiguous names, failed or skipped checks, and
+unsupported workflow/event mappings run in Gitea. A pending matching GitHub
+check holds admission for at most two minutes; after that Gitea runs. Results
+are cached per mirror, SHA, workflow, and event for 30 seconds, and paginated
+GitHub responses are used to select the latest run/attempt for that key.
 
-Label matching is case-insensitive and order-independent, but requires an exact
-set match. Each entry needs a unique non-empty label set and a non-empty reason.
-The queue lookup and runner lookup fail open: an error leaves the job queued.
+Public mirrors use GitHub's unauthenticated API. For private mirrors, filtering
+is disabled unless `github_token_file` points to an absolute path containing a
+read-only GitHub token with Actions read access. Gitea does not reuse credentials
+embedded in mirror remotes. API errors, missing permissions, and rate limits
+fail open and allow Gitea to run; this can reduce deduplication but cannot block
+the Gitea job. Keep the token file readable only by the Gitea service account.

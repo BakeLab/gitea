@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"gitea.dev/modules/setting"
@@ -65,10 +64,6 @@ var makeSQLiteConnStr = func(opts SQLiteConnStrOptions) (string, string, error) 
 }
 
 func registerSQLiteConnStrMaker(fn func(opts SQLiteConnStrOptions) (string, string, error)) {
-	if slices.Contains(setting.SupportedDatabaseTypes, setting.DatabaseTypeSQLite3) {
-		panic("another sqlite3 driver has been registered")
-	}
-	setting.SupportedDatabaseTypes = append(setting.SupportedDatabaseTypes, setting.DatabaseTypeSQLite3)
 	makeSQLiteConnStr = fn
 }
 
@@ -78,6 +73,12 @@ func ConnStrDefaultDatabase(opts ConnOptions) (string, string, error) {
 }
 
 func ConnStr(opts ConnOptions) (string, string, error) {
+	if !setting.IsInTesting && !opts.Type.IsSupportedRuntime() {
+		return "", "", fmt.Errorf("unsupported runtime database type %q: only PostgreSQL is supported", opts.Type)
+	}
+
+	// Keep non-PostgreSQL connection string support for database test helpers and
+	// historical migration tests. Normal application startup rejects these types above.
 	switch {
 	case opts.Type.IsMySQL():
 		// use unix socket or tcp socket
