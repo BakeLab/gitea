@@ -84,6 +84,27 @@ individual workflows may install Go, Rust or Homebrew LLVM themselves.
 The macOS node must declare the exact Gitea internal-service route required by
 the profile; the guest uses BB gateway networking without its own NetBird identity.
 
+A profile may set `"extends": "<profile name>"` to inherit another profile and
+override only some fields. Inheritance is resolved once at load time, before the
+normal validation, which then runs on the resolved profile. Multi-level chains
+are allowed; an unknown or ambiguous parent, a cycle, or a child without a unique
+name is a load error. The child must define its own non-empty `labels` (labels
+are never inherited). `runner_url`, `runner_sha256`, `package_sets`, `platform`
+and `exec_user` replace the parent value when set. `sandbox` is deep-merged:
+child keys override, nested objects such as `cpu` merge by key, and lists such as
+`allowed_hosts` and `required_internal_services` are replaced.
+
+```json
+{
+  "name": "linux-arm64",
+  "extends": "linux-ubuntu-latest",
+  "labels": ["self-hosted:host", "linux:host", "arm64:host", "cpu:host", "ubuntu-24.04-arm:host"],
+  "runner_url": "https://github.com/BakeLab/runner/releases/download/node-runtime-4af8cd2b/gitea-runner-4af8cd2b-linux-arm64",
+  "runner_sha256": "107ecd5e76ea7e830a19a35e461a320b7d44a3a09fee03b89b2c74f179a5c1c3",
+  "sandbox": {"cpu": {"arch": "arm64"}}
+}
+```
+
 Profiles are considered in order. All job `runs-on` labels must match the label
 names before `:host` or `:docker://IMAGE`. Give ARM64 profiles an ARM64 sandbox
 and an ARM64 runner binary. GPU profiles must explicitly request the appropriate
