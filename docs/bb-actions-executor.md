@@ -69,7 +69,11 @@ independent store. Profile authentication uses the configured issuer and
 resource and does not require a client secret. Alternatively, the OAuth
 client-credentials mode remains available for a dedicated machine identity;
 the legacy `token_file` mode continues to reread a raw bearer token for each
-request.
+request. All BB executor credential files (`token_file`, OAuth
+`client_secret_file`, and `github_token_file`) must be absolute paths to regular
+files with no group or other permissions. Gitea rejects files larger than 64
+KiB. Create them as mode `0600` and keep them owned by the Gitea service
+account.
 
 For native macOS jobs, set `platform` to `darwin`, use an official Darwin runner
 binary, and pin `sandbox.node_name` to the macOS node (for example,
