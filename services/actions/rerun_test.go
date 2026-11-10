@@ -11,6 +11,7 @@ import (
 	"gitea.dev/models/unittest"
 	user_model "gitea.dev/models/user"
 	"gitea.dev/modules/container"
+	"gitea.dev/modules/git"
 	"gitea.dev/modules/test"
 	"gitea.dev/modules/util"
 
@@ -487,6 +488,13 @@ jobs:
 		jobs[job.JobID] = job
 	}
 	run = unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: run.ID})
+	// This test covers re-evaluating `if` against current variables, not stale
+	// workflow rejection. Keep the fixture's source commit aligned with its ref.
+	gitRepo, err := git.OpenRepository(ctx, repo)
+	require.NoError(t, err)
+	run.WorkflowCommitSHA, err = gitRepo.GetRefCommitID(ctx, run.Ref)
+	gitRepo.Close()
+	require.NoError(t, err)
 
 	variable.Data = "no"
 	_, err = actions_model.UpdateVariableCols(ctx, variable, "data")
