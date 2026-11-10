@@ -5,6 +5,7 @@ package actions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -50,19 +51,19 @@ func (config bbExecutorConfig) validateUnsupportedLabels() error {
 	for _, unsupported := range config.UnsupportedLabels {
 		reason := strings.TrimSpace(unsupported.Reason)
 		if len(canonicalRunnerLabels(unsupported.Labels)) == 0 || reason == "" || len(reason) > 2048 {
-			return fmt.Errorf("BB executor unsupported_labels entries require labels and a reason")
+			return errors.New("BB executor unsupported_labels entries require labels and a reason")
 		}
 		labels := make(map[string]bool, len(unsupported.Labels))
 		for _, label := range unsupported.Labels {
 			label = strings.ToLower(strings.TrimSpace(label))
 			if label == "" || labels[label] {
-				return fmt.Errorf("BB executor unsupported_labels entries require unique, non-empty labels")
+				return errors.New("BB executor unsupported_labels entries require unique, non-empty labels")
 			}
 			labels[label] = true
 		}
 		key := runnerLabelSetKey(unsupported.Labels)
 		if seen[key] {
-			return fmt.Errorf("BB executor unsupported_labels contains duplicate label sets")
+			return errors.New("BB executor unsupported_labels contains duplicate label sets")
 		}
 		seen[key] = true
 	}

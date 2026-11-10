@@ -151,9 +151,12 @@ func upsertActionRunJobSummary(ctx context.Context, summary *ActionRunJobSummary
 	}
 
 	if setting.Database.Type.IsPostgreSQL() || setting.Database.Type.IsSQLite3() {
-		args := append([]any{"INSERT INTO `action_run_job_summary` (" + columns + ") VALUES (?,?,?,?,?,?,?,?,?,?) " +
-			"ON CONFLICT (`repo_id`, `run_id`, `run_attempt_id`, `job_id`, `step_index`) DO UPDATE SET " +
-			"`content` = excluded.`content`, `content_type` = excluded.`content_type`, `content_size` = excluded.`content_size`, `updated` = excluded.`updated`"}, values...)
+		// Keep the shared PostgreSQL/SQLite statement free of MySQL backtick quoting;
+		// SQLite rejects the qualified excluded-table identifier form used previously.
+		columns := "repo_id, run_id, run_attempt_id, job_id, step_index, content, content_type, content_size, created, updated"
+		args := append([]any{"INSERT INTO action_run_job_summary (" + columns + ") VALUES (?,?,?,?,?,?,?,?,?,?) " +
+			"ON CONFLICT (repo_id, run_id, run_attempt_id, job_id, step_index) DO UPDATE SET " +
+			"content = excluded.content, content_type = excluded.content_type, content_size = excluded.content_size, updated = excluded.updated"}, values...)
 		_, err := engine.Exec(args...)
 		return err
 	}
