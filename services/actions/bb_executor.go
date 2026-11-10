@@ -142,10 +142,7 @@ func initBBExecutor(ctx context.Context) error {
 	}
 	var githubToken string
 	if config.GitHubTokenFile != "" {
-		if !filepath.IsAbs(config.GitHubTokenFile) {
-			return errors.New("BB executor GitHub token file path must be absolute")
-		}
-		data, err := os.ReadFile(config.GitHubTokenFile)
+		data, err := readBBSecretFile(config.GitHubTokenFile)
 		if err != nil || strings.TrimSpace(string(data)) == "" {
 			return errors.New("BB executor GitHub token file is unavailable or empty")
 		}
@@ -179,9 +176,9 @@ func initBBExecutor(ctx context.Context) error {
 		if config.ClientID == "" || config.ClientSecretFile == "" || config.Resource == "" {
 			return errors.New("BB executor OAuth requires client_id, client_secret_file and resource")
 		}
-		clientSecret, err := os.ReadFile(config.ClientSecretFile)
-		if err != nil {
-			return err
+		clientSecret, err := readBBSecretFile(config.ClientSecretFile)
+		if err != nil || strings.TrimSpace(string(clientSecret)) == "" {
+			return errors.New("BB executor client secret file is unavailable or invalid")
 		}
 		auth := clientcredentials.Config{ClientID: config.ClientID, ClientSecret: strings.TrimSpace(string(clientSecret)), TokenURL: config.TokenURL, Scopes: config.Scopes, EndpointParams: url.Values{"resource": {config.Resource}}, AuthStyle: oauth2.AuthStyleInHeader}
 		authCtx := context.WithValue(graceful.GetManager().ShutdownContext(), oauth2.HTTPClient, &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }})
@@ -395,7 +392,7 @@ func (config bbExecutorConfig) request(ctx context.Context, method, path, key st
 			}
 			bearer = token.AccessToken
 		} else {
-			token, err := os.ReadFile(config.TokenFile)
+			token, err := readBBSecretFile(config.TokenFile)
 			if err != nil {
 				return err
 			}
