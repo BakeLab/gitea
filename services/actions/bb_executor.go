@@ -70,6 +70,7 @@ type bbExecutorProfile struct {
 	Platform     string         `json:"platform"`
 	ExecUser     string         `json:"exec_user"`
 	Name         string         `json:"name"`
+	Extends      string         `json:"extends,omitempty"`
 	Labels       []string       `json:"labels"`
 	RunnerURL    string         `json:"runner_url"`
 	RunnerSHA256 string         `json:"runner_sha256"`
@@ -132,6 +133,9 @@ func initBBExecutor(ctx context.Context) error {
 	}
 	if config.Project == "" || config.MaxConcurrent < 1 || config.MaxConcurrent > 100 || config.MaxDurationS < 60 || config.MaxDurationS > 604800 || len(config.Profiles) == 0 {
 		return errors.New("BB executor requires project, profiles, max_concurrent (1-100) and max_duration_s (60-604800)")
+	}
+	if config.Profiles, err = resolveBBProfileExtends(config.Profiles); err != nil {
+		return err
 	}
 	if err := config.validateUnsupportedLabels(); err != nil {
 		return err
@@ -254,6 +258,112 @@ func initBBExecutor(ctx context.Context) error {
 		}
 	})
 	return nil
+}
+
+// resolveBBProfileExtends flattens "extends" inheritance. Labels are never
+// inherited so two profiles cannot claim the same labels by accident.
+func resolveBBProfileExtends(profiles []bbExecutorProfile) ([]bbExecutorProfile, error) {
+	byName := map[string][]int{}
+	for i, profile := range profiles {
+		byName[profile.Name] = append(byName[profile.Name], i)
+	}
+	resolved := make([]bool, len(profiles))
+	visiting := make([]bool, len(profiles))
+	var resolve func(i int) error
+	resolve = func(i int) error {
+		if resolved[i] {
+			return nil
+		}
+		child := profiles[i]
+		if child.Extends == "" {
+			resolved[i] = true
+			return nil
+		}
+		if child.Name == "" || len(byName[child.Name]) != 1 {
+			return fmt.Errorf("BB executor profile %q with extends requires a unique name", child.Name)
+		}
+		if len(child.Labels) == 0 {
+			return fmt.Errorf("BB executor profile %q extends %q but must define its own labels", child.Name, child.Extends)
+		}
+		parents := byName[child.Extends]
+		if len(parents) != 1 {
+			return fmt.Errorf("BB executor profile %q extends unknown or ambiguous profile %q", child.Name, child.Extends)
+		}
+		if visiting[i] {
+			return fmt.Errorf("BB executor profile %q has a cyclic extends chain", child.Name)
+		}
+		visiting[i] = true
+		defer func() { visiting[i] = false }()
+		if err := resolve(parents[0]); err != nil {
+			return err
+		}
+		merged := profiles[parents[0]]
+		merged.Name, merged.Extends, merged.Labels = child.Name, child.Extends, child.Labels
+		if child.RunnerURL != "" {
+			merged.RunnerURL = child.RunnerURL
+		}
+		if child.RunnerSHA256 != "" {
+			merged.RunnerSHA256 = child.RunnerSHA256
+		}
+		if child.Platform != "" {
+			merged.Platform = child.Platform
+		}
+		if child.ExecUser != "" {
+			merged.ExecUser = child.ExecUser
+		}
+		if child.PackageSets != nil {
+			merged.PackageSets = slices.Clone(child.PackageSets)
+		} else {
+			merged.PackageSets = slices.Clone(merged.PackageSets)
+		}
+		merged.Sandbox = bbMergeSandbox(merged.Sandbox, child.Sandbox)
+		profiles[i] = merged
+		resolved[i] = true
+		return nil
+	}
+	profiles = slices.Clone(profiles)
+	for i := range profiles {
+		if err := resolve(i); err != nil {
+			return nil, err
+		}
+	}
+	return profiles, nil
+}
+
+// bbMergeSandbox deep-merges maps by key; every other value, including lists,
+// is replaced by the override. The result never aliases its inputs.
+func bbMergeSandbox(base, override map[string]any) map[string]any {
+	if base == nil && override == nil {
+		return nil
+	}
+	merged := make(map[string]any, len(base)+len(override))
+	for key, value := range base {
+		merged[key] = bbCloneSandboxValue(value)
+	}
+	for key, value := range override {
+		if overrideMap, ok := value.(map[string]any); ok {
+			if baseMap, ok := merged[key].(map[string]any); ok {
+				merged[key] = bbMergeSandbox(baseMap, overrideMap)
+				continue
+			}
+		}
+		merged[key] = bbCloneSandboxValue(value)
+	}
+	return merged
+}
+
+func bbCloneSandboxValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		return bbMergeSandbox(v, nil)
+	case []any:
+		cloned := make([]any, len(v))
+		for i, item := range v {
+			cloned[i] = bbCloneSandboxValue(item)
+		}
+		return cloned
+	}
+	return value
 }
 
 func bbArrayContains(value any, wanted string) bool {
