@@ -66,7 +66,7 @@ func RerunWorkflowRunJobs(ctx context.Context, repo *repo_model.Repository, run 
 			if err := deleteExpiredFailedJobs(ctx, run, jobs); err != nil {
 				return nil, fmt.Errorf("delete expired workflow run jobs: %w", err)
 			}
-			return nil, nil
+			return nil, nil //nolint:nilnil // no new attempt is created after deleting an expired run
 		}
 	}
 	if err := validateRerun(ctx, run, repo, triggerUser, jobsToRerun); err != nil {
