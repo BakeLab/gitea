@@ -27,6 +27,7 @@ import (
 	"gitea.dev/modules/graceful"
 	"gitea.dev/modules/json"
 	"gitea.dev/modules/log"
+	"gitea.dev/modules/optional"
 	"gitea.dev/modules/secret"
 	"gitea.dev/modules/setting"
 	"gitea.dev/modules/timeutil"
@@ -550,6 +551,87 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 	groupsSeen := make(map[githubDedupGroupKey]bool)
 	runs := make(map[int64]*actions_model.ActionRun)
 	repos := make(map[int64]*repo_model.Repository)
+	onlineRunners := make(map[int64][]*actions_model.ActionRunner)
+	loadedRunners := make(map[int64]bool)
+	failedRunners := make(map[int64]error)
+	hasMatchingOnlineRunner := func(job *actions_model.ActionRunJob) (bool, error) {
+		if err, failed := failedRunners[job.RepoID]; failed {
+			return false, err
+		}
+		if !loadedRunners[job.RepoID] {
+			runners, err := db.Find[actions_model.ActionRunner](ctx, actions_model.FindRunnerOptions{
+				RepoID:        job.RepoID,
+				IsOnline:      optional.Some(true),
+				IsDisabled:    optional.Some(false),
+				WithAvailable: true,
+				ListOptions:   db.ListOptions{ListAll: true},
+			})
+			if err != nil {
+				failedRunners[job.RepoID] = err
+				return false, err
+			}
+			onlineRunners[job.RepoID] = runners
+			loadedRunners[job.RepoID] = true
+		}
+		return slices.ContainsFunc(onlineRunners[job.RepoID], func(runner *actions_model.ActionRunner) bool {
+			return runner.CanMatchLabels(job.RunsOn)
+		}), nil
+	}
+	shouldWaitForGitHub := func(job *actions_model.ActionRunJob) (bool, error) {
+		if config.githubDeduper == nil {
+			return false, nil
+		}
+		groupKey := githubDedupKey(job)
+		if groupsSeen[groupKey] {
+			return true, nil
+		}
+		decision, decided := admission[groupKey]
+		if !decided {
+			run := runs[job.RunID]
+			if run == nil {
+				var err error
+				run, err = actions_model.GetRunByRepoAndID(ctx, job.RepoID, job.RunID)
+				if err != nil {
+					log.Warn("BB executor cannot load workflow run for GitHub dedup job %d; allowing the Gitea job to proceed: %v", job.ID, err)
+					decision = githubDedupRun
+				} else {
+					runs[job.RunID] = run
+				}
+			}
+			repo := repos[job.RepoID]
+			if run != nil && repo == nil {
+				var err error
+				repo, err = repo_model.GetRepositoryByID(ctx, job.RepoID)
+				if err != nil {
+					log.Warn("BB executor cannot load repository for GitHub dedup job %d; allowing the Gitea job to proceed: %v", job.ID, err)
+					decision = githubDedupRun
+				} else {
+					repos[job.RepoID] = repo
+				}
+			}
+			if run != nil && repo != nil {
+				var siblings []*actions_model.ActionRunJob
+				var err error
+				decision, siblings, _, err = config.githubDeduper.decide(ctx, repo, run, job)
+				decision = githubDedupDecisionForLookup(decision, err)
+				if err != nil {
+					config.githubDeduper.clearPending(groupKey)
+					log.Warn("BB executor GitHub status lookup failed for job %d; allowing the Gitea job to proceed: %v", job.ID, err)
+				}
+				if decision == githubDedupSkip {
+					if err := markGitHubDuplicateJobsSkipped(ctx, siblings); err != nil {
+						return false, err
+					}
+				}
+			}
+			admission[groupKey] = decision
+		}
+		if decision == githubDedupWait || decision == githubDedupSkip {
+			groupsSeen[groupKey] = true
+			return true, nil
+		}
+		return false, nil
+	}
 	for page := 1; ; page++ {
 		jobs, total, err := actions_model.FindJobQueueJobs(ctx, actions_model.JobQueueOptions{Status: actions_model.StatusWaiting}, page, 100)
 		if err != nil {
@@ -576,6 +658,23 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 				profileLabels[profileIndex] = labels
 			}
 			if len(matchingProfiles) == 0 {
+				hasRunner, err := hasMatchingOnlineRunner(job)
+				if err != nil {
+					log.Warn("BB executor cannot inspect online runners for unmatched job %d; leaving it queued: %v", job.ID, err)
+					labels, _ := json.Marshal(job.RunsOn)
+					unmatchedProfiles[string(labels)]++
+					continue
+				}
+				if hasRunner {
+					continue
+				}
+				deferred, err := shouldWaitForGitHub(job)
+				if err != nil {
+					return err
+				}
+				if deferred {
+					continue
+				}
 				labels, _ := json.Marshal(job.RunsOn)
 				unmatchedProfiles[string(labels)]++
 				continue
@@ -590,55 +689,13 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 					continue
 				}
 				labels := profileLabels[profileIndex]
-				if config.githubDeduper != nil {
-					groupKey := githubDedupKey(job)
-					if groupsSeen[groupKey] {
-						deferred = true
-						break
-					}
-					decision, decided := admission[groupKey]
-					if !decided {
-						run := runs[job.RunID]
-						if run == nil {
-							run, err = actions_model.GetRunByRepoAndID(ctx, job.RepoID, job.RunID)
-							if err != nil {
-								log.Warn("BB executor cannot load workflow run for GitHub dedup job %d; allowing Gitea dispatch: %v", job.ID, err)
-								decision = githubDedupRun
-							} else {
-								runs[job.RunID] = run
-							}
-						}
-						repo := repos[job.RepoID]
-						if run != nil && repo == nil {
-							repo, err = repo_model.GetRepositoryByID(ctx, job.RepoID)
-							if err != nil {
-								log.Warn("BB executor cannot load repository for GitHub dedup job %d; allowing Gitea dispatch: %v", job.ID, err)
-								decision = githubDedupRun
-							} else {
-								repos[job.RepoID] = repo
-							}
-						}
-						if run != nil && repo != nil {
-							var siblings []*actions_model.ActionRunJob
-							decision, siblings, _, err = config.githubDeduper.decide(ctx, repo, run, job)
-							decision = githubDedupDecisionForLookup(decision, err)
-							if err != nil {
-								config.githubDeduper.clearPending(groupKey)
-								log.Warn("BB executor GitHub status lookup failed for job %d; allowing Gitea dispatch: %v", job.ID, err)
-							}
-							if decision == githubDedupSkip {
-								if err := markGitHubDuplicateJobsSkipped(ctx, siblings); err != nil {
-									return err
-								}
-							}
-						}
-						admission[groupKey] = decision
-					}
-					if decision == githubDedupWait || decision == githubDedupSkip {
-						groupsSeen[groupKey] = true
-						deferred = true
-						break
-					}
+				waitForGitHub, err := shouldWaitForGitHub(job)
+				if err != nil {
+					return err
+				}
+				if waitForGitHub {
+					deferred = true
+					break
 				}
 				row, err := config.prepare(ctx, job, profile, labels)
 				if err != nil {
