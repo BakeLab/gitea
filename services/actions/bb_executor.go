@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -221,11 +222,7 @@ func initBBExecutor(ctx context.Context) error {
 	} else if config.TokenURL != "" || config.ClientID != "" || config.ClientSecretFile != "" {
 		return errors.New("BB executor config must select token_file or OAuth credentials")
 	}
-	port := origin.Port()
-	if port == "" {
-		port = "443"
-	}
-	for _, profile := range config.Profiles {
+	for i, profile := range config.Profiles {
 		if profile.Name == "" || len(profile.Labels) == 0 || profile.Sandbox == nil {
 			return errors.New("BB executor profiles require name, labels and sandbox")
 		}
@@ -264,9 +261,11 @@ func initBBExecutor(ctx context.Context) error {
 		if profile.Sandbox["runtime"] != "sandbox-vm" || profile.Sandbox["network"] != "gateway" {
 			return errors.New("BB executor requires sandbox-vm gateway profiles")
 		}
-		if !bbArrayContains(profile.Sandbox["required_internal_services"], origin.Hostname()+":"+port) || !bbArrayContains(profile.Sandbox["allowed_hosts"], origin.Hostname()) {
-			return errors.New("BB executor sandbox must require the exact Gitea internal service and allow its hostname")
+		sandbox, err := bbGiteaSandbox(profile.Sandbox, origin)
+		if err != nil {
+			return err
 		}
+		config.Profiles[i].Sandbox = sandbox
 	}
 	active, err := actions_model.ListActiveBBTasks(ctx)
 	if err != nil {
@@ -436,9 +435,25 @@ func bbCloneSandboxValue(value any) any {
 	return value
 }
 
-func bbArrayContains(value any, wanted string) bool {
-	items, _ := value.([]any)
-	return slices.ContainsFunc(items, func(item any) bool { return item == wanted })
+func bbGiteaSandbox(sandbox map[string]any, origin *url.URL) (map[string]any, error) {
+	port := origin.Port()
+	if port == "" {
+		port = "443"
+	}
+	sandbox = bbMergeSandbox(sandbox, nil)
+	for key, required := range map[string]string{
+		"allowed_hosts":              origin.Hostname(),
+		"required_internal_services": net.JoinHostPort(origin.Hostname(), port),
+	} {
+		items, ok := sandbox[key].([]any)
+		if sandbox[key] != nil && !ok {
+			return nil, errors.New("BB executor network declarations must be arrays")
+		}
+		if !slices.Contains(items, any(required)) {
+			sandbox[key] = append(items, required)
+		}
+	}
+	return sandbox, nil
 }
 
 func (config bbExecutorConfig) request(ctx context.Context, method, path, key string, body, target any) error {

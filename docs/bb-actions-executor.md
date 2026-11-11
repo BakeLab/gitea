@@ -12,6 +12,14 @@ Sandbox placement requires the declaration; a missing route keeps the sandbox
 queued. No SSH forwarding or runner NetBird identity is used. The route declaration
 does not establish upstream connectivity, so verify it before enabling profiles.
 
+After resolving profile inheritance and capability overlays, Gitea adds the
+hostname from `ROOT_URL` to `allowed_hosts` and its host and effective HTTPS port
+to `required_internal_services`. The runner registration uses that same URL.
+Existing entries are preserved and the derived entries are added only if absent.
+Both capacity queries and task creation use the resulting sandbox specification.
+Profiles need only declare their other network dependencies; eligible BB nodes
+must still advertise the Gitea route.
+
 Example configuration using the previously authorized human profile (replace
 the project, token record path and SHA-256):
 
@@ -41,8 +49,7 @@ the project, token record path and SHA-256):
       "fabric": false,
       "cpu": {"arch": "amd64", "vcpus": 4, "memory_mb": 32768},
       "disk_mb": 102400,
-      "allowed_hosts": ["*", "blackthorn-rtx5080.int.bb.pub"],
-      "required_internal_services": ["blackthorn-rtx5080.int.bb.pub:28300"]
+      "allowed_hosts": ["*"]
     }
   }]
 }
