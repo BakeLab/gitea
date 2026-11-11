@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"gitea.dev/models/repo"
+	"gitea.dev/models/unit"
 	user_model "gitea.dev/models/user"
 	"gitea.dev/modules/log"
 	base "gitea.dev/modules/migration"
 	"gitea.dev/modules/structs"
-	"gitea.dev/modules/unit"
 
 	gh "github.com/google/go-github/v93/github"
 )
