@@ -194,6 +194,12 @@ func (config bbExecutorConfig) skipConfiguredUnsupportedJobs(ctx context.Context
 }
 
 func markConfiguredUnsupportedJobSkipped(ctx context.Context, job *actions_model.ActionRunJob, reason string) (bool, error) {
+	escapedReason := strings.ReplaceAll(reason, "`", "\\`")
+	content := []byte(fmt.Sprintf("This job was skipped by the Gitea BB dispatcher because its runner labels are configured as unsupported in this deployment.\n\n**Labels:** `%s`\n\n**Reason:** %s\n", strings.Join(canonicalRunnerLabels(job.RunsOn), ", "), escapedReason))
+	return markConfiguredJobSkipped(ctx, job, content)
+}
+
+func markConfiguredJobSkipped(ctx context.Context, job *actions_model.ActionRunJob, content []byte) (bool, error) {
 	updated := *job
 	updated.Status = actions_model.StatusSkipped
 	updated.Stopped = timeutil.TimeStampNow()
@@ -203,8 +209,6 @@ func markConfiguredUnsupportedJobSkipped(ctx context.Context, job *actions_model
 		if err != nil || count != 1 {
 			return err
 		}
-		escapedReason := strings.ReplaceAll(reason, "`", "\\`")
-		content := []byte(fmt.Sprintf("This job was skipped by the Gitea BB dispatcher because its runner labels are configured as unsupported in this deployment.\n\n**Labels:** `%s`\n\n**Reason:** %s\n", strings.Join(canonicalRunnerLabels(job.RunsOn), ", "), escapedReason))
 		if err := actions_model.UpsertActionRunJobSummary(ctx, job.RepoID, job.RunID, job.RunAttemptID, job.ID, 0, actions_model.JobSummaryContentTypeMarkdown, content); err != nil {
 			return err
 		}
