@@ -38,25 +38,26 @@ import (
 )
 
 type bbExecutorConfig struct {
-	Endpoint          string                        `json:"endpoint"`
-	Project           string                        `json:"project"`
-	TokenFile         string                        `json:"token_file"`
-	TokenURL          string                        `json:"token_url"`
-	ClientID          string                        `json:"client_id"`
-	ClientSecretFile  string                        `json:"client_secret_file"`
-	Resource          string                        `json:"resource"`
-	Scopes            []string                      `json:"scopes"`
-	ProfileAuth       *bbExecutorProfileAuth        `json:"profile_auth,omitempty"`
-	MaxConcurrent     int                           `json:"max_concurrent"`
-	AutoConcurrency   bool                          `json:"auto_concurrency,omitempty"`
-	GitHubTokenFile   string                        `json:"github_token_file,omitempty"`
-	MaxDurationS      int                           `json:"max_duration_s"`
-	Profiles          []bbExecutorProfile           `json:"profiles"`
-	UnsupportedLabels []bbExecutorUnsupportedLabels `json:"unsupported_labels,omitempty"`
-	tokens            oauth2.TokenSource
-	client            *http.Client
-	githubDeduper     *githubStatusDeduper
-	reconcileState    *bbExecutorReconcileState
+	Endpoint           string                        `json:"endpoint"`
+	Project            string                        `json:"project"`
+	TokenFile          string                        `json:"token_file"`
+	TokenURL           string                        `json:"token_url"`
+	ClientID           string                        `json:"client_id"`
+	ClientSecretFile   string                        `json:"client_secret_file"`
+	Resource           string                        `json:"resource"`
+	Scopes             []string                      `json:"scopes"`
+	ProfileAuth        *bbExecutorProfileAuth        `json:"profile_auth,omitempty"`
+	MaxConcurrent      int                           `json:"max_concurrent"`
+	AutoConcurrency    bool                          `json:"auto_concurrency,omitempty"`
+	GitHubTokenFile    string                        `json:"github_token_file,omitempty"`
+	MaxDurationS       int                           `json:"max_duration_s"`
+	Profiles           []bbExecutorProfile           `json:"profiles"`
+	CapabilityOverlays []bbExecutorCapabilityOverlay `json:"capability_overlays,omitempty"`
+	UnsupportedLabels  []bbExecutorUnsupportedLabels `json:"unsupported_labels,omitempty"`
+	tokens             oauth2.TokenSource
+	client             *http.Client
+	githubDeduper      *githubStatusDeduper
+	reconcileState     *bbExecutorReconcileState
 }
 
 type bbExecutorReconcileState struct {
@@ -95,6 +96,16 @@ type bbExecutorProfile struct {
 	RunnerSHA256 string         `json:"runner_sha256"`
 	Sandbox      map[string]any `json:"sandbox"`
 	PackageSets  []string       `json:"package_sets"`
+}
+
+// bbExecutorCapabilityOverlay adds a job-requested hardware resource to
+// compatible base profiles without duplicating their runner and sandbox setup.
+type bbExecutorCapabilityOverlay struct {
+	Label         string         `json:"label"`
+	Group         string         `json:"group"`
+	Platforms     []string       `json:"platforms"`
+	Architectures []string       `json:"architectures"`
+	Sandbox       map[string]any `json:"sandbox"`
 }
 
 type bbCapacityResponse struct {
@@ -155,6 +166,9 @@ func initBBExecutor(ctx context.Context) error {
 		return errors.New("BB executor requires project, profiles, max_concurrent (1-100) and max_duration_s (60-604800)")
 	}
 	if config.Profiles, err = resolveBBProfileExtends(config.Profiles); err != nil {
+		return err
+	}
+	if config.Profiles, err = expandBBProfileCapabilityOverlays(config.Profiles, config.CapabilityOverlays); err != nil {
 		return err
 	}
 	if err := config.validateUnsupportedLabels(); err != nil {
