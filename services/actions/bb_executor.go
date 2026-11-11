@@ -395,8 +395,9 @@ func (config bbExecutorConfig) repositoryNamesForJobs(ctx context.Context, jobs 
 	return map[int64]string{}, nil
 }
 
-// bbMergeSandbox deep-merges maps by key; every other value, including lists,
-// is replaced by the override. The result never aliases its inputs.
+// bbMergeSandbox deep-merges maps by key; nil overrides delete inherited keys,
+// and every other value, including lists, is replaced by the override. The
+// result never aliases its inputs.
 func bbMergeSandbox(base, override map[string]any) map[string]any {
 	if base == nil && override == nil {
 		return nil
@@ -406,6 +407,10 @@ func bbMergeSandbox(base, override map[string]any) map[string]any {
 		merged[key] = bbCloneSandboxValue(value)
 	}
 	for key, value := range override {
+		if value == nil {
+			delete(merged, key)
+			continue
+		}
 		if overrideMap, ok := value.(map[string]any); ok {
 			if baseMap, ok := merged[key].(map[string]any); ok {
 				merged[key] = bbMergeSandbox(baseMap, overrideMap)
