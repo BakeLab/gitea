@@ -412,7 +412,18 @@ func bbMergeSandbox(base, override map[string]any) map[string]any {
 		}
 		if overrideMap, ok := value.(map[string]any); ok {
 			if baseMap, ok := merged[key].(map[string]any); ok {
-				merged[key] = bbMergeSandbox(baseMap, overrideMap)
+				mergedValue := bbMergeSandbox(baseMap, overrideMap)
+				// Breadboard accelerator requests use either a class selector or
+				// an exact model selector. A model-only child profile therefore
+				// replaces an inherited class without a null-valued override.
+				if key == "accelerator" {
+					if model, hasModel := overrideMap["model"].(string); hasModel && model != "" {
+						if _, hasClass := overrideMap["class"]; !hasClass {
+							delete(mergedValue, "class")
+						}
+					}
+				}
+				merged[key] = mergedValue
 				continue
 			}
 		}
