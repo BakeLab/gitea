@@ -377,7 +377,7 @@ func (config bbExecutorConfig) repositoryNamesForJobs(ctx context.Context, jobs 
 			return names, nil
 		}
 	}
-	return nil, nil
+	return map[int64]string{}, nil
 }
 
 // bbMergeSandbox deep-merges maps by key; every other value, including lists,
