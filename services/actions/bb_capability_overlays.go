@@ -23,7 +23,7 @@ func expandBBProfileCapabilityOverlays(profiles []bbExecutorProfile, overlays []
 	for _, overlay := range overlays {
 		label := strings.TrimSpace(overlay.Label)
 		name, mode, hasMode := strings.Cut(label, ":")
-		if name == "" || !hasMode || (mode != "host" && mode != "guest") || strings.TrimSpace(overlay.Group) == "" || len(overlay.Platforms) == 0 || len(overlay.Architectures) == 0 || len(overlay.Sandbox) == 0 {
+		if name == "" || !hasMode || (mode != "host" && mode != "guest") || overlay.Group != "accelerator" || len(overlay.Platforms) == 0 || len(overlay.Architectures) == 0 || len(overlay.Sandbox) == 0 {
 			return nil, fmt.Errorf("BB executor capability overlays require a label with mode, group, platforms, architectures and sandbox")
 		}
 		key := strings.ToLower(name)
@@ -47,7 +47,8 @@ func expandBBProfileCapabilityOverlays(profiles []bbExecutorProfile, overlays []
 			return nil, fmt.Errorf("BB executor capability overlay %q may only set sandbox.accelerator", name)
 		}
 		accelerator, ok := overlay.Sandbox["accelerator"].(map[string]any)
-		if !ok || accelerator["class"] == nil || accelerator["count"] == nil {
+		class, classOK := accelerator["class"].(string)
+		if !ok || !classOK || !strings.EqualFold(class, name) || accelerator["count"] == nil {
 			return nil, fmt.Errorf("BB executor capability overlay %q requires sandbox.accelerator class and count", name)
 		}
 	}
@@ -72,7 +73,8 @@ func expandBBProfileCapabilityOverlays(profiles []bbExecutorProfile, overlays []
 			}
 			overlay := overlays[index]
 			name, _, _ := strings.Cut(overlay.Label, ":")
-			if groups[overlay.Group] || !slices.Contains(overlay.Platforms, platform) || !slices.Contains(overlay.Architectures, arch) || bbProfileHasLabel(current, name) {
+			_, hasAccelerator := current.Sandbox["accelerator"]
+			if groups[overlay.Group] || !slices.Contains(overlay.Platforms, platform) || !slices.Contains(overlay.Architectures, arch) || bbProfileHasLabel(current, name) || hasAccelerator {
 				return compose(index+1, current, groups, labels)
 			}
 			if err := compose(index+1, current, groups, labels); err != nil {
