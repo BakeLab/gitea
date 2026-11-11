@@ -29,6 +29,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"gitea.dev/cli/internal/version"
@@ -242,20 +243,18 @@ func TestDebugLogsRequestsWithoutSecrets(t *testing.T) {
 }
 
 func TestDebugLogsWhyARequestTimedOut(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(100 * time.Millisecond)
-	}))
-	defer server.Close()
-	var log bytes.Buffer
-	client := New(server.URL, "", false).Debug(&log).WithResponseTimeout(20 * time.Millisecond)
-	response, err := client.Do(context.Background(), http.MethodGet, "version", nil, nil)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	if response != nil {
-		defer response.Body.Close()
-	}
-	require.ErrorIs(t, err, ErrTimeout, "told apart from the end of the caller's deadline")
-	require.ErrorContains(t, err, "no answer within 20ms")
-	require.Regexp(t, `-> error: no answer within 20ms: context deadline exceeded \(\d+(\.\d+)?[µm]?s\)\n$`, log.String())
+	synctest.Test(t, func(t *testing.T) {
+		var log bytes.Buffer
+		client := bubbleClient(t, func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }).Debug(&log).WithResponseTimeout(time.Second)
+		response, err := client.Do(context.Background(), http.MethodGet, "version", nil, nil)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		if response != nil {
+			defer response.Body.Close()
+		}
+		require.ErrorIs(t, err, ErrTimeout, "told apart from the end of the caller's deadline")
+		require.ErrorContains(t, err, "no answer within 1s")
+		require.Regexp(t, `-> error: no answer within 1s: context deadline exceeded \(1s\)\n$`, log.String())
+	})
 }
 
 func TestDebugRedactsOnlySensitiveQueryValues(t *testing.T) {

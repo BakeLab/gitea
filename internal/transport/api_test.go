@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -91,18 +92,19 @@ func TestAPIRetriesOnlyTransientFailures(t *testing.T) {
 }
 
 func TestAPIDoesNotRetryAReadWithoutAnswer(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		time.Sleep(100 * time.Millisecond)
-	}))
-	defer server.Close()
-	response, err := New(server.URL, "", false).WithResponseTimeout(20*time.Millisecond).Do(context.Background(), http.MethodGet, "user", nil, nil)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	if response != nil {
-		defer response.Body.Close()
-	}
-	require.Equal(t, int32(1), calls.Load())
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		client := bubbleClient(t, func(_ http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			<-r.Context().Done()
+		})
+		response, err := client.WithResponseTimeout(time.Second).Do(context.Background(), http.MethodGet, "user", nil, nil)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		if response != nil {
+			defer response.Body.Close()
+		}
+		require.Equal(t, int32(1), calls.Load())
+	})
 }
 
 func TestAPIRetryRecoversAndStopsOnCancellation(t *testing.T) {
