@@ -4,7 +4,9 @@
 package actions
 
 import (
+	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -24,7 +26,7 @@ func expandBBProfileCapabilityOverlays(profiles []bbExecutorProfile, overlays []
 		label := strings.TrimSpace(overlay.Label)
 		name, mode, hasMode := strings.Cut(label, ":")
 		if name == "" || !hasMode || (mode != "host" && mode != "guest") || overlay.Group != "accelerator" || len(overlay.Platforms) == 0 || len(overlay.Architectures) == 0 || len(overlay.Sandbox) == 0 {
-			return nil, fmt.Errorf("BB executor capability overlays require a label with mode, group, platforms, architectures and sandbox")
+			return nil, errors.New("BB executor capability overlays require a label with mode, group, platforms, architectures and sandbox")
 		}
 		key := strings.ToLower(name)
 		if seenLabels[key] {
@@ -84,10 +86,7 @@ func expandBBProfileCapabilityOverlays(profiles []bbExecutorProfile, overlays []
 			next.Name = current.Name + "+" + name
 			next.Labels = append(slices.Clone(current.Labels), overlay.Label)
 			next.Sandbox = bbMergeSandbox(current.Sandbox, overlay.Sandbox)
-			if err := compose(index+1, next, withBBProfileValue(groups, overlay.Group), withBBProfileValue(labels, name)); err != nil {
-				return err
-			}
-			return nil
+			return compose(index+1, next, withBBProfileValue(groups, overlay.Group), withBBProfileValue(labels, name))
 		}
 		if err := compose(0, base, map[string]bool{}, map[string]bool{}); err != nil {
 			return nil, err
@@ -113,10 +112,7 @@ func bbProfileHasLabel(profile bbExecutorProfile, name string) bool {
 }
 
 func withBBProfileValue(values map[string]bool, value string) map[string]bool {
-	copy := make(map[string]bool, len(values)+1)
-	for key, present := range values {
-		copy[key] = present
-	}
-	copy[value] = true
-	return copy
+	cloned := maps.Clone(values)
+	cloned[value] = true
+	return cloned
 }
