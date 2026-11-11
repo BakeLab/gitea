@@ -3013,6 +3013,7 @@
   "admin.dashboard.sync_repo_branches": "Sync missed branches from git data to databases",
   "admin.dashboard.sync_repo_tags": "Sync tags from git data to database",
   "admin.dashboard.update_mirrors": "Update Mirrors",
+  "admin.dashboard.sync_github_org_mirrors": "Discover GitHub organization repositories and create pull mirrors",
   "admin.dashboard.repo_health_check": "Health check all repositories",
   "admin.dashboard.check_repo_stats": "Check all repository statistics",
   "admin.dashboard.archive_cleanup": "Delete old repository archives",

@@ -41,6 +41,23 @@ func registerUpdateMirrorTask() {
 	})
 }
 
+func registerGitHubOrgMirrorSyncTask() {
+	RegisterTaskFatal("sync_github_org_mirrors", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: false,
+		Schedule:   "@daily",
+	}, func(ctx context.Context, _ *user_model.User, _ *BaseConfig) error {
+		return migrations.SyncGitHubOrganizationPullMirrors(
+			ctx,
+			setting.GitHubOrgSync.GitHubOwner,
+			setting.GitHubOrgSync.GiteaOwner,
+			setting.GitHubOrgSync.Token,
+			setting.GitHubOrgSync.MirrorInterval,
+			setting.GitHubOrgSync.ActionsInterval,
+		)
+	})
+}
+
 func registerRepoHealthCheck() {
 	type RepoHealthCheckConfig struct {
 		BaseConfig
@@ -162,6 +179,9 @@ func registerSyncRepoLicenses() {
 func initBasicTasks() {
 	if setting.Mirror.Enabled {
 		registerUpdateMirrorTask()
+		if setting.GitHubOrgSync.Enabled {
+			registerGitHubOrgMirrorSyncTask()
+		}
 	}
 	registerRepoHealthCheck()
 	registerCheckRepoStats()
