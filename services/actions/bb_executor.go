@@ -746,6 +746,21 @@ func bbSecretName(row *actions_model.ActionBBTask) string {
 
 func bbShellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
 
+func bbRunnerDownloadScript(runnerURL string) string {
+	return "download_attempt=1\ndownload_delay=1\nwhile ! curl --fail --silent --show-error --location --connect-timeout 15 --max-time 300 " + bbShellQuote(runnerURL) + " -o runner.tmp; do\n" +
+		"  rm -f runner.tmp\n" +
+		"  if [ \"$download_attempt\" -ge 6 ]; then\n" +
+		"    echo 'runner download failed after 6 attempts' >&2\n" +
+		"    exit 1\n" +
+		"  fi\n" +
+		"  echo \"runner download failed (attempt $download_attempt/6); retrying in ${download_delay}s\" >&2\n" +
+		"  sleep \"$download_delay\"\n" +
+		"  download_attempt=$((download_attempt + 1))\n" +
+		"  download_delay=$((download_delay * 2))\n" +
+		"done\n" +
+		"mv runner.tmp runner\n"
+}
+
 func (config bbExecutorConfig) taskRequest(row *actions_model.ActionBBTask, profile bbExecutorProfile) ([]byte, error) {
 	workdir, user, platform := "/opt/gitea-bb", "root", "Linux"
 	checksum := "sha256sum --check --status"
@@ -766,7 +781,7 @@ func (config bbExecutorConfig) taskRequest(row *actions_model.ActionBBTask, prof
 	if profile.Platform != "darwin" {
 		script += "export HOME=" + bbShellQuote(workdir) + "\n"
 	}
-	script += "cd " + bbShellQuote(workdir) + "\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\ncurl --fail --silent --show-error --location " + bbShellQuote(profile.RunnerURL) + " -o runner\nprintf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | " + checksum + "\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
+	script += "cd " + bbShellQuote(workdir) + "\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\n" + bbRunnerDownloadScript(profile.RunnerURL) + "printf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | " + checksum + "\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
 	return json.Marshal(map[string]any{"sandbox": profile.Sandbox, "package_sets": profile.PackageSets, "max_duration_s": config.MaxDurationS, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": user, "timeout_s": config.MaxDurationS, "secrets": []string{bbSecretName(row)}}})
 }
 
