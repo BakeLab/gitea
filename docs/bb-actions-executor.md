@@ -193,3 +193,12 @@ read-only GitHub token with Actions read access. Gitea does not reuse credential
 embedded in mirror remotes. API errors, missing permissions, and rate limits
 fail open and allow Gitea to run; this can reduce deduplication but cannot block
 the Gitea job. Keep the token file readable only by the Gitea service account.
+
+## Gitea-only workflow exclusions
+
+The Gitea BB dispatcher skips two workflows that rely on GitHub-only
+integrations: `BakeLab/intel-xpu-backend-for-triton` / `codeql.yml` and
+`BakeLab/rustfs` / `functional-chain-health.yml`. Matching is exact on repository
+and workflow filename. A matching job is marked Skipped with the reason in its
+job summary before BB dispatch. These rules apply only to Gitea; the repositories'
+GitHub Actions workflows are unchanged.

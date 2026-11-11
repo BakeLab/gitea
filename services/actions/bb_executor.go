@@ -483,6 +483,11 @@ func (config bbExecutorConfig) request(ctx context.Context, method, path, key st
 }
 
 func (config bbExecutorConfig) reconcile(ctx context.Context) error {
+	// These workflows target GitHub-only services. Exclude them in Gitea so
+	// their GitHub Actions runs remain unchanged.
+	if err := config.skipExcludedWorkflows(ctx); err != nil {
+		return fmt.Errorf("skip Gitea-excluded workflows: %w", err)
+	}
 	// Explicitly unsupported label sets must be drained even when BB has no
 	// capacity, the global concurrency limit is full, or a capacity query fails.
 	// Unknown labels remain queued so a missing profile is observable and safe.

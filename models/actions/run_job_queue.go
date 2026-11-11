@@ -82,7 +82,7 @@ func FindWaitingJobsAfterID(ctx context.Context, afterID int64, limit int) ([]*A
 		sess = sess.And(builder.Lt{"`action_run_job`.id": afterID})
 	}
 	jobs := make([]*ActionRunJob, 0, limit)
-	err := sess.Cols("`action_run_job`.id", "`action_run_job`.run_id", "`action_run_job`.runs_on").
+	err := sess.Cols("`action_run_job`.id", "`action_run_job`.repo_id", "`action_run_job`.run_id", "`action_run_job`.runs_on").
 		OrderBy("`action_run_job`.id DESC").
 		Limit(limit).
 		Find(&jobs)
