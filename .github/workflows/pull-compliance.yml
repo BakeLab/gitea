@@ -25,6 +25,8 @@ jobs:
         with:
           lint-cache: "true"
       - run: make deps-backend deps-tools
+        env:
+          BB_SDK_READ_TOKEN: ${{ secrets.BB_SDK_READ_TOKEN }}
       - run: TAGS="bindata" make generate-go lint-backend # lint-go can lint with "bindata" tags
 
   lint-on-demand:
@@ -62,6 +64,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/go-setup
       - run: make deps-backend deps-tools
+        env:
+          BB_SDK_READ_TOKEN: ${{ secrets.BB_SDK_READ_TOKEN }}
       - run: make --always-make checks-backend # ensure the "go-licenses" make target runs
 
   frontend:
@@ -86,6 +90,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/go-setup
       - run: make deps-backend generate-go
+        env:
+          BB_SDK_READ_TOKEN: ${{ secrets.BB_SDK_READ_TOKEN }}
       # no frontend build here as backend should be able to build, even without any frontend files
       # CGO is not used when cross-compile, so these steps also test if the code is compatible with CGO disabled
       - name: build-backend-arm64

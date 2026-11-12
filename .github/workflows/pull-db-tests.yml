@@ -52,6 +52,7 @@ jobs:
           shard: 1
           total-shards: 2
           run-migration: "true"
+          sdk-read-token: ${{ secrets.BB_SDK_READ_TOKEN }}
 
   test-pgsql-shard-2:
     if: needs.files-changed.outputs.backend == 'true'
@@ -89,6 +90,7 @@ jobs:
         with:
           shard: 2
           total-shards: 2
+          sdk-read-token: ${{ secrets.BB_SDK_READ_TOKEN }}
 
   test-unit:
     if: needs.files-changed.outputs.backend == 'true'
@@ -137,6 +139,8 @@ jobs:
       - name: Add hosts to /etc/hosts
         run: '[ -e "/.dockerenv" ] || [ -e "/run/.containerenv" ] || echo "127.0.0.1 minio devstoreaccount1.azurite.local elasticsearch meilisearch smtpimap" | sudo tee -a /etc/hosts'
       - run: make deps-backend
+        env:
+          BB_SDK_READ_TOKEN: ${{ secrets.BB_SDK_READ_TOKEN }}
       - run: make generate-go
         env:
           TAGS: bindata
