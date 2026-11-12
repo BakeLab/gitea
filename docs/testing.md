@@ -59,21 +59,21 @@ clean rebuild first:
 make clean build
 ```
 
-### Running the database test workflow with Gitea Runner
+### Running the backend CI workflow with Gitea Runner
 
-The CI database test jobs can be run locally with
+The backend CI jobs (BakeLab runs them on internal Gitea Actions) can be run locally with
 [Gitea Runner](https://gitea.com/gitea/runner). Running every job is
 resource-intensive and not recommended:
 
 ```bash
-gitea-runner exec -W ./.github/workflows/pull-db-tests.yml --event=pull_request --default-actions-url="https://github.com" -i catthehacker/ubuntu:runner-latest
+gitea-runner exec -W ./.gitea/workflows/ci.yml --event=push --default-actions-url="https://github.com" -i catthehacker/ubuntu:runner-latest
 ```
 
 List the available job names, then run a single one:
 
 ```bash
-gitea-runner exec -W ./.github/workflows/pull-db-tests.yml --event=pull_request --default-actions-url="https://github.com" -i catthehacker/ubuntu:runner-latest -l
-gitea-runner exec -W ./.github/workflows/pull-db-tests.yml --event=pull_request --default-actions-url="https://github.com" -i catthehacker/ubuntu:runner-latest -j <job_name>
+gitea-runner exec -W ./.gitea/workflows/ci.yml --event=push --default-actions-url="https://github.com" -i catthehacker/ubuntu:runner-latest -l
+gitea-runner exec -W ./.gitea/workflows/ci.yml --event=push --default-actions-url="https://github.com" -i catthehacker/ubuntu:runner-latest -j <job_name>
 ```
 
 ## Recorded API responses
