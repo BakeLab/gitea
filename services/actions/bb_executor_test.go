@@ -42,6 +42,9 @@ func TestBBExecutorSchedulableCapacity(t *testing.T) {
 		ProfileAuth: &bbExecutorProfileAuth{},
 		client:      server.Client(),
 	}
+	if err := config.initAPI(); err != nil {
+		t.Fatal(err)
+	}
 	capacity, err := config.schedulableCapacity(context.Background(), profile, 4)
 	if err != nil {
 		t.Fatalf("schedulableCapacity() error = %v", err)
@@ -66,10 +69,14 @@ func TestBBExecutorSchedulableCapacityFailsClosed(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(response))
 			}))
 			defer server.Close()
 			config := bbExecutorConfig{Endpoint: server.URL, Project: "prj_test", ProfileAuth: &bbExecutorProfileAuth{}, client: server.Client()}
+			if err := config.initAPI(); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := config.schedulableCapacity(context.Background(), bbExecutorProfile{Sandbox: map[string]any{}}, 4); err == nil {
 				t.Fatal("schedulableCapacity() succeeded for invalid response")
 			}
