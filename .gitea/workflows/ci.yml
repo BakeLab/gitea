@@ -29,6 +29,8 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+      - name: Install build tools
+        run: &build-tools sudo pacman -Syu --needed --noconfirm base-devel
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -50,6 +52,8 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+      - name: Install build tools
+        run: *build-tools
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -68,6 +72,8 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+      - name: Install build tools
+        run: *build-tools
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -135,6 +141,8 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+      - name: Install build tools
+        run: *build-tools
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -188,6 +196,8 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+      - name: Install build tools
+        run: *build-tools
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
