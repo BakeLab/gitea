@@ -4,12 +4,10 @@
 package actions
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,6 +30,7 @@ import (
 	"gitea.dev/modules/timeutil"
 	"gitea.dev/modules/util"
 
+	bbControl "github.com/BakeLab/breadboard/sdk/go/control"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 	"xorm.io/builder"
@@ -55,6 +54,7 @@ type bbExecutorConfig struct {
 	UnsupportedLabels []bbExecutorUnsupportedLabels `json:"unsupported_labels,omitempty"`
 	tokens            oauth2.TokenSource
 	client            *http.Client
+	api               *bbControl.ClientWithResponses
 	githubDeduper     *githubStatusDeduper
 	reconcileState    *bbExecutorReconcileState
 }
@@ -95,12 +95,6 @@ type bbExecutorProfile struct {
 	RunnerSHA256 string         `json:"runner_sha256"`
 	Sandbox      map[string]any `json:"sandbox"`
 	PackageSets  []string       `json:"package_sets"`
-}
-
-type bbCapacityResponse struct {
-	Schedulable int   `json:"schedulable"`
-	MaxCount    int   `json:"max_count"`
-	AsOfMS      int64 `json:"as_of_ms"`
 }
 
 type bbTaskResult struct {
@@ -205,6 +199,9 @@ func initBBExecutor(ctx context.Context) error {
 		config.tokens = auth.TokenSource(authCtx)
 	} else if config.TokenURL != "" || config.ClientID != "" || config.ClientSecretFile != "" {
 		return errors.New("BB executor config must select token_file or OAuth credentials")
+	}
+	if err := config.initAPI(); err != nil {
+		return err
 	}
 	port := origin.Port()
 	if port == "" {
@@ -421,65 +418,61 @@ func bbArrayContains(value any, wanted string) bool {
 	return slices.ContainsFunc(items, func(item any) bool { return item == wanted })
 }
 
-func (config bbExecutorConfig) request(ctx context.Context, method, path, key string, body, target any) error {
-	var encoded []byte
-	var err error
-	if body != nil {
-		encoded, err = json.Marshal(body)
-		if err != nil {
-			return err
-		}
+func (config *bbExecutorConfig) initAPI() error {
+	if config.client == nil {
+		config.client = &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(config.Endpoint, "/")+path, bytes.NewReader(encoded))
+	api, err := bbControl.NewClientWithResponses(config.Endpoint,
+		bbControl.WithHTTPClient(config.client),
+		bbControl.WithRequestEditorFn(config.requestEditor),
+	)
 	if err != nil {
-		return err
+		return fmt.Errorf("initialize Breadboard Go SDK client: %w", err)
 	}
-	if config.ProfileAuth == nil {
-		var bearer string
-		if config.tokens != nil {
-			token, err := config.tokens.Token()
-			if err != nil {
-				return errors.New("BB executor OAuth token acquisition failed")
-			}
-			bearer = token.AccessToken
-		} else {
-			token, err := readBBSecretFile(config.TokenFile)
-			if err != nil {
-				return err
-			}
-			bearer = strings.TrimSpace(string(token))
-		}
-		if bearer == "" {
-			return errors.New("BB executor credential is empty")
-		}
-		req.Header.Set("Authorization", "Bearer "+bearer)
-	}
+	config.api = api
+	return nil
+}
+
+func (config bbExecutorConfig) requestEditor(_ context.Context, req *http.Request) error {
 	req.Header.Set("X-Breadboard-Project", config.Project)
-	req.Header.Set("Content-Type", "application/json")
-	if key != "" {
-		req.Header.Set("Idempotency-Key", key)
-	}
-	client := config.client
-	if client == nil {
-		client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	}
-	res, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	if res.StatusCode == http.StatusNotFound && method == http.MethodDelete {
+	if config.ProfileAuth != nil {
+		// The profile-authenticated SDK transport pins bearer credentials to the
+		// configured endpoint and rejects redirects.
 		return nil
 	}
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return &bbRequestError{method: method, path: path, status: res.StatusCode}
+	var bearer string
+	if config.tokens != nil {
+		token, err := config.tokens.Token()
+		if err != nil {
+			return errors.New("BB executor OAuth token acquisition failed")
+		}
+		bearer = token.AccessToken
+	} else {
+		token, err := readBBSecretFile(config.TokenFile)
+		if err != nil {
+			return errors.New("BB executor token file is unavailable")
+		}
+		bearer = strings.TrimSpace(string(token))
 	}
-	if target != nil {
-		return json.NewDecoder(io.LimitReader(res.Body, 1024*1024)).Decode(target)
+	if bearer == "" || strings.ContainsAny(bearer, "\r\n\t ") {
+		return errors.New("BB executor credential is invalid")
+	}
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	return nil
+}
+
+func bbSDKStatusError(method, path string, status int) error {
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		return &bbRequestError{method: method, path: path, status: status}
 	}
 	return nil
+}
+
+func bbSDKTask(response *bbControl.TaskResponse) (bbTaskResult, error) {
+	if response == nil || response.TaskId == "" {
+		return bbTaskResult{}, errors.New("Breadboard SDK returned a task without an ID")
+	}
+	return bbTaskResult{ID: response.TaskId, State: string(response.State)}, nil
 }
 
 func (config bbExecutorConfig) reconcile(ctx context.Context) error {
@@ -690,21 +683,32 @@ func (config bbExecutorConfig) schedulableCapacity(ctx context.Context, profile 
 	if maxCount < 1 || maxCount > 100 {
 		return 0, errors.New("BB capacity max_count must be between 1 and 100")
 	}
-	var response bbCapacityResponse
-	request := map[string]any{"spec": profile.Sandbox, "max_count": maxCount}
-	if err := config.request(ctx, http.MethodPost, "/v1/scheduler/capacity", "", request, &response); err != nil {
+	var spec bbControl.SandboxSpecRequest
+	encoded, err := json.Marshal(profile.Sandbox)
+	if err != nil {
 		return 0, err
 	}
-	if response.Schedulable < 0 || response.MaxCount < 1 || response.MaxCount > 100 || response.Schedulable > response.MaxCount || response.AsOfMS <= 0 {
+	if err := json.Unmarshal(encoded, &spec); err != nil {
+		return 0, fmt.Errorf("decode BB profile sandbox for SDK request: %w", err)
+	}
+	response, err := config.api.GetSchedulableCapacityWithResponse(ctx, bbControl.SchedulableCapacityRequest{Spec: spec, MaxCount: &maxCount})
+	if err != nil {
+		return 0, err
+	}
+	if err := bbSDKStatusError(http.MethodPost, "/v1/scheduler/capacity", response.StatusCode()); err != nil {
+		return 0, err
+	}
+	capacity := response.JSON200
+	if capacity == nil || capacity.Schedulable < 0 || capacity.MaxCount < 1 || capacity.MaxCount > 100 || capacity.Schedulable > capacity.MaxCount || capacity.AsOfMs <= 0 {
 		return 0, errors.New("BB capacity response is invalid")
 	}
-	if response.MaxCount < maxCount {
-		maxCount = response.MaxCount
+	if capacity.MaxCount < maxCount {
+		maxCount = capacity.MaxCount
 	}
-	if response.Schedulable > maxCount {
+	if capacity.Schedulable > maxCount {
 		return 0, errors.New("BB capacity response exceeds requested max_count")
 	}
-	return response.Schedulable, nil
+	return capacity.Schedulable, nil
 }
 
 func (config bbExecutorConfig) prepare(ctx context.Context, job *actions_model.ActionRunJob, profile bbExecutorProfile, labels []string) (*actions_model.ActionBBTask, error) {
@@ -790,22 +794,38 @@ func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.A
 	if err != nil {
 		return err
 	}
-	if err := config.request(ctx, http.MethodPost, "/v1/secrets", "", map[string]string{"name": bbSecretName(row), "value": registration}, nil); err != nil {
+	secretResponse, err := config.api.PutSecretWithResponse(ctx, bbControl.PutSecretRequest{Name: bbSecretName(row), Value: registration})
+	if err != nil {
+		return err
+	}
+	if err := bbSDKStatusError(http.MethodPost, "/v1/secrets", secretResponse.StatusCode()); err != nil {
 		return err
 	}
 	var task bbTaskResult
 	if row.TaskID == "" {
-		var request json.Value
+		var request bbControl.TaskRequest
 		if err := json.Unmarshal([]byte(row.RequestJSON), &request); err != nil {
 			return fmt.Errorf("decode persisted BB task request: %w", err)
 		}
-		if err := config.request(ctx, http.MethodPost, "/v1/tasks", "gitea-bb-"+row.Key, request, &task); err != nil {
-			var responseError *bbRequestError
-			if !errors.As(err, &responseError) || responseError.status != http.StatusBadRequest {
+		response, err := config.api.CreateTaskWithResponse(ctx, &bbControl.CreateTaskParams{IdempotencyKey: "gitea-bb-" + row.Key}, request)
+		if err != nil {
+			return err
+		}
+		if response.StatusCode() == http.StatusBadRequest {
+			log.Error("BB executor rejected task for job %d: %v", row.JobID, &bbRequestError{method: http.MethodPost, path: "/v1/tasks", status: response.StatusCode()})
+			task.State = "failed"
+		} else {
+			if err := bbSDKStatusError(http.MethodPost, "/v1/tasks", response.StatusCode()); err != nil {
 				return err
 			}
-			log.Error("BB executor rejected task for job %d: %v", row.JobID, err)
-			task.State = "failed"
+			body := response.JSON200
+			if response.StatusCode() == http.StatusAccepted {
+				body = response.JSON202
+			}
+			task, err = bbSDKTask(body)
+			if err != nil {
+				return err
+			}
 		}
 		if task.ID == "" && !task.terminal() {
 			return errors.New("BB executor response has no task ID")
@@ -814,8 +834,18 @@ func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.A
 		if _, err := db.GetEngine(ctx).ID(row.ID).Cols("task_id").Update(row); err != nil {
 			return err
 		}
-	} else if err := config.request(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(row.TaskID), "", nil, &task); err != nil {
-		return err
+	} else {
+		response, err := config.api.GetTaskWithResponse(ctx, row.TaskID)
+		if err != nil {
+			return err
+		}
+		if err := bbSDKStatusError(http.MethodGet, "/v1/tasks/{task_id}", response.StatusCode()); err != nil {
+			return err
+		}
+		task, err = bbSDKTask(response.JSON200)
+		if err != nil {
+			return err
+		}
 	}
 	job, has, err := db.GetByID[actions_model.ActionRunJob](ctx, row.JobID)
 	if err != nil {
@@ -843,7 +873,15 @@ func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.A
 		shouldCancel = shouldCancel || job.TaskID == 0 || job.Stopped.AddDuration(2*time.Minute) < timeutil.TimeStampNow()
 	}
 	if !task.terminal() && shouldCancel {
-		if err := config.request(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(row.TaskID)+"/cancel", "", struct{}{}, &task); err != nil {
+		response, err := config.api.CancelTaskWithResponse(ctx, row.TaskID)
+		if err != nil {
+			return err
+		}
+		if err := bbSDKStatusError(http.MethodPost, "/v1/tasks/{task_id}/cancel", response.StatusCode()); err != nil {
+			return err
+		}
+		task, err = bbSDKTask(response.JSON200)
+		if err != nil {
 			return err
 		}
 	}
@@ -876,8 +914,14 @@ func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.A
 			notifyAndEmitFinishedJobs(ctx, []*actions_model.ActionRunJob{job})
 		}
 	}
-	if err := config.request(ctx, http.MethodDelete, "/v1/secrets/"+bbSecretName(row), "", nil, nil); err != nil {
+	deleteResponse, err := config.api.DeleteSecretWithResponse(ctx, bbSecretName(row))
+	if err != nil {
 		return err
+	}
+	if status := deleteResponse.StatusCode(); status != http.StatusNotFound {
+		if err := bbSDKStatusError(http.MethodDelete, "/v1/secrets/{name}", status); err != nil {
+			return err
+		}
 	}
 	if _, err := db.DeleteByID[actions_model.ActionRunner](ctx, row.RunnerID); err != nil && !errors.Is(err, util.ErrNotExist) {
 		return err
