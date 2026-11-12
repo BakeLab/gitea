@@ -7,7 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 
 	auth_model "gitea.dev/models/auth"
 	"gitea.dev/modules/util"
@@ -36,7 +40,11 @@ func oauthCLIFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name:  "secret",
 			Value: "",
-			Usage: "Client Secret",
+			Usage: "Client Secret (visible in the process arguments; prefer --secret-file)",
+		},
+		&cli.StringFlag{
+			Name:  "secret-file",
+			Usage: "Read the Client Secret from an absolute, owner-only regular file",
 		},
 		&cli.StringFlag{
 			Name:  "auto-discover-url",
@@ -157,7 +165,58 @@ func microcmdAuthUpdateOauth() *cli.Command {
 	}
 }
 
-func parseOAuth2Config(c *cli.Command) *oauth2.Source {
+func readOAuthClientSecret(c *cli.Command) (string, error) {
+	const maxSize = 64 * 1024
+
+	if c.IsSet("secret") && c.IsSet("secret-file") {
+		return "", errors.New("--secret and --secret-file cannot be used together")
+	}
+	if !c.IsSet("secret-file") {
+		return c.String("secret"), nil
+	}
+
+	path := c.String("secret-file")
+	if !filepath.IsAbs(path) {
+		return "", errors.New("--secret-file must be an absolute path")
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("stat client secret file: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		return "", errors.New("client secret file must be a regular file accessible only to its owner")
+	}
+	if info.Size() > maxSize {
+		return "", errors.New("client secret file is too large")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open client secret file: %w", err)
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat opened client secret file: %w", err)
+	}
+	if !os.SameFile(info, openedInfo) {
+		return "", errors.New("client secret file changed while it was opened")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxSize+1))
+	if err != nil {
+		return "", fmt.Errorf("read client secret file: %w", err)
+	}
+	if len(data) > maxSize {
+		return "", errors.New("client secret file is too large")
+	}
+	secret := strings.TrimSuffix(string(data), "\n")
+	secret = strings.TrimSuffix(secret, "\r")
+	if secret == "" || strings.ContainsAny(secret, "\r\n") {
+		return "", errors.New("client secret file must contain one non-empty line")
+	}
+	return secret, nil
+}
+
+func parseOAuth2Config(c *cli.Command, clientSecret string) *oauth2.Source {
 	var customURLMapping *oauth2.CustomURLMapping
 	if c.IsSet("use-custom-urls") {
 		customURLMapping = &oauth2.CustomURLMapping{
@@ -173,7 +232,7 @@ func parseOAuth2Config(c *cli.Command) *oauth2.Source {
 	return &oauth2.Source{
 		Provider:                      c.String("provider"),
 		ClientID:                      c.String("key"),
-		ClientSecret:                  c.String("secret"),
+		ClientSecret:                  clientSecret,
 		OpenIDConnectAutoDiscoveryURL: c.String("auto-discover-url"),
 		CustomURLMapping:              customURLMapping,
 		IconURL:                       c.String("icon-url"),
@@ -195,7 +254,11 @@ func (a *authService) runAddOauth(ctx context.Context, c *cli.Command) error {
 		return err
 	}
 
-	config := parseOAuth2Config(c)
+	clientSecret, err := readOAuthClientSecret(c)
+	if err != nil {
+		return err
+	}
+	config := parseOAuth2Config(c, clientSecret)
 	if config.Provider == "openidConnect" {
 		discoveryURL, err := url.Parse(config.OpenIDConnectAutoDiscoveryURL)
 		if err != nil || (discoveryURL.Scheme != "http" && discoveryURL.Scheme != "https") {
@@ -226,6 +289,13 @@ func (a *authService) runUpdateOauth(ctx context.Context, c *cli.Command) error 
 		return err
 	}
 	oAuth2Config := auth_model.MustSourceCfg[*oauth2.Source](source)
+	if c.IsSet("secret") || c.IsSet("secret-file") {
+		clientSecret, err := readOAuthClientSecret(c)
+		if err != nil {
+			return err
+		}
+		oAuth2Config.ClientSecret = clientSecret
+	}
 
 	if c.IsSet("name") {
 		source.Name = c.String("name")
@@ -237,10 +307,6 @@ func (a *authService) runUpdateOauth(ctx context.Context, c *cli.Command) error 
 
 	if c.IsSet("key") {
 		oAuth2Config.ClientID = c.String("key")
-	}
-
-	if c.IsSet("secret") {
-		oAuth2Config.ClientSecret = c.String("secret")
 	}
 
 	if c.IsSet("auto-discover-url") {

@@ -5,6 +5,8 @@ package cmd
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	auth_model "gitea.dev/models/auth"
@@ -144,6 +146,38 @@ func TestAddOauth(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReadOAuthClientSecret(t *testing.T) {
+	secretPath := filepath.Join(t.TempDir(), "client-secret")
+	if err := os.WriteFile(secretPath, []byte("client-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read := func(args ...string) (string, error) {
+		var secret string
+		app := &cli.Command{
+			Flags: oauthCLIFlags(),
+			Action: func(ctx context.Context, c *cli.Command) error {
+				var err error
+				secret, err = readOAuthClientSecret(c)
+				return err
+			},
+		}
+		return secret, app.Run(t.Context(), append([]string{"oauth-test"}, args...))
+	}
+
+	secret, err := read("--secret-file", secretPath)
+	assert.NoError(t, err)
+	assert.Equal(t, "client-secret", secret)
+
+	_, err = read("--secret", "inline", "--secret-file", secretPath)
+	assert.EqualError(t, err, "--secret and --secret-file cannot be used together")
+
+	if err := os.Chmod(secretPath, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	_, err = read("--secret-file", secretPath)
+	assert.EqualError(t, err, "client secret file must be a regular file accessible only to its owner")
 }
 
 func TestUpdateOauth(t *testing.T) {

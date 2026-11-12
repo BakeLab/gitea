@@ -20,6 +20,7 @@ import (
 	user_model "gitea.dev/models/user"
 	"gitea.dev/modules/setting"
 	api "gitea.dev/modules/structs"
+	"gitea.dev/modules/test"
 	"gitea.dev/modules/timeutil"
 	webhook_module "gitea.dev/modules/webhook"
 	actions_web "gitea.dev/routers/web/repo/actions"
@@ -394,6 +395,9 @@ jobs:
 		assert.Equal(t, actions_model.StatusRunning, wf2Job2ActionJob.Status)
 		// push workflow3 to trigger wf3-job1
 		opts3 := getWorkflowCreateFileOptions(user2, repo.DefaultBranch, "create %s"+wf3TreePath, wf3FileContent)
+		// Keep the default branch's workflow snapshot current so rerunning wf2
+		// below exercises concurrency behavior instead of stale-run rejection.
+		opts3.NewBranchName = "job-concurrency-cancel"
 		createWorkflowFile(t, token, user2.Name, repo.Name, wf3TreePath, opts3)
 		// fetch wf3-job1
 		wf3Job1Task := runner1.fetchTask(t)
@@ -444,6 +448,8 @@ jobs:
 
 func TestMatrixConcurrency(t *testing.T) {
 	onGiteaRun(t, func(t *testing.T, u *url.URL) {
+		// This test supplies a Windows runner and exercises cross-platform concurrency.
+		defer test.MockVariableValue(&setting.Actions.SkipRunnerLabels, []string{})()
 		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 		session := loginUser(t, user2.Name)
 		token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository, auth_model.AccessTokenScopeWriteUser)

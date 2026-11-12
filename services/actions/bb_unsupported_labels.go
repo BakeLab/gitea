@@ -5,6 +5,7 @@ package actions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -50,19 +51,19 @@ func (config bbExecutorConfig) validateUnsupportedLabels() error {
 	for _, unsupported := range config.UnsupportedLabels {
 		reason := strings.TrimSpace(unsupported.Reason)
 		if len(canonicalRunnerLabels(unsupported.Labels)) == 0 || reason == "" || len(reason) > 2048 {
-			return fmt.Errorf("BB executor unsupported_labels entries require labels and a reason")
+			return errors.New("BB executor unsupported_labels entries require labels and a reason")
 		}
 		labels := make(map[string]bool, len(unsupported.Labels))
 		for _, label := range unsupported.Labels {
 			label = strings.ToLower(strings.TrimSpace(label))
 			if label == "" || labels[label] {
-				return fmt.Errorf("BB executor unsupported_labels entries require unique, non-empty labels")
+				return errors.New("BB executor unsupported_labels entries require unique, non-empty labels")
 			}
 			labels[label] = true
 		}
 		key := runnerLabelSetKey(unsupported.Labels)
 		if seen[key] {
-			return fmt.Errorf("BB executor unsupported_labels contains duplicate label sets")
+			return errors.New("BB executor unsupported_labels contains duplicate label sets")
 		}
 		seen[key] = true
 	}
@@ -91,9 +92,33 @@ func bbProfileRunnerLabels(profile bbExecutorProfile) []string {
 	return labels
 }
 
-func (config bbExecutorConfig) matchingProfiles(job *actions_model.ActionRunJob) []int {
+func validateBBProfileRepositories(repositories []string) error {
+	seen := make(map[string]bool, len(repositories))
+	for _, repository := range repositories {
+		if repository != strings.TrimSpace(repository) || strings.Count(repository, "/") != 1 {
+			return errors.New("repositories must use exact owner/repository names")
+		}
+		parts := strings.SplitN(repository, "/", 2)
+		if parts[0] == "" || parts[1] == "" || strings.ContainsAny(repository, " \t\r\n") {
+			return errors.New("repositories must use exact owner/repository names")
+		}
+		key := strings.ToLower(repository)
+		if seen[key] {
+			return errors.New("repositories must not contain duplicates")
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+func (config bbExecutorConfig) matchingProfiles(job *actions_model.ActionRunJob, repository string) []int {
 	var matching []int
 	for profileIndex, profile := range config.Profiles {
+		if len(profile.Repositories) > 0 && !slices.ContainsFunc(profile.Repositories, func(allowed string) bool {
+			return repository != "" && strings.EqualFold(allowed, repository)
+		}) {
+			continue
+		}
 		runner := &actions_model.ActionRunner{AgentLabels: bbProfileRunnerLabels(profile)}
 		if runner.CanMatchLabels(job.RunsOn) {
 			matching = append(matching, profileIndex)
@@ -112,8 +137,12 @@ func (config bbExecutorConfig) skipConfiguredUnsupportedJobs(ctx context.Context
 		if err != nil {
 			return err
 		}
+		repoNames, err := config.repositoryNamesForJobs(ctx, jobs)
+		if err != nil {
+			return fmt.Errorf("load repositories for unsupported-label matching: %w", err)
+		}
 		for _, job := range jobs {
-			if len(config.matchingProfiles(job)) == 0 {
+			if len(config.matchingProfiles(job, repoNames[job.RepoID])) == 0 {
 				if _, unsupported := config.unsupportedLabelReason(job.RunsOn); unsupported {
 					candidates = append(candidates, job)
 				}

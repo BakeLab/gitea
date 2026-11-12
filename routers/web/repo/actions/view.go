@@ -923,6 +923,14 @@ func checkRunRerunAllowed(ctx *context_module.Context, run *actions_model.Action
 		ctx.JSONError(ctx.Locale.Tr("actions.runs.not_done"))
 		return false
 	}
+	expired, err := actions_service.IsWorkflowRunExpired(ctx, run)
+	if err != nil {
+		ctx.ServerError("IsWorkflowRunExpired", err)
+		return false
+	}
+	if expired {
+		return true
+	}
 	cfgUnit := ctx.Repo.Repository.MustGetUnit(ctx, unit.TypeActions)
 	cfg := cfgUnit.ActionsConfig()
 	disabled := cfg.IsWorkflowDisabled(run.WorkflowID)
@@ -963,12 +971,34 @@ func Rerun(ctx *context_module.Context) {
 		return
 	}
 	if len(jobs) == 0 {
+		if expired, err := actions_service.IsWorkflowRunExpired(ctx, run); err != nil {
+			ctx.ServerError("IsWorkflowRunExpired", err)
+			return
+		} else if expired {
+			if _, err := actions_service.RerunWorkflowRunJobs(ctx, ctx.Repo.Repository, run, ctx.Doer, nil); err != nil {
+				handleWorkflowRerunError(ctx, err)
+				return
+			}
+			ctx.JSONRedirect(run.Link())
+			return
+		}
 		ctx.JSONError(ctx.Locale.Tr("actions.runs.no_job"))
 		return
 	}
 
 	currentJob, hasPathParam := findCurrentJobByPathParam(ctx, jobs)
 	if hasPathParam && currentJob == nil {
+		if expired, err := actions_service.IsWorkflowRunExpired(ctx, run); err != nil {
+			ctx.ServerError("IsWorkflowRunExpired", err)
+			return
+		} else if expired {
+			if _, err := actions_service.RerunWorkflowRunJobs(ctx, ctx.Repo.Repository, run, ctx.Doer, nil); err != nil {
+				handleWorkflowRerunError(ctx, err)
+				return
+			}
+			ctx.JSONRedirect(run.Link())
+			return
+		}
 		ctx.NotFound(nil)
 		return
 	}
@@ -1003,6 +1033,13 @@ func RerunFailed(ctx *context_module.Context) {
 	// rerun button but wrong here, so a direct POST on a fully successful run cannot re-run everything.
 	failedJobs := actions_service.GetFailedJobsForRerun(jobs)
 	if len(failedJobs) == 0 {
+		if expired, err := actions_service.IsWorkflowRunExpired(ctx, run); err != nil {
+			ctx.ServerError("IsWorkflowRunExpired", err)
+			return
+		} else if expired {
+			ctx.JSONRedirect(run.Link())
+			return
+		}
 		ctx.JSONError(ctx.Locale.Tr("actions.runs.no_failed_jobs"))
 		return
 	}

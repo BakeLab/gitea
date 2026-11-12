@@ -73,6 +73,22 @@ func FindJobQueueJobs(ctx context.Context, opts JobQueueOptions, page, pageSize 
 		Find(&jobs)
 }
 
+// FindWaitingJobsAfterID returns a keyset-paginated batch of unclaimed waiting jobs,
+// ordered by descending job ID. It is used by startup reconciliation so queue changes
+// caused by concurrent runner claims cannot shift offset-based pages.
+func FindWaitingJobsAfterID(ctx context.Context, afterID int64, limit int) ([]*ActionRunJob, error) {
+	sess := JobQueueOptions{Status: StatusWaiting}.session(ctx)
+	if afterID > 0 {
+		sess = sess.And(builder.Lt{"`action_run_job`.id": afterID})
+	}
+	jobs := make([]*ActionRunJob, 0, limit)
+	err := sess.Cols("`action_run_job`.id", "`action_run_job`.run_id", "`action_run_job`.runs_on").
+		OrderBy("`action_run_job`.id DESC").
+		Limit(limit).
+		Find(&jobs)
+	return jobs, err
+}
+
 // JobQueueFilterRepoIDs returns up to limit ids of the repositories with queued or running jobs.
 func JobQueueFilterRepoIDs(ctx context.Context, limit int) ([]int64, error) {
 	var ids []int64

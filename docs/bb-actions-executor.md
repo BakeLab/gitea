@@ -69,7 +69,49 @@ independent store. Profile authentication uses the configured issuer and
 resource and does not require a client secret. Alternatively, the OAuth
 client-credentials mode remains available for a dedicated machine identity;
 the legacy `token_file` mode continues to reread a raw bearer token for each
-request.
+request. All BB executor credential files (`token_file`, OAuth
+`client_secret_file`, and `github_token_file`) must be absolute paths to regular
+files with no group or other permissions. Gitea rejects files larger than 64
+KiB. Create them as mode `0600` and keep them owned by the Gitea service
+account.
+
+For native macOS jobs, set `platform` to `darwin`, use an official Darwin runner
+binary, and pin `sandbox.node_name` to the macOS node (for example,
+`apricot-mac-mini-1.int.bb.pub`). Use only `:host` labels such as
+`macos-latest:host`, `self-hosted:host`, `macos:host` and `arm64:host`.
+Leave `package_sets` empty: macOS guests use their image tools rather than Linux
+package sets. The execution user defaults to `breadboard` on macOS and `root`
+on Linux; `exec_user` can select the configured guest account. The macOS task
+uses a private temporary work directory and the native `shasum` checksum tool.
+The guest image needs Git, curl, Node action support and Xcode command line tools;
+individual workflows may install Go, Rust or Homebrew LLVM themselves.
+The macOS node must declare the exact Gitea internal-service route required by
+the profile; the guest uses BB gateway networking without its own NetBird identity.
+
+A profile may set `"extends": "<profile name>"` to inherit another profile and
+override only some fields. Inheritance is resolved once at load time, before the
+normal validation, which then runs on the resolved profile. Multi-level chains
+are allowed; an unknown or ambiguous parent, a cycle, or a child without a unique
+name is a load error. The child must define its own non-empty `labels` (labels
+are never inherited). `runner_url`, `runner_sha256`, `package_sets`, `platform`
+and `exec_user` replace the parent value when set. `repositories` optionally
+limits a profile to exact `owner/repository` names; a child value replaces the
+parent list, and an omitted value inherits it. This keeps repository-specific
+runner aliases from claiming similarly named labels in other repositories.
+`sandbox` is deep-merged:
+child keys override, nested objects such as `cpu` merge by key, and lists such as
+`allowed_hosts` and `required_internal_services` are replaced.
+
+```json
+{
+  "name": "linux-arm64",
+  "extends": "linux-ubuntu-latest",
+  "labels": ["self-hosted:host", "linux:host", "arm64:host", "cpu:host", "ubuntu-24.04-arm:host"],
+  "runner_url": "https://github.com/BakeLab/runner/releases/download/node-runtime-4af8cd2b/gitea-runner-4af8cd2b-linux-arm64",
+  "runner_sha256": "107ecd5e76ea7e830a19a35e461a320b7d44a3a09fee03b89b2c74f179a5c1c3",
+  "sandbox": {"cpu": {"arch": "arm64"}}
+}
+```
 
 Profiles are considered in order. All job `runs-on` labels must match the label
 names before `:host` or `:docker://IMAGE`. Give ARM64 profiles an ARM64 sandbox
