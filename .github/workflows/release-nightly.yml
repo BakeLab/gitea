@@ -22,7 +22,7 @@ jobs:
     steps:
       - id: changed
         env:
-          BB_SDK_READ_TOKEN: ${{ secrets.BB_SDK_READ_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           since=$(gh run list --workflow release-nightly.yml --status success --limit 1 --json createdAt -q '.[0].createdAt')
@@ -58,8 +58,6 @@ jobs:
           cache: false
       - uses: ./.github/actions/node-setup
       - run: make deps-frontend deps-backend
-        env:
-          GH_TOKEN: ${{ github.token }}
       - run: make release GITHUB_REF_NAME="$BRANCH"
         env:
           BRANCH: ${{ matrix.branch }}
@@ -166,22 +164,16 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: build regular docker image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        env:
-          BB_SDK_READ_TOKEN: ${{ secrets.BB_SDK_READ_TOKEN }}
         with:
           context: .
           platforms: linux/amd64,linux/arm64,linux/riscv64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           annotations: ${{ steps.meta.outputs.annotations }}
-          secret-envs: |
-            BB_SDK_READ_TOKEN
           cache-from: type=registry,ref=ghcr.io/go-gitea/gitea:buildcache-rootful
           cache-to: type=registry,ref=ghcr.io/go-gitea/gitea:buildcache-rootful,mode=max
       - name: build rootless docker image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        env:
-          BB_SDK_READ_TOKEN: ${{ secrets.BB_SDK_READ_TOKEN }}
         with:
           context: .
           platforms: linux/amd64,linux/arm64,linux/riscv64
@@ -189,8 +181,6 @@ jobs:
           file: Dockerfile.rootless
           tags: ${{ steps.meta_rootless.outputs.tags }}
           annotations: ${{ steps.meta_rootless.outputs.annotations }}
-          secret-envs: |
-            BB_SDK_READ_TOKEN
           cache-from: type=registry,ref=ghcr.io/go-gitea/gitea:buildcache-rootless
           cache-to: type=registry,ref=ghcr.io/go-gitea/gitea:buildcache-rootless,mode=max
 

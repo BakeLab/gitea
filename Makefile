@@ -553,7 +553,7 @@ deps-frontend: node_modules ## install frontend dependencies
 
 .PHONY: deps-backend
 deps-backend: ## install backend dependencies
-	GO="$(GO)" ./scripts/go-mod-download.sh
+	$(GO) mod download
 
 .PHONY: deps-tools
 deps-tools: ## fetch and compile tool dependencies

@@ -36,8 +36,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/go-setup
       - run: make deps-backend deps-tools
-        env:
-          BB_SDK_READ_TOKEN: ${{ secrets.BB_SDK_READ_TOKEN }}
       - run: TAGS="bindata" make backend
       - name: warm test compile cache (bindata)
         env:
@@ -62,8 +60,6 @@ jobs:
         with:
           lint-cache: "true"
       - run: make deps-backend deps-tools
-        env:
-          BB_SDK_READ_TOKEN: ${{ secrets.BB_SDK_READ_TOKEN }}
       - run: make generate-go
         env:
           TAGS: ${{ matrix.tags }}

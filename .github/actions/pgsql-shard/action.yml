@@ -11,9 +11,6 @@ inputs:
   run-migration:
     description: Also run migration tests
     default: "false"
-  sdk-read-token:
-    description: Read-only token for the private Breadboard Go SDK
-    required: false
 
 runs:
   using: composite
@@ -23,8 +20,6 @@ runs:
       run: '[ -e "/.dockerenv" ] || [ -e "/run/.containerenv" ] || echo "127.0.0.1 pgsql ldap minio" | sudo tee -a /etc/hosts'
     - shell: bash
       run: make deps-backend
-      env:
-        BB_SDK_READ_TOKEN: ${{ inputs.sdk-read-token }}
     - shell: bash
       run: make backend
       env:
