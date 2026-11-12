@@ -23,7 +23,9 @@ RUN apk --no-cache add \
 
 WORKDIR ${GOPATH}/src/gitea.dev
 COPY go.mod go.sum ./
-RUN go mod download
+COPY scripts/go-mod-download.sh /usr/local/bin/go-mod-download
+RUN --mount=type=secret,id=BB_SDK_READ_TOKEN,env=BB_SDK_READ_TOKEN,required=false \
+    /usr/local/bin/go-mod-download
 # Use COPY instead of bind mount as read-only one breaks makefile state tracking and read-write one needs binary to be moved as it's discarded.
 # ".git" directory is mounted separately later only for version data extraction.
 COPY --exclude=.git/ . .
