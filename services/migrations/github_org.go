@@ -17,9 +17,11 @@ import (
 	"gitea.dev/models/repo"
 	"gitea.dev/models/unit"
 	user_model "gitea.dev/models/user"
+	"gitea.dev/modules/git"
 	"gitea.dev/modules/log"
 	base "gitea.dev/modules/migration"
 	"gitea.dev/modules/structs"
+	"gitea.dev/modules/util"
 
 	gh "github.com/google/go-github/v93/github"
 )
@@ -105,6 +107,22 @@ func SyncGitHubOrganizationPullMirrors(ctx context.Context, githubOwner, giteaOw
 				failures = append(failures, fmt.Errorf("get pull mirror %s/%s: %w", giteaOwner, name, err))
 				continue
 			}
+			remote, err := git.ParseRemoteAddressURL(ctx, repository, mirror.GetRemoteName())
+			if err != nil {
+				failures = append(failures, fmt.Errorf("read pull mirror remote for %s/%s: %s", giteaOwner, name, util.SanitizeCredentialURLs(err.Error())))
+				continue
+			}
+			address, updateAuth, err := githubMirrorRemoteAddress(remote.URL, githubOwner, name, token)
+			if err != nil {
+				failures = append(failures, fmt.Errorf("check pull mirror remote for %s/%s: %w", giteaOwner, name, err))
+				continue
+			}
+			if updateAuth {
+				if err := git.ManagedRemoteSetURL(ctx, repository, mirror.GetRemoteName(), address); err != nil {
+					failures = append(failures, fmt.Errorf("update pull mirror authentication for %s/%s: %s", giteaOwner, name, util.SanitizeCredentialURLs(err.Error())))
+					continue
+				}
+			}
 			if mirror.Interval != interval {
 				mirror.Interval = interval
 				mirror.ScheduleNextUpdate()
@@ -158,6 +176,25 @@ func SyncGitHubOrganizationPullMirrors(ctx context.Context, githubOwner, giteaOw
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func githubMirrorRemoteAddress(remote *url.URL, owner, name, token string) (string, bool, error) {
+	if remote == nil {
+		return "", false, errors.New("missing pull mirror remote")
+	}
+	address := *remote
+	address.User = nil
+	if !sameGitHubOrigin(address.String(), owner, name) {
+		return "", false, errors.New("pull mirror remote is not the expected GitHub repository")
+	}
+	if remote.User != nil {
+		password, ok := remote.User.Password()
+		if ok && remote.User.Username() == "x-access-token" && password == token {
+			return "", false, nil
+		}
+	}
+	address.User = url.UserPassword("x-access-token", token)
+	return address.String(), true, nil
 }
 
 func sameGitHubOrigin(rawURL, owner, name string) bool {

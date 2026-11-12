@@ -45,6 +45,13 @@ func ManagedRemoteRemove(ctx context.Context, repo RepositoryFacade, remoteName 
 	})
 }
 
+func ManagedRemoteSetURL(ctx context.Context, repo RepositoryFacade, remoteName, remoteURL string) error {
+	return LockConfigAndDo(ctx, repo, func(ctx context.Context) error {
+		_, _, err := gitcmd.NewCommand("remote", "set-url").AddDynamicArguments(remoteName, remoteURL).WithRepo(repo).RunStdString(ctx)
+		return err
+	})
+}
+
 func ParseRemoteAddressURL(ctx context.Context, repo RepositoryFacade, remoteName string) (*giturl.GitURL, error) {
 	addr, err := GetRemoteAddress(ctx, repo, remoteName)
 	if (addr == "" && err == nil) || IsRemoteNotExistError(err) {
