@@ -23,9 +23,7 @@ RUN apk --no-cache add \
 
 WORKDIR ${GOPATH}/src/gitea.dev
 COPY go.mod go.sum ./
-COPY scripts/go-mod-download.sh /usr/local/bin/go-mod-download
-RUN --mount=type=secret,id=BB_SDK_READ_TOKEN,env=BB_SDK_READ_TOKEN,required=false \
-    /usr/local/bin/go-mod-download
+RUN go mod download
 # See the comments in Dockerfile
 COPY --exclude=.git/ . .
 COPY --from=frontend-build /src/public/assets public/assets
