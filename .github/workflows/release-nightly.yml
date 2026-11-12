@@ -58,6 +58,8 @@ jobs:
           cache: false
       - uses: ./.github/actions/node-setup
       - run: make deps-frontend deps-backend
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: make release GITHUB_REF_NAME="$BRANCH"
         env:
           BRANCH: ${{ matrix.branch }}

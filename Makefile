@@ -553,7 +553,12 @@ deps-frontend: node_modules ## install frontend dependencies
 
 .PHONY: deps-backend
 deps-backend: ## install backend dependencies
-	$(GO) mod download
+	@if [ -n "$$GH_TOKEN" ]; then \
+		export GIT_CONFIG_COUNT=1; \
+		export GIT_CONFIG_KEY_0=credential.helper; \
+		export GIT_CONFIG_VALUE_0='!f() { echo username=x-access-token; echo "password=$$GH_TOKEN"; }; f'; \
+	fi; \
+	GOPRIVATE=github.com/BakeLab/* $(GO) mod download
 
 .PHONY: deps-tools
 deps-tools: ## fetch and compile tool dependencies

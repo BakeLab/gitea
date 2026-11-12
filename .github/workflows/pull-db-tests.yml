@@ -137,6 +137,8 @@ jobs:
       - name: Add hosts to /etc/hosts
         run: '[ -e "/.dockerenv" ] || [ -e "/run/.containerenv" ] || echo "127.0.0.1 minio devstoreaccount1.azurite.local elasticsearch meilisearch smtpimap" | sudo tee -a /etc/hosts'
       - run: make deps-backend
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: make generate-go
         env:
           TAGS: bindata
