@@ -26,8 +26,34 @@ sudo -u gitea /usr/local/bin/gitea --config /etc/gitea/app.ini admin auth add-oa
   --key <client-id> \
   --secret-file /etc/gitea/pocket-id-client-secret \
   --auto-discover-url https://id.bb.pub/.well-known/openid-configuration \
-  --scopes openid --scopes profile --scopes email
+  --scopes openid --scopes profile --scopes email --scopes groups \
+  --group-claim-name groups \
+  --admin-group bakeai-admin
 ```
+
+`bakeai-admin` is the exact Pocket ID group name. Gitea grants site
+administrator access only when the verified `groups` claim contains that name;
+other Pocket ID users remain ordinary users. The source's `GroupClaimName` and
+`AdminGroup` values are serialized into the existing `login_source.cfg` database
+field. They do not need separate columns or a schema migration. Keep the
+`groups` scope when updating the source.
+
+To allow Pocket ID sign-in without a local registration or password form, first
+activate the authentication source, then set:
+
+```ini
+[service]
+DISABLE_REGISTRATION = false
+ALLOW_ONLY_EXTERNAL_REGISTRATION = true
+ENABLE_PASSWORD_SIGNIN_FORM = false
+SHOW_REGISTRATION_BUTTON = false
+
+[oauth2_client]
+ENABLE_AUTO_REGISTRATION = true
+```
+
+Gitea creates its internal user record on the first successful Pocket ID login.
+`DISABLE_REGISTRATION = true` would also block that first login.
 
 For an existing source, find its ID with `gitea admin auth list` and use
 `update-oauth --id <id>` with the same provider options. The ID is required so
