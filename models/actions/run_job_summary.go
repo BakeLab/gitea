@@ -135,7 +135,7 @@ func DeleteActionRunJobSummary(ctx context.Context, repoID, runID, runAttemptID,
 
 func upsertActionRunJobSummary(ctx context.Context, summary *ActionRunJobSummary) error {
 	engine := db.GetEngine(ctx)
-	columns := "`repo_id`, `run_id`, `run_attempt_id`, `job_id`, `step_index`, `content`, `content_type`, `content_size`, `created`, `updated`"
+	columns := "repo_id, run_id, run_attempt_id, job_id, step_index, content, content_type, content_size, created, updated"
 	values := []any{
 		summary.RepoID,
 		summary.RunID,
@@ -149,9 +149,11 @@ func upsertActionRunJobSummary(ctx context.Context, summary *ActionRunJobSummary
 		summary.Updated,
 	}
 
-	args := append([]any{"INSERT INTO `action_run_job_summary` (" + columns + ") VALUES (?,?,?,?,?,?,?,?,?,?) " +
-		"ON CONFLICT (`repo_id`, `run_id`, `run_attempt_id`, `job_id`, `step_index`) DO UPDATE SET " +
-		"`content` = excluded.`content`, `content_type` = excluded.`content_type`, `content_size` = excluded.`content_size`, `updated` = excluded.`updated"}, values...)
+	// Use unquoted identifiers so this shared PostgreSQL and SQLite-test statement
+	// does not rely on MySQL-only backtick syntax or qualified backtick parsing.
+	args := append([]any{"INSERT INTO action_run_job_summary (" + columns + ") VALUES (?,?,?,?,?,?,?,?,?,?) " +
+		"ON CONFLICT (repo_id, run_id, run_attempt_id, job_id, step_index) DO UPDATE SET " +
+		"content = excluded.content, content_type = excluded.content_type, content_size = excluded.content_size, updated = excluded.updated"}, values...)
 	_, err := engine.Exec(args...)
 	return err
 }

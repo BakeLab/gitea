@@ -1,0 +1,219 @@
+name: ci
+
+# Backend CI for the BakeLab fork, run by Gitea Actions on BB runners.
+# The private Breadboard SDK is fetched from the internal mirror with the job token.
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GOPRIVATE: github.com/BakeLab/breadboard
+
+jobs:
+  lint-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Install build tools
+        run: &build-tools sudo pacman -Syu --needed --noconfirm base-devel
+      - name: Use Breadboard mirror
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: &mirror |
+          repo="${GITHUB_SERVER_URL}/BakeLab/breadboard"
+          git config --global url."${repo}".insteadOf https://github.com/BakeLab/breadboard
+          git config --global http."${repo}".extraHeader "Authorization: Basic $(printf 'x-access-token:%s' "${GITEA_TOKEN:?}" | base64 -w0)"
+      - run: make deps-backend deps-tools
+      - run: TAGS="bindata" make generate-go lint-backend
+
+  checks-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Install build tools
+        run: *build-tools
+      - name: Use Breadboard mirror
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: *mirror
+      - run: make deps-backend deps-tools
+      - run: make --always-make checks-backend
+
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Install build tools
+        run: *build-tools
+      - name: Use Breadboard mirror
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: *mirror
+      - run: make deps-backend generate-go
+      # CGO is not used when cross-compiling, so these also check CGO-disabled builds.
+      - name: build-backend-arm64
+        run: go build -ldflags '-s -w' -o gitea-linux-arm64
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          TAGS: bindata
+      - name: build-backend-386
+        run: go build -ldflags '-s -w' -o gitea-linux-386
+        env:
+          GOOS: linux
+          GOARCH: 386
+      - run: ls -l gitea-*
+
+  test-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      elasticsearch:
+        image: elasticsearch:8.19.23@sha256:ef5cafd961d7e273f13fed8def82e63c5ae0491106b5eecb5a69aa12d64f089b
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: false
+          xpack.ml.enabled: false
+          ingest.geoip.downloader.enabled: false
+          ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+        ports:
+          - "9200:9200"
+      meilisearch:
+        image: getmeili/meilisearch:v1@sha256:1f578fa865f8251894b3bf38d6668d6209a3f451f8f65ab953e129d4c1db5ef4
+        env:
+          MEILI_ENV: development
+        ports:
+          - "7700:7700"
+      redis:
+        image: redis:8@sha256:298e5b3bc566bade82f46ad5511777a4a07a294097ce16ada2f6a42be5239df5
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - "6379:6379"
+      minio:
+        image: bitnamilegacy/minio:2025.7.23@sha256:8935e75fa5d11295c17171e4aa49efe390a1193cd7f12e4d21b92af9ffef09d7
+        env:
+          MINIO_ROOT_USER: 123456
+          MINIO_ROOT_PASSWORD: 12345678
+        ports:
+          - "9000:9000"
+      devstoreaccount1.azurite.local:
+        image: mcr.microsoft.com/azure-storage/azurite:latest@sha256:f9791d0a0613e93057c06ae31f7ac0c0222f0530590e67e020b0986c66a36fa6
+        ports:
+          - "10000:10000"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Install build tools
+        run: *build-tools
+      - name: Use Breadboard mirror
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: *mirror
+      - name: Add hosts to /etc/hosts
+        run: '[ -e "/.dockerenv" ] || [ -e "/run/.containerenv" ] || echo "127.0.0.1 minio devstoreaccount1.azurite.local elasticsearch meilisearch smtpimap" | sudo tee -a /etc/hosts'
+      - run: make deps-backend
+      - run: make generate-go
+        env:
+          TAGS: bindata
+      - run: make test-backend
+        env:
+          GOTEST_FLAGS: -race -timeout=40m
+          TAGS: bindata
+      - run: make test-check
+
+  test-pgsql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    services:
+      pgsql:
+        image: postgres:14@sha256:156f0b253fd61366d5fc2107ad45955027d5612f695a8436ce20167f3fa79bff
+        env:
+          POSTGRES_DB: test
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --mount type=tmpfs,destination=/var/lib/postgresql/data
+        ports:
+          - "5432:5432"
+      ldap:
+        image: gitea/test-openldap:latest@sha256:4ac633b01d684e6b2a458cc0c8530c92f9b3702f6e040ce5f365607df34fbda0
+        ports:
+          - "389:389"
+          - "636:636"
+      minio:
+        image: bitnamilegacy/minio:2025.7.23@sha256:8935e75fa5d11295c17171e4aa49efe390a1193cd7f12e4d21b92af9ffef09d7
+        env:
+          MINIO_ROOT_USER: 123456
+          MINIO_ROOT_PASSWORD: 12345678
+        ports:
+          - "9000:9000"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Install build tools
+        run: *build-tools
+      - name: Use Breadboard mirror
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: *mirror
+      - name: Add hosts to /etc/hosts
+        run: '[ -e "/.dockerenv" ] || [ -e "/run/.containerenv" ] || echo "127.0.0.1 pgsql ldap minio" | sudo tee -a /etc/hosts'
+      - run: make deps-backend
+      - run: make backend
+        env:
+          TAGS: bindata
+      - if: matrix.shard == 1
+        run: GITEA_TEST_DATABASE=pgsql make test-migration
+      - run: GITEA_TEST_DATABASE=pgsql make test-integration
+        env:
+          GOTEST_FLAGS: -race -timeout=70m
+          TAGS: bindata
+          TEST_LDAP: 1
+          TEST_SHARD: ${{ matrix.shard }}
+          TEST_TOTAL_SHARDS: 2

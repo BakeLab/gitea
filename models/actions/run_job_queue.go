@@ -67,10 +67,26 @@ func FindJobQueueJobs(ctx context.Context, opts JobQueueOptions, page, pageSize 
 	jobs := make([]*ActionRunJob, 0, pageSize)
 	return jobs, total, opts.session(ctx).
 		Cols("`action_run_job`.id", "`action_run_job`.repo_id", "`action_run_job`.name", "`action_run_job`.status", // skip the payload columns
-			"`action_run_job`.run_id", "`action_run_job`.runs_on", "`action_run_job`.updated", "`action_run_job`.started", "`action_run_job`.task_id").
+			"`action_run_job`.run_id", "`action_run_job`.job_id", "`action_run_job`.commit_sha", "`action_run_job`.run_attempt_id", "`action_run_job`.parent_job_id", "`action_run_job`.is_reusable_caller", "`action_run_job`.runs_on", "`action_run_job`.updated", "`action_run_job`.started", "`action_run_job`.task_id").
 		OrderBy(jobQueueOrderBy).
 		Limit(pageSize, (page-1)*pageSize).
 		Find(&jobs)
+}
+
+// FindWaitingJobsAfterID returns a keyset-paginated batch of unclaimed waiting jobs,
+// ordered by descending job ID. It is used by startup reconciliation so queue changes
+// caused by concurrent runner claims cannot shift offset-based pages.
+func FindWaitingJobsAfterID(ctx context.Context, afterID int64, limit int) ([]*ActionRunJob, error) {
+	sess := JobQueueOptions{Status: StatusWaiting}.session(ctx)
+	if afterID > 0 {
+		sess = sess.And(builder.Lt{"`action_run_job`.id": afterID})
+	}
+	jobs := make([]*ActionRunJob, 0, limit)
+	err := sess.Cols("`action_run_job`.id", "`action_run_job`.repo_id", "`action_run_job`.run_id", "`action_run_job`.runs_on").
+		OrderBy("`action_run_job`.id DESC").
+		Limit(limit).
+		Find(&jobs)
+	return jobs, err
 }
 
 // JobQueueFilterRepoIDs returns up to limit ids of the repositories with queued or running jobs.

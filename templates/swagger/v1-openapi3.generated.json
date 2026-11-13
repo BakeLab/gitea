@@ -11312,12 +11312,6 @@
       }
     },
     "securitySchemes": {
-      "AccessToken": {
-        "description": "This authentication option is deprecated for removal in Gitea 1.23. Please use AuthorizationHeaderToken instead.",
-        "in": "query",
-        "name": "access_token",
-        "type": "apiKey"
-      },
       "AuthorizationHeaderToken": {
         "description": "API tokens must be prepended with \"token\" followed by a space.",
         "in": "header",
@@ -11344,12 +11338,6 @@
         "description": "Must be used in combination with BasicAuth if two-factor authentication is enabled.",
         "in": "header",
         "name": "X-GITEA-OTP",
-        "type": "apiKey"
-      },
-      "Token": {
-        "description": "This authentication option is deprecated for removal in Gitea 1.23. Please use AuthorizationHeaderToken instead.",
-        "in": "query",
-        "name": "token",
         "type": "apiKey"
       }
     }
@@ -18435,6 +18423,9 @@
           "201": {
             "$ref": "#/components/responses/WorkflowJob"
           },
+          "204": {
+            "$ref": "#/components/responses/empty"
+          },
           "default": {
             "$ref": "#/components/responses/error"
           }
@@ -18527,6 +18518,9 @@
           "201": {
             "$ref": "#/components/responses/WorkflowRun"
           },
+          "204": {
+            "$ref": "#/components/responses/empty"
+          },
           "default": {
             "$ref": "#/components/responses/error"
           }
@@ -18571,6 +18565,9 @@
         ],
         "responses": {
           "201": {
+            "$ref": "#/components/responses/empty"
+          },
+          "204": {
             "$ref": "#/components/responses/empty"
           },
           "default": {
@@ -37324,12 +37321,6 @@
   "security": [
     {
       "BasicAuth": []
-    },
-    {
-      "Token": []
-    },
-    {
-      "AccessToken": []
     },
     {
       "AuthorizationHeaderToken": []

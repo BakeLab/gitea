@@ -3003,6 +3003,7 @@
   "admin.dashboard.sync_repo_branches": "将缺少的分支从 Git 数据同步到数据库",
   "admin.dashboard.sync_repo_tags": "从 Git 数据同步 Git 标签到数据库",
   "admin.dashboard.update_mirrors": "更新镜像仓库",
+  "admin.dashboard.sync_github_org_mirrors": "发现 GitHub 组织仓库并创建拉取镜像",
   "admin.dashboard.repo_health_check": "健康检查所有仓库",
   "admin.dashboard.check_repo_stats": "检查所有仓库统计",
   "admin.dashboard.archive_cleanup": "删除旧的仓库存档",

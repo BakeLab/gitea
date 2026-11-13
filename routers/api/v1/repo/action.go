@@ -1317,6 +1317,8 @@ func RerunWorkflowRun(ctx *context.APIContext) {
 	// responses:
 	//   "201":
 	//     "$ref": "#/responses/WorkflowRun"
+	//   "204":
+	//     "$ref": "#/responses/empty"
 	//   default:
 	//     "$ref": "#/responses/error"
 
@@ -1325,8 +1327,13 @@ func RerunWorkflowRun(ctx *context.APIContext) {
 		return
 	}
 
-	if _, err := actions_service.RerunWorkflowRunJobs(ctx, ctx.Repo.Repository, run, ctx.Doer, jobs); err != nil {
+	attempt, err := actions_service.RerunWorkflowRunJobs(ctx, ctx.Repo.Repository, run, ctx.Doer, jobs)
+	if err != nil {
 		ctx.APIErrorAuto(err)
+		return
+	}
+	if attempt == nil {
+		ctx.Status(http.StatusNoContent)
 		return
 	}
 
@@ -1362,6 +1369,8 @@ func RerunFailedWorkflowRun(ctx *context.APIContext) {
 	// responses:
 	//   "201":
 	//     "$ref": "#/responses/empty"
+	//   "204":
+	//     "$ref": "#/responses/empty"
 	//   default:
 	//     "$ref": "#/responses/error"
 
@@ -1373,12 +1382,30 @@ func RerunFailedWorkflowRun(ctx *context.APIContext) {
 	failedJobs := actions_service.GetFailedJobsForRerun(jobs)
 	// Empty failedJobs means no failed jobs to re-run
 	if len(failedJobs) == 0 {
+		expired, err := actions_service.IsWorkflowRunExpired(ctx, run)
+		if err != nil {
+			ctx.APIErrorInternal(err)
+			return
+		}
+		if expired {
+			if _, err := actions_service.RerunWorkflowRunJobs(ctx, ctx.Repo.Repository, run, ctx.Doer, nil); err != nil {
+				ctx.APIErrorAuto(err)
+				return
+			}
+			ctx.Status(http.StatusNoContent)
+			return
+		}
 		ctx.APIError(http.StatusBadRequest, "this workflow run has no failed jobs to re-run")
 		return
 	}
 
-	if _, err := actions_service.RerunWorkflowRunJobs(ctx, ctx.Repo.Repository, run, ctx.Doer, failedJobs); err != nil {
+	attempt, err := actions_service.RerunWorkflowRunJobs(ctx, ctx.Repo.Repository, run, ctx.Doer, failedJobs)
+	if err != nil {
 		ctx.APIErrorAuto(err)
+		return
+	}
+	if attempt == nil {
+		ctx.Status(http.StatusNoContent)
 		return
 	}
 
@@ -1416,6 +1443,8 @@ func RerunWorkflowJob(ctx *context.APIContext) {
 	// responses:
 	//   "201":
 	//     "$ref": "#/responses/WorkflowJob"
+	//   "204":
+	//     "$ref": "#/responses/empty"
 	//   default:
 	//     "$ref": "#/responses/error"
 
@@ -1427,6 +1456,15 @@ func RerunWorkflowJob(ctx *context.APIContext) {
 	jobID := ctx.PathParamInt64("job_id")
 	jobIdx := slices.IndexFunc(jobs, func(job *actions_model.ActionRunJob) bool { return job.ID == jobID })
 	if jobIdx == -1 {
+		expired, err := actions_service.IsWorkflowRunExpired(ctx, run)
+		if err != nil {
+			ctx.APIErrorInternal(err)
+			return
+		}
+		if expired {
+			ctx.Status(http.StatusNoContent)
+			return
+		}
 		ctx.APIErrorNotFound("workflow job not found")
 		return
 	}
@@ -1435,6 +1473,10 @@ func RerunWorkflowJob(ctx *context.APIContext) {
 	newAttempt, err := actions_service.RerunWorkflowRunJobs(ctx, ctx.Repo.Repository, run, ctx.Doer, []*actions_model.ActionRunJob{targetJob})
 	if err != nil {
 		ctx.APIErrorAuto(err)
+		return
+	}
+	if newAttempt == nil {
+		ctx.Status(http.StatusNoContent)
 		return
 	}
 
