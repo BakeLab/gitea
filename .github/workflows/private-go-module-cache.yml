@@ -40,17 +40,21 @@ jobs:
             -f description="Preparing the private Breadboard SDK cache" \
             -f target_url="$TARGET_URL"
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Fetch PR Go manifests as data
         if: github.event_name == 'pull_request_target'
-        with:
-          repository: ${{ github.repository }}
-          ref: refs/pull/${{ github.event.pull_request.number }}/merge
-          sparse-checkout: |
-            go.mod
-            go.sum
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-          path: pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p pr
+          for file in go.mod go.sum; do
+            gh api "repos/$REPOSITORY/contents/$file?ref=$MERGE_SHA" \
+              --jq 'if .type == "file" and .encoding == "base64" then .content else error("expected a regular file encoded as base64") end' \
+              | base64 --decode > "pr/$file"
+          done
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
