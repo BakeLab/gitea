@@ -99,16 +99,15 @@ Go dependencies are managed with [Go Modules](https://go.dev/ref/mod).
 
 ### Private Breadboard module
 
-The Go SDK at `github.com/BakeLab/breadboard/sdk/go` is private. CI fetches it in
-a `pull_request_target` prefetch workflow that reads only `go.mod` and `go.sum`,
-then stores the module in a version-keyed Actions cache. Ordinary pull-request
-jobs wait for that cache and never receive the GitHub App token. Configure the
-`BB_SDK_READ_APP_CLIENT_ID` repository variable and
-`BB_SDK_READ_APP_PRIVATE_KEY` repository secret in `BakeLab/gitea`. The App
-installation must be restricted to the `BakeLab/breadboard` repository with
-`Contents: read`; its short-lived installation token is revoked after the
-prefetch job. `GOPRIVATE` and `GONOSUMDB` keep the module path out of public Go
-proxy and checksum-database requests.
+The Go SDK at `github.com/BakeLab/breadboard/sdk/go` is private. CI fetches it
+from the `BakeLab/breadboard` Gitea mirror in a `pull_request_target` prefetch
+workflow that reads only `go.mod` and `go.sum`, then stores the module in a
+version-keyed Actions cache. Ordinary pull-request jobs wait for that cache and
+never receive the mirror credentials. Configure the `BB_SDK_GITEA_READ_USERNAME`
+repository variable and `BB_SDK_GITEA_READ_TOKEN` repository secret in
+`BakeLab/gitea`; use credentials with read-only access to the mirror. `GOPRIVATE`
+and `GONOSUMDB` keep the module path out of public Go proxy and checksum-database
+requests.
 
 Pull requests should only modify `go.mod` and `go.sum` where it relates to the
 change at hand, be it a bug fix or a new feature. Otherwise, these files should only
