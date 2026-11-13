@@ -55,4 +55,3 @@ jobs:
       - run: make playwright
       - run: make test-frontend
       - run: make frontend
-

@@ -1,7 +1,9 @@
 name: go-caches
-description: Restore the go module, build, and golangci-lint caches. Save only on the cache-seeder workflow.
+description: Restore Go module, build, and golangci-lint caches. Save standard caches only on cache-seeder.
 
-# Only the cache-seeder workflow saves; rename requires updating cache-seeder.yml.
+# Only cache-seeder saves the standard module, build, and lint caches; rename
+# requires updating cache-seeder.yml. The private module workflow seeds one
+# version-keyed Breadboard SDK cache.
 # The lint job restores but does not save the gobuild and gomod caches, so every key
 # has a single writer and there is no contention on it.
 # Seeder restores by exact key only (no restore-keys) so each go.sum seeds a clean
@@ -21,6 +23,17 @@ inputs:
 runs:
   using: composite
   steps:
+    - id: bb-sdk
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(go mod edit -json go.mod | jq -r '[.Require[]? | select(.Path == "github.com/BakeLab/breadboard/sdk/go") | .Version] | if length == 1 then .[0] else "" end')"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+    - if: ${{ steps.bb-sdk.outputs.version != '' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/go/pkg/mod
+        key: gomod-private-${{ runner.os }}-${{ runner.arch }}-${{ steps.bb-sdk.outputs.version }}
     - if: ${{ github.workflow == 'cache-seeder' && inputs.lint-cache != 'true' }}
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
