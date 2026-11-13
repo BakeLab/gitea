@@ -82,6 +82,8 @@ type bbExecutorProfile struct {
 	ExecUser string `json:"exec_user"`
 	Name     string `json:"name"`
 	Extends  string `json:"extends,omitempty"`
+	// SandboxInput overlays trusted resource fields from a workflow_dispatch input.
+	SandboxInput string `json:"sandbox_input,omitempty"`
 	// Repositories optionally limits this profile to exact owner/repository names.
 	Repositories []string       `json:"repositories,omitempty"`
 	Labels       []string       `json:"labels"`
@@ -191,6 +193,9 @@ func initBBExecutor(ctx context.Context) error {
 	for i, profile := range config.Profiles {
 		if profile.Name == "" || len(profile.Labels) == 0 || profile.Sandbox == nil {
 			return errors.New("BB executor profiles require name, labels and sandbox")
+		}
+		if profile.SandboxInput != "" && profile.SandboxInput != "config_json.sandbox" {
+			return fmt.Errorf("BB executor profile %q has unsupported sandbox_input %q", profile.Name, profile.SandboxInput)
 		}
 		if err := validateBBProfileRepositories(profile.Repositories); err != nil {
 			return fmt.Errorf("BB executor profile %q: %w", profile.Name, err)
@@ -315,6 +320,9 @@ func resolveBBProfileExtends(profiles []bbExecutorProfile) ([]bbExecutorProfile,
 		}
 		if child.ExecUser != "" {
 			merged.ExecUser = child.ExecUser
+		}
+		if child.SandboxInput != "" {
+			merged.SandboxInput = child.SandboxInput
 		}
 		if child.PackageSets != nil {
 			merged.PackageSets = slices.Clone(child.PackageSets)
@@ -788,7 +796,7 @@ func (config bbExecutorConfig) prepare(ctx context.Context, job *actions_model.A
 		}
 		namespace := sha256.Sum256([]byte(setting.AppURL))
 		row.Key = fmt.Sprintf("%x_%d", namespace[:8], row.ID)
-		request, err := config.taskRequest(row, profile)
+		request, err := config.taskRequest(ctx, row, job, profile)
 		if err != nil {
 			return err
 		}
@@ -820,7 +828,11 @@ func bbRunnerDownloadScript(runnerURL string) string {
 		"mv runner.tmp runner\n"
 }
 
-func (config bbExecutorConfig) taskRequest(row *actions_model.ActionBBTask, profile bbExecutorProfile) ([]byte, error) {
+func (config bbExecutorConfig) taskRequest(ctx context.Context, row *actions_model.ActionBBTask, job *actions_model.ActionRunJob, profile bbExecutorProfile) ([]byte, error) {
+	sandbox, err := config.sandboxForJob(ctx, job, profile)
+	if err != nil {
+		return nil, err
+	}
 	workdir, user, platform := "/opt/gitea-bb", "root", "Linux"
 	checksum := "sha256sum --check --status"
 	createDirectory := "mkdir -p "
@@ -841,7 +853,68 @@ func (config bbExecutorConfig) taskRequest(row *actions_model.ActionBBTask, prof
 		script += "export HOME=" + bbShellQuote(workdir) + "\n"
 	}
 	script += "cd " + bbShellQuote(workdir) + "\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\n" + bbRunnerDownloadScript(profile.RunnerURL) + "printf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | " + checksum + "\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
-	return json.Marshal(map[string]any{"sandbox": profile.Sandbox, "package_sets": profile.PackageSets, "max_duration_s": config.MaxDurationS, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": user, "timeout_s": config.MaxDurationS, "secrets": []string{bbSecretName(row)}}})
+	return json.Marshal(map[string]any{"sandbox": sandbox, "package_sets": profile.PackageSets, "max_duration_s": config.MaxDurationS, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": user, "timeout_s": config.MaxDurationS, "secrets": []string{bbSecretName(row)}}})
+}
+
+func (config bbExecutorConfig) sandboxForJob(ctx context.Context, job *actions_model.ActionRunJob, profile bbExecutorProfile) (map[string]any, error) {
+	sandbox := bbMergeSandbox(profile.Sandbox, nil)
+	if profile.SandboxInput == "" {
+		return sandbox, nil
+	}
+	if profile.SandboxInput != "config_json.sandbox" {
+		return nil, fmt.Errorf("BB executor profile %q has unsupported sandbox_input %q", profile.Name, profile.SandboxInput)
+	}
+	fullJob, err := actions_model.GetRunJobByRepoAndID(ctx, job.RepoID, job.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load workflow job %d for sandbox input: %w", job.ID, err)
+	}
+	run, err := actions_model.GetRunByRepoAndID(ctx, job.RepoID, job.RunID)
+	if err != nil {
+		return nil, fmt.Errorf("load workflow run %d for sandbox input: %w", job.RunID, err)
+	}
+	inputs, err := dispatchInputsForJob(run, fullJob)
+	if err != nil {
+		return nil, fmt.Errorf("load sandbox dispatch input for job %d: %w", job.ID, err)
+	}
+	rawConfig, ok := inputs["config_json"].(string)
+	if !ok || rawConfig == "" {
+		return nil, fmt.Errorf("workflow job %d requires config_json for its sandbox", job.ID)
+	}
+	var payload struct {
+		Sandbox map[string]any `json:"sandbox"`
+	}
+	if err := json.Unmarshal([]byte(rawConfig), &payload); err != nil || payload.Sandbox == nil {
+		return nil, fmt.Errorf("workflow job %d has invalid config_json sandbox", job.ID)
+	}
+	for _, key := range []string{"network", "fabric"} {
+		if value, exists := payload.Sandbox[key]; exists && value != sandbox[key] {
+			return nil, fmt.Errorf("workflow job %d sandbox %s conflicts with profile", job.ID, key)
+		}
+	}
+	resourceFields := map[string]bool{"cpu": true, "disk_mb": true, "accelerator": true, "node_name": true, "vfs_mounts": true, "vfs_exports": true}
+	resourceSpec := make(map[string]any, len(payload.Sandbox))
+	for key, value := range payload.Sandbox {
+		if key == "runtime" {
+			if value != sandbox[key] {
+				return nil, fmt.Errorf("workflow job %d sandbox runtime conflicts with profile", job.ID)
+			}
+			continue
+		}
+		if key == "network" || key == "fabric" {
+			continue
+		}
+		if !resourceFields[key] {
+			return nil, fmt.Errorf("workflow job %d sandbox input contains unsupported field %q", job.ID, key)
+		}
+		resourceSpec[key] = value
+	}
+	if _, ok := resourceSpec["cpu"]; !ok {
+		return nil, fmt.Errorf("workflow job %d sandbox input is missing cpu", job.ID)
+	}
+	if _, ok := resourceSpec["disk_mb"]; !ok {
+		return nil, fmt.Errorf("workflow job %d sandbox input is missing disk_mb", job.ID)
+	}
+	return bbMergeSandbox(sandbox, resourceSpec), nil
 }
 
 func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.ActionBBTask) error {
