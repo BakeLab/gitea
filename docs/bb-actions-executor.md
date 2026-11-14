@@ -217,12 +217,13 @@ global default for its BB task, command and runner timeout together. Omission
 inherits the parent profile's value, then falls back to the global default.
 Workflow `timeout-minutes` alone cannot extend the BB task lifetime.
 
-For TheRock's SDK build, provision a separate repository-scoped CPU-only profile
-with `rocm-sdk-build-only:host` in addition to `self-hosted:host`, `linux:host`,
-`x64:host`, `cpu:host` and `on-demand:host`. Set `repositories` to
-`["BakeLab/TheRock"]`, `max_duration_s` to `86400`, CPU memory to `65536` MiB,
-and disk to `512000` MiB. Pin `sandbox.node_name` to a verified znver4-compatible
-node with sufficient available host memory and disk. Reuse the CPU profile's
-runner and package sets; do not inherit an accelerator profile. A disk request
-is not evidence of free host storage. Configure this profile only after checking
-capacity and package OIDC grants; this example does not activate a build.
+For TheRock's SDK build, apply a 24-hour limit (`86400`) only to its trusted
+build configuration. Reuse the existing CPU, Linux and architecture labels;
+no SDK-specific runner label is needed. The build needs CPU memory of `65536`
+MiB and disk of `512000` MiB on a verified znver4-compatible node with sufficient
+available host capacity, without an accelerator runtime. A disk request does
+not establish free host storage.
+
+The current `capability_overlays` only compose accelerator requests. They do
+not configure memory, disk, CPU features or time limits. Scope any additional
+resource configuration to the SDK build; do not raise global CPU defaults.
