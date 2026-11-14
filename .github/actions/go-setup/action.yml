@@ -22,7 +22,7 @@ runs:
         go-version-file: go.mod
         check-latest: true
         cache: false
-    - if: ${{ inputs.wait-private-module-cache == 'true' && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
+    - if: ${{ inputs.wait-private-module-cache == 'true' && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/trim')) }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -42,7 +42,7 @@ runs:
             exit 0
           fi
           if [[ "$state" == "failure" || "$state" == "error" ]]; then
-            echo "::error::The trusted private-module prefetch failed; inspect the private-go-module-cache workflow and configure the BB SDK read-only App credentials."
+            echo "::error::The trusted private-module prefetch failed; inspect the private-go-module-cache workflow and configure BB_SDK_BOT_TOKEN."
             exit 1
           fi
           sleep 10
