@@ -34,8 +34,8 @@ github.com/Azure/go-ntlmssp v0.1.1 h1:l+FM/EEMb0U9QZE7mKNEDw5Mu3mFiaa2GKOoTSsNDP
 github.com/Azure/go-ntlmssp v0.1.1/go.mod h1:NYqdhxd/8aAct/s4qSYZEerdPuH1liG2/X9DiVTbhpk=
 github.com/AzureAD/microsoft-authentication-library-for-go v1.8.0 h1:Nljr4q1GRA/5vCrMONS+g4u4LRHNgOXVSh3O43J2CnI=
 github.com/AzureAD/microsoft-authentication-library-for-go v1.8.0/go.mod h1:Y33QHnf0FfdVewFFISOGe20mkZbxX4H839o955/PoeI=
-github.com/BakeLab/breadboard/sdk/go v0.0.0-20261110082713-7ac16eb1875f h1:TtD5EuTQRbsc/dqsbdGN3C7e+IZKUDK4L7aFy3smDug=
-github.com/BakeLab/breadboard/sdk/go v0.0.0-20261110082713-7ac16eb1875f/go.mod h1:lQZT1ObpkBo8kYhrVvdQnulT515iy1hxakTvXeUu9nk=
+github.com/BakeLab/breadboard/sdk/go v0.0.0-20261114095442-4b4aa79c03ea h1:Ne+PQ+Kt1ur1+BvGPItosIi/goEJD8Uz5XmAJ1QlNQY=
+github.com/BakeLab/breadboard/sdk/go v0.0.0-20261114095442-4b4aa79c03ea/go.mod h1:ye7H6zu6p5gmSG5obJGTk/E7GB7JMDe0fHzrQ57KN0c=
 github.com/Necoro/html2text v0.0.0-20250804200300-7bf1ce1c7347 h1:3JhDl+JysaO8nhNU1XMaw35VSGjV4IEQAefaG4Lyok4=
 github.com/Necoro/html2text v0.0.0-20250804200300-7bf1ce1c7347/go.mod h1:2ErI0aycD43Ufr6CFK5lT/NrHGmoZuVbn1nlPThw69o=
 github.com/ProtonMail/go-crypto v1.5.2 h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=
@@ -210,8 +210,8 @@ github.com/go-enry/go-enry/v2 v2.9.6 h1:np63eOtMV56zfYDHnFVgpEVOk8fr2kmylcMnAZUD
 github.com/go-enry/go-enry/v2 v2.9.6/go.mod h1:9yrj4ES1YrbNb1Wb7/PWYr2bpaCXUGRt0uafN0ISyG8=
 github.com/go-enry/go-oniguruma v1.2.1 h1:k8aAMuJfMrqm/56SG2lV9Cfti6tC4x8673aHCcBk+eo=
 github.com/go-enry/go-oniguruma v1.2.1/go.mod h1:bWDhYP+S6xZQgiRL7wlTScFYBe023B6ilRZbCAD5Hf4=
-github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
-github.com/go-jose/go-jose/v4 v4.1.4/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
+github.com/go-jose/go-jose/v4 v4.1.6 h1:sNRkftxFJxwsILiQukqp5z83QBSmntVwmgRY7AqBDO4=
+github.com/go-jose/go-jose/v4 v4.1.6/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
 github.com/go-ldap/ldap/v3 v3.4.15 h1:eRB4f4Ecn1POL1mO86+uUDlecmyWsdiJwh60bAUS4UY=
 github.com/go-ldap/ldap/v3 v3.4.15/go.mod h1:jeD0c98EdZQCKKKKe4kTWs5aCf6y+j8KuYsYLznZSQk=
 github.com/go-openapi/jsonpointer v0.23.1 h1:1HBACs7XIwR2RcmItfdSFlALhGbe6S92p0ry4d1GWg4=
