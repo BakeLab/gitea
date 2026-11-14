@@ -5,10 +5,12 @@ package actions
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	actions_model "gitea.dev/models/actions"
 	"gitea.dev/modules/json"
 
 	"github.com/stretchr/testify/assert"
@@ -159,4 +161,37 @@ func TestBBProfileExtends(t *testing.T) {
 		_, err := load(t, `[`+base+`,{"name":"arm","extends":"base","labels":["a:host"]},{"name":"arm","labels":["b:host"]}]`)
 		require.ErrorContains(t, err, "unique name")
 	})
+}
+
+func TestBBProfileDuration(t *testing.T) {
+	config := bbExecutorConfig{MaxDurationS: 3600}
+	profiles, err := resolveBBProfileExtends([]bbExecutorProfile{
+		{Name: "sdk", Labels: []string{"sdk:host"}, MaxDurationS: 86400},
+		{Name: "inherited", Extends: "sdk", Labels: []string{"inherited:host"}},
+		{Name: "override", Extends: "sdk", Labels: []string{"override:host"}, MaxDurationS: 7200},
+		{Name: "default"},
+	})
+	require.NoError(t, err)
+	for i, expected := range []int{86400, 86400, 7200, 3600} {
+		duration, err := config.profileDuration(profiles[i])
+		require.NoError(t, err)
+		assert.Equal(t, expected, duration)
+		request, err := config.taskRequest(context.Background(), &actions_model.ActionBBTask{Key: "test"}, nil, profiles[i])
+		require.NoError(t, err)
+		var payload struct {
+			MaxDurationS int `json:"max_duration_s"`
+			Exec         struct {
+				TimeoutS int      `json:"timeout_s"`
+				Cmd      []string `json:"cmd"`
+			} `json:"exec"`
+		}
+		require.NoError(t, json.Unmarshal(request, &payload))
+		assert.Equal(t, expected, payload.MaxDurationS)
+		assert.Equal(t, expected, payload.Exec.TimeoutS)
+		assert.Contains(t, payload.Exec.Cmd[2], fmt.Sprintf(`"timeout":"%ds"`, expected))
+	}
+	for _, invalid := range []int{-1, 59, 604801} {
+		_, err := config.taskRequest(context.Background(), &actions_model.ActionBBTask{}, nil, bbExecutorProfile{MaxDurationS: invalid})
+		require.ErrorContains(t, err, "max_duration_s")
+	}
 }

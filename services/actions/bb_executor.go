@@ -78,10 +78,11 @@ type bbExecutorProfileAuth struct {
 }
 
 type bbExecutorProfile struct {
-	Platform string `json:"platform"`
-	ExecUser string `json:"exec_user"`
-	Name     string `json:"name"`
-	Extends  string `json:"extends,omitempty"`
+	MaxDurationS int    `json:"max_duration_s,omitempty"`
+	Platform     string `json:"platform"`
+	ExecUser     string `json:"exec_user"`
+	Name         string `json:"name"`
+	Extends      string `json:"extends,omitempty"`
 	// SandboxInput overlays trusted resource fields from a workflow_dispatch input.
 	SandboxInput string `json:"sandbox_input,omitempty"`
 	// Repositories optionally limits this profile to exact owner/repository names.
@@ -193,6 +194,9 @@ func initBBExecutor(ctx context.Context) error {
 	for i, profile := range config.Profiles {
 		if profile.Name == "" || len(profile.Labels) == 0 || profile.Sandbox == nil {
 			return errors.New("BB executor profiles require name, labels and sandbox")
+		}
+		if _, err := config.profileDuration(profile); err != nil {
+			return err
 		}
 		if profile.SandboxInput != "" && profile.SandboxInput != "config_json.sandbox" {
 			return fmt.Errorf("BB executor profile %q has unsupported sandbox_input %q", profile.Name, profile.SandboxInput)
@@ -314,6 +318,9 @@ func resolveBBProfileExtends(profiles []bbExecutorProfile) ([]bbExecutorProfile,
 		}
 		if child.RunnerSHA256 != "" {
 			merged.RunnerSHA256 = child.RunnerSHA256
+		}
+		if child.MaxDurationS != 0 {
+			merged.MaxDurationS = child.MaxDurationS
 		}
 		if child.Platform != "" {
 			merged.Platform = child.Platform
@@ -828,7 +835,22 @@ func bbRunnerDownloadScript(runnerURL string) string {
 		"mv runner.tmp runner\n"
 }
 
+func (config bbExecutorConfig) profileDuration(profile bbExecutorProfile) (int, error) {
+	duration := config.MaxDurationS
+	if profile.MaxDurationS != 0 {
+		duration = profile.MaxDurationS
+	}
+	if duration < 60 || duration > 604800 {
+		return 0, fmt.Errorf("BB executor profile %q requires max_duration_s between 60 and 604800", profile.Name)
+	}
+	return duration, nil
+}
+
 func (config bbExecutorConfig) taskRequest(ctx context.Context, row *actions_model.ActionBBTask, job *actions_model.ActionRunJob, profile bbExecutorProfile) ([]byte, error) {
+	duration, err := config.profileDuration(profile)
+	if err != nil {
+		return nil, err
+	}
 	sandbox, err := config.sandboxForJob(ctx, job, profile)
 	if err != nil {
 		return nil, err
@@ -844,7 +866,7 @@ func (config bbExecutorConfig) taskRequest(ctx context.Context, row *actions_mod
 	if profile.ExecUser != "" {
 		user = profile.ExecUser
 	}
-	runnerConfig, err := json.Marshal(map[string]any{"runner": map[string]any{"file": workdir + "/.runner", "capacity": 1, "timeout": fmt.Sprintf("%ds", config.MaxDurationS)}, "container": map[string]any{"network": "host", "bind_workdir": true}, "host": map[string]any{"workdir_parent": workdir + "/work"}})
+	runnerConfig, err := json.Marshal(map[string]any{"runner": map[string]any{"file": workdir + "/.runner", "capacity": 1, "timeout": fmt.Sprintf("%ds", duration)}, "container": map[string]any{"network": "host", "bind_workdir": true}, "host": map[string]any{"workdir_parent": workdir + "/work"}})
 	if err != nil {
 		return nil, err
 	}
@@ -853,7 +875,7 @@ func (config bbExecutorConfig) taskRequest(ctx context.Context, row *actions_mod
 		script += "export HOME=" + bbShellQuote(workdir) + "\n"
 	}
 	script += "cd " + bbShellQuote(workdir) + "\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\n" + bbRunnerDownloadScript(profile.RunnerURL) + "printf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | " + checksum + "\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
-	return json.Marshal(map[string]any{"sandbox": sandbox, "package_sets": profile.PackageSets, "max_duration_s": config.MaxDurationS, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": user, "timeout_s": config.MaxDurationS, "secrets": []string{bbSecretName(row)}}})
+	return json.Marshal(map[string]any{"sandbox": sandbox, "package_sets": profile.PackageSets, "max_duration_s": duration, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": user, "timeout_s": duration, "secrets": []string{bbSecretName(row)}}})
 }
 
 func (config bbExecutorConfig) sandboxForJob(ctx context.Context, job *actions_model.ActionRunJob, profile bbExecutorProfile) (map[string]any, error) {

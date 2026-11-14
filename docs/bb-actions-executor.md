@@ -101,7 +101,7 @@ normal validation, which then runs on the resolved profile. Multi-level chains
 are allowed; an unknown or ambiguous parent, a cycle, or a child without a unique
 name is a load error. The child must define its own non-empty `labels` (labels
 are never inherited). `runner_url`, `runner_sha256`, `package_sets`, `platform`
-and `exec_user` replace the parent value when set. `repositories` optionally
+`max_duration_s` and `exec_user` replace the parent value when set. `repositories` optionally
 limits a profile to exact `owner/repository` names; a child value replaces the
 parent list, and an omitted value inherits it. This keeps repository-specific
 runner aliases from claiming similarly named labels in other repositories.
@@ -209,3 +209,20 @@ integrations: `BakeLab/intel-xpu-backend-for-triton` / `codeql.yml` and
 and workflow filename. A matching job is marked Skipped with the reason in its
 job summary before BB dispatch. These rules apply only to Gitea; the repositories'
 GitHub Actions workflows are unchanged.
+
+### Long CPU builds
+
+A trusted profile can set `max_duration_s` (60–604800 seconds) to override the
+global default for its BB task, command and runner timeout together. Omission
+inherits the parent profile's value, then falls back to the global default.
+Workflow `timeout-minutes` alone cannot extend the BB task lifetime.
+
+For TheRock's SDK build, provision a separate repository-scoped CPU-only profile
+with `rocm-sdk-build-only:host` in addition to `self-hosted:host`, `linux:host`,
+`x64:host`, `cpu:host` and `on-demand:host`. Set `repositories` to
+`["BakeLab/TheRock"]`, `max_duration_s` to `86400`, CPU memory to `65536` MiB,
+and disk to `512000` MiB. Pin `sandbox.node_name` to a verified znver4-compatible
+node with sufficient available host memory and disk. Reuse the CPU profile's
+runner and package sets; do not inherit an accelerator profile. A disk request
+is not evidence of free host storage. Configure this profile only after checking
+capacity and package OIDC grants; this example does not activate a build.
