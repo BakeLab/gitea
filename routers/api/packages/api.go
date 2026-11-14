@@ -43,7 +43,7 @@ import (
 
 func reqPackageAccess(accessMode perm.AccessMode) func(ctx *context.Context) {
 	return func(ctx *context.Context) {
-		if ctx.Data["genericOIDCUpload"] == true {
+		if ctx.Data["packageOIDCUpload"] == true {
 			return
 		}
 		if scope, ok := user_model.GetDoerTokenScope(ctx.Doer); ok {
@@ -98,7 +98,7 @@ func verifyAuth(r *web.Router, authMethods []auth.Method, opts verifyAuthOptions
 	authGroup := auth.NewGroup(authMethods...)
 
 	r.AfterRouting(func(ctx *context.Context) {
-		if authenticateGenericOIDC(ctx) {
+		if authenticatePackageOIDC(ctx) {
 			return
 		}
 		var err error
@@ -445,7 +445,7 @@ func CommonRoutes() *web.Router {
 			r.Post("/", reqPackageAccess(perm.AccessModeWrite), pypi.UploadPackageFile)
 			r.Get("/files/{id}/{version}/{filename}", pypi.DownloadPackageFile)
 			r.Get("/simple/{id}", pypi.PackageMetadata)
-		}, reqPackageAccess(perm.AccessModeRead))
+		}, reqPyPIPackageRead)
 
 		r.Methods("HEAD,GET", "/rpm.repo", reqPackageAccess(perm.AccessModeRead), rpm.GetRepositoryConfig)
 		r.PathGroup("/rpm/*", func(g *web.RouterPathGroup) {

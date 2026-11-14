@@ -16,7 +16,9 @@ var (
 		Storage                   *Storage
 		Enabled                   bool
 		AnonymousGenericDownloads []string `ini:"ANONYMOUS_GENERIC_DOWNLOADS"`
-		GenericOIDCUploadRules    []string `ini:"GENERIC_OIDC_UPLOAD_RULES"`
+		OIDCUploadRules           []string `ini:"OIDC_UPLOAD_RULES"`
+
+		AnonymousPyPIOwners []string `ini:"ANONYMOUS_PYPI_OWNERS"`
 
 		LimitTotalOwnerCount    int64
 		LimitTotalOwnerSize     int64
