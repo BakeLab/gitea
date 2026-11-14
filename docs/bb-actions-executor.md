@@ -101,7 +101,7 @@ normal validation, which then runs on the resolved profile. Multi-level chains
 are allowed; an unknown or ambiguous parent, a cycle, or a child without a unique
 name is a load error. The child must define its own non-empty `labels` (labels
 are never inherited). `runner_url`, `runner_sha256`, `package_sets`, `platform`
-and `exec_user` replace the parent value when set. `repositories` optionally
+`max_duration_s` and `exec_user` replace the parent value when set. `repositories` optionally
 limits a profile to exact `owner/repository` names; a child value replaces the
 parent list, and an omitted value inherits it. This keeps repository-specific
 runner aliases from claiming similarly named labels in other repositories.
@@ -209,3 +209,21 @@ integrations: `BakeLab/intel-xpu-backend-for-triton` / `codeql.yml` and
 and workflow filename. A matching job is marked Skipped with the reason in its
 job summary before BB dispatch. These rules apply only to Gitea; the repositories'
 GitHub Actions workflows are unchanged.
+
+### Long CPU builds
+
+A trusted profile can set `max_duration_s` (60–604800 seconds) to override the
+global default for its BB task, command and runner timeout together. Omission
+inherits the parent profile's value, then falls back to the global default.
+Workflow `timeout-minutes` alone cannot extend the BB task lifetime.
+
+For TheRock's SDK build, apply a 24-hour limit (`86400`) only to its trusted
+build configuration. Reuse the existing CPU, Linux and architecture labels;
+no SDK-specific runner label is needed. The build needs CPU memory of `65536`
+MiB and disk of `512000` MiB on a verified znver4-compatible node with sufficient
+available host capacity, without an accelerator runtime. A disk request does
+not establish free host storage.
+
+The current `capability_overlays` only compose accelerator requests. They do
+not configure memory, disk, CPU features or time limits. Scope any additional
+resource configuration to the SDK build; do not raise global CPU defaults.
