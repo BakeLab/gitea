@@ -111,16 +111,70 @@ func validateBBProfileRepositories(repositories []string) error {
 	return nil
 }
 
+func validateBBProfileJobScopes(profile bbExecutorProfile) error {
+	if len(profile.Workflows) > 0 && len(profile.Repositories) == 0 {
+		return errors.New("workflow scopes require repositories")
+	}
+	if len(profile.Jobs) > 0 && len(profile.Workflows) == 0 {
+		return errors.New("job scopes require workflows")
+	}
+	for _, values := range [][]string{profile.Workflows, profile.Jobs} {
+		seen := make(map[string]bool, len(values))
+		for _, value := range values {
+			if value == "" || value != strings.TrimSpace(value) || strings.ContainsAny(value, "*?[]\\/\t\r\n") || seen[value] {
+				return errors.New("workflow and job scopes require unique exact identifiers")
+			}
+			seen[value] = true
+		}
+	}
+	return nil
+}
+
 func (config bbExecutorConfig) matchingProfiles(job *actions_model.ActionRunJob, repository string) []int {
+	for _, profile := range config.Profiles {
+		if len(profile.Repositories) > 0 && repository == "" {
+			return nil
+		}
+		if len(profile.Workflows) > 0 && (job.Run == nil || job.Run.WorkflowID == "") {
+			return nil
+		}
+		if len(profile.Jobs) > 0 && job.JobID == "" {
+			return nil
+		}
+	}
 	var matching []int
+	bestScope := -1
 	for profileIndex, profile := range config.Profiles {
 		if len(profile.Repositories) > 0 && !slices.ContainsFunc(profile.Repositories, func(allowed string) bool {
 			return repository != "" && strings.EqualFold(allowed, repository)
 		}) {
 			continue
 		}
+		scope := 0
+		if len(profile.Repositories) > 0 {
+			scope++
+		}
+		if len(profile.Workflows) > 0 {
+			if job.Run == nil || !slices.Contains(profile.Workflows, job.Run.WorkflowID) {
+				continue
+			}
+			scope++
+		}
+		if len(profile.Jobs) > 0 {
+			if !slices.Contains(profile.Jobs, job.JobID) {
+				continue
+			}
+			scope++
+		}
 		runner := &actions_model.ActionRunner{AgentLabels: bbProfileRunnerLabels(profile)}
 		if runner.CanMatchLabels(job.RunsOn) {
+			if scope < bestScope {
+				continue
+			}
+			if scope > bestScope {
+				matching = matching[:0]
+				bestScope = scope
+			}
 			matching = append(matching, profileIndex)
 		}
 	}
@@ -137,7 +191,7 @@ func (config bbExecutorConfig) skipConfiguredUnsupportedJobs(ctx context.Context
 		if err != nil {
 			return err
 		}
-		repoNames, err := config.repositoryNamesForJobs(ctx, jobs)
+		repoNames, err := config.loadJobProfileScopes(ctx, jobs)
 		if err != nil {
 			return fmt.Errorf("load repositories for unsupported-label matching: %w", err)
 		}

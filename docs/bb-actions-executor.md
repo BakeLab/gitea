@@ -103,8 +103,11 @@ name is a load error. The child must define its own non-empty `labels` (labels
 are never inherited). `runner_url`, `runner_sha256`, `package_sets`, `platform`
 `max_duration_s` and `exec_user` replace the parent value when set. `repositories` optionally
 limits a profile to exact `owner/repository` names; a child value replaces the
-parent list, and an omitted value inherits it. This keeps repository-specific
-runner aliases from claiming similarly named labels in other repositories.
+parent list, and an omitted value inherits it. `workflows` narrows that repository scope to exact workflow filenames (for
+example `publish-sdk.yml`), and `jobs` narrows a workflow scope to YAML job IDs
+(for example `sdk`), including all matrix variants. These lists also inherit
+when omitted; explicit empty lists clear them. Workflow scopes require
+repositories, and job scopes require workflows. Wildcards are rejected.
 `sandbox` is deep-merged:
 child keys override, nested objects such as `cpu` merge by key, and lists such as
 `allowed_hosts` and `required_internal_services` are replaced.
@@ -120,12 +123,37 @@ child keys override, nested objects such as `cpu` merge by key, and lists such a
 }
 ```
 
-Profiles are considered in order. All job `runs-on` labels must match the label
+The most specific matching scope wins: repository/workflow/job, then
+repository/workflow, then repository, then unscoped. All candidates at the
+winning scope remain in configuration order. If they have no capacity, the job
+waits rather than falling back to a less constrained profile. Missing scope
+metadata prevents dispatch. This lets a repository use standard labels while
+its `sdk` job receives dedicated memory, disk and duration limits and its other
+jobs use the ordinary profile. All job `runs-on` labels must match the label
 names before `:host` or `:docker://IMAGE`. Give ARM64 profiles an ARM64 sandbox
 and an ARM64 runner binary. GPU profiles must explicitly request the appropriate
 BB accelerator and package sets. Do not alias unavailable hardware to another
 GPU class. Task requests use the BB sandbox API shape, so other immutable
 placement constraints are available inside `sandbox`.
+
+For example, a CPU-only SDK build can reuse normal labels without changing the
+resource limits of other jobs in the same workflow:
+
+```json
+{
+  "name": "therock-sdk",
+  "extends": "linux-ubuntu-latest",
+  "repositories": ["BakeLab/TheRock"],
+  "workflows": ["publish-sdk.yml"],
+  "jobs": ["sdk"],
+  "labels": ["self-hosted:host", "linux:host", "x64:host", "cpu:host", "on-demand:host"],
+  "max_duration_s": 86400,
+  "sandbox": {
+    "cpu": {"vcpus": 8, "memory_mb": 65536},
+    "disk_mb": 512000
+  }
+}
+```
 
 The dispatcher records the job, runner identity and immutable task request before
 submitting work. The runner identity is encrypted with Gitea's `SECRET_KEY` and
