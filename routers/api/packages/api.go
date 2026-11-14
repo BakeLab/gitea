@@ -43,6 +43,9 @@ import (
 
 func reqPackageAccess(accessMode perm.AccessMode) func(ctx *context.Context) {
 	return func(ctx *context.Context) {
+		if ctx.Data["packageOIDCUpload"] == true {
+			return
+		}
 		if scope, ok := user_model.GetDoerTokenScope(ctx.Doer); ok {
 			scopeMatched, err := scope.HasScope(auth_model.GetRequiredScopes(auth_model.GetScopeLevelFromAccessMode(accessMode), auth_model.AccessTokenScopeCategoryPackage)...)
 			if err != nil {
@@ -95,6 +98,9 @@ func verifyAuth(r *web.Router, authMethods []auth.Method, opts verifyAuthOptions
 	authGroup := auth.NewGroup(authMethods...)
 
 	r.AfterRouting(func(ctx *context.Context) {
+		if authenticatePackageOIDC(ctx) {
+			return
+		}
 		var err error
 		ctx.Doer, err = authGroup.Verify(ctx.Req, ctx.Resp, ctx, ctx.Session)
 		ctx.IsSigned = ctx.Doer != nil
@@ -439,7 +445,7 @@ func CommonRoutes() *web.Router {
 			r.Post("/", reqPackageAccess(perm.AccessModeWrite), pypi.UploadPackageFile)
 			r.Get("/files/{id}/{version}/{filename}", pypi.DownloadPackageFile)
 			r.Get("/simple/{id}", pypi.PackageMetadata)
-		}, reqPackageAccess(perm.AccessModeRead))
+		}, reqPyPIPackageRead)
 
 		r.Methods("HEAD,GET", "/rpm.repo", reqPackageAccess(perm.AccessModeRead), rpm.GetRepositoryConfig)
 		r.PathGroup("/rpm/*", func(g *web.RouterPathGroup) {
