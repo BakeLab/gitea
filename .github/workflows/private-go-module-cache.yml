@@ -2,14 +2,15 @@ name: private-go-module-cache
 
 on:
   # This workflow only sparse-checks PR go.mod/go.sum as data; it never checks
-  # out or executes PR code. The read-only Gitea token is confined to this job.
+  # out or executes PR code. The private SDK credential is confined to this job.
   pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, reopened, synchronize, ready_for_review]
     paths:
       - go.mod
       - go.sum
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches: [trim]
     paths:
       - go.mod
       - go.sum
@@ -40,41 +41,34 @@ jobs:
             -f description="Preparing the private Breadboard SDK cache" \
             -f target_url="$TARGET_URL"
 
-      - name: Fetch PR Go manifests as data
-        if: github.event_name == 'pull_request_target'
+      - name: Fetch Go manifests as data
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          MANIFEST_SHA: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
         run: |
           set -euo pipefail
           mkdir -p pr
           for file in go.mod go.sum; do
-            gh api "repos/$REPOSITORY/contents/$file?ref=$MERGE_SHA" \
+            gh api "repos/$REPOSITORY/contents/$file?ref=$MANIFEST_SHA" \
               --jq 'if .type == "file" and .encoding == "base64" then .content else error("expected a regular file encoded as base64") end' \
               | base64 --decode > "pr/$file"
           done
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: ${{ github.event_name == 'pull_request_target' && 'pr/go.mod' || 'go.mod' }}
+          go-version-file: pr/go.mod
           check-latest: true
           cache: false
 
       - name: Find the private Breadboard SDK requirement
         id: sdk
         shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          manifest=go.mod
-          sums=go.sum
-          if [[ "$EVENT_NAME" == "pull_request_target" ]]; then
-            manifest=pr/go.mod
-            sums=pr/go.sum
-          fi
+          manifest=pr/go.mod
+          sums=pr/go.sum
           if [[ ! -f "$manifest" || -L "$manifest" || ! -f "$sums" || -L "$sums" ]]; then
             echo "::error::The Go dependency manifests must be regular files."
             exit 1
@@ -105,24 +99,11 @@ jobs:
           path: ~/go/pkg/mod
           key: gomod-private-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.version }}
 
-      - name: Check Gitea mirror credentials
-        if: steps.sdk.outputs.required == 'true' && steps.module-cache.outputs.cache-hit != 'true'
-        shell: bash
-        env:
-          GITEA_USERNAME: ${{ vars.BB_SDK_GITEA_READ_USERNAME }}
-          GITEA_TOKEN: ${{ secrets.BB_SDK_GITEA_READ_TOKEN }}
-        run: |
-          if [[ -z "$GITEA_USERNAME" || -z "$GITEA_TOKEN" ]]; then
-            echo "::error::Configure repository variable BB_SDK_GITEA_READ_USERNAME and secret BB_SDK_GITEA_READ_TOKEN with read-only access to the BakeLab/breadboard Gitea mirror."
-            exit 1
-          fi
-
       - name: Prefetch the private module
         if: steps.sdk.outputs.required == 'true' && steps.module-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
-          GITEA_USERNAME: ${{ vars.BB_SDK_GITEA_READ_USERNAME }}
-          GITEA_TOKEN: ${{ secrets.BB_SDK_GITEA_READ_TOKEN }}
+          GH_TOKEN: ${{ secrets.BB_SDK_BOT_TOKEN }}
           VERSION: ${{ steps.sdk.outputs.version }}
           SUMS: ${{ steps.sdk.outputs.sums }}
         run: |
@@ -130,9 +111,11 @@ jobs:
           temp="$(mktemp -d)"
           export GIT_CONFIG_GLOBAL="$temp/gitconfig"
           trap 'rm -rf "$temp"' EXIT
-          auth="$(printf '%s:%s' "$GITEA_USERNAME" "$GITEA_TOKEN" | base64 -w0)"
-          git config --global http.https://gitea.int.bb.pub/.extraheader "AUTHORIZATION: basic $auth"
-          git config --global url.https://gitea.int.bb.pub/BakeLab/breadboard.git.insteadOf https://github.com/BakeLab/breadboard
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo '::error::Configure BB_SDK_BOT_TOKEN with read access to BakeLab/breadboard.'
+            exit 1
+          fi
+          gh auth setup-git
           cd "$temp"
           go mod init prefetch.invalid/gitea
           go mod edit -require="github.com/BakeLab/breadboard/sdk/go@$VERSION"
@@ -142,7 +125,7 @@ jobs:
             go mod download "github.com/BakeLab/breadboard/sdk/go@$VERSION"
 
   status:
-    if: always() && (github.event_name == 'pull_request_target' || github.event_name == 'push')
+    if: always()
     needs: prefetch
     runs-on: ubuntu-latest
     permissions:
