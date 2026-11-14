@@ -4,6 +4,7 @@
 package actions
 
 import (
+	"slices"
 	"testing"
 
 	actions_model "gitea.dev/models/actions"
@@ -76,6 +77,73 @@ func TestValidateBBProfileRepositories(t *testing.T) {
 	} {
 		if err := validateBBProfileRepositories(repositories); err == nil {
 			t.Fatalf("invalid repository scope accepted: %v", repositories)
+		}
+	}
+}
+
+func TestBBProfileSpecificScope(t *testing.T) {
+	config := bbExecutorConfig{Profiles: []bbExecutorProfile{
+		{Name: "base", Labels: []string{"cpu:host"}},
+		{Name: "repository", Labels: []string{"cpu:host"}, Repositories: []string{"BakeLab/TheRock"}},
+		{Name: "sdk", Labels: []string{"cpu:host"}, Repositories: []string{"BakeLab/TheRock"}, Workflows: []string{"publish-sdk.yml"}, Jobs: []string{"sdk"}},
+		{Name: "sdk-fallback", Labels: []string{"cpu:host"}, Repositories: []string{"BakeLab/TheRock"}, Workflows: []string{"publish-sdk.yml"}, Jobs: []string{"sdk"}},
+	}}
+	job := &actions_model.ActionRunJob{RunsOn: []string{"cpu"}, JobID: "sdk", Run: &actions_model.ActionRun{WorkflowID: "publish-sdk.yml"}}
+	check := func(repository string, expected ...int) {
+		t.Helper()
+		got := config.matchingProfiles(job, repository)
+		if !slices.Equal(got, expected) {
+			t.Fatalf("matchingProfiles(%q) = %v, want %v", repository, got, expected)
+		}
+	}
+	check("BakeLab/TheRock", 2, 3)
+	check("BakeLab/other", 0)
+	job.JobID = "runtimepack"
+	check("BakeLab/TheRock", 1)
+	job.JobID = "sdk"
+	job.Run.WorkflowID = "other.yml"
+	check("BakeLab/TheRock", 1)
+	check("")
+	job.Run = nil
+	check("BakeLab/TheRock")
+	job.Run = &actions_model.ActionRun{WorkflowID: "publish-sdk.yml"}
+	job.JobID = ""
+	check("BakeLab/TheRock")
+}
+
+func TestBBProfileJobScopeInheritance(t *testing.T) {
+	profiles, err := resolveBBProfileExtends([]bbExecutorProfile{
+		{Name: "sdk", Labels: []string{"cpu:host"}, Repositories: []string{"BakeLab/TheRock"}, Workflows: []string{"publish-sdk.yml"}, Jobs: []string{"sdk"}},
+		{Name: "inherited", Extends: "sdk", Labels: []string{"cpu:host"}},
+		{Name: "override", Extends: "sdk", Labels: []string{"cpu:host"}, Jobs: []string{"runtimepack"}},
+		{Name: "clear", Extends: "sdk", Labels: []string{"cpu:host"}, Jobs: []string{}, Workflows: []string{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(profiles[1].Workflows, profiles[0].Workflows) || !slices.Equal(profiles[1].Jobs, profiles[0].Jobs) {
+		t.Fatal("scope not inherited")
+	}
+	if !slices.Equal(profiles[2].Jobs, []string{"runtimepack"}) || len(profiles[3].Jobs) != 0 || len(profiles[3].Workflows) != 0 {
+		t.Fatal("scope override not applied")
+	}
+	profiles[1].Jobs[0] = "changed"
+	if profiles[0].Jobs[0] != "sdk" {
+		t.Fatal("inherited scope aliases parent")
+	}
+	for _, profile := range profiles {
+		if err := validateBBProfileJobScopes(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, profile := range []bbExecutorProfile{
+		{Workflows: []string{"a.yml"}},
+		{Repositories: []string{"BakeLab/TheRock"}, Jobs: []string{"sdk"}},
+		{Repositories: []string{"BakeLab/TheRock"}, Workflows: []string{"*.yml"}},
+		{Repositories: []string{"BakeLab/TheRock"}, Workflows: []string{"a.yml", "a.yml"}},
+	} {
+		if validateBBProfileJobScopes(profile) == nil {
+			t.Fatalf("invalid scope accepted: %+v", profile)
 		}
 	}
 }

@@ -87,6 +87,8 @@ type bbExecutorProfile struct {
 	SandboxInput string `json:"sandbox_input,omitempty"`
 	// Repositories optionally limits this profile to exact owner/repository names.
 	Repositories []string       `json:"repositories,omitempty"`
+	Workflows    []string       `json:"workflows,omitempty"`
+	Jobs         []string       `json:"jobs,omitempty"`
 	Labels       []string       `json:"labels"`
 	RunnerURL    string         `json:"runner_url"`
 	RunnerSHA256 string         `json:"runner_sha256"`
@@ -204,6 +206,9 @@ func initBBExecutor(ctx context.Context) error {
 		if err := validateBBProfileRepositories(profile.Repositories); err != nil {
 			return fmt.Errorf("BB executor profile %q: %w", profile.Name, err)
 		}
+		if err := validateBBProfileJobScopes(profile); err != nil {
+			return fmt.Errorf("BB executor profile %q: %w", profile.Name, err)
+		}
 		if profile.Platform != "" && profile.Platform != "linux" && profile.Platform != "darwin" {
 			return errors.New("BB executor platform must be linux or darwin")
 		}
@@ -313,6 +318,16 @@ func resolveBBProfileExtends(profiles []bbExecutorProfile) ([]bbExecutorProfile,
 		} else {
 			merged.Repositories = slices.Clone(merged.Repositories)
 		}
+		if child.Workflows != nil {
+			merged.Workflows = slices.Clone(child.Workflows)
+		} else {
+			merged.Workflows = slices.Clone(merged.Workflows)
+		}
+		if child.Jobs != nil {
+			merged.Jobs = slices.Clone(child.Jobs)
+		} else {
+			merged.Jobs = slices.Clone(merged.Jobs)
+		}
 		if child.RunnerURL != "" {
 			merged.RunnerURL = child.RunnerURL
 		}
@@ -350,7 +365,28 @@ func resolveBBProfileExtends(profiles []bbExecutorProfile) ([]bbExecutorProfile,
 	return profiles, nil
 }
 
-func (config bbExecutorConfig) repositoryNamesForJobs(ctx context.Context, jobs []*actions_model.ActionRunJob) (map[int64]string, error) {
+func (config bbExecutorConfig) loadJobProfileScopes(ctx context.Context, jobs []*actions_model.ActionRunJob) (map[int64]string, error) {
+	if slices.ContainsFunc(config.Profiles, func(profile bbExecutorProfile) bool { return len(profile.Workflows) > 0 }) && len(jobs) > 0 {
+		ids := make([]int64, 0, len(jobs))
+		for _, job := range jobs {
+			ids = append(ids, job.RunID)
+		}
+		var runs []*actions_model.ActionRun
+		if err := db.GetEngine(ctx).In("id", ids).Find(&runs); err != nil {
+			return nil, err
+		}
+		byID := make(map[int64]*actions_model.ActionRun, len(runs))
+		for _, run := range runs {
+			byID[run.ID] = run
+		}
+		for _, job := range jobs {
+			run := byID[job.RunID]
+			if run == nil || run.RepoID != job.RepoID {
+				return nil, fmt.Errorf("loadJobProfileScopes: missing matching run for job %d", job.ID)
+			}
+			job.Run = run
+		}
+	}
 	for _, profile := range config.Profiles {
 		if len(profile.Repositories) > 0 {
 			ids := make([]int64, 0, len(jobs))
@@ -629,7 +665,7 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		repoNames, err := config.repositoryNamesForJobs(ctx, jobs)
+		repoNames, err := config.loadJobProfileScopes(ctx, jobs)
 		if err != nil {
 			return fmt.Errorf("load repositories for BB profile matching: %w", err)
 		}
