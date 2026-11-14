@@ -1,0 +1,41 @@
+name: bb-sdk-depbot
+
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bb-sdk-depbot
+
+jobs:
+  bump:
+    if: github.repository == 'BakeLab/gitea'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check bot credentials
+        env:
+          BOT_TOKEN: ${{ secrets.BB_SDK_BOT_TOKEN }}
+        run: |
+          if [[ -z "$BOT_TOKEN" ]]; then
+            echo '::error::Set BB_SDK_BOT_TOKEN with read access to BakeLab/breadboard and contents/pull-request write access to BakeLab/gitea.'
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: trim
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Bump BB SDK and open a PR
+        env:
+          GH_TOKEN: ${{ secrets.BB_SDK_BOT_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          GOPRIVATE: github.com/BakeLab/breadboard
+        run: bash scripts/bb-sdk-depbot.sh
