@@ -138,6 +138,14 @@ func TestPackageGeneric(t *testing.T) {
 
 			req = NewRequest(t, "GET", url+"/dummy.bin")
 			MakeRequest(t, req, http.StatusUnauthorized)
+
+			defer test.MockVariableValue(&setting.Packages.AnonymousGenericDownloads, []string{user.Name + "/" + packageName})()
+			MakeRequest(t, NewRequest(t, "HEAD", url+"/dummy.bin"), http.StatusOK)
+			for _, method := range []string{"PUT", "DELETE"} {
+				MakeRequest(t, NewRequest(t, method, url+"/dummy.bin"), http.StatusUnauthorized)
+			}
+			MakeRequest(t, NewRequest(t, "DELETE", url), http.StatusUnauthorized)
+			MakeRequest(t, NewRequest(t, "HEAD", fmt.Sprintf("/api/packages/%s/generic/private-package/1/file", user.Name)), http.StatusUnauthorized)
 		})
 
 		t.Run("ServeDirect", func(t *testing.T) {
