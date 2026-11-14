@@ -38,4 +38,5 @@ jobs:
           GH_TOKEN: ${{ secrets.BB_SDK_BOT_TOKEN }}
           GH_REPO: ${{ github.repository }}
           GOPRIVATE: github.com/BakeLab/breadboard
+          GOTOOLCHAIN: auto
         run: bash scripts/bb-sdk-depbot.sh
