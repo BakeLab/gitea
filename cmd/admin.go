@@ -27,6 +27,7 @@ func newAdminCommand() *cli.Command {
 			newRegenerateCommand(),
 			newAuthCommand(),
 			newSendMailCommand(),
+			newBreadboardWheelCleanupCommand(),
 		},
 	}
 }
