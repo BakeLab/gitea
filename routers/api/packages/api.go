@@ -5,6 +5,7 @@ package packages
 
 import (
 	"net/http"
+	"strings"
 
 	auth_model "gitea.dev/models/auth"
 	"gitea.dev/models/perm"
@@ -61,6 +62,26 @@ func reqPackageAccess(accessMode perm.AccessMode) func(ctx *context.Context) {
 			return
 		}
 	}
+}
+
+func reqGenericPackageRead(ctx *context.Context) {
+	if ctx.Doer == nil && ctx.PathParam("filename") != "" && anonymousGenericDownloadAllowed(ctx.Req.Method, ctx.Package.Owner.LowerName, ctx.PathParam("packagename")) {
+		return
+	}
+	reqPackageAccess(perm.AccessModeRead)(ctx)
+}
+
+func anonymousGenericDownloadAllowed(method, owner, name string) bool {
+	if method != http.MethodGet && method != http.MethodHead {
+		return false
+	}
+	selector := strings.ToLower(owner + "/" + name)
+	for _, allowed := range setting.Packages.AnonymousGenericDownloads {
+		if strings.ToLower(strings.TrimSpace(allowed)) == selector {
+			return true
+		}
+	}
+	return false
 }
 
 type verifyAuthOptions struct {
@@ -326,7 +347,7 @@ func CommonRoutes() *web.Router {
 					}, reqPackageAccess(perm.AccessModeWrite))
 				})
 			})
-		}, reqPackageAccess(perm.AccessModeRead))
+		}, reqGenericPackageRead)
 		r.Group("/helm", func() {
 			r.Get("/index.yaml", helm.Index)
 			r.Get("/{filename}", helm.DownloadPackageFile)

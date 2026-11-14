@@ -13,8 +13,9 @@ import (
 // Package registry settings
 var (
 	Packages = struct {
-		Storage *Storage
-		Enabled bool
+		Storage                   *Storage
+		Enabled                   bool
+		AnonymousGenericDownloads []string `ini:"ANONYMOUS_GENERIC_DOWNLOADS"`
 
 		LimitTotalOwnerCount    int64
 		LimitTotalOwnerSize     int64
