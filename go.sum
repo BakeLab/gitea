@@ -34,8 +34,8 @@ github.com/Azure/go-ntlmssp v0.1.1 h1:l+FM/EEMb0U9QZE7mKNEDw5Mu3mFiaa2GKOoTSsNDP
 github.com/Azure/go-ntlmssp v0.1.1/go.mod h1:NYqdhxd/8aAct/s4qSYZEerdPuH1liG2/X9DiVTbhpk=
 github.com/AzureAD/microsoft-authentication-library-for-go v1.8.0 h1:Nljr4q1GRA/5vCrMONS+g4u4LRHNgOXVSh3O43J2CnI=
 github.com/AzureAD/microsoft-authentication-library-for-go v1.8.0/go.mod h1:Y33QHnf0FfdVewFFISOGe20mkZbxX4H839o955/PoeI=
-github.com/BakeLab/breadboard/sdk/go v0.0.0-20261114095442-4b4aa79c03ea h1:Ne+PQ+Kt1ur1+BvGPItosIi/goEJD8Uz5XmAJ1QlNQY=
-github.com/BakeLab/breadboard/sdk/go v0.0.0-20261114095442-4b4aa79c03ea/go.mod h1:ye7H6zu6p5gmSG5obJGTk/E7GB7JMDe0fHzrQ57KN0c=
+github.com/BakeLab/breadboard/sdk/go v0.0.0-20261114105408-0053f1a8b036 h1:yTEZeXoeH9NDa2LeTM2gOD6uajmh2iMRwHTS6q6J+1I=
+github.com/BakeLab/breadboard/sdk/go v0.0.0-20261114105408-0053f1a8b036/go.mod h1:ye7H6zu6p5gmSG5obJGTk/E7GB7JMDe0fHzrQ57KN0c=
 github.com/Necoro/html2text v0.0.0-20250804200300-7bf1ce1c7347 h1:3JhDl+JysaO8nhNU1XMaw35VSGjV4IEQAefaG4Lyok4=
 github.com/Necoro/html2text v0.0.0-20250804200300-7bf1ce1c7347/go.mod h1:2ErI0aycD43Ufr6CFK5lT/NrHGmoZuVbn1nlPThw69o=
 github.com/ProtonMail/go-crypto v1.5.2 h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=
