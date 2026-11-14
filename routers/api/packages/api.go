@@ -43,6 +43,9 @@ import (
 
 func reqPackageAccess(accessMode perm.AccessMode) func(ctx *context.Context) {
 	return func(ctx *context.Context) {
+		if ctx.Data["genericOIDCUpload"] == true {
+			return
+		}
 		if scope, ok := user_model.GetDoerTokenScope(ctx.Doer); ok {
 			scopeMatched, err := scope.HasScope(auth_model.GetRequiredScopes(auth_model.GetScopeLevelFromAccessMode(accessMode), auth_model.AccessTokenScopeCategoryPackage)...)
 			if err != nil {
@@ -95,6 +98,9 @@ func verifyAuth(r *web.Router, authMethods []auth.Method, opts verifyAuthOptions
 	authGroup := auth.NewGroup(authMethods...)
 
 	r.AfterRouting(func(ctx *context.Context) {
+		if authenticateGenericOIDC(ctx) {
+			return
+		}
 		var err error
 		ctx.Doer, err = authGroup.Verify(ctx.Req, ctx.Resp, ctx, ctx.Session)
 		ctx.IsSigned = ctx.Doer != nil
