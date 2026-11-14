@@ -11,7 +11,7 @@ require (
 	github.com/42wim/httpsig v1.3.0
 	github.com/42wim/sshsig v0.0.0-20260317195500-b9f38cf0d432
 	github.com/Azure/go-ntlmssp v0.1.1
-	github.com/BakeLab/breadboard/sdk/go v0.0.0-20261114095442-4b4aa79c03ea
+	github.com/BakeLab/breadboard/sdk/go v0.0.0-20261114105408-0053f1a8b036
 	github.com/Necoro/html2text v0.0.0-20250804200300-7bf1ce1c7347
 	github.com/ProtonMail/go-crypto v1.5.2
 	github.com/PuerkitoBio/goquery v1.13.0
