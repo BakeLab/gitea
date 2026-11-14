@@ -60,6 +60,6 @@ func runConfigureBreadboardWheelCleanup(ctx context.Context, c *cli.Command) err
 	if err != nil {
 		return fmt.Errorf("runConfigureBreadboardWheelCleanup: %w", err)
 	}
-	fmt.Printf("Created PyPI cleanup rule for %s/breadboard: keep 10 versions and all versions younger than 30 days; enabled=%t\n", owner.Name, c.Bool("enable"))
+	fmt.Fprintf(c.Writer, "Created PyPI cleanup rule for %s/breadboard: keep 10 versions and all versions younger than 30 days; enabled=%t\n", owner.Name, c.Bool("enable"))
 	return nil
 }
