@@ -25,6 +25,7 @@ jobs:
   prefetch:
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: read
       statuses: write
     steps:
