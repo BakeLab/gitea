@@ -663,6 +663,7 @@ func TestOAuthLoginOpensAuthorizationURLInBrowser(t *testing.T) {
 			require.Equal(t, http.StatusOK, callback.StatusCode)
 			_ = callback.Body.Close()
 			require.NoError(t, <-done)
+			require.Contains(t, diagnostics.String(), "OAuth authorization completed for "+server.URL+" as alice; credential saved successfully (OAuth, file store)")
 			if tty {
 				require.Contains(t, diagnostics.String(), "Opening "+resource+" in your browser.", "the whole URL, which people can copy")
 			} else {
@@ -676,6 +677,75 @@ func TestOAuthLoginOpensAuthorizationURLInBrowser(t *testing.T) {
 			require.Contains(t, snapshot.Hosts.Hosts[normalized].Users, "alice")
 		})
 	}
+}
+
+type unpersistedKeyring struct{}
+
+func (unpersistedKeyring) Get(string, string) (string, error) { return "", errors.New("entry missing") }
+func (unpersistedKeyring) Set(string, string, string) error   { return nil }
+func (unpersistedKeyring) Delete(string, string) error        { return nil }
+
+func TestOAuthLoginReportsCredentialPersistenceFailure(t *testing.T) {
+	opened := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login/oauth/access_token":
+			require.NoError(t, r.ParseForm())
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "access", "token_type": "Bearer"})
+		case "/api/v1/version":
+			_, _ = w.Write([]byte(`{"version":"1.25.0"}`))
+		case "/api/v1/user":
+			require.Equal(t, "token access", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	deps, _, _ := testDeps(t)
+	deps.Browser = &channelBrowser{opened: opened}
+	deps.Credentials = &auth.Store{Dir: deps.Settings.Dir, Keyring: unpersistedKeyring{}}
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	deps.Client = func(instance, token string, insecure bool) *transport.Client {
+		client := transport.New(instance, token, insecure)
+		client.HTTP = server.Client()
+		return client
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Execute(ctx, deps, []string{"auth", "login", "--host", server.URL, "--oauth", "--client-id", "test-client", "--yes"})
+	}()
+
+	var authorizationURL string
+	select {
+	case authorizationURL = <-opened:
+	case <-time.After(3 * time.Second):
+		t.Fatal("browser was not opened")
+	}
+	u, err := url.Parse(authorizationURL)
+	require.NoError(t, err)
+	callbackURL := u.Query().Get("redirect_uri")
+	state := u.Query().Get("state")
+	require.NotEmpty(t, callbackURL)
+	require.NotEmpty(t, state)
+	callback, err := http.Get(callbackURL + "?code=valid-code&state=" + url.QueryEscape(state))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, callback.StatusCode)
+	_ = callback.Body.Close()
+	err = <-done
+	require.ErrorContains(t, err, "OAuth authorization completed, but credentials could not be saved or registered")
+	require.ErrorContains(t, err, "secure credential storage write could not be verified")
+	snapshot, err := deps.Settings.Load()
+	require.NoError(t, err)
+	normalized, err := settings.NormalizeHost(server.URL)
+	require.NoError(t, err)
+	require.NotContains(t, snapshot.Hosts.Hosts[normalized].Users, "alice")
 }
 
 func TestOAuthLoginChecksTheInstanceBeforeOpeningTheBrowser(t *testing.T) {

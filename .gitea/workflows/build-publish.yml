@@ -1,0 +1,80 @@
+name: build-publish
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            tag: manylinux_2_28_x86_64
+          - goos: linux
+            goarch: arm64
+            tag: manylinux_2_28_aarch64
+          - goos: darwin
+            goarch: arm64
+            tag: macosx_13_0_arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: astral-sh/setup-uv@v6
+      - name: Verify pinned upstream base
+        run: |
+          set -euo pipefail
+          upstream=$(cat UPSTREAM_COMMIT)
+          test "$upstream" = "2fb208e88ed4c8f64478f585dec868d0b08fc90d07c3bb42e6737420f4f5d8bf"
+          git cat-file -e "$upstream^{commit}"
+          git merge-base --is-ancestor "$upstream" HEAD
+      - name: Build binary and wheel
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          commit=$(git rev-parse HEAD)
+          revision=$((GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT))
+          version="1.2.0.dev${revision}+bakeai.g${commit:0:12}"
+          mkdir -p dist/bin dist/wheels
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -X gitea.dev/cli/internal/version.Version=${version}" \
+            -o dist/bin/gt ./cmd/gt
+          python3 packaging/build_wheel.py \
+            --binary dist/bin/gt --version "$version" --commit "$commit" \
+            --tag '${{ matrix.tag }}' --output dist/wheels
+      - name: Check wheel contents
+        run: |
+          python3 - <<'PY'
+          import glob, zipfile
+          paths = glob.glob('dist/wheels/*.whl')
+          assert len(paths) == 1, paths
+          with zipfile.ZipFile(paths[0]) as z:
+              assert any(p.endswith('.data/scripts/gt') for p in z.namelist())
+              assert any(p.endswith('share/bakelab-gt/build.json') for p in z.namelist())
+          PY
+      - name: Publish wheel to private PyPI
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.BAKEAI_PYPI_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$UV_PUBLISH_TOKEN" ]; then
+            echo 'BAKEAI_PYPI_UPLOAD_TOKEN Gitea Actions secret is required to publish wheels.' >&2
+            exit 1
+          fi
+          uv publish --publish-url https://pypi.int.bb.pub/bakeai/dev/ dist/wheels/*.whl

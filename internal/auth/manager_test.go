@@ -17,8 +17,10 @@ import (
 )
 
 type memoryKeyring struct {
-	values map[string]string
-	fail   bool
+	values     map[string]string
+	fail       bool
+	dropSet    bool
+	wrongValue bool
 }
 
 func (m *memoryKeyring) Get(_, k string) (string, error) {
@@ -29,12 +31,18 @@ func (m *memoryKeyring) Get(_, k string) (string, error) {
 	if !ok {
 		return "", keyring.ErrNotFound
 	}
+	if m.wrongValue {
+		return "different credential", nil
+	}
 	return value, nil
 }
 
 func (m *memoryKeyring) Set(_, k, v string) error {
 	if m.fail {
 		return errors.New("unavailable")
+	}
+	if m.dropSet {
+		return nil
 	}
 	m.values[k] = v
 	return nil
@@ -108,6 +116,23 @@ func TestNoSilentCredentialFallback(t *testing.T) {
 	credential, err := credentials.Load("https://example.org", "alice", "file")
 	require.NoError(t, err)
 	require.Equal(t, "secret", credential.AccessToken)
+}
+
+func TestCredentialStoreVerifiesKeyringWrites(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		keyring *memoryKeyring
+	}{
+		{name: "write is not persisted", keyring: &memoryKeyring{values: map[string]string{}, dropSet: true}},
+		{name: "read returns another value", keyring: &memoryKeyring{values: map[string]string{}, wrongValue: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &Store{Dir: t.TempDir(), Keyring: tc.keyring}
+			err := store.Save("https://example.org", "alice", settings.StoreKeyring, Credential{AccessToken: "never-print-this"})
+			require.ErrorContains(t, err, "secure credential storage write could not be verified")
+			require.NotContains(t, err.Error(), "never-print-this")
+		})
+	}
 }
 
 func TestCredentialLoadDistinguishesMissingFromUnavailable(t *testing.T) {

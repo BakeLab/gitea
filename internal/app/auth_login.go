@@ -246,9 +246,16 @@ $ gt auth login --host gitea.example.com --with-token --header 'CF-Access-Client
 			account := settings.Account{AuthMethod: method, CredentialStore: answers.Store}
 			hostOptions.OAuthClientID = clientID
 			if err := manager.Register(instance, user, answers.Store, method, hostOptions, credential); err != nil {
+				if method == settings.AuthOAuth {
+					return fmt.Errorf("OAuth authorization completed, but credentials could not be saved or registered: %w", err)
+				}
 				return err
 			}
-			a.done(cmd, "Logged in to %s as %s (%s)", instance, user, credentialLabel(account))
+			if method == settings.AuthOAuth {
+				a.feedback(cmd, "✓", "green", "OAuth authorization completed for %s as %s; credential saved successfully (%s)", instance, user, credentialLabel(account))
+			} else {
+				a.done(cmd, "Logged in to %s as %s (%s)", instance, user, credentialLabel(account))
+			}
 			a.defaultToFirstInstance(cmd, instance)
 			if interactive && answers.SetupGit {
 				if err := a.setupGit(cmd, instance, false, false); err != nil {

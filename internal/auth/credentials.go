@@ -117,8 +117,16 @@ func (s *Store) Save(instance, user, backend string, credential Credential) erro
 		if s.Keyring == nil {
 			return errNoKeyring
 		}
-		if err := s.Keyring.Set(keyringService, Identity(instance, user), string(data)); err != nil {
+		identity := Identity(instance, user)
+		if err := s.Keyring.Set(keyringService, identity, string(data)); err != nil {
 			return fmt.Errorf("secure credential storage unavailable; use --credential-store file only if you accept private file storage: %w", err)
+		}
+		stored, err := s.Keyring.Get(keyringService, identity)
+		if err != nil {
+			return fmt.Errorf("secure credential storage write could not be verified: %w", err)
+		}
+		if stored != string(data) {
+			return errors.New("secure credential storage write could not be verified: stored value differs")
 		}
 		return nil
 	case settings.StoreFile:
