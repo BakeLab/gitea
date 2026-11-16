@@ -88,29 +88,7 @@ func AddActionsCrossRepoPermission(ctx *context.APIContext) {
 	//   default:
 	//     "$ref": "#/responses/error"
 
-	repo, err := repo_model.GetRepositoryByName(ctx, ctx.Org.Organization.ID, ctx.PathParam("repo"))
-	if err != nil {
-		if repo_model.IsErrRepoNotExist(err) {
-			ctx.APIErrorNotFound()
-		} else {
-			ctx.APIErrorInternal(err)
-		}
-		return
-	}
-
-	cfg, err := actions_model.GetOwnerActionsConfig(ctx, ctx.Org.Organization.ID)
-	if err != nil {
-		ctx.APIErrorInternal(err)
-		return
-	}
-	if !slices.Contains(cfg.AllowedCrossRepoIDs, repo.ID) {
-		cfg.AllowedCrossRepoIDs = append(cfg.AllowedCrossRepoIDs, repo.ID)
-		if err := actions_model.SetOwnerActionsConfig(ctx, ctx.Org.Organization.ID, cfg); err != nil {
-			ctx.APIErrorInternal(err)
-			return
-		}
-	}
-	ctx.Status(http.StatusNoContent)
+	updateActionsCrossRepoPermission(ctx, true)
 }
 
 // RemoveActionsCrossRepoPermission removes an organization's repository from Actions token access.
@@ -137,6 +115,10 @@ func RemoveActionsCrossRepoPermission(ctx *context.APIContext) {
 	//   default:
 	//     "$ref": "#/responses/error"
 
+	updateActionsCrossRepoPermission(ctx, false)
+}
+
+func updateActionsCrossRepoPermission(ctx *context.APIContext, allowed bool) {
 	repo, err := repo_model.GetRepositoryByName(ctx, ctx.Org.Organization.ID, ctx.PathParam("repo"))
 	if err != nil {
 		if repo_model.IsErrRepoNotExist(err) {
@@ -152,8 +134,12 @@ func RemoveActionsCrossRepoPermission(ctx *context.APIContext) {
 		ctx.APIErrorInternal(err)
 		return
 	}
-	if slices.Contains(cfg.AllowedCrossRepoIDs, repo.ID) {
-		cfg.AllowedCrossRepoIDs = slices.DeleteFunc(cfg.AllowedCrossRepoIDs, func(id int64) bool { return id == repo.ID })
+	if slices.Contains(cfg.AllowedCrossRepoIDs, repo.ID) != allowed {
+		if allowed {
+			cfg.AllowedCrossRepoIDs = append(cfg.AllowedCrossRepoIDs, repo.ID)
+		} else {
+			cfg.AllowedCrossRepoIDs = slices.DeleteFunc(cfg.AllowedCrossRepoIDs, func(id int64) bool { return id == repo.ID })
+		}
 		if err := actions_model.SetOwnerActionsConfig(ctx, ctx.Org.Organization.ID, cfg); err != nil {
 			ctx.APIErrorInternal(err)
 			return
