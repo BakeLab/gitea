@@ -35,7 +35,6 @@ the project, token record path and SHA-256):
     "token_file": "/etc/gitea/bb-profile/token.json"
   },
   "max_concurrent": 4,
-  "auto_concurrency": true,
   "max_duration_s": 25200,
   "profiles": [{
     "name": "linux-amd64",
@@ -55,16 +54,11 @@ the project, token record path and SHA-256):
 }
 ```
 
-`max_concurrent` is always the hard upper limit across all BB-managed jobs.
-With `auto_concurrency` omitted or false, dispatch retains the fixed limit and
-does not query BB capacity. When enabled, Gitea asks
-`POST /v1/scheduler/capacity` for each profile's exact `sandbox` spec and uses
-the returned `schedulable` count as that profile's additional admission limit.
-The endpoint must return `schedulable`, `max_count` and `as_of_ms`; project
-scope comes from the configured `X-Breadboard-Project` header. Capacity checks
-are read-only and do not reserve resources. If any profile query fails or
-returns invalid data, the dispatcher starts no new BB tasks during that
-reconciliation; already active tasks continue to be reconciled normally.
+`max_concurrent` is the hard Gitea-side limit across all BB-managed jobs.
+Gitea creates a task request for each matching waiting job under this limit;
+BB persists the request and its scheduler queues or places it as resources
+become available. Gitea does not preflight `/v1/scheduler/capacity`, so temporary
+BB capacity shortages do not prevent task requests from being recorded.
 
 `profile_auth.token_file` uses the BB CLI token-record format (`access_token`,
 `refresh_token`, `expires_at` as a Unix timestamp). Provision the already
@@ -181,8 +175,11 @@ missing labels do not match. The dispatcher skips a configured job only when no
 BB profile matches and no online, enabled Gitea runner can claim it. The skipped
 job gets a summary with the labels and reason. Runner lookup or database errors
 fail open and leave the job queued. A matching profile with zero current
-schedulable capacity also stays queued. Unconfigured labels always remain
-queued, so profile omissions are not silently treated as unsupported hardware.
+BB capacity is still submitted as a BB task request while it is under the
+Gitea `max_concurrent` limit; BB queues the request until resources are
+available. Jobs deferred by the Gitea-side concurrency limit are logged with
+their job ID and current limit. Unconfigured labels always remain queued, so
+profile omissions are not silently treated as unsupported hardware.
 
 Each managed runner is bound to exactly one job. Concurrent ordinary runners may
 claim a waiting job first; the dispatcher then cancels its unused BB task.
