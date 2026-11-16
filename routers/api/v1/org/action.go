@@ -6,9 +6,11 @@ package org
 import (
 	"errors"
 	"net/http"
+	"slices"
 
 	actions_model "gitea.dev/models/actions"
 	"gitea.dev/models/db"
+	repo_model "gitea.dev/models/repo"
 	secret_model "gitea.dev/models/secret"
 	api "gitea.dev/modules/structs"
 	"gitea.dev/modules/util"
@@ -20,6 +22,131 @@ import (
 	"gitea.dev/services/context"
 	secret_service "gitea.dev/services/secrets"
 )
+
+// GetActionsCrossRepoPermissions returns the private repositories accessible to organization Actions tokens.
+func GetActionsCrossRepoPermissions(ctx *context.APIContext) {
+	// swagger:operation GET /orgs/{org}/actions/permissions organization orgGetActionsCrossRepoPermissions
+	// ---
+	// summary: List private repositories accessible to the organization's Actions tokens
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: org
+	//   in: path
+	//   description: name of the organization
+	//   type: string
+	//   required: true
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/ActionsCrossRepositoryPermissions"
+	//   default:
+	//     "$ref": "#/responses/error"
+
+	cfg, err := actions_model.GetOwnerActionsConfig(ctx, ctx.Org.Organization.ID)
+	if err != nil {
+		ctx.APIErrorInternal(err)
+		return
+	}
+
+	repos, err := repo_model.GetOwnerRepositoriesByIDs(ctx, ctx.Org.Organization.ID, cfg.AllowedCrossRepoIDs)
+	if err != nil {
+		ctx.APIErrorInternal(err)
+		return
+	}
+
+	response := api.ActionsCrossRepositoryPermissions{
+		AllowedRepositories: make([]string, len(repos)),
+	}
+	for i, repo := range repos {
+		response.AllowedRepositories[i] = repo.FullName()
+	}
+	slices.Sort(response.AllowedRepositories)
+	ctx.JSON(http.StatusOK, response)
+}
+
+// AddActionsCrossRepoPermission allows an organization Actions token to read one of its repositories.
+func AddActionsCrossRepoPermission(ctx *context.APIContext) {
+	// swagger:operation PUT /orgs/{org}/actions/permissions/repositories/{repo} organization orgAddActionsCrossRepoPermission
+	// ---
+	// summary: Allow organization Actions tokens to read one of the organization's repositories
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: org
+	//   in: path
+	//   description: name of the organization
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: repository name
+	//   type: string
+	//   required: true
+	// responses:
+	//   "204":
+	//     description: repository access was allowed
+	//   default:
+	//     "$ref": "#/responses/error"
+
+	updateActionsCrossRepoPermission(ctx, true)
+}
+
+// RemoveActionsCrossRepoPermission removes an organization's repository from Actions token access.
+func RemoveActionsCrossRepoPermission(ctx *context.APIContext) {
+	// swagger:operation DELETE /orgs/{org}/actions/permissions/repositories/{repo} organization orgRemoveActionsCrossRepoPermission
+	// ---
+	// summary: Remove a repository from organization Actions token read access
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: org
+	//   in: path
+	//   description: name of the organization
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: repository name
+	//   type: string
+	//   required: true
+	// responses:
+	//   "204":
+	//     description: repository access was removed
+	//   default:
+	//     "$ref": "#/responses/error"
+
+	updateActionsCrossRepoPermission(ctx, false)
+}
+
+func updateActionsCrossRepoPermission(ctx *context.APIContext, allowed bool) {
+	repo, err := repo_model.GetRepositoryByName(ctx, ctx.Org.Organization.ID, ctx.PathParam("repo"))
+	if err != nil {
+		if repo_model.IsErrRepoNotExist(err) {
+			ctx.APIErrorNotFound()
+		} else {
+			ctx.APIErrorInternal(err)
+		}
+		return
+	}
+
+	cfg, err := actions_model.GetOwnerActionsConfig(ctx, ctx.Org.Organization.ID)
+	if err != nil {
+		ctx.APIErrorInternal(err)
+		return
+	}
+	if slices.Contains(cfg.AllowedCrossRepoIDs, repo.ID) != allowed {
+		if allowed {
+			cfg.AllowedCrossRepoIDs = append(cfg.AllowedCrossRepoIDs, repo.ID)
+		} else {
+			cfg.AllowedCrossRepoIDs = slices.DeleteFunc(cfg.AllowedCrossRepoIDs, func(id int64) bool { return id == repo.ID })
+		}
+		if err := actions_model.SetOwnerActionsConfig(ctx, ctx.Org.Organization.ID, cfg); err != nil {
+			ctx.APIErrorInternal(err)
+			return
+		}
+	}
+	ctx.Status(http.StatusNoContent)
+}
 
 // ListActionsSecrets list an organization's actions secrets
 func (Action) ListActionsSecrets(ctx *context.APIContext) {

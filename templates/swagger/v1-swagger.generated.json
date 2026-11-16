@@ -1971,6 +1971,105 @@
         }
       }
     },
+    "/orgs/{org}/actions/permissions": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "List private repositories accessible to the organization's Actions tokens",
+        "operationId": "orgGetActionsCrossRepoPermissions",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/ActionsCrossRepositoryPermissions"
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/actions/permissions/repositories/{repo}": {
+      "put": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Allow organization Actions tokens to read one of the organization's repositories",
+        "operationId": "orgAddActionsCrossRepoPermission",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "repository name",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "repository access was allowed"
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      },
+      "delete": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Remove a repository from organization Actions token read access",
+        "operationId": "orgRemoveActionsCrossRepoPermission",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "repository name",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "repository access was removed"
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
     "/orgs/{org}/actions/runners": {
       "get": {
         "produces": [
@@ -24894,6 +24993,21 @@
       },
       "x-go-package": "gitea.dev/modules/structs"
     },
+    "ActionsCrossRepositoryPermissions": {
+      "type": "object",
+      "title": "ActionsCrossRepositoryPermissions describes repositories readable by an organization's Actions token.",
+      "properties": {
+        "allowed_repositories": {
+          "description": "Full names of repositories the organization's Actions tokens may read.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "AllowedRepositories"
+        }
+      },
+      "x-go-package": "gitea.dev/modules/structs"
+    },
     "Activity": {
       "type": "object",
       "properties": {
@@ -33784,6 +33898,12 @@
       "description": "ActionWorkflowList",
       "schema": {
         "$ref": "#/definitions/ActionWorkflowResponse"
+      }
+    },
+    "ActionsCrossRepositoryPermissions": {
+      "description": "ActionsCrossRepositoryPermissions",
+      "schema": {
+        "$ref": "#/definitions/ActionsCrossRepositoryPermissions"
       }
     },
     "ActivityFeedsList": {

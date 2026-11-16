@@ -54,6 +54,16 @@
         },
         "description": "ActionWorkflowList"
       },
+      "ActionsCrossRepositoryPermissions": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ActionsCrossRepositoryPermissions"
+            }
+          }
+        },
+        "description": "ActionsCrossRepositoryPermissions"
+      },
       "ActivityFeedsList": {
         "content": {
           "application/json": {
@@ -2412,6 +2422,21 @@
             "x-go-name": "Status"
           }
         },
+        "type": "object",
+        "x-go-package": "gitea.dev/modules/structs"
+      },
+      "ActionsCrossRepositoryPermissions": {
+        "properties": {
+          "allowed_repositories": {
+            "description": "Full names of repositories the organization's Actions tokens may read.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "x-go-name": "AllowedRepositories"
+          }
+        },
+        "title": "ActionsCrossRepositoryPermissions describes repositories readable by an organization's Actions token.",
         "type": "object",
         "x-go-package": "gitea.dev/modules/structs"
       },
@@ -13314,6 +13339,106 @@
           }
         },
         "summary": "Get org-level workflow jobs",
+        "tags": [
+          "organization"
+        ]
+      }
+    },
+    "/orgs/{org}/actions/permissions": {
+      "get": {
+        "operationId": "orgGetActionsCrossRepoPermissions",
+        "parameters": [
+          {
+            "description": "name of the organization",
+            "in": "path",
+            "name": "org",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/ActionsCrossRepositoryPermissions"
+          },
+          "default": {
+            "$ref": "#/components/responses/error"
+          }
+        },
+        "summary": "List private repositories accessible to the organization's Actions tokens",
+        "tags": [
+          "organization"
+        ]
+      }
+    },
+    "/orgs/{org}/actions/permissions/repositories/{repo}": {
+      "delete": {
+        "operationId": "orgRemoveActionsCrossRepoPermission",
+        "parameters": [
+          {
+            "description": "name of the organization",
+            "in": "path",
+            "name": "org",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "repository name",
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "repository access was removed"
+          },
+          "default": {
+            "$ref": "#/components/responses/error"
+          }
+        },
+        "summary": "Remove a repository from organization Actions token read access",
+        "tags": [
+          "organization"
+        ]
+      },
+      "put": {
+        "operationId": "orgAddActionsCrossRepoPermission",
+        "parameters": [
+          {
+            "description": "name of the organization",
+            "in": "path",
+            "name": "org",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "repository name",
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "repository access was allowed"
+          },
+          "default": {
+            "$ref": "#/components/responses/error"
+          }
+        },
+        "summary": "Allow organization Actions tokens to read one of the organization's repositories",
         "tags": [
           "organization"
         ]
