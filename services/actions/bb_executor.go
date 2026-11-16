@@ -41,7 +41,6 @@ type bbExecutorConfig struct {
 	Project            string                        `json:"project"`
 	ProfileAuth        *bbExecutorProfileAuth        `json:"profile_auth,omitempty"`
 	MaxConcurrent      int                           `json:"max_concurrent"`
-	AutoConcurrency    bool                          `json:"auto_concurrency,omitempty"`
 	GitHubTokenFile    string                        `json:"github_token_file,omitempty"`
 	MaxDurationS       int                           `json:"max_duration_s"`
 	Profiles           []bbExecutorProfile           `json:"profiles"`
@@ -562,21 +561,8 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 	remaining := config.MaxConcurrent - len(rows)
 	unmatchedProfiles := make(map[string]int)
 	fullyScanned := true
-	profileCapacity := make(map[int]int, len(config.Profiles))
-	if config.AutoConcurrency && remaining > 0 {
-		// Read capacity for every profile before admitting any new work. If any
-		// query fails, fail closed for this reconciliation while leaving active
-		// tasks alone (they were advanced above).
-		for profileIndex, profile := range config.Profiles {
-			capacity, err := config.schedulableCapacity(ctx, profile, config.MaxConcurrent)
-			if err != nil {
-				return fmt.Errorf("query BB schedulable capacity for profile %q: %w", profile.Name, err)
-			}
-			profileCapacity[profileIndex] = capacity
-		}
-	}
 	admission := make(map[githubDedupGroupKey]githubDedupDecision)
-	groupsSeen := make(map[githubDedupGroupKey]bool)
+	groupsSeen := make(map[githubDedupGroupKey]githubDedupDecision)
 	runs := make(map[int64]*actions_model.ActionRun)
 	repos := make(map[int64]*repo_model.Repository)
 	onlineRunners := make(map[int64][]*actions_model.ActionRunner)
@@ -610,7 +596,10 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 			return false, nil
 		}
 		groupKey := githubDedupKey(job)
-		if groupsSeen[groupKey] {
+		if decision, seen := groupsSeen[groupKey]; seen {
+			if decision == githubDedupWait {
+				log.Info("BB executor deferred job %d with its GitHub duplicate group while checks are pending", job.ID)
+			}
 			return true, nil
 		}
 		decision, decided := admission[groupKey]
@@ -650,12 +639,18 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 					if err := markGitHubDuplicateJobsSkipped(ctx, siblings); err != nil {
 						return false, err
 					}
+					for _, sibling := range siblings {
+						log.Info("BB executor skipped duplicate job %d after matching GitHub workflow checks succeeded", sibling.ID)
+					}
 				}
 			}
 			admission[groupKey] = decision
 		}
 		if decision == githubDedupWait || decision == githubDedupSkip {
-			groupsSeen[groupKey] = true
+			groupsSeen[groupKey] = decision
+			if decision == githubDedupWait {
+				log.Info("BB executor deferred job %d while matching GitHub workflow checks are pending", job.ID)
+			}
 			return true, nil
 		}
 		return false, nil
@@ -703,19 +698,18 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 				if deferred {
 					continue
 				}
+				log.Warn("BB executor deferred job %d: no configured profile or online Gitea runner matches runs-on %v", job.ID, job.RunsOn)
 				labels, _ := json.Marshal(job.RunsOn)
 				unmatchedProfiles[string(labels)]++
+				continue
+			}
+			if remaining <= 0 {
+				log.Info("BB executor deferred job %d: max_concurrent limit reached (%d active, limit %d)", job.ID, config.MaxConcurrent-remaining, config.MaxConcurrent)
 				continue
 			}
 			deferred := false
 			for _, profileIndex := range matchingProfiles {
 				profile := config.Profiles[profileIndex]
-				if remaining <= 0 {
-					continue
-				}
-				if config.AutoConcurrency && profileCapacity[profileIndex] <= 0 {
-					continue
-				}
 				labels := profileLabels[profileIndex]
 				waitForGitHub, err := shouldWaitForGitHub(job)
 				if err != nil {
@@ -727,15 +721,12 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 				}
 				row, err := config.prepare(ctx, job, profile, labels)
 				if err != nil {
-					return err
+					return fmt.Errorf("prepare BB task for job %d: %w", job.ID, err)
 				}
 				if err := config.advance(ctx, row); err != nil {
-					return err
+					return fmt.Errorf("advance BB task for job %d: %w", job.ID, err)
 				}
 				remaining--
-				if config.AutoConcurrency {
-					profileCapacity[profileIndex]--
-				}
 				break
 			}
 			if deferred {
@@ -783,38 +774,6 @@ func (config bbExecutorConfig) reportUnmatchedProfiles(unmatchedProfiles map[str
 		return
 	}
 	log.Warn("BB executor cannot schedule at least %d observed waiting jobs because no configured profile matches their runs-on labels: %s", count, summary)
-}
-
-func (config bbExecutorConfig) schedulableCapacity(ctx context.Context, profile bbExecutorProfile, maxCount int) (int, error) {
-	if maxCount < 1 || maxCount > 100 {
-		return 0, errors.New("BB capacity max_count must be between 1 and 100")
-	}
-	var spec bbControl.SandboxSpecRequest
-	encoded, err := json.Marshal(profile.Sandbox)
-	if err != nil {
-		return 0, err
-	}
-	if err := json.Unmarshal(encoded, &spec); err != nil {
-		return 0, fmt.Errorf("decode BB profile sandbox for SDK request: %w", err)
-	}
-	response, err := config.api.GetSchedulableCapacityWithResponse(ctx, bbControl.SchedulableCapacityRequest{Spec: spec, MaxCount: &maxCount})
-	if err != nil {
-		return 0, err
-	}
-	if err := bbSDKStatusError(http.MethodPost, "/v1/scheduler/capacity", response.StatusCode()); err != nil {
-		return 0, err
-	}
-	capacity := response.JSON200
-	if capacity == nil || capacity.Schedulable < 0 || capacity.MaxCount < 1 || capacity.MaxCount > 100 || capacity.Schedulable > capacity.MaxCount || capacity.AsOfMs <= 0 {
-		return 0, errors.New("BB capacity response is invalid")
-	}
-	if capacity.MaxCount < maxCount {
-		maxCount = capacity.MaxCount
-	}
-	if capacity.Schedulable > maxCount {
-		return 0, errors.New("BB capacity response exceeds requested max_count")
-	}
-	return capacity.Schedulable, nil
 }
 
 func (config bbExecutorConfig) prepare(ctx context.Context, job *actions_model.ActionRunJob, profile bbExecutorProfile, labels []string) (*actions_model.ActionBBTask, error) {
