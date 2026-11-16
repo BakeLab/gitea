@@ -36,6 +36,8 @@ github.com/AzureAD/microsoft-authentication-library-for-go v1.8.0 h1:Nljr4q1GRA/
 github.com/AzureAD/microsoft-authentication-library-for-go v1.8.0/go.mod h1:Y33QHnf0FfdVewFFISOGe20mkZbxX4H839o955/PoeI=
 github.com/BakeLab/breadboard/sdk/go v0.0.0-20261115030800-33b26920045e h1:Y+zxodoYjF3OweDYDG/ZlwpcTlNmqNS1SQ9eE7tziy4=
 github.com/BakeLab/breadboard/sdk/go v0.0.0-20261115030800-33b26920045e/go.mod h1:ye7H6zu6p5gmSG5obJGTk/E7GB7JMDe0fHzrQ57KN0c=
+github.com/BakeLab/breadboard/sdk/go v0.0.0-20261116110315-056c8fee3bdb h1:Zy5z39fXo4EojfvLP/2PoD1KFT3B1hkWBPzsX5v5yw8=
+github.com/BakeLab/breadboard/sdk/go v0.0.0-20261116110315-056c8fee3bdb/go.mod h1:ye7H6zu6p5gmSG5obJGTk/E7GB7JMDe0fHzrQ57KN0c=
 github.com/Necoro/html2text v0.0.0-20250804200300-7bf1ce1c7347 h1:3JhDl+JysaO8nhNU1XMaw35VSGjV4IEQAefaG4Lyok4=
 github.com/Necoro/html2text v0.0.0-20250804200300-7bf1ce1c7347/go.mod h1:2ErI0aycD43Ufr6CFK5lT/NrHGmoZuVbn1nlPThw69o=
 github.com/ProtonMail/go-crypto v1.5.2 h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=
