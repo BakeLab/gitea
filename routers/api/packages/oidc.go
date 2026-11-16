@@ -5,6 +5,7 @@ package packages
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -103,7 +104,7 @@ func authenticatePackageOIDC(ctx *context.Context) bool {
 	if len(candidates) == 0 {
 		return false
 	}
-	name := ""
+	var name string
 	if kind == "generic" {
 		name = parts[4]
 	} else if read {
@@ -118,16 +119,10 @@ func authenticatePackageOIDC(ctx *context.Context) bool {
 	if kind == "pypi" {
 		name = strings.NewReplacer("_", "-", ".", "-").Replace(strings.ToLower(name))
 	}
-	allowed := false
-	for _, candidate := range candidates {
-		if candidate == name {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	if !slices.Contains(candidates, name) {
 		return false
 	}
+
 	doer, err := user_model.GetUserByID(ctx, triggerUserID)
 	if err != nil || !doer.IsActive || doer.ProhibitLogin {
 		return false
@@ -141,10 +136,8 @@ func authenticatePackageOIDC(ctx *context.Context) bool {
 func reqPyPIPackageRead(ctx *context.Context) {
 	if ctx.Doer == nil && (ctx.Req.Method == http.MethodGet || ctx.Req.Method == http.MethodHead) {
 		ownerID := strconv.FormatInt(ctx.Package.Owner.ID, 10)
-		for _, allowed := range setting.Packages.AnonymousPyPIOwners {
-			if allowed == ownerID {
-				return
-			}
+		if slices.Contains(setting.Packages.AnonymousPyPIOwners, ownerID) {
+			return
 		}
 	}
 	reqPackageAccess(perm.AccessModeRead)(ctx)

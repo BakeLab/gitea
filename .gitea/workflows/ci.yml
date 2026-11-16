@@ -30,7 +30,7 @@ jobs:
           go-version-file: go.mod
           check-latest: true
       - name: Install build tools
-        run: &build-tools sudo pacman -Syu --needed --noconfirm base-devel
+        run: &build-tools sudo pacman -Syu --needed --noconfirm base-devel git-lfs shadow util-linux
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -153,7 +153,7 @@ jobs:
       - run: make generate-go
         env:
           TAGS: bindata
-      - run: make test-backend
+      - run: bash .gitea/scripts/test-as-user.sh make test-backend
         env:
           GOTEST_FLAGS: -race -timeout=40m
           TAGS: bindata
@@ -209,8 +209,8 @@ jobs:
         env:
           TAGS: bindata
       - if: matrix.shard == 1
-        run: GITEA_TEST_DATABASE=pgsql make test-migration
-      - run: GITEA_TEST_DATABASE=pgsql make test-integration
+        run: GITEA_TEST_DATABASE=pgsql bash .gitea/scripts/test-as-user.sh make test-migration
+      - run: GITEA_TEST_DATABASE=pgsql bash .gitea/scripts/test-as-user.sh make test-integration
         env:
           GOTEST_FLAGS: -race -timeout=70m
           TAGS: bindata
