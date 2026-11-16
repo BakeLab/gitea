@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+// ActionsCrossRepositoryPermissions describes repositories readable by an organization's Actions token.
+// swagger:model
+type ActionsCrossRepositoryPermissions struct {
+	// Full names of repositories the organization's Actions tokens may read.
+	AllowedRepositories []string `json:"allowed_repositories"`
+}
+
 // ActionTask represents a ActionTask
 type ActionTask struct {
 	// ID is the unique identifier for the action task

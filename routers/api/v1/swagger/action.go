@@ -5,6 +5,13 @@ package swagger
 
 import api "gitea.dev/modules/structs"
 
+// ActionsCrossRepositoryPermissions
+// swagger:response ActionsCrossRepositoryPermissions
+type swaggerResponseActionsCrossRepositoryPermissions struct {
+	// in:body
+	Body api.ActionsCrossRepositoryPermissions `json:"body"`
+}
+
 // SecretList
 // swagger:response SecretList
 type swaggerResponseSecretList struct {

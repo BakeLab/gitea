@@ -1742,6 +1742,11 @@ func Routes() *web.Router {
 				reqOrgOwnership(),
 				org.NewAction(),
 			)
+			m.Group("/actions/permissions", func() {
+				m.Get("", reqToken(), org.GetActionsCrossRepoPermissions)
+				m.Put("/repositories/{repo}", reqToken(), org.AddActionsCrossRepoPermission)
+				m.Delete("/repositories/{repo}", reqToken(), org.RemoveActionsCrossRepoPermission)
+			}, reqOrgOwnership())
 			m.Group("/public_members", func() {
 				m.Get("", org.ListPublicMembers)
 				m.Combo("/{username}").Get(org.IsPublicMember).
