@@ -39,8 +39,10 @@ jobs:
           set -euo pipefail
           upstream=$(cat UPSTREAM_COMMIT)
           test "$upstream" = "2fb208e88ed4c8f64478f585dec868d0b08fc90d07c3bb42e6737420f4f5d8bf"
-          git cat-file -e "$upstream^{commit}"
-          git merge-base --is-ancestor "$upstream" HEAD
+          upstream_git=$(cat UPSTREAM_COMMIT_SHA1)
+          test "${#upstream_git}" -eq 40
+          git cat-file -e "$upstream_git^{commit}"
+          git merge-base --is-ancestor "$upstream_git" HEAD
       - name: Build binary and wheel
         env:
           GOOS: ${{ matrix.goos }}
