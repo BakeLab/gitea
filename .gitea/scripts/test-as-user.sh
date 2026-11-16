@@ -4,15 +4,20 @@ if (( EUID != 0 )); then
     exec "$@"
 fi
 id gitea-ci >/dev/null 2>&1 || useradd --create-home --shell /bin/bash gitea-ci
-cache_dir="${RUNNER_TEMP:?}/gitea-ci"
-mkdir -p "$cache_dir"
-# Keep Go's cache accessible without exposing root's home to the test user.
+# Runner workspaces and setup-go installations can have root-only parents.
+test_root="$(mktemp -d /tmp/gitea-ci.XXXXXXXX)"
+trap 'rm -rf -- "$test_root"' EXIT
+mkdir -p "$test_root/workspace" "$test_root/tmp" "$test_root/goroot"
+cp -a "${GITHUB_WORKSPACE:?}/." "$test_root/workspace/"
+cp -a "$(go env GOROOT)/." "$test_root/goroot/"
 module_cache="$(go env GOMODCACHE)"
-if [[ "$module_cache" != "$cache_dir/mod" && ! -d "$cache_dir/mod" ]]; then
-    cp -a "$module_cache" "$cache_dir/mod"
+if [[ -d "$module_cache" ]]; then
+    cp -a "$module_cache" "$test_root/mod"
 fi
-workspace_owner="$(stat -c '%u:%g' "${GITHUB_WORKSPACE:?}")"
-trap 'chown -R "$workspace_owner" "$GITHUB_WORKSPACE"' EXIT
-chown -R gitea-ci:gitea-ci "$GITHUB_WORKSPACE" "$cache_dir"
+chown -R gitea-ci:gitea-ci "$test_root"
+cd "$test_root/workspace"
 runuser -u gitea-ci -- env HOME=/home/gitea-ci USER=gitea-ci LOGNAME=gitea-ci \
-    PATH="$PATH" GOPATH="$cache_dir/go" GOMODCACHE="$cache_dir/mod" GOCACHE="$cache_dir/build" "$@"
+    PATH="$test_root/goroot/bin:$PATH" GOROOT="$test_root/goroot" \
+    GITHUB_WORKSPACE="$test_root/workspace" GITEA_WORKSPACE="$test_root/workspace" \
+    RUNNER_TEMP="$test_root/tmp" TMPDIR="$test_root/tmp" \
+    GOPATH="$test_root/go" GOMODCACHE="$test_root/mod" GOCACHE="$test_root/build" "$@"
