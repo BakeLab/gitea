@@ -19,6 +19,7 @@ import (
 	issues_model "gitea.dev/models/issues"
 	"gitea.dev/models/perm"
 	repo_model "gitea.dev/models/repo"
+	"gitea.dev/models/unit"
 	"gitea.dev/models/unittest"
 	user_model "gitea.dev/models/user"
 	actions_module "gitea.dev/modules/actions"
@@ -870,6 +871,14 @@ jobs:
 			assert.Equal(t, "val0", dispatchPayload.Inputs["myinput"])
 			assert.Equal(t, "def2", dispatchPayload.Inputs["myinput2"])
 			assert.Equal(t, "true", dispatchPayload.Inputs["myinput3"])
+
+			require.NoError(t, repo_service.UpdateRepositoryUnits(t.Context(), repo, nil, []unit.Type{unit.TypeActions}))
+			for _, action := range []string{"disable", "enable"} {
+				req := NewRequest(t, "PUT", workflows.Workflows[0].URL+"/"+action).
+					AddTokenAuth(token)
+				MakeRequest(t, req, http.StatusNotFound)
+				unittest.AssertNotExistsBean(t, &repo_model.RepoUnit{RepoID: repo.ID, Type: unit.TypeActions})
+			}
 		})
 
 		t.Run("ActionRunNameWithContextVariables", func(t *testing.T) {
