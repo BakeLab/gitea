@@ -212,8 +212,8 @@ func initBBExecutor(ctx context.Context) error {
 			return errors.New("BB executor platform must be linux or darwin")
 		}
 		if profile.Platform == "darwin" {
-			if node, _ := profile.Sandbox["node_name"].(string); node == "" {
-				return errors.New("BB executor darwin profiles require an explicit macOS node_name")
+			if !bbProfileSelectsMacOS(profile.Sandbox) {
+				return errors.New("BB executor darwin profiles require a macOS node_name or arm64 Apple Silicon CPU selector")
 			}
 			for _, label := range profile.Labels {
 				if !strings.HasSuffix(label, ":host") {
@@ -1075,4 +1075,14 @@ func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.A
 	row.Registration = ""
 	_, err = db.GetEngine(ctx).ID(row.ID).Cols("completed", "registration").Update(row)
 	return err
+}
+
+func bbProfileSelectsMacOS(sandbox map[string]any) bool {
+	if node, _ := sandbox["node_name"].(string); strings.TrimSpace(node) != "" {
+		return true
+	}
+	cpu, _ := sandbox["cpu"].(map[string]any)
+	arch, _ := cpu["arch"].(string)
+	model, _ := cpu["model"].(string)
+	return arch == "arm64" && strings.EqualFold(strings.TrimSpace(model), "Apple Silicon")
 }
