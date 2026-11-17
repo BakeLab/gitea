@@ -7,9 +7,22 @@ import (
 	"testing"
 
 	"gitea.dev/actionslib/pkg/model"
+	repo_model "gitea.dev/models/repo"
+	"gitea.dev/models/unit"
+	gitea_context "gitea.dev/services/context"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestToggleWorkflowWithoutActionsUnit(t *testing.T) {
+	for _, enable := range []bool{false, true} {
+		repo := &repo_model.Repository{Units: []*repo_model.RepoUnit{}}
+		ctx := &gitea_context.APIContext{Repo: &gitea_context.Repository{Repository: repo}}
+		err := EnableOrDisableWorkflow(ctx, "gitleaks.yml", enable)
+		assert.ErrorIs(t, err, repo_model.ErrUnitTypeNotExist{UT: unit.TypeActions})
+		assert.Empty(t, repo.Units, "toggling a workflow must not enable repository Actions")
+	}
+}
 
 func TestCoerceDispatchInputTypes(t *testing.T) {
 	dispatch := &model.WorkflowDispatch{

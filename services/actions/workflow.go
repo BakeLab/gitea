@@ -28,12 +28,16 @@ import (
 )
 
 func EnableOrDisableWorkflow(ctx *gitea_context.APIContext, workflowID string, isEnable bool) error {
+	cfgUnit, err := ctx.Repo.Repository.GetUnit(ctx, unit.TypeActions)
+	if err != nil {
+		return err
+	}
+
 	workflow, err := convert.GetActionWorkflow(ctx, ctx.Repo.GitRepo, ctx.Repo.Repository, workflowID)
 	if err != nil {
 		return err
 	}
 
-	cfgUnit := ctx.Repo.Repository.MustGetUnit(ctx, unit.TypeActions)
 	cfg := cfgUnit.ActionsConfig()
 
 	if isEnable {
