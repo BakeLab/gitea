@@ -124,3 +124,19 @@ func TestBBProfileDuration(t *testing.T) {
 		require.ErrorContains(t, err, "max_duration_s")
 	}
 }
+
+func TestBBProfileSelectsMacOS(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		sandbox map[string]any
+		want    bool
+	}{
+		{"named", map[string]any{"node_name": "mac"}, true},
+		{"all Macs", map[string]any{"cpu": map[string]any{"arch": "arm64", "model": "Apple Silicon"}}, true},
+		{"Linux ARM", map[string]any{"cpu": map[string]any{"arch": "arm64"}}, false},
+		{"wrong architecture", map[string]any{"cpu": map[string]any{"arch": "amd64", "model": "Apple Silicon"}}, false},
+		{"empty", nil, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) { assert.Equal(t, tt.want, bbProfileSelectsMacOS(tt.sandbox)) })
+	}
+}
