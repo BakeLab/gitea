@@ -6,6 +6,7 @@ package setting
 import (
 	"fmt"
 	"math"
+	"regexp"
 
 	"gitea.dev/modules/util"
 )
@@ -13,6 +14,8 @@ import (
 // Package registry settings
 var (
 	Packages = struct {
+		CleanupKeepGroupPattern   string         `ini:"CLEANUP_KEEP_GROUP_PATTERN"`
+		CleanupKeepGroupMatcher   *regexp.Regexp `ini:"-"`
 		Storage                   *Storage
 		Enabled                   bool
 		AnonymousGenericDownloads []string `ini:"ANONYMOUS_GENERIC_DOWNLOADS"`
@@ -64,6 +67,11 @@ func loadPackagesFrom(rootCfg ConfigProvider) (err error) {
 		return fmt.Errorf("failed to map Packages settings: %v", err)
 	}
 
+	Packages.CleanupKeepGroupMatcher, err = compileCleanupKeepGroupPattern(Packages.CleanupKeepGroupPattern)
+	if err != nil {
+		return err
+	}
+
 	Packages.Storage, err = getStorage(rootCfg, "packages", "", sec)
 	if err != nil {
 		return err
@@ -109,4 +117,19 @@ func mustBytes(section ConfigSection, key string) int64 {
 		return -1
 	}
 	return int64(bytes)
+}
+
+// Grouping is opt-in; the single capture is the retention bucket within each package.
+func compileCleanupKeepGroupPattern(pattern string) (*regexp.Regexp, error) {
+	if pattern == "" {
+		return nil, nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("packages.CLEANUP_KEEP_GROUP_PATTERN: %w", err)
+	}
+	if re.NumSubexp() != 1 {
+		return nil, fmt.Errorf("packages.CLEANUP_KEEP_GROUP_PATTERN requires exactly one capture group")
+	}
+	return re, nil
 }
