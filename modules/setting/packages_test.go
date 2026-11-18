@@ -126,3 +126,16 @@ SERVE_DIRECT = true
 		assert.True(t, storage.MinioConfig.ServeDirect)
 	}
 }
+
+func TestCompileCleanupKeepGroupPattern(t *testing.T) {
+	pattern, err := compileCleanupKeepGroupPattern("")
+	assert.NoError(t, err)
+	assert.Nil(t, pattern)
+	for _, invalid := range []string{"[", "no-capture", "(two)(captures)"} {
+		_, err := compileCleanupKeepGroupPattern(invalid)
+		assert.Error(t, err)
+	}
+	pattern, err = compileCleanupKeepGroupPattern(`^pypi/example/.*\.target\.(.+)\.[0-9]+$`)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"pypi/example/1.target.cuda.arm64.3", "cuda.arm64"}, pattern.FindStringSubmatch("pypi/example/1.target.cuda.arm64.3"))
+}

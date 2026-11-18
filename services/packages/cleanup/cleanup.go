@@ -14,6 +14,7 @@ import (
 	"gitea.dev/modules/log"
 	"gitea.dev/modules/optional"
 	packages_module "gitea.dev/modules/packages"
+	"gitea.dev/modules/setting"
 	packages_service "gitea.dev/services/packages"
 	alpine_service "gitea.dev/services/packages/alpine"
 	arch_service "gitea.dev/services/packages/arch"
@@ -42,13 +43,8 @@ func executeCleanupOneRulePackage(ctx context.Context, pcr *packages_model.Packa
 	if err != nil {
 		return false, fmt.Errorf("CleanupRule [%d]: SearchVersions failed: %w", pcr.ID, err)
 	}
-	if pcr.KeepCount > 0 {
-		if pcr.KeepCount < len(pvs) {
-			pvs = pvs[pcr.KeepCount:]
-		} else {
-			pvs = nil
-		}
-	}
+	pvs = cleanupCandidates(pvs, pcr.KeepCount, string(p.Type)+"/"+p.LowerName+"/", setting.Packages.CleanupKeepGroupMatcher)
+
 	for _, pv := range pvs {
 		if pcr.Type == packages_model.TypeContainer {
 			if skip, err := container_service.ShouldBeSkipped(ctx, pcr, p, pv); err != nil {
