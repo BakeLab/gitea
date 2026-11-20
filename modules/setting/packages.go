@@ -4,6 +4,7 @@
 package setting
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -122,14 +123,14 @@ func mustBytes(section ConfigSection, key string) int64 {
 // Grouping is opt-in; the single capture is the retention bucket within each package.
 func compileCleanupKeepGroupPattern(pattern string) (*regexp.Regexp, error) {
 	if pattern == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // An empty pattern explicitly disables grouping.
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("packages.CLEANUP_KEEP_GROUP_PATTERN: %w", err)
 	}
 	if re.NumSubexp() != 1 {
-		return nil, fmt.Errorf("packages.CLEANUP_KEEP_GROUP_PATTERN requires exactly one capture group")
+		return nil, errors.New("packages.CLEANUP_KEEP_GROUP_PATTERN requires exactly one capture group")
 	}
 	return re, nil
 }

@@ -4,10 +4,12 @@
 package container
 
 import (
-	packages_model "gitea.dev/models/packages"
-	"github.com/stretchr/testify/assert"
 	"regexp"
 	"testing"
+
+	packages_model "gitea.dev/models/packages"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCleanupCandidates(t *testing.T) {

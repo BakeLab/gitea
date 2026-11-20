@@ -85,43 +85,6 @@ jobs:
   test-unit:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    services:
-      elasticsearch:
-        image: elasticsearch:8.19.23@sha256:ef5cafd961d7e273f13fed8def82e63c5ae0491106b5eecb5a69aa12d64f089b
-        env:
-          discovery.type: single-node
-          xpack.security.enabled: false
-          xpack.ml.enabled: false
-          ingest.geoip.downloader.enabled: false
-          ES_JAVA_OPTS: "-Xms1g -Xmx1g"
-        ports:
-          - "9200:9200"
-      meilisearch:
-        image: getmeili/meilisearch:v1@sha256:1f578fa865f8251894b3bf38d6668d6209a3f451f8f65ab953e129d4c1db5ef4
-        env:
-          MEILI_ENV: development
-        ports:
-          - "7700:7700"
-      redis:
-        image: redis:8@sha256:298e5b3bc566bade82f46ad5511777a4a07a294097ce16ada2f6a42be5239df5
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-        ports:
-          - "6379:6379"
-      minio:
-        image: bitnamilegacy/minio:2025.7.23@sha256:8935e75fa5d11295c17171e4aa49efe390a1193cd7f12e4d21b92af9ffef09d7
-        env:
-          MINIO_ROOT_USER: 123456
-          MINIO_ROOT_PASSWORD: 12345678
-        ports:
-          - "9000:9000"
-      devstoreaccount1.azurite.local:
-        image: mcr.microsoft.com/azure-storage/azurite:latest@sha256:f9791d0a0613e93057c06ae31f7ac0c0222f0530590e67e020b0986c66a36fa6
-        ports:
-          - "10000:10000"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -130,6 +93,8 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+      - name: Start test services
+        run: docker compose -f .gitea/test-services.yml up -d --wait --wait-timeout 180 elasticsearch meilisearch redis minio azurite
       - name: Install build tools
         run: *build-tools
       - name: Use Breadboard mirror
@@ -148,6 +113,10 @@ jobs:
           TAGS: bindata
       - run: make test-check
 
+      - name: Stop test services
+        if: always()
+        run: docker compose -f .gitea/test-services.yml down --volumes
+
   test-pgsql:
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -155,28 +124,6 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2]
-    services:
-      pgsql:
-        image: postgres:14@sha256:156f0b253fd61366d5fc2107ad45955027d5612f695a8436ce20167f3fa79bff
-        env:
-          POSTGRES_DB: test
-          POSTGRES_PASSWORD: postgres
-        options: >-
-          --mount type=tmpfs,destination=/var/lib/postgresql/data
-        ports:
-          - "5432:5432"
-      ldap:
-        image: gitea/test-openldap:latest@sha256:4ac633b01d684e6b2a458cc0c8530c92f9b3702f6e040ce5f365607df34fbda0
-        ports:
-          - "389:389"
-          - "636:636"
-      minio:
-        image: bitnamilegacy/minio:2025.7.23@sha256:8935e75fa5d11295c17171e4aa49efe390a1193cd7f12e4d21b92af9ffef09d7
-        env:
-          MINIO_ROOT_USER: 123456
-          MINIO_ROOT_PASSWORD: 12345678
-        ports:
-          - "9000:9000"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -185,6 +132,8 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+      - name: Start test services
+        run: docker compose -f .gitea/test-services.yml up -d --wait --wait-timeout 180 pgsql ldap minio
       - name: Install build tools
         run: *build-tools
       - name: Use Breadboard mirror
@@ -207,24 +156,13 @@ jobs:
           TEST_SHARD: ${{ matrix.shard }}
           TEST_TOTAL_SHARDS: 2
 
+      - name: Stop test services
+        if: always()
+        run: docker compose -f .gitea/test-services.yml down --volumes
+
   test-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    services:
-      pgsql:
-        image: postgres:14@sha256:156f0b253fd61366d5fc2107ad45955027d5612f695a8436ce20167f3fa79bff
-        env:
-          POSTGRES_DB: testgitea
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        options: >-
-          --mount type=tmpfs,destination=/var/lib/postgresql/data
-          --health-cmd "pg_isready -U postgres -d testgitea"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-        ports:
-          - "5432:5432"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -232,9 +170,12 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - run: sudo pacman -S --needed --noconfirm npm
       - uses: ./.github/actions/node-setup
         with:
           cache: 'false'
+      - name: Start test services
+        run: POSTGRES_DB=testgitea docker compose -f .gitea/test-services.yml up -d --wait --wait-timeout 180 pgsql
       - name: Install build tools
         run: *build-tools
       - name: Use Breadboard mirror
@@ -259,3 +200,7 @@ jobs:
               pnpm install --frozen-lockfile
               bash tools/test-e2e.sh
             '
+
+      - name: Stop test services
+        if: always()
+        run: docker compose -f .gitea/test-services.yml down --volumes
