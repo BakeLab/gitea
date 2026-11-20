@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# These tests start a fresh Gitea instance. Socket activation and graceful
+# restart state belong to the launcher that received the descriptors.
+unset LISTEN_FDS LISTEN_PID LISTEN_FDNAMES GITEA_UNLINK_FDS NOTIFY_SOCKET WATCHDOG_USEC WATCHDOG_PID
 if (( EUID != 0 )); then
     exec "$@"
 fi
