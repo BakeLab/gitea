@@ -8,7 +8,6 @@ RELEASE_PATH_PREFIX="${DIST}/binaries/gitea-${VERSION##*/}"
 
 RELEASE_PLATFORMS_DEFAULT=(
   linux/amd64 linux/arm-5 linux/arm-6 linux/arm64 linux/riscv64 \
-  windows/amd64 windows/arm64 \
   darwin/amd64 darwin/arm64 \
   freebsd/amd64
 )
@@ -27,9 +26,6 @@ build() {
 
   local output="${RELEASE_PATH_PREFIX}-${target//\//-}"
   local args=()
-  if [[ "$goos" == "windows" ]]; then
-    output="${output}.exe"
-  fi
   args+=(-tags "$RELEASE_TAGS")
   args+=(-ldflags "$RELEASE_LDFLAGS")
   echo "  args: ${args[*]}"
@@ -39,6 +35,10 @@ build() {
 }
 
 main() {
+  if [[ "${1:-}" == windows ]]; then
+    echo "Windows server builds are unsupported" >&2
+    return 1
+  fi
   # When building release binaries, some TAGS (bindata) are needed by the release script,
   # so here it needs to use the TAGS to generate the assets (embed bindata).
   echo "generating assets with tags=${RELEASE_TAGS}"
