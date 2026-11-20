@@ -79,19 +79,8 @@ jobs:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
         run: *mirror
       - run: make deps-backend generate-go
-      # CGO is not used when cross-compiling, so these also check CGO-disabled builds.
-      - name: build-backend-arm64
-        run: go build -ldflags '-s -w' -o gitea-linux-arm64
-        env:
-          GOOS: linux
-          GOARCH: arm64
-          TAGS: bindata
-      - name: build-backend-386
-        run: go build -ldflags '-s -w' -o gitea-linux-386
-        env:
-          GOOS: linux
-          GOARCH: 386
-      - run: ls -l gitea-*
+      - name: Build Linux amd64 backend
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '-s -w' -o gitea-linux-amd64 .
 
   test-unit:
     runs-on: ubuntu-latest

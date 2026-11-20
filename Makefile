@@ -493,16 +493,7 @@ release-binaries: | $(DIST_DIRS)
 	@$(RELEASE_ENV) ./tools/build-release.sh
 
 .PHONY: release-linux
-release-linux: | $(DIST_DIRS)
-	@$(RELEASE_ENV) ./tools/build-release.sh linux
-
-.PHONY: release-darwin
-release-darwin: | $(DIST_DIRS)
-	@$(RELEASE_ENV) ./tools/build-release.sh darwin
-
-.PHONY: release-freebsd
-release-freebsd: | $(DIST_DIRS)
-	@$(RELEASE_ENV) ./tools/build-release.sh freebsd
+release-linux: release-binaries
 
 .PHONY: release-copy
 release-copy: | $(DIST_DIRS)
