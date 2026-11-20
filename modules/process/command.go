@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"time"
 )
 
 type Cmd struct {
@@ -46,6 +47,7 @@ func CommandContext(ctx context.Context, name string, arg ...string) *Cmd {
 	c := &Cmd{Cmd: exec.CommandContext(ctx, name, arg...)} //nolint:forbidigo // wrap it
 	setSysProcAttribute(c.Cmd)
 	c.Cmd.Cancel = c.onCancel
+	c.Cmd.WaitDelay = 5 * time.Second // Bounds cancellation and inherited pipes; callers may override.
 
 	// Unlike exec.CommandContext, we use graceful termination by default to avoid corrupting data or leaving lock files behind.
 	// If some processes don't respond to SIGTERM, can switch to WithOnCancelForceKill (SIGKILL) to force kill them.

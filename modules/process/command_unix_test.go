@@ -65,3 +65,25 @@ func TestCommandContextCancelKillProcessGroup(t *testing.T) {
 		return grandchild.Signal(syscall.Signal(0)) != nil
 	}, 5*time.Second, 10*time.Millisecond)
 }
+
+func TestCommandContextBoundsIgnoredTermination(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cmd := CommandContext(ctx, "sh", "-c", "trap '' TERM; echo ready; while :; do :; done")
+	require.Positive(t, cmd.WaitDelay)
+	cmd.WaitDelay = 50 * time.Millisecond
+	output, err := cmd.StdoutPipe()
+	require.NoError(t, err)
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	require.True(t, bufio.NewScanner(output).Scan())
+	cancel()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("canceled process ignored termination without bounded wait")
+	}
+}
