@@ -102,9 +102,8 @@ func (g *Manager) DoGracefulShutdown() {
 	g.doShutdown()
 }
 
-// RegisterServer registers the running of a listening server, in the case of unix this means that the parent process can now die.
+// RegisterServer registers the running of a listening server.
 // Any call to RegisterServer must be matched by a call to ServerDone
 func (g *Manager) RegisterServer() {
-	KillParent()
 	g.runningServerWaitGroup.Add(1)
 }

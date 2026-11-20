@@ -86,13 +86,22 @@ func getProvidedFDs() (savedErr error) {
 			log.Trace("No Systemd Notify Socket provided")
 		}
 
+		if pid := os.Getenv("LISTEN_PID"); pid != "" && pid != strconv.Itoa(os.Getpid()) {
+			return
+		}
 		numFDs := os.Getenv(listenFDsEnv)
 		if numFDs == "" {
 			return
 		}
+		_ = os.Unsetenv(listenFDsEnv)
 		n, err := strconv.Atoi(numFDs)
 		if err != nil {
 			savedErr = fmt.Errorf("%s is not a number: %s. Err: %w", listenFDsEnv, numFDs, err)
+			return
+		}
+
+		if n < 0 {
+			savedErr = fmt.Errorf("negative %s: %d", listenFDsEnv, n)
 			return
 		}
 

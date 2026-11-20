@@ -14,23 +14,13 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
 )
 
-var killParent sync.Once
+const restartParentEnv = "GITEA_RESTART_PARENT_PID"
 
-// KillParent sends the kill signal to the parent process if we are a child
-func KillParent() {
-	killParent.Do(func() {
-		if GetManager().IsChild() {
-			ppid := syscall.Getppid()
-			if ppid > 1 {
-				_ = syscall.Kill(ppid, syscall.SIGTERM)
-			}
-		}
-	})
+func isRestartChild(ppid int, marker string) bool {
+	return marker != "" && ppid > 0 && marker == strconv.Itoa(ppid)
 }
 
 // RestartProcess starts a new process passing it the active listeners. It
@@ -75,11 +65,12 @@ func RestartProcess() (int, error) {
 	// Pass on the environment and replace the old count key with the new one.
 	var env []string
 	for _, v := range os.Environ() {
-		if !strings.HasPrefix(v, listenFDsEnv+"=") {
+		key, _, _ := strings.Cut(v, "=")
+		if key != listenFDsEnv && key != restartParentEnv && key != "LISTEN_PID" && key != "LISTEN_FDNAMES" && key != unlinkFDsEnv {
 			env = append(env, v)
 		}
 	}
-	env = append(env, fmt.Sprintf("%s=%d", listenFDsEnv, len(listeners)))
+	env = append(env, fmt.Sprintf("%s=%d", listenFDsEnv, len(listeners)), restartParentEnv+"="+strconv.Itoa(os.Getpid()))
 
 	if notifySocketAddr != "" {
 		env = append(env, fmt.Sprintf("%s=%s", notifySocketEnv, notifySocketAddr))
