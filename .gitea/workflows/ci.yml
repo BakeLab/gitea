@@ -35,7 +35,7 @@ jobs:
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
         run: &mirror |
-          repo="${GITHUB_SERVER_URL}/BakeLab/breadboard"
+          repo="${GITHUB_SERVER_URL}/BakeLab/inf_breadboard"
           git config --global url."${repo}".insteadOf https://github.com/BakeLab/breadboard
           git config --global http."${repo}".extraHeader "Authorization: Basic $(printf 'x-access-token:%s' "${GITEA_TOKEN:?}" | base64 -w0)"
       - run: make deps-backend deps-tools
@@ -206,3 +206,56 @@ jobs:
           TEST_LDAP: 1
           TEST_SHARD: ${{ matrix.shard }}
           TEST_TOTAL_SHARDS: 2
+
+  test-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      pgsql:
+        image: postgres:14@sha256:156f0b253fd61366d5fc2107ad45955027d5612f695a8436ce20167f3fa79bff
+        env:
+          POSTGRES_DB: testgitea
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --mount type=tmpfs,destination=/var/lib/postgresql/data
+          --health-cmd "pg_isready -U postgres -d testgitea"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - "5432:5432"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: ./.github/actions/node-setup
+        with:
+          cache: 'false'
+      - name: Install build tools
+        run: *build-tools
+      - name: Use Breadboard mirror
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: *mirror
+      - run: make deps-backend deps-frontend
+      - run: CGO_ENABLED=0 TAGS=bindata make backend frontend
+      - name: Run PostgreSQL E2E with Playwright
+        timeout-minutes: 20
+        run: |
+          version=$(node -p 'require("@playwright/test/package.json").version')
+          tar --exclude=.git --exclude=node_modules -cf - . | docker run -i --rm \
+            --network host --shm-size=1g --user pwuser \
+            -e PLAYWRIGHT_MODE=local -e EXECUTABLE=gitea -e CI=true \
+            -e GITEA_TEST_E2E_DEBUG=1 -e TEST_PGSQL_HOST=localhost:5432 \
+            "mcr.microsoft.com/playwright:v${version}-noble" bash -euo pipefail -c '
+              cd "$(mktemp -d)"
+              tar -xf -
+              npm install --prefix "$PWD/.tools" --no-save "$(node -p "require(\"./package.json\").packageManager")"
+              export PATH="$PWD/.tools/node_modules/.bin:$PATH"
+              pnpm install --frozen-lockfile
+              bash tools/test-e2e.sh
+            '
