@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"gitea.dev/modules/json"
-	"gitea.dev/modules/log"
 	"gitea.dev/modules/setting"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -76,9 +75,8 @@ func ParseAuthorizationToken(req *http.Request) (int64, error) {
 	}
 
 	parts := strings.SplitN(h, " ", 2)
-	if len(parts) != 2 {
-		log.Error("split token failed: %s", h)
-		return 0, errors.New("split token failed")
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
+		return 0, errors.New("invalid authorization header")
 	}
 
 	return TokenToTaskID(parts[1])
@@ -91,7 +89,7 @@ func TokenToTaskID(token string) (int64, error) {
 
 func taskIDFromToken(token string, idTokenRequest bool) (int64, error) {
 	parsedToken, err := jwt.ParseWithClaims(token, &actionsClaims{}, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+		if t.Method != jwt.SigningMethodHS256 {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return setting.GetGeneralTokenSigningSecret(), nil
@@ -104,7 +102,11 @@ func taskIDFromToken(token string, idTokenRequest bool) (int64, error) {
 	if !parsedToken.Valid || !ok {
 		return 0, errors.New("invalid token claim")
 	}
-	if (claims.Scp == idTokenRequestScope) != idTokenRequest {
+	expectedScope := fmt.Sprintf("Actions.Results:%d:%d", claims.RunID, claims.JobID)
+	if idTokenRequest {
+		expectedScope = idTokenRequestScope
+	}
+	if claims.Scp != expectedScope || claims.TaskID <= 0 {
 		return 0, errors.New("unexpected token scope")
 	}
 

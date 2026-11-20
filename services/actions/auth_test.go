@@ -12,6 +12,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateAuthorizationToken(t *testing.T) {
@@ -61,4 +62,24 @@ func TestParseAuthorizationTokenNoAuthHeader(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, int64(0), rTaskID)
+}
+
+func TestRuntimeTokenScope(t *testing.T) {
+	for _, scope := range []string{"", "Actions.IDTokenRequest", "Actions.Results:9:2", "unknown"} {
+		t.Run(scope, func(t *testing.T) {
+			token, err := signActionsClaims(actionsClaims{Scp: scope, TaskID: 23, RunID: 1, JobID: 2})
+			require.NoError(t, err)
+			_, err = TokenToTaskID(token)
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), token)
+		})
+	}
+	for _, header := range []string{"private-credential", "Basic private-credential", "Bearer "} {
+		req, err := http.NewRequest(http.MethodGet, "/", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", header)
+		_, err = ParseAuthorizationToken(req)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "private-credential")
+	}
 }

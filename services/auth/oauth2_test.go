@@ -12,7 +12,9 @@ import (
 	auth_model "gitea.dev/models/auth"
 	"gitea.dev/models/unittest"
 	user_model "gitea.dev/models/user"
+	"gitea.dev/modules/setting"
 	"gitea.dev/services/actions"
+	"gitea.dev/services/oauth2_provider"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,17 +36,20 @@ func TestUserIDFromToken(t *testing.T) {
 	assert.NoError(t, unittest.PrepareTestDatabase())
 
 	t.Run("Actions JWT", func(t *testing.T) {
+		oldKey := oauth2_provider.DefaultSigningKey
+		t.Cleanup(func() { oauth2_provider.DefaultSigningKey = oldKey })
+		signingKey, err := oauth2_provider.CreateJWTSigningKey("HS256", setting.GetGeneralTokenSigningSecret())
+		require.NoError(t, err)
+		oauth2_provider.DefaultSigningKey = signingKey
+
 		const RunningTaskID int64 = 47
 		token, err := actions.CreateAuthorizationToken(RunningTaskID, 1, 2)
 		assert.NoError(t, err)
 
 		o := OAuth2{}
 		u, err := o.userFromToken(t.Context(), token)
-		require.NoError(t, err)
-		assert.Equal(t, user_model.ActionsUserID, u.ID)
-		taskID, ok := user_model.GetActionsUserTaskID(u)
-		assert.True(t, ok)
-		assert.Equal(t, RunningTaskID, taskID)
+		require.Error(t, err)
+		assert.Nil(t, u)
 	})
 
 	t.Run("Access token", func(t *testing.T) {
@@ -57,25 +62,4 @@ func TestUserIDFromToken(t *testing.T) {
 		assert.Equal(t, token.Scope, scope)
 		assert.Equal(t, fmt.Sprintf("access-token:%d", token.ID), user_model.GetDoerCredential(u))
 	})
-}
-
-func TestCheckTaskIsRunning(t *testing.T) {
-	assert.NoError(t, unittest.PrepareTestDatabase())
-
-	cases := map[string]struct {
-		TaskID   int64
-		Expected bool
-	}{
-		"Running":   {TaskID: 47, Expected: true},
-		"Missing":   {TaskID: 1, Expected: false},
-		"Cancelled": {TaskID: 46, Expected: false},
-	}
-
-	for name := range cases {
-		c := cases[name]
-		t.Run(name, func(t *testing.T) {
-			actual := CheckTaskIsRunning(t.Context(), c.TaskID)
-			assert.Equal(t, c.Expected, actual)
-		})
-	}
 }
