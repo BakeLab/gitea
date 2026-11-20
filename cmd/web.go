@@ -267,7 +267,7 @@ func runWeb(ctx context.Context, cmd *cli.Command) error {
 	graceful.InitManager(managerCtx)
 	defer cancel()
 
-	if os.Getppid() > 1 && len(os.Getenv("LISTEN_FDS")) > 0 {
+	if graceful.GetManager().IsChild() {
 		log.Info("Restarting Gitea on PID: %d from parent PID: %d", os.Getpid(), os.Getppid())
 	} else {
 		log.Info("Starting Gitea on PID: %d", os.Getpid())

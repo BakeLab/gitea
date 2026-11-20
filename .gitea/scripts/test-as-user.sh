@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# These tests start a fresh Gitea instance. Socket activation and graceful
+# restart state belong to the launcher that received the descriptors.
+unset LISTEN_FDS LISTEN_PID LISTEN_FDNAMES GITEA_UNLINK_FDS NOTIFY_SOCKET WATCHDOG_USEC WATCHDOG_PID
 if (( EUID != 0 )); then
     exec "$@"
 fi
 id gitea-ci >/dev/null 2>&1 || useradd --create-home --shell /bin/bash gitea-ci
 # Runner workspaces and setup-go installations can have root-only parents.
-test_root="$(mktemp -d /tmp/gitea-ci.XXXXXXXX)"
+test_root="$(mktemp -d /var/tmp/gitea-ci.XXXXXXXX)"
 trap 'rm -rf -- "$test_root"' EXIT
 mkdir -p "$test_root/workspace" "$test_root/tmp" "$test_root/goroot"
 cp -a "${GITHUB_WORKSPACE:?}/." "$test_root/workspace/"

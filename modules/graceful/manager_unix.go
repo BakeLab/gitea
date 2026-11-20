@@ -48,7 +48,8 @@ func (g *Manager) start() {
 	pprof.SetGoroutineLabels(g.managerCtx)
 	defer pprof.SetGoroutineLabels(g.ctx)
 
-	g.isChild = len(os.Getenv(listenFDsEnv)) > 0 && os.Getppid() > 1
+	g.isChild = isRestartChild(os.Getppid(), os.Getenv(restartParentEnv))
+	_ = os.Unsetenv(restartParentEnv)
 
 	g.notify(statusMsg("Starting Gitea"))
 	g.notify(pidMsg())

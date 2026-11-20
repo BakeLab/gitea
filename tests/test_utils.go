@@ -19,6 +19,7 @@ import (
 	"gitea.dev/routers"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func InitIntegrationTest() (workPath string, err error) {
@@ -120,7 +121,7 @@ func PrepareTestEnv(t testing.TB, skip ...int) func() {
 	deferFn := PrintCurrentTest(t, util.OptionalArg(skip)+1)
 
 	// load database fixtures
-	assert.NoError(t, unittest.LoadFixtures())
+	require.NoError(t, unittest.LoadFixtures())
 
 	// do not add more Prepare* functions here, only call necessary ones in the related test functions
 	PrepareGitRepoDirectory(t)

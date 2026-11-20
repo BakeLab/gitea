@@ -4,8 +4,9 @@
 package container
 
 import (
-	packages_model "gitea.dev/models/packages"
 	"regexp"
+
+	packages_model "gitea.dev/models/packages"
 )
 
 // Versions arrive newest first. Unmatched versions retain the historical shared

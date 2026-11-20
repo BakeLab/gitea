@@ -4,6 +4,9 @@
 package integration
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,7 +23,38 @@ import (
 	"gitea.dev/tests"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func requireRepo1Tarball(t *testing.T, data []byte) {
+	t.Helper()
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	contents, err := io.ReadAll(gz)
+	require.NoError(t, err)
+	require.NoError(t, gz.Close())
+
+	archive := tar.NewReader(bytes.NewReader(contents))
+	dir, err := archive.Next()
+	require.NoError(t, err)
+	// Git may include the commit ID in a global PAX header.
+	if dir.Typeflag == tar.TypeXGlobalHeader {
+		dir, err = archive.Next()
+		require.NoError(t, err)
+	}
+	require.Equal(t, "repo1/", dir.Name)
+	require.Equal(t, byte(tar.TypeDir), dir.Typeflag)
+
+	file, err := archive.Next()
+	require.NoError(t, err)
+	require.Equal(t, "repo1/README.md", file.Name)
+	require.Equal(t, byte(tar.TypeReg), file.Typeflag)
+	readme, err := io.ReadAll(archive)
+	require.NoError(t, err)
+	require.Equal(t, "# repo1\n\nDescription for repo1", string(readme))
+	_, err = archive.Next()
+	require.ErrorIs(t, err, io.EOF)
+}
 
 func TestAPIDownloadArchive(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
@@ -40,7 +74,7 @@ func TestAPIDownloadArchive(t *testing.T) {
 	resp = MakeRequest(t, NewRequest(t, "GET", link.String()).AddTokenAuth(token), http.StatusOK)
 	bs, err = io.ReadAll(resp.Body)
 	assert.NoError(t, err)
-	assert.Len(t, bs, 266)
+	requireRepo1Tarball(t, bs)
 
 	// Must return a link to a commit ID as the "immutable" archive link
 	linkHeaderRe := regexp.MustCompile(`^<(https?://.*/api/v1/repos/user2/repo1/archive/[a-f0-9]+\.tar\.gz.*)>; rel="immutable"$`)
@@ -83,7 +117,7 @@ func testAPIDownloadArchiveGitHubStyle(t *testing.T) {
 	resp = MakeRequest(t, NewRequest(t, "GET", link.String()).AddTokenAuth(token), http.StatusOK)
 	bs, err = io.ReadAll(resp.Body)
 	assert.NoError(t, err)
-	assert.Len(t, bs, 266)
+	requireRepo1Tarball(t, bs)
 
 	// Must return a link to a commit ID as the "immutable" archive link
 	linkHeaderRe := regexp.MustCompile(`^<(https?://.*/api/v1/repos/user2/repo1/archive/[a-f0-9]+\.tar\.gz.*)>; rel="immutable"$`)
