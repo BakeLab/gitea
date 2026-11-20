@@ -338,6 +338,9 @@ func claimJobForRunner(ctx context.Context, runner *ActionRunner, job *ActionRun
 		if !nativeBuilderAllowsJob(runner, job) {
 			return nil
 		}
+		if allowed, err := runnerIsolationAllowsRunner(ctx, job, runner.ID); err != nil || !allowed {
+			return err
+		}
 		if err := job.Run.Repo.LoadUnits(ctx); err != nil {
 			return err
 		}

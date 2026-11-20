@@ -55,6 +55,13 @@ func ComputeTaskTokenPermissions(ctx context.Context, task *ActionTask, targetRe
 	if restrictCrossRepoAccess {
 		effectivePerms = repo_model.ClampActionsTokenPermissions(effectivePerms, repo_model.MakeRestrictedPermissions())
 	}
+	isolation, err := RunnerIsolationForJob(ctx, task.Job)
+	if err != nil {
+		return ret, err
+	}
+	if isolation != nil {
+		effectivePerms = repo_model.ClampActionsTokenPermissions(effectivePerms, repo_model.MakeRestrictedPermissions())
+	}
 
 	return effectivePerms, nil
 }

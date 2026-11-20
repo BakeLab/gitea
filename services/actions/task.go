@@ -105,6 +105,12 @@ func PickTask(ctx context.Context, runner *actions_model.ActionRunner) (*runnerv
 
 	task, job, err = buildRunnerTask(ctx, t)
 	if err != nil {
+		if errors.Is(err, errRunnerIsolation) {
+			if stopErr := failIsolatedTask(ctx, t); stopErr != nil {
+				return nil, false, stopErr
+			}
+			return nil, false, err
+		}
 		// The job was already claimed but assembling its payload failed; release the
 		// claim so the job returns to the waiting queue instead of being stranded in
 		// running state with no runner ever executing it.
@@ -138,6 +144,9 @@ func buildRunnerTask(ctx context.Context, t *actions_model.ActionTask) (*runnerv
 		return nil, nil, fmt.Errorf("task LoadAttributes: %w", err)
 	}
 	job := t.Job
+	if err := validateIsolatedTask(ctx, t); err != nil {
+		return nil, nil, err
+	}
 
 	secrets, err := secret_model.GetSecretsOfTask(ctx, t)
 	if err != nil {
