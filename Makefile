@@ -42,19 +42,7 @@ ifneq ($(strip $(filter $(CGO_TAGS),$(TAGS))),)
 	CGO_ENABLED = 1
 endif
 
-ifeq ($(GOOS),windows)
-	IS_WINDOWS := yes
-else ifeq ($(patsubst Windows%,Windows,$(OS)),Windows)
-	ifeq ($(GOOS),)
-		IS_WINDOWS := yes
-	endif
-endif
-
-ifeq ($(IS_WINDOWS),yes)
-	EXECUTABLE ?= gitea.exe
-else
-	EXECUTABLE ?= gitea
-endif
+EXECUTABLE ?= gitea
 
 # EXTRA_GOFLAGS is for the 'go build' command only
 EXTRA_GOFLAGS ?=
@@ -503,10 +491,6 @@ release: frontend release-binaries release-copy release-compress vendor release-
 .PHONY: release-binaries
 release-binaries: | $(DIST_DIRS)
 	@$(RELEASE_ENV) ./tools/build-release.sh
-
-.PHONY: release-windows
-release-windows: | $(DIST_DIRS)
-	@$(RELEASE_ENV) ./tools/build-release.sh windows
 
 .PHONY: release-linux
 release-linux: | $(DIST_DIRS)
