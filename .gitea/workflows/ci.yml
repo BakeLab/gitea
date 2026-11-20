@@ -79,6 +79,11 @@ jobs:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
         run: *mirror
       - run: make deps-backend generate-go
+      - name: Check reachable vulnerabilities
+        if: github.event_name == 'push' && github.ref == 'refs/heads/trim'
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.10.0
+          govulncheck ./...
       - name: Build Linux amd64 backend
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '-s -w' -o gitea-linux-amd64 .
 
