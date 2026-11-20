@@ -1,0 +1,21 @@
+version: 2
+registries:
+  breadboard:
+    type: git
+    url: https://github.com
+    username: x-access-token
+    password: ${{secrets.BREADBOARD_SDK_TOKEN}}
+updates:
+
+  - package-ecosystem: gomod
+    directories:
+      - "/"
+    schedule:
+      interval: weekly
+    registries:
+      - breadboard
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
