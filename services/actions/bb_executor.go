@@ -46,6 +46,7 @@ type bbExecutorConfig struct {
 	Profiles           []bbExecutorProfile           `json:"profiles"`
 	CapabilityOverlays []bbExecutorCapabilityOverlay `json:"capability_overlays,omitempty"`
 	UnsupportedLabels  []bbExecutorUnsupportedLabels `json:"unsupported_labels,omitempty"`
+	RunnerPolicies     []actions_model.RunnerPolicy  `json:"runner_policies,omitempty"`
 	client             *http.Client
 	api                *bbControl.ClientWithResponses
 	githubDeduper      *githubStatusDeduper
@@ -254,6 +255,9 @@ func initBBExecutor(ctx context.Context) error {
 		if row.Endpoint != strings.TrimRight(config.Endpoint, "/") || row.Project != config.Project {
 			return errors.New("drain BB executor tasks before changing endpoint or project")
 		}
+	}
+	if err := actions_model.SetRunnerPolicies(config.RunnerPolicies); err != nil {
+		return err
 	}
 	go graceful.GetManager().RunWithShutdownContext(func(ctx context.Context) {
 		ticker := time.NewTicker(5 * time.Second)
@@ -681,6 +685,16 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 				profileLabels[profileIndex] = labels
 			}
 			if len(matchingProfiles) == 0 {
+				isolation, err := actions_model.RunnerIsolationForJob(ctx, job)
+				if err != nil {
+					return err
+				}
+				if isolation != nil {
+					if _, err := markConfiguredJobFinished(ctx, job, actions_model.StatusFailure, []byte("Runner isolation policy requires a matching BB VM profile. Ordinary runners cannot execute this job. Ask the administrator to configure a matching profile, then rerun.")); err != nil {
+						return err
+					}
+					continue
+				}
 				hasRunner, err := hasMatchingOnlineRunner(job)
 				if err != nil {
 					log.Warn("BB executor cannot inspect online runners for unmatched job %d; leaving it queued: %v", job.ID, err)
@@ -721,6 +735,12 @@ func (config bbExecutorConfig) reconcile(ctx context.Context) error {
 				}
 				row, err := config.prepare(ctx, job, profile, labels)
 				if err != nil {
+					if errors.Is(err, errBBDispatchSandbox) {
+						if _, finishErr := markConfiguredJobFinished(ctx, job, actions_model.StatusFailure, []byte("Dispatch sandbox configuration violates the BB profile. Use supported resource fields and only administrator-configured mounts, then rerun.")); finishErr != nil {
+							return finishErr
+						}
+						break
+					}
 					return fmt.Errorf("prepare BB task for job %d: %w", job.ID, err)
 				}
 				if err := config.advance(ctx, row); err != nil {
@@ -850,6 +870,9 @@ func (config bbExecutorConfig) taskRequest(ctx context.Context, row *actions_mod
 	if err != nil {
 		return nil, err
 	}
+	if sandbox, err = isolatedJobSandbox(ctx, job, sandbox); err != nil {
+		return nil, err
+	}
 	workdir, user, platform := "/opt/gitea-bb", "root", "Linux"
 	checksum := "sha256sum --check --status"
 	createDirectory := "mkdir -p "
@@ -891,29 +914,29 @@ func (config bbExecutorConfig) sandboxForJob(ctx context.Context, job *actions_m
 	}
 	inputs, err := dispatchInputsForJob(run, fullJob)
 	if err != nil {
-		return nil, fmt.Errorf("load sandbox dispatch input for job %d: %w", job.ID, err)
+		return nil, fmt.Errorf("%w: load sandbox input for job %d", errBBDispatchSandbox, job.ID)
 	}
 	rawConfig, ok := inputs["config_json"].(string)
 	if !ok || rawConfig == "" {
-		return nil, fmt.Errorf("workflow job %d requires config_json for its sandbox", job.ID)
+		return nil, fmt.Errorf("%w: workflow job %d requires config_json", errBBDispatchSandbox, job.ID)
 	}
 	var payload struct {
 		Sandbox map[string]any `json:"sandbox"`
 	}
 	if err := json.Unmarshal([]byte(rawConfig), &payload); err != nil || payload.Sandbox == nil {
-		return nil, fmt.Errorf("workflow job %d has invalid config_json sandbox", job.ID)
+		return nil, fmt.Errorf("%w: workflow job %d has invalid config_json", errBBDispatchSandbox, job.ID)
 	}
 	for _, key := range []string{"network", "fabric"} {
 		if value, exists := payload.Sandbox[key]; exists && value != sandbox[key] {
-			return nil, fmt.Errorf("workflow job %d sandbox %s conflicts with profile", job.ID, key)
+			return nil, fmt.Errorf("%w: workflow job %d sandbox %s conflicts with profile", errBBDispatchSandbox, job.ID, key)
 		}
 	}
-	resourceFields := map[string]bool{"cpu": true, "disk_mb": true, "accelerator": true, "node_name": true, "vfs_mounts": true, "vfs_exports": true}
+	resourceFields := map[string]bool{"cpu": true, "disk_mb": true, "accelerator": true, "node_name": true, "vfs_mounts": true}
 	resourceSpec := make(map[string]any, len(payload.Sandbox))
 	for key, value := range payload.Sandbox {
 		if key == "runtime" {
 			if value != sandbox[key] {
-				return nil, fmt.Errorf("workflow job %d sandbox runtime conflicts with profile", job.ID)
+				return nil, fmt.Errorf("%w: workflow job %d runtime conflicts with profile", errBBDispatchSandbox, job.ID)
 			}
 			continue
 		}
@@ -921,15 +944,20 @@ func (config bbExecutorConfig) sandboxForJob(ctx context.Context, job *actions_m
 			continue
 		}
 		if !resourceFields[key] {
-			return nil, fmt.Errorf("workflow job %d sandbox input contains unsupported field %q", job.ID, key)
+			return nil, fmt.Errorf("%w: workflow job %d input contains unsupported field", errBBDispatchSandbox, job.ID)
+		}
+		if key == "vfs_mounts" {
+			if err := validateBBDispatchMounts(sandbox[key], value); err != nil {
+				return nil, fmt.Errorf("%w: %w", errBBDispatchSandbox, err)
+			}
 		}
 		resourceSpec[key] = value
 	}
 	if _, ok := resourceSpec["cpu"]; !ok {
-		return nil, fmt.Errorf("workflow job %d sandbox input is missing cpu", job.ID)
+		return nil, fmt.Errorf("%w: workflow job %d missing cpu", errBBDispatchSandbox, job.ID)
 	}
 	if _, ok := resourceSpec["disk_mb"]; !ok {
-		return nil, fmt.Errorf("workflow job %d sandbox input is missing disk_mb", job.ID)
+		return nil, fmt.Errorf("%w: workflow job %d missing disk_mb", errBBDispatchSandbox, job.ID)
 	}
 	return bbMergeSandbox(sandbox, resourceSpec), nil
 }

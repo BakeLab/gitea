@@ -254,8 +254,12 @@ func markConfiguredUnsupportedJobSkipped(ctx context.Context, job *actions_model
 }
 
 func markConfiguredJobSkipped(ctx context.Context, job *actions_model.ActionRunJob, content []byte) (bool, error) {
+	return markConfiguredJobFinished(ctx, job, actions_model.StatusSkipped, content)
+}
+
+func markConfiguredJobFinished(ctx context.Context, job *actions_model.ActionRunJob, status actions_model.Status, content []byte) (bool, error) {
 	updated := *job
-	updated.Status = actions_model.StatusSkipped
+	updated.Status = status
 	updated.Stopped = timeutil.TimeStampNow()
 	changed := false
 	err := db.WithTx(ctx, func(ctx context.Context) error {

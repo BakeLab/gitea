@@ -20,6 +20,76 @@ Both capacity queries and task creation use the resulting sandbox specification.
 Profiles need only declare their other network dependencies; eligible BB nodes
 must still advertise the Gitea route.
 
+## Server-owned runner isolation
+
+Optional `runner_policies` in the administrator's BB executor configuration
+restrict jobs independently of their `runs-on` labels. Existing installations
+without policies retain their publishing behavior. For example:
+
+```json
+"runner_policies": [{
+  "repositories": ["BakeLab/inf_breadboard"],
+  "events": ["pull_request"],
+  "allowed_hosts": [
+    "github.com", "api.github.com", "codeload.github.com",
+    "objects.githubusercontent.com", "raw.githubusercontent.com",
+    "geo.mirror.pkgbuild.com", "archive.archlinux.org"
+  ]
+}]
+```
+
+Review the exact dependency endpoints before activation; this example is not a
+complete allowlist for every build. Package-set bootstrap dependencies must also
+be allowed. The server's HTTPS `ROOT_URL` host and service route are added
+automatically. An explicit empty `allowed_hosts` array allows only that service.
+Wildcards and IP addresses are rejected. Allowed domains can still accept uploads:
+an allowlist is not proof that source cannot be exfiltrated.
+
+Repositories are exact owner/name identities, case-insensitive. Events are the
+server's webhook event names, with pull-request sync/label/assignment events
+normalized to `pull_request`; `pull_request_target` cannot evade that policy.
+Omitting `events` covers all events. Optional `workflows` and `jobs` narrow a
+policy to exact workflow filenames and job IDs; `jobs` requires `workflows`.
+Use repository/event-wide rules for untrusted workflows: selecting only a named
+scan job deliberately leaves other jobs outside the rule and is not an isolation
+boundary against someone who can rename the job. Reusable workflow callees inherit
+matching caller policies. Multiple matching rules intersect their host lists.
+
+For matching jobs, Gitea:
+
+- Does not load or decrypt organization/repository secrets, including reusable
+  workflow `secrets: inherit` mappings.
+- Keeps `GITHUB_TOKEN`/`GITEA_TOKEN` and `github.token` for checkout, but clamps
+  authorization server-side to read-only code/packages/releases. It disables
+  OIDC issuance, even if workflow YAML asks for write permissions or `id-token`.
+- Replaces the final VM network allowlist, disables fabric and removes host
+  mounts, block exports, exposed ports and bootstrap secrets.
+- Allows only the job-bound ephemeral BB runner to claim the job. Ordinary
+  registered runners cannot bypass the network policy by matching its labels.
+  If no BB profile matches, the job fails with an actionable summary.
+- Checks the stored BB VM request again before delivering the task. An old VM
+  with wider access fails rather than receiving a newly restricted job.
+
+The runtime token for task logs/artifacts and the one-job runner registration
+remain available; they are separate from repository write and OIDC permissions.
+The stored VM request and runner binding are checked, not hardware attestation;
+protect runner registration credentials and keep the runner API behind its
+existing access controls.
+Treat logs, artifacts, workflow outputs, variables and checked-out files as
+potential data channels. Do not put credentials in variables or pass secret
+values through dependency outputs. Isolation cannot retract credentials already
+delivered to a running job: drain active jobs, configure the reviewed policies,
+restart Gitea, then rerun. Keep publication jobs outside scan policies only when
+their source/event is trusted. No production policies are activated by a code
+upgrade alone. Remote ARM64/macOS profiles remain supported; the Linux Gitea
+service's own systemd sandbox does not constrain remote guest networking.
+
+Dispatch sandbox input accepts resource fields only. `vfs_mounts` entries must
+exactly match names and paths already configured in the trusted profile; callers
+cannot add host paths. Configure required model mounts explicitly before
+upgrading. The removed `vfs_exports` input is rejected. Isolation policies remove
+mounts even when the base profile allows them.
+
 Example configuration using the previously authorized human profile (replace
 the project, token record path and SHA-256):
 
