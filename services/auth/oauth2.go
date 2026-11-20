@@ -19,7 +19,6 @@ import (
 	"gitea.dev/modules/setting"
 	"gitea.dev/modules/timeutil"
 	"gitea.dev/modules/util"
-	"gitea.dev/services/actions"
 	"gitea.dev/services/oauth2_provider"
 )
 
@@ -57,18 +56,6 @@ func GetOAuthAccessTokenScopeAndUserID(ctx context.Context, accessToken string) 
 	return accessTokenScope, grant.UserID, grant.ID
 }
 
-// CheckTaskIsRunning verifies that the TaskID corresponds to a running task
-func CheckTaskIsRunning(ctx context.Context, taskID int64) bool {
-	// Verify the task exists
-	task, err := actions_model.GetTaskByID(ctx, taskID)
-	if err != nil {
-		return false
-	}
-
-	// Verify that it's running
-	return task.Status == actions_model.StatusRunning
-}
-
 // OAuth2 implements the Auth interface and authenticates API requests using the
 // Authorization header.
 type OAuth2 struct{}
@@ -94,14 +81,6 @@ func parseToken(req *http.Request) (string, bool) {
 func (o *OAuth2) userFromToken(ctx context.Context, tokenSHA string) (*user_model.User, error) {
 	// Let's see if token is valid.
 	if strings.Contains(tokenSHA, ".") {
-		// First attempt to decode an actions JWT, returning the actions user
-		if taskID, err := actions.TokenToTaskID(tokenSHA); err == nil {
-			if CheckTaskIsRunning(ctx, taskID) {
-				return user_model.NewActionsUserWithTaskID(taskID), nil
-			}
-		}
-
-		// Otherwise, check if this is an OAuth access token
 		accessTokenScope, uid, grantID := GetOAuthAccessTokenScopeAndUserID(ctx, tokenSHA)
 		user, err := user_model.GetUserByID(ctx, uid)
 		if err != nil || !user.IsIndividual() {

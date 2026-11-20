@@ -154,29 +154,18 @@ func ArtifactContexter() func(next http.Handler) http.Handler {
 			// New runner uses jwt to authenticate
 			tID, err := actions_service.ParseAuthorizationToken(req)
 
-			var task *actions.ActionTask
-			if err == nil {
-				task, err = actions.GetTaskByID(req.Context(), tID)
-				if err != nil {
-					log.Error("Error runner api getting task by ID: %v", err)
-					ctx.HTTPError(http.StatusInternalServerError, "Error runner api getting task by ID")
-					return
-				}
-				if task.Status != actions.StatusRunning {
-					log.Error("Error runner api getting task: task is not running")
-					ctx.HTTPError(http.StatusInternalServerError, "Error runner api getting task: task is not running")
-					return
-				}
-			} else {
-				// Old runner uses GITEA_TOKEN to authenticate
-				authToken := strings.TrimPrefix(authHeader, "Bearer ")
-
-				task, err = actions.GetRunningTaskByToken(req.Context(), authToken)
-				if err != nil {
-					log.Error("Error runner api getting task: %v", err)
-					ctx.HTTPError(http.StatusInternalServerError, "Error runner api getting task")
-					return
-				}
+			if err != nil || tID <= 0 {
+				ctx.HTTPError(http.StatusUnauthorized, "Invalid runtime token")
+				return
+			}
+			task, err := actions.GetTaskByID(req.Context(), tID)
+			if err != nil {
+				ctx.HTTPError(http.StatusUnauthorized, "Invalid runtime task")
+				return
+			}
+			if task.Status != actions.StatusRunning && task.Status != actions.StatusCancelling {
+				ctx.HTTPError(http.StatusUnauthorized, "Inactive runtime task")
+				return
 			}
 
 			if err := task.LoadJob(req.Context()); err != nil {

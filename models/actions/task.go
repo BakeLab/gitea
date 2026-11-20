@@ -185,7 +185,7 @@ func GetTaskRunnerNames(ctx context.Context, taskIDs []int64) (map[int64]string,
 }
 
 func GetRunningTaskByToken(ctx context.Context, token string) (*ActionTask, error) {
-	errNotExist := fmt.Errorf("task with token %q: %w", token, util.ErrNotExist)
+	errNotExist := fmt.Errorf("running task: %w", util.ErrNotExist)
 	if token == "" {
 		return nil, errNotExist
 	}
@@ -210,7 +210,7 @@ func GetRunningTaskByToken(ctx context.Context, token string) (*ActionTask, erro
 		if err != nil {
 			return nil, err
 		}
-		if has && util.CryptoConstTimeEqual(task.TokenHash, cached.TokenHash) {
+		if has && (task.Status == StatusRunning || task.Status == StatusCancelling) && util.CryptoConstTimeEqual(task.TokenHash, cached.TokenHash) {
 			return task, nil
 		}
 		auth_model.TokenCache().Remove(cacheKey)

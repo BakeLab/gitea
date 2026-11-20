@@ -11,12 +11,14 @@ import (
 	"testing"
 
 	runnerv1 "gitea.dev/actionslib/runner/v1"
+	auth_model "gitea.dev/models/auth"
 	"gitea.dev/models/db"
 	repo_model "gitea.dev/models/repo"
 	"gitea.dev/models/unit"
 	"gitea.dev/models/unittest"
 	"gitea.dev/modules/actions/jobparser"
 	"gitea.dev/modules/timeutil"
+	"gitea.dev/modules/util"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -663,5 +665,37 @@ func TestNativeBuilderClaimSkipsUntrustedNewestJob(t *testing.T) {
 	assert.Empty(t, cancelled)
 	for _, job := range []*ActionRunJob{untrusted, generic} {
 		assert.Equal(t, StatusWaiting, unittest.AssertExistsAndLoadBean(t, &ActionRunJob{ID: job.ID}).Status)
+	}
+}
+
+func TestRunningTaskTokenRejectsTerminalCacheHit(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	for _, status := range []Status{StatusSuccess, StatusFailure, StatusCancelled, StatusSkipped} {
+		t.Run(status.String(), func(t *testing.T) {
+			task := &ActionTask{Status: StatusRunning}
+			task.GenerateAndFillToken()
+			require.NoError(t, db.Insert(t.Context(), task))
+			_, err := GetRunningTaskByToken(t.Context(), task.Token)
+			require.NoError(t, err)
+			cached, ok := auth_model.TokenCache().Get("actions:" + task.Token)
+			require.True(t, ok)
+			require.NotNil(t, cached)
+			task.Status = StatusCancelling
+			_, err = db.GetEngine(t.Context()).ID(task.ID).Cols("status").Update(task)
+			require.NoError(t, err)
+			_, err = GetRunningTaskByToken(t.Context(), task.Token)
+			require.NoError(t, err)
+			task.Status = status
+			_, err = db.GetEngine(t.Context()).ID(task.ID).Cols("status").Update(task)
+			require.NoError(t, err)
+			for range 2 {
+				got, err := GetRunningTaskByToken(t.Context(), task.Token)
+				require.ErrorIs(t, err, util.ErrNotExist)
+				assert.Nil(t, got)
+				assert.NotContains(t, err.Error(), task.Token)
+			}
+			_, ok = auth_model.TokenCache().Get("actions:" + task.Token)
+			assert.False(t, ok)
+		})
 	}
 }
