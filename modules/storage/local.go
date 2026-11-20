@@ -84,6 +84,7 @@ func (l *LocalStorage) Save(path string, r io.Reader, size int64) (int64, error)
 	}
 	tmpRemoved := false
 	defer func() {
+		_ = tmp.Close()
 		if !tmpRemoved {
 			_ = util.RemoveWithRetry(tmp.Name())
 		}

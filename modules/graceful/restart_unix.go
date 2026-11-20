@@ -77,7 +77,7 @@ func RestartProcess() (int, error) {
 	}
 
 	if watchdogTimeout != 0 {
-		watchdogStr := strconv.FormatInt(int64(watchdogTimeout/time.Millisecond), 10)
+		watchdogStr := strconv.FormatInt(int64(watchdogTimeout/time.Microsecond), 10)
 		env = append(env, fmt.Sprintf("%s=%s", watchdogTimeoutEnv, watchdogStr))
 	}
 
