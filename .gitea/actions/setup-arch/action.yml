@@ -1,0 +1,42 @@
+name: Set up Arch build tools
+description: Install the BB guest toolchain through its configured pacman mirrors
+inputs:
+  frontend:
+    description: Install Node and the repository-pinned pnpm version
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Install Arch packages
+      shell: bash
+      env:
+        FRONTEND: ${{ inputs.frontend }}
+      run: |
+        set -euo pipefail
+        grep -qx 'ID=arch' /etc/os-release
+        packages=(go base-devel git-lfs shadow util-linux)
+        if [[ "$FRONTEND" == true ]]; then
+          packages+=(nodejs npm)
+        fi
+        sudo pacman -Syu --needed --noconfirm "${packages[@]}"
+        pacman -Sp --print-format '%l' go
+        required=$(awk '$1 == "go" {print $2; exit}' go.mod)
+        installed=$(GOTOOLCHAIN=local /usr/bin/go env GOVERSION)
+        installed=${installed#go}
+        if [[ -z "$required" || "$(printf '%s\n' "$required" "$installed" | sort -V | head -n1)" != "$required" ]]; then
+          echo "Arch Go $installed does not satisfy go.mod ($required); update the pacman mirror." >&2
+          exit 1
+        fi
+        echo 'GOTOOLCHAIN=local' >> "$GITHUB_ENV"
+        printf '/usr/bin\n%s/bin\n' "$(GOTOOLCHAIN=local /usr/bin/go env GOPATH)" >> "$GITHUB_PATH"
+        /usr/bin/go version
+    - name: Install pinned pnpm
+      if: inputs.frontend == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        prefix="$RUNNER_TEMP/gitea-node-tools"
+        npm install --prefix "$prefix" --no-save "$(node -p 'require("./package.json").packageManager')"
+        echo "$prefix/node_modules/.bin" >> "$GITHUB_PATH"
+        node --version
+        "$prefix/node_modules/.bin/pnpm" --version
