@@ -2,7 +2,7 @@
 - Development targets are in the `Makefile`; read `CONTRIBUTING.md` for the command style and package structure
 - PR descriptions: minimal, only what and why, no task or file listings. Aim for less than 1000 characters
 - Reference issues and PRs by full URL, not by number
-- Use Conventional Commits for commit messages and PR titles (`build`, `chore`, `ci`, `docs`, `enhance`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`), with `enhance` for user-facing enhancements. PRs are squash-merged with the PR title as the commit subject
+- Use Conventional Commits for commit messages and PR titles (`build`, `chore`, `ci`, `docs`, `enhance`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`), with `enhance` for user-facing enhancements. Follow the root repository's merge policy
 - Add an `Assisted-by: AGENT_NAME:MODEL_VERSION` trailer to commit messages, never `Co-Authored-By`. Only the human author adds the DCO `Signed-off-by`
 - Attribute agent authorship on one trailing line in issue and PR comments, never as a PR description section
 - Never rewrite git history unless asked, update PRs with new commits and normal push

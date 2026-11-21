@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cli_commit=$(cat "$(dirname "$0")/../gt-revision")
 cd "${1:?release directory is required}"
 : "${GITHUB_SHA:?}"
+cli_commit="$GITHUB_SHA"
 jq -e --arg commit "$GITHUB_SHA" \
   '.commit == $commit and .platform == "linux-amd64" and (.version | type == "string" and length > 0)' manifest.json > /dev/null
 test -s gitea-linux-amd64
 test "$(cat gitea-linux-amd64.sha256)" = "$(sha256sum gitea-linux-amd64)"
-cli_version="1.2.0-dev-g${cli_commit:0:12}"
+cli_version="trim-${cli_commit:0:12}-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
 jq -e --arg commit "$cli_commit" --arg version "$cli_version" \
-  '.repository == "BakeLab/gt" and .commit == $commit and .version == $version and .platforms == ["linux-amd64", "linux-arm64", "darwin-arm64"]' cli-manifest.json > /dev/null
+  '.repository == "BakeLab/gitea" and .path == "cli" and .commit == $commit and .version == $version and .platforms == ["linux-amd64", "linux-arm64", "darwin-arm64"]' cli-manifest.json > /dev/null
 files=(gitea-linux-amd64 gitea-linux-amd64.sha256 manifest.json cli-manifest.json)
 for platform in linux-amd64 linux-arm64 darwin-arm64; do
   binary="gt-${platform}"
@@ -35,7 +35,7 @@ api="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
 tag="trim-${GITHUB_SHA:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 version=$(jq -r '.version' manifest.json)
 source_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/src/commit/${GITHUB_SHA}"
-cli_source_url="${GITHUB_SERVER_URL}/BakeLab/gt/src/commit/${cli_commit}"
+cli_source_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/src/commit/${cli_commit}/cli"
 payload=$(jq -n --arg tag "$tag" --arg commit "$GITHUB_SHA" --arg version "$version" --arg source_url "$source_url" --arg cli_commit "$cli_commit" --arg cli_source_url "$cli_source_url" \
   '{tag_name: $tag, target_commitish: $commit, name: $tag, body: ($version + "\nGitea source: [" + $commit + "](" + $source_url + ")\nCLI source: [" + $cli_commit + "](" + $cli_source_url + ")\nGitea Linux amd64 with embedded frontend assets; gt for Linux amd64/arm64 and macOS arm64. Download uploaded binaries, SHA-256 checksums and manifests; generated tag archives are not release deliverables."), draft: true, prerelease: true}')
 release=$(curl --fail-with-body --silent --show-error \

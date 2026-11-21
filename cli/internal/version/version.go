@@ -15,7 +15,7 @@ import (
 // Version holds the current gt version.
 // This is set at build time via ldflags.
 // If the Version is moved to another package or name changed,
-// build flags in .goreleaser.yaml or Makefile need to be updated accordingly.
+// build flags in the root CI workflow or Makefile need to be updated accordingly.
 var Version = "development"
 
 // Tags holds the build tags used
@@ -72,7 +72,9 @@ func format(version, tags, goVersion string, info *debug.BuildInfo) string {
 		}
 	}
 	text := "gt version " + version + date + "\n"
-	if IsRelease(version) {
+	if strings.HasPrefix(version, "trim-") {
+		text += "https://gitea.int.bb.pub/BakeLab/gitea/releases/tag/" + version + "\n"
+	} else if IsRelease(version) {
 		text += "https://gitea.com/gitea/cli/releases/tag/v" + version + "\n"
 	}
 	text += "built with " + goVersion

@@ -18,6 +18,7 @@ func TestFormatDescribesTheBuild(t *testing.T) {
 		info                *debug.BuildInfo
 		want                string
 	}{
+		{"integrated release", "trim-abcdef123456-42-1", "", nil, "gt version trim-abcdef123456-42-1\nhttps://gitea.int.bb.pub/BakeLab/gitea/releases/tag/trim-abcdef123456-42-1\nbuilt with go1.27.2"},
 		{"release", "1.0.0", "", stamped, "gt version 1.0.0 (2026-10-01)\nhttps://gitea.com/gitea/cli/releases/tag/v1.0.0\nbuilt with go1.27.2"},
 		{"release candidate with tags", "1.1.0-rc1", "sqlite netgo", nil, "gt version 1.1.0-rc1\nhttps://gitea.com/gitea/cli/releases/tag/v1.1.0-rc1\nbuilt with go1.27.2 (tags: sqlite, netgo)"},
 		{"between releases", "0.16.0+12-gabcdef", "", stamped, "gt version 0.16.0+12-gabcdef (2026-10-01)\nbuilt with go1.27.2"},

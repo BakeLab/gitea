@@ -1,5 +1,9 @@
 # <img alt='gt logo' src='assets/gt-icon.svg' height="40"/> gitea-cli
 
+The BakeLab CLI is maintained in this repository's `cli/` module. Download its
+binaries and checksums from the [internal Gitea releases](https://gitea.int.bb.pub/BakeLab/gitea/releases).
+See [integration notes](INTEGRATION.md) for source history and development.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Release](https://raster.shields.io/badge/dynamic/json.svg?label=release&url=https://gitea.com/api/v1/repos/gitea/cli/releases&query=$[0].tag_name)](https://gitea.com/gitea/cli/releases)
 [![Join the chat at https://img.shields.io/discord/322538954119184384.svg](https://img.shields.io/discord/322538954119184384.svg)](https://discord.gg/Gitea)
@@ -38,46 +42,33 @@ environment credentials are never persisted.
 
 ## Installation
 
-There are different ways to get `gt`:
+Download the binary and its matching `.sha256` file from the latest completed
+[internal Gitea release](https://gitea.int.bb.pub/BakeLab/gitea/releases).
+Sign in with your internal account to access the assets.
 
-1. Run the install script. It downloads the binary for your system from dl.gitea.com, verifies its
-   checksum and installs `gt`; `GITEA_CLI_VERSION` and `GITEA_CLI_INSTALL_DIR` choose another
-   version or directory, and the version `nightly` installs the latest build of the main branch.
-   Later, `gt upgrade` upgrades it the same way.
+| System | Binary |
+| --- | --- |
+| Linux x86-64 | `gt-linux-amd64` |
+| Linux ARM64 | `gt-linux-arm64` |
+| macOS Apple Silicon | `gt-darwin-arm64` |
 
-   On Linux, macOS, FreeBSD or OpenBSD:
+For example, after downloading the Linux x86-64 binary and checksum:
 
-   ```sh
-   curl -fsSL https://gitea.com/gitea/cli/raw/branch/main/scripts/install.sh | sh
-   # the latest nightly build
-   curl -fsSL https://gitea.com/gitea/cli/raw/branch/main/scripts/install.sh | sh -s -- --nightly
-   ```
+```sh
+sha256sum -c gt-linux-amd64.sha256
+mkdir -p ~/.local/bin
+install -m 755 gt-linux-amd64 ~/.local/bin/gt
+~/.local/bin/gt --version
+```
 
-   On Windows, in PowerShell, which also adds `gt` to your PATH:
+On macOS, verify with `shasum -a 256 -c gt-darwin-arm64.sha256` and install
+`gt-darwin-arm64` instead. Ensure `~/.local/bin` is on your PATH. The release
+manifest records the Gitea commit and the `cli/` source path for the binary.
 
-   ```powershell
-   irm https://gitea.com/gitea/cli/raw/branch/main/scripts/install.ps1 | iex
-   # the latest nightly build
-   $env:GITEA_CLI_VERSION = 'nightly'; irm https://gitea.com/gitea/cli/raw/branch/main/scripts/install.ps1 | iex
-   ```
-
-2. Use the prebuilt binaries from [dl.gitea.com](https://dl.gitea.com/gitea-cli/)
-
-3. Docker: [gitea-cli at docker hub](https://hub.docker.com/r/gitea/gitea-cli)
-
-4. Homebrew on macOS or Linux:
-
-   ```sh
-   brew install gitea-cli
-   ```
-
-5. Arch Linux: install `gitea-cli` from the [extra repository](https://archlinux.org/packages/extra/x86_64/gitea-cli/) with `sudo pacman -S gitea-cli`
-
-6. Linux packages: download the `.deb`, `.rpm`, `.apk` or Arch `.pkg.tar.zst` for your system from the
-   [release](https://gitea.com/gitea/cli/releases) and install it with your package manager, for example
-   `sudo apt install ./gitea-cli_<version>_amd64.deb`. They include the man pages and shell completions.
-
-7. Install from source: [see *Compilation*](#compilation)
+After this installation, `gt upgrade` follows the internal Gitea release assets.
+Earlier BakeLab `dev` binaries are detected as source builds and require this
+one-time manual replacement. Source development builds remain available through
+[Compilation](#compilation).
 
 ### Log in to Gitea from gt
 
@@ -160,8 +151,8 @@ Make sure you have a current Go version installed (1.27 or newer).
 
 - To compile the source yourself with the recommended flags & tags:
   ```sh
-  git clone https://gitea.com/gitea/cli.git # or: gt repo clone https://gitea.com/gitea/cli ;)
-  cd cli
+  git clone --branch trim https://github.com/BakeLab/gitea.git
+  cd gitea/cli
   make
   ```
   Note that GNU Make (gmake on OpenBSD) is required.
@@ -171,9 +162,9 @@ Make sure you have a current Go version installed (1.27 or newer).
   ```
   This installs the binary into the "bin" folder inside of your GOPATH folder (`go env GOPATH`). It is possible that this folder isn't in your PATH Environment Variable. 
 
-- For a quick installation without `git` & `make`, set $version and exec:
+- To install from an existing checkout without Make, run from `cli/`:
   ```sh
-  go install gitea.dev/cli/cmd/gt@${version}
+  go install ./cmd/gt
   ```
 
 ## Contributing
