@@ -188,7 +188,7 @@ jobs:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
         run: *mirror
       - run: make deps-backend deps-frontend
-      - run: CGO_ENABLED=0 TAGS=bindata make backend frontend
+      - run: CGO_ENABLED=0 TAGS=bindata make frontend backend
       - name: Run PostgreSQL E2E with Playwright
         timeout-minutes: 20
         run: |
