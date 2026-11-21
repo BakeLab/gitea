@@ -202,6 +202,7 @@ func NormalRoutes() *web.Router {
 		// TODO: this prefix should be generated with a token string with runner ?
 		prefix = "/api/actions_pipeline"
 		r.Mount(prefix, actions_router.ArtifactsRoutes(prefix))
+		r.Mount(actions_router.CacheRouteBase, actions_router.CacheRoutes())
 		prefix = actions_router.ArtifactV4RouteBase
 		r.Mount(prefix, actions_router.ArtifactsV4Routes(prefix))
 	}

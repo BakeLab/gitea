@@ -884,7 +884,7 @@ func (config bbExecutorConfig) taskRequest(ctx context.Context, row *actions_mod
 	if profile.ExecUser != "" {
 		user = profile.ExecUser
 	}
-	runnerConfig, err := json.Marshal(map[string]any{"runner": map[string]any{"file": workdir + "/.runner", "capacity": 1, "timeout": fmt.Sprintf("%ds", duration)}, "container": map[string]any{"network": "host", "bind_workdir": true}, "host": map[string]any{"workdir_parent": workdir + "/work"}})
+	runnerConfig, err := json.Marshal(map[string]any{"runner": map[string]any{"file": workdir + "/.runner", "capacity": 1, "timeout": fmt.Sprintf("%ds", duration), "envs": map[string]string{"ACTIONS_CACHE_URL": setting.AppURL + "api/actions_cache/"}}, "cache": map[string]any{"enabled": false, "v2": false}, "container": map[string]any{"network": "host", "bind_workdir": true}, "host": map[string]any{"workdir_parent": workdir + "/work"}})
 	if err != nil {
 		return nil, err
 	}
