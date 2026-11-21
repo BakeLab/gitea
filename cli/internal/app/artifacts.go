@@ -338,7 +338,7 @@ func extractFile(root *os.Root, entry *zip.File, name string, clobber, skipExist
 		return err
 	}
 	if clobber {
-		defer root.Remove(destination)
+		defer func() { _ = root.Remove(destination) }()
 	}
 	content, err := entry.Open()
 	if err != nil {

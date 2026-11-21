@@ -244,7 +244,12 @@ func TestDebugLogsRequestsWithoutSecrets(t *testing.T) {
 
 func TestMalformedResponsesDoNotExposeRequestSecrets(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, rw, err := w.(http.Hijacker).Hijack()
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("test server does not support hijacking")
+			return
+		}
+		conn, rw, err := hijacker.Hijack()
 		if !assert.NoError(t, err) {
 			return
 		}
@@ -269,7 +274,12 @@ func TestMalformedResponsesDoNotExposeRequestSecrets(t *testing.T) {
 
 func TestMalformedTrailersDoNotExposeRequestSecrets(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, rw, err := w.(http.Hijacker).Hijack()
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("test server does not support hijacking")
+			return
+		}
+		conn, rw, err := hijacker.Hijack()
 		if !assert.NoError(t, err) {
 			return
 		}

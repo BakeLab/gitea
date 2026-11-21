@@ -151,7 +151,12 @@ func TestOAuthMalformedResponseDoesNotExposeCredentials(t *testing.T) {
 				}
 				values := []string{r.Form.Get("code"), r.Form.Get("code_verifier"), r.Form.Get("refresh_token")}
 				secrets <- values
-				conn, rw, err := w.(http.Hijacker).Hijack()
+				hijacker, ok := w.(http.Hijacker)
+				if !ok {
+					t.Error("test server does not support hijacking")
+					return
+				}
+				conn, rw, err := hijacker.Hijack()
 				if err != nil {
 					t.Error(err)
 					return
