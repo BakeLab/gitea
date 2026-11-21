@@ -8,6 +8,7 @@ import unittest
 
 
 SCRIPT = Path(__file__).with_name("publish-release.sh").resolve()
+CLI_COMMIT = (SCRIPT.parent.parent / "gt-revision").read_text().strip()
 
 
 class PublishReleaseTest(unittest.TestCase):
@@ -44,6 +45,15 @@ print('{"id":123}')
             f"{hashlib.sha256(binary).hexdigest()}  gitea-linux-amd64\n")
         (self.dist / "manifest.json").write_text(json.dumps({
             "commit": "a" * 40, "platform": "linux-amd64", "version": "Gitea test"}))
+        platforms = ["linux-amd64", "linux-arm64", "darwin-arm64"]
+        for platform in platforms:
+            name = f"gt-{platform}"
+            (self.dist / name).write_bytes(binary)
+            (self.dist / f"{name}.sha256").write_text(
+                f"{hashlib.sha256(binary).hexdigest()}  {name}\n")
+        (self.dist / "cli-manifest.json").write_text(json.dumps({
+            "repository": "BakeLab/gt", "commit": CLI_COMMIT,
+            "version": f"1.2.0-dev-g{CLI_COMMIT[:12]}", "platforms": platforms}))
 
     def publish(self, *args):
         return subprocess.run(["bash", str(SCRIPT), str(self.dist), *args],
@@ -56,12 +66,16 @@ print('{"id":123}')
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stderr)
         requests = self.requests()
-        self.assertEqual(len(requests), 5)
+        self.assertEqual(len(requests), 12)
         payload = json.loads(requests[0][requests[0].index("--data") + 1])
         self.assertTrue(payload["draft"])
         self.assertEqual(payload["target_commitish"], "a" * 40)
         self.assertEqual(payload["tag_name"], "trim-aaaaaaaaaaaa-42-1")
-        self.assertEqual(sum("-F" in request for request in requests), 3)
+        self.assertEqual(sum("-F" in request for request in requests), 10)
+        manifest = json.loads((self.dist / "manifest.json").read_text())
+        self.assertEqual(manifest["commit"], "a" * 40)
+        self.assertEqual(manifest["cli"]["commit"], CLI_COMMIT)
+        self.assertIn(f"/BakeLab/gt/src/commit/{CLI_COMMIT}", payload["body"])
         self.assertIn("PATCH", requests[-1])
         self.assertIn('{"draft":false}', requests[-1])
 
@@ -90,6 +104,20 @@ print('{"id":123}')
         self.env["FAIL_UPLOAD"] = "1"
         self.assertNotEqual(self.publish().returncode, 0)
         self.assertFalse(any("PATCH" in request for request in self.requests()))
+
+    def test_missing_cli_platform_or_wrong_revision_never_publish(self):
+        for platform in ("linux-amd64", "linux-arm64", "darwin-arm64"):
+            binary = self.dist / f"gt-{platform}"
+            data = binary.read_bytes()
+            binary.unlink()
+            self.assertNotEqual(self.publish("--check").returncode, 0)
+            binary.write_bytes(data)
+        path = self.dist / "cli-manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest["commit"] = "b" * 40
+        path.write_text(json.dumps(manifest))
+        self.assertNotEqual(self.publish().returncode, 0)
+        self.assertFalse(self.log.exists())
 
 
 if __name__ == "__main__":
