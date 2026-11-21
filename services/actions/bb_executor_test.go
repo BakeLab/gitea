@@ -11,6 +11,7 @@ import (
 	actions_model "gitea.dev/models/actions"
 	"gitea.dev/modules/json"
 
+	bbControl "github.com/BakeLab/breadboard/sdk/go/control"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -139,4 +140,24 @@ func TestBBProfileSelectsMacOS(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) { assert.Equal(t, tt.want, bbProfileSelectsMacOS(tt.sandbox)) })
 	}
+}
+
+func TestBBAttachRunnerEnv(t *testing.T) {
+	config := bbExecutorConfig{MaxDurationS: 3600}
+	row := &actions_model.ActionBBTask{Key: "abc_42"}
+
+	raw, err := config.taskRequest(context.Background(), row, nil, bbExecutorProfile{})
+	require.NoError(t, err)
+
+	var req bbControl.TaskRequest
+	require.NoError(t, json.Unmarshal(raw, &req))
+	assert.Nil(t, req.Exec.Secrets, "taskRequest must not emit removed exec.secrets")
+	assert.Nil(t, req.Exec.Env, "persisted taskRequest must not contain runner registration")
+
+	legacySecrets := []string{bbSecretName(row)}
+	req.Exec.Secrets = &legacySecrets
+	bbAttachRunnerEnv(&req, row, `{"token":"ephemeral"}`)
+	assert.Nil(t, req.Exec.Secrets, "bbAttachRunnerEnv must clear legacy exec.secrets")
+	require.NotNil(t, req.Exec.Env)
+	assert.Equal(t, `{"token":"ephemeral"}`, (*req.Exec.Env)[bbSecretName(row)])
 }
