@@ -19,6 +19,7 @@ runs:
           packages+=(nodejs npm)
         fi
         sudo pacman -Syu --needed --noconfirm "${packages[@]}"
+        pacman -Sp --print-format '%l' go
         required=$(awk '$1 == "go" {print $2; exit}' go.mod)
         installed=$(GOTOOLCHAIN=local /usr/bin/go env GOVERSION)
         installed=${installed#go}
