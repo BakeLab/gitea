@@ -32,7 +32,9 @@ func CleanupCaches(ctx context.Context) error {
 				return err
 			}
 			claimed, err := db.GetEngine(ctx).Where(cond).And("id = ?", entry.ID).Cols("status").Update(&actions_model.ActionCache{Status: actions_model.CacheDeleting})
-			if err != nil || claimed != 1 { return err }
+			if err != nil || claimed != 1 {
+				return err
+			}
 			chunks, err := actions_model.GetCacheChunks(ctx, entry.ID)
 			if err != nil {
 				return err

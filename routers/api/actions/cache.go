@@ -4,7 +4,7 @@
 package actions
 
 import (
- stdcontext "context"
+	stdcontext "context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -221,11 +221,29 @@ func uploadCache(ctx *ArtifactContext) {
 		ctx.HTTPError(http.StatusBadRequest, "Incomplete cache chunk")
 		return
 	}
-	existing, found, err := db.Get[actions_model.ActionCacheChunk](ctx, builder.Eq{"cache_id": entry.ID, "offset": start})
-	if err == nil && !found {
-		_, err = db.GetEngine(ctx).Insert(&actions_model.ActionCacheChunk{CacheID: entry.ID, Offset: start, Size: size})
-	}
-	if err != nil || (found && existing.Size != size) {
+	err = db.WithTx(ctx, func(txCtx stdcontext.Context) error {
+		claimed, err := db.GetEngine(txCtx).Where("id = ? AND status = ?", entry.ID, actions_model.CacheWriting).Cols("status").Update(&actions_model.ActionCache{Status: actions_model.CacheWriting})
+		if err != nil {
+			return err
+		}
+		if claimed != 1 {
+			return fmt.Errorf("cache upload expired")
+		}
+		existing, found, err := db.Get[actions_model.ActionCacheChunk](txCtx, builder.Eq{"cache_id": entry.ID, "offset": start})
+		if err != nil {
+			return err
+		}
+		if found {
+			if existing.Size != size {
+				return fmt.Errorf("cache chunk size changed")
+			}
+			return nil
+		}
+		_, err = db.GetEngine(txCtx).Insert(&actions_model.ActionCacheChunk{CacheID: entry.ID, Offset: start, Size: size})
+		return err
+	})
+	if err != nil {
+		_ = storage.ActionsArtifacts.Delete(path)
 		ctx.HTTPError(http.StatusInternalServerError, "Cache chunk save failed")
 		return
 	}
