@@ -130,6 +130,7 @@ func OAuthLogin(ctx context.Context, opts OAuthOptions) (Credential, error) {
 	case err := <-failures:
 		return Credential{}, err
 	case code := <-codes:
+		ctx = transport.WithSecrets(ctx, code, verifier)
 		ctx = withHTTPClient(ctx, opts.HTTP)
 		token, err := config.Exchange(ctx, code, oauth2.VerifierOption(verifier))
 		if err != nil {
@@ -244,6 +245,7 @@ func (m Manager) Refresh(ctx context.Context, instance, user string, httpClient 
 		config := oauthConfig(instance, clientID)
 		requestContext, cancel := context.WithTimeout(ctx, refreshTimeout)
 		defer cancel()
+		requestContext = transport.WithSecrets(requestContext, credential.AccessToken, credential.RefreshToken)
 		requestContext = withHTTPClient(requestContext, httpClient)
 		old := &oauth2.Token{AccessToken: credential.AccessToken, RefreshToken: credential.RefreshToken, Expiry: now.Add(-time.Hour)}
 		token, err := config.TokenSource(requestContext, old).Token()

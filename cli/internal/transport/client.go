@@ -218,7 +218,8 @@ func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			req.Header[name] = t.headers[name]
 		}
 	}
-	return t.base.RoundTrip(req)
+	response, err := t.base.RoundTrip(req)
+	return response, redactError(req.Context(), err)
 }
 
 // minHeaderSecret is the length below which a configured header value, such as "1" or "acme", is
@@ -719,7 +720,7 @@ func RequestError(ctx context.Context, action string, err error) error {
 		return ctx.Err()
 	}
 	if urlErr, ok := errors.AsType[*url.Error](err); ok {
-		failure := &RequestFailure{Action: action, Err: urlErr.Err}
+		failure := &RequestFailure{Action: action, Err: redactError(ctx, urlErr.Err)}
 		if u, parseErr := url.Parse(urlErr.URL); parseErr == nil {
 			failure.Server = (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
 		}
@@ -734,8 +735,9 @@ func ResponseError(ctx context.Context, resp *http.Response, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	failure := &RequestFailure{Action: "reading the API response failed", Err: err}
+	failure := &RequestFailure{Action: "reading the API response failed", Err: redactError(ctx, err)}
 	if resp != nil && resp.Request != nil && resp.Request.URL != nil {
+		failure.Err = redactError(resp.Request.Context(), failure.Err)
 		failure.Server = (&url.URL{Scheme: resp.Request.URL.Scheme, Host: resp.Request.URL.Host}).String()
 	}
 	return failure

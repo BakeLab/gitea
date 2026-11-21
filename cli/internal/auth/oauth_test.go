@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -137,6 +138,61 @@ func TestOAuthWithoutHTTPClientUsesDefaultClient(t *testing.T) {
 	credential, err = manager.Refresh(context.Background(), server.URL, "alice", nil, false, time.Now())
 	require.NoError(t, err)
 	require.Equal(t, "access", credential.AccessToken)
+}
+
+func TestOAuthMalformedResponseDoesNotExposeCredentials(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		t.Run(fmt.Sprintf("refresh=%v", refresh), func(t *testing.T) {
+			secrets := make(chan []string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+					return
+				}
+				values := []string{r.Form.Get("code"), r.Form.Get("code_verifier"), r.Form.Get("refresh_token")}
+				secrets <- values
+				hijacker, ok := w.(http.Hijacker)
+				if !ok {
+					t.Error("test server does not support hijacking")
+					return
+				}
+				conn, rw, err := hijacker.Hijack()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer conn.Close()
+				_, _ = fmt.Fprintf(rw, "HTTP/1.1 200 OK\r\n%s\r\n\r\n", strings.Join(values, " "))
+				_ = rw.Flush()
+			}))
+			defer server.Close()
+			var err error
+			if refresh {
+				config := settings.New(t.TempDir())
+				manager := newTestManager(t, config, &Store{Dir: config.Dir})
+				require.NoError(t, manager.Register(server.URL, "alice", "file", "oauth", HostOptions{}, Credential{AccessToken: "old-access", RefreshToken: "private-refresh-token", ExpiresAt: time.Now().Add(-time.Minute)}))
+				_, err = manager.Refresh(context.Background(), server.URL, "alice", nil, false, time.Now())
+			} else {
+				_, err = OAuthLogin(context.Background(), OAuthOptions{Instance: server.URL, Timeout: time.Second, Authorize: func(_ context.Context, raw string) error {
+					u, parseErr := url.Parse(raw)
+					if parseErr != nil {
+						return parseErr
+					}
+					response, requestErr := http.Get(u.Query().Get("redirect_uri") + "?code=private-auth-code&state=" + url.QueryEscape(u.Query().Get("state")))
+					if requestErr != nil {
+						return requestErr
+					}
+					return response.Body.Close()
+				}})
+			}
+			require.Error(t, err)
+			for _, value := range <-secrets {
+				if value != "" {
+					require.NotContains(t, err.Error(), value)
+				}
+			}
+		})
+	}
 }
 
 func TestOAuthLoginReportsAnUnreachableTokenEndpoint(t *testing.T) {
