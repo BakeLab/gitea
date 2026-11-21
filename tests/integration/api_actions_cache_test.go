@@ -34,19 +34,20 @@ func TestActionsPersistentCache(t *testing.T) {
 	upload := func(start int, body string, status int) {
 		MakeRequest(t, NewRequestWithBody(t, "PATCH", path, strings.NewReader(body)).AddTokenAuth(token).SetHeader("Content-Range", fmt.Sprintf("bytes %d-%d/*", start, start+len(body)-1)), status)
 	}
+	// A distinct task obtains its own runtime token, without transferring cache credentials.
+	other := *task
+	other.ID = 0
+	other.TokenHash = "cache-test-new-task"
+	_, err := db.GetEngine(t.Context()).Insert(&other)
+	require.NoError(t, err)
+	otherToken, err := actions_service.CreateAuthorizationToken(other.ID, other.Job.RunID, other.JobID)
+	require.NoError(t, err)
+	MakeRequest(t, NewRequestWithBody(t, "PATCH", path, strings.NewReader("abc")).AddTokenAuth(otherToken).SetHeader("Content-Range", "bytes 0-2/*"), http.StatusNotFound)
 	upload(3, "def", http.StatusNoContent)
 	MakeRequest(t, NewRequestWithJSON(t, "POST", path, map[string]int{"size": 6}).AddTokenAuth(token), http.StatusBadRequest)
 	upload(2, "xx", http.StatusConflict)
 	upload(0, "abc", http.StatusNoContent)
 	MakeRequest(t, NewRequestWithJSON(t, "POST", path, map[string]int{"size": 6}).AddTokenAuth(token), http.StatusNoContent)
-	// A distinct task obtains its own runtime token, without transferring cache credentials.
-	other := *task
-	other.ID = 0
-	other.Token = "cache-test-new-task"
-	_, err := db.GetEngine(t.Context()).Insert(&other)
-	require.NoError(t, err)
-	otherToken, err := actions_service.CreateAuthorizationToken(other.ID, other.Job.RunID, other.JobID)
-	require.NoError(t, err)
 	result := MakeRequest(t, NewRequest(t, "GET", base+"/cache?keys=uv-%25_&version=v1").AddTokenAuth(otherToken), http.StatusOK)
 	var hit struct {
 		CacheKey        string `json:"cacheKey"`
@@ -62,6 +63,19 @@ func TestActionsPersistentCache(t *testing.T) {
 	assert.Equal(t, "cde", partial.Body.String())
 	MakeRequest(t, NewRequest(t, "GET", location.RequestURI()+"bad"), http.StatusUnauthorized)
 	MakeRequest(t, NewRequestWithBody(t, "PATCH", path, strings.NewReader("abc")).AddTokenAuth(otherToken).SetHeader("Content-Range", "bytes 0-2/*"), http.StatusNotFound)
+	lookupPath := base + "/cache?keys=uv-%25_&version=v1"
+	MakeRequest(t, NewRequest(t, "GET", lookupPath), http.StatusUnauthorized)
+	MakeRequest(t, NewRequest(t, "GET", lookupPath).AddTokenAuth("invalid"), http.StatusUnauthorized)
+	// A cache from an unrelated repository or branch is never selected.
+	_, err = db.GetEngine(t.Context()).ID(reservation.CacheID).Cols("repo_id").Update(&actions_model.ActionCache{RepoID: task.RepoID + 10000})
+	require.NoError(t, err)
+	MakeRequest(t, NewRequest(t, "GET", lookupPath).AddTokenAuth(otherToken), http.StatusNoContent)
+	_, err = db.GetEngine(t.Context()).ID(reservation.CacheID).Cols("repo_id", "ref").Update(&actions_model.ActionCache{RepoID: task.RepoID, Ref: "refs/heads/unrelated"})
+	require.NoError(t, err)
+	MakeRequest(t, NewRequest(t, "GET", lookupPath).AddTokenAuth(otherToken), http.StatusNoContent)
+	_, err = db.GetEngine(t.Context()).ID(other.ID).Cols("status").Update(&actions_model.ActionTask{Status: actions_model.StatusSuccess})
+	require.NoError(t, err)
+	MakeRequest(t, NewRequest(t, "GET", lookupPath).AddTokenAuth(otherToken), http.StatusUnauthorized)
 	_, err = db.GetEngine(t.Context()).ID(reservation.CacheID).Cols("expires_unix").Update(&actions_model.ActionCache{ExpiresUnix: timeutil.TimeStampNow() - 1})
 	require.NoError(t, err)
 	require.NoError(t, actions_service.CleanupCaches(t.Context()))

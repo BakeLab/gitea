@@ -8,6 +8,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"gitea.dev/models/db"
 	"gitea.dev/modules/globallock"
 	"gitea.dev/modules/json"
+	"gitea.dev/modules/log"
 	"gitea.dev/modules/setting"
 	"gitea.dev/modules/storage"
 	"gitea.dev/modules/timeutil"
@@ -59,21 +61,21 @@ func cacheRefs(ctx *ArtifactContext) ([]string, error) {
 	if run.Event.IsPullRequest() || run.Event.IsPullRequestReview() {
 		payload, err := run.GetPullRequestEventPayload()
 		if err != nil || payload.Index <= 0 || payload.PullRequest == nil || payload.PullRequest.Base == nil {
-			return nil, fmt.Errorf("cacheRefs: invalid pull request payload")
+			return nil, errors.New("cacheRefs: invalid pull request payload")
 		}
 		ref = fmt.Sprintf("refs/pull/%d/head", payload.Index)
 		refs = append(refs, "refs/heads/"+payload.PullRequest.Base.Ref)
 	} else if run.IsForkPullRequest {
-		return nil, fmt.Errorf("cacheRefs: missing pull request scope")
+		return nil, errors.New("cacheRefs: missing pull request scope")
 	}
 	if ref == "" {
-		return nil, fmt.Errorf("cacheRefs: empty ref")
+		return nil, errors.New("cacheRefs: empty ref")
 	}
 	return append(append([]string{ref}, refs...), "refs/heads/"+run.Repo.DefaultBranch), nil
 }
 
 func cacheSignature(id, expires int64) string {
-	mac := hmac.New(sha256.New, []byte(setting.GetGeneralTokenSigningSecret()))
+	mac := hmac.New(sha256.New, setting.GetGeneralTokenSigningSecret())
 	_, _ = fmt.Fprintf(mac, "actions-cache:%d:%d", id, expires)
 	return hex.EncodeToString(mac.Sum(nil))
 }
@@ -227,15 +229,15 @@ func uploadCache(ctx *ArtifactContext) {
 			return err
 		}
 		if claimed != 1 {
-			return fmt.Errorf("cache upload expired")
+			return errors.New("cache upload expired")
 		}
-		existing, found, err := db.Get[actions_model.ActionCacheChunk](txCtx, builder.Eq{"cache_id": entry.ID, "offset": start})
+		existing, found, err := db.Get[actions_model.ActionCacheChunk](txCtx, builder.Eq{"cache_id": entry.ID, "`offset`": start})
 		if err != nil {
 			return err
 		}
 		if found {
 			if existing.Size != size {
-				return fmt.Errorf("cache chunk size changed")
+				return errors.New("cache chunk size changed")
 			}
 			return nil
 		}
@@ -244,6 +246,7 @@ func uploadCache(ctx *ArtifactContext) {
 	})
 	if err != nil {
 		_ = storage.ActionsArtifacts.Delete(path)
+		log.Error("Cache chunk save failed: %v", err)
 		ctx.HTTPError(http.StatusInternalServerError, "Cache chunk save failed")
 		return
 	}
