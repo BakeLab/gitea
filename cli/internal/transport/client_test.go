@@ -242,6 +242,54 @@ func TestDebugLogsRequestsWithoutSecrets(t *testing.T) {
 	require.NotContains(t, log.String(), "secret")
 }
 
+func TestMalformedResponsesDoNotExposeRequestSecrets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, rw, err := w.(http.Hijacker).Hijack()
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer conn.Close()
+		_, _ = fmt.Fprintf(rw, "HTTP/1.1 200 OK\r\n%s %s\r\n\r\n", r.Header.Get("Authorization"), r.Header.Get("X-Proxy-Secret"))
+		_ = rw.Flush()
+	}))
+	defer server.Close()
+	var log bytes.Buffer
+	client := New(server.URL, "private-access-token", false).Debug(&log).WithHeaders(http.Header{"X-Proxy-Secret": {"private-proxy-secret"}})
+	client.Retries = 0
+	response, err := client.Do(context.Background(), http.MethodGet, "user", nil, nil)
+	if response != nil {
+		_ = response.Body.Close()
+	}
+	require.Error(t, err)
+	for _, secret := range []string{"private-access-token", "private-proxy-secret"} {
+		require.NotContains(t, err.Error(), secret)
+		require.NotContains(t, log.String(), secret)
+	}
+}
+
+func TestMalformedTrailersDoNotExposeRequestSecrets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, rw, err := w.(http.Hijacker).Hijack()
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer conn.Close()
+		_, _ = fmt.Fprintf(rw, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTrailer: X-Result\r\n\r\n1\r\nx\r\n0\r\n%s %s\r\n\r\n", r.Header.Get("Authorization"), r.Header.Get("X-Proxy-Secret"))
+		_ = rw.Flush()
+	}))
+	defer server.Close()
+	client := New(server.URL, "private-access-token", false).WithHeaders(http.Header{"X-Proxy-Secret": {"private-proxy-secret"}})
+	response, err := client.Do(context.Background(), http.MethodGet, "user", nil, nil)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	_, err = io.ReadAll(response.Body)
+	require.Error(t, err)
+	failure := ResponseError(context.Background(), response, err)
+	for _, secret := range []string{"private-access-token", "private-proxy-secret"} {
+		require.NotContains(t, failure.Error(), secret)
+	}
+}
+
 func TestDebugLogsWhyARequestTimedOut(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var log bytes.Buffer

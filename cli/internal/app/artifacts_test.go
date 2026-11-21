@@ -242,3 +242,61 @@ func TestArtifactListShowsSizesAndExpiry(t *testing.T) {
 		require.Equal(t, want, out.String(), "tty=%t", tty)
 	}
 }
+
+func TestExtractZipClobberDoesNotModifyHardLinkTarget(t *testing.T) {
+	outside, dir := t.TempDir(), t.TempDir()
+	victim := filepath.Join(outside, "victim")
+	require.NoError(t, os.WriteFile(victim, []byte("keep outside"), 0o600))
+	require.NoError(t, os.Link(victim, filepath.Join(dir, "file")))
+	archive := strings.NewReader(zipOf(t, map[string]string{"file": "replacement"}))
+	require.NoError(t, extractZip(context.Background(), archive, dir, true, false))
+	data, err := os.ReadFile(victim)
+	require.NoError(t, err)
+	require.Equal(t, "keep outside", string(data))
+	data, err = os.ReadFile(filepath.Join(dir, "file"))
+	require.NoError(t, err)
+	require.Equal(t, "replacement", string(data))
+}
+
+func TestExtractZipClobberPreservesFileOnChecksumFailure(t *testing.T) {
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	file, err := writer.CreateHeader(&zip.FileHeader{Name: "file", Method: zip.Store})
+	require.NoError(t, err)
+	_, err = file.Write([]byte("contents"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	damaged := bytes.Replace(archive.Bytes(), []byte("contents"), []byte("tampered"), 1)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file")
+	require.NoError(t, os.WriteFile(path, []byte("original"), 0o600))
+	require.ErrorIs(t, extractZip(context.Background(), bytes.NewReader(damaged), dir, true, false), zip.ErrChecksum)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "original", string(data))
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+}
+
+func TestExtractZipClobberPreservesPrivatePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits")
+	}
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	header := &zip.FileHeader{Name: "file"}
+	header.SetMode(0o644)
+	file, err := writer.CreateHeader(header)
+	require.NoError(t, err)
+	_, err = file.Write([]byte("replacement"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file")
+	require.NoError(t, os.WriteFile(path, []byte("private"), 0o600))
+	require.NoError(t, extractZip(context.Background(), &archive, dir, true, false))
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}

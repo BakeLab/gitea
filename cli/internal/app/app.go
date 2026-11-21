@@ -77,7 +77,7 @@ func System() Dependencies {
 	streams := terminal.System()
 	store := settings.New(os.Getenv("GITEA_CLI_CONFIG_DIR"))
 	prompter := &terminal.FormPrompter{Streams: streams}
-	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: streams.ErrOut, Reads: &git.ReadCache{}}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, ReleaseForm: prompter, RepoForm: prompter, LabelForm: prompter, Getenv: os.Getenv, LookupEnv: os.LookupEnv, Client: transport.New, DataDir: settings.DataDir(os.Getenv("GITEA_CLI_DATA_DIR")), PolicyFile: settings.PolicyPath(), Environ: os.Environ, RunExtension: extensions.Run, GitHub: github.New}
+	return Dependencies{Browser: terminal.SystemBrowser{ErrOut: streams.ErrOut}, Editor: terminal.SystemEditor{Streams: streams}, Pager: terminal.SystemPager{}, Executable: os.Executable, Git: git.System{In: streams.In, ErrOut: terminal.SafeWriter(streams.ErrOut, streams.ErrTTY, false), Reads: &git.ReadCache{}}, Now: time.Now, Settings: store, Credentials: &auth.Store{Dir: store.Dir, Keyring: auth.SystemKeyring{}}, Streams: streams, Prompter: prompter, IssueForm: prompter, IssueEditForm: prompter, PullForm: prompter, ReviewForm: prompter, MergeForm: prompter, MilestoneForm: prompter, ReleaseForm: prompter, RepoForm: prompter, LabelForm: prompter, Getenv: os.Getenv, LookupEnv: os.LookupEnv, Client: transport.New, DataDir: settings.DataDir(os.Getenv("GITEA_CLI_DATA_DIR")), PolicyFile: settings.PolicyPath(), Environ: os.Environ, RunExtension: extensions.Run, GitHub: github.New}
 }
 
 type options struct {
@@ -160,7 +160,7 @@ func newRoot(deps Dependencies) (*cobra.Command, *application) {
 		deps.RunExtension = extensions.Run
 	}
 	if deps.Git == nil {
-		deps.Git = git.System{In: deps.Streams.In, ErrOut: deps.Streams.ErrOut}
+		deps.Git = git.System{In: deps.Streams.In, ErrOut: terminal.SafeWriter(deps.Streams.ErrOut, deps.Streams.ErrTTY, false)}
 	}
 	if deps.Browser == nil {
 		deps.Browser = terminal.SystemBrowser{ErrOut: deps.Streams.ErrOut}

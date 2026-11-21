@@ -69,6 +69,25 @@ func failureMessage(req *http.Request, resp *http.Response) string {
 
 type secrets struct{}
 
+type redactedError struct {
+	cause error
+	text  string
+}
+
+func (e *redactedError) Error() string { return e.text }
+func (e *redactedError) Unwrap() error { return e.cause }
+
+func redactError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	text := RedactSecrets(ctx, err.Error())
+	if text == err.Error() {
+		return err
+	}
+	return &redactedError{cause: err, text: text}
+}
+
 // WithSecrets marks ctx with secrets that a request carries in its body, such as source
 // credentials of a migration, so that whatever echoes them is redacted with RedactSecrets.
 func WithSecrets(ctx context.Context, values ...string) context.Context {

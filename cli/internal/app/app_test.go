@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,11 +17,35 @@ import (
 	"unicode"
 
 	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
 	"gitea.dev/cli/internal/version"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDefaultGitDiagnosticsAreSafeOnTerminals(t *testing.T) {
+	const message = "remote: \x1b]52;c;Y29udGVudA==\ahello\x1b[2J\n"
+	for _, tty := range []bool{false, true} {
+		t.Run(fmt.Sprintf("tty=%v", tty), func(t *testing.T) {
+			deps, _, diagnostics := testDeps(t)
+			deps.Git = nil
+			deps.Streams.ErrTTY = tty
+			_, app := newRoot(deps)
+			runner, ok := app.deps.Git.(git.System)
+			require.True(t, ok)
+			_, err := io.WriteString(runner.ErrOut, message)
+			require.NoError(t, err)
+			if tty {
+				require.NotContains(t, diagnostics.String(), "\x1b")
+				require.NotContains(t, diagnostics.String(), "\a")
+				require.Contains(t, diagnostics.String(), "hello")
+			} else {
+				require.Equal(t, message, diagnostics.String())
+			}
+		})
+	}
+}
 
 func TestHelpWorksWithoutValidConfiguration(t *testing.T) {
 	for _, args := range [][]string{{}, {"help"}, {"version"}, {"man"}, {"man", "pr", "checkout"}, {"completion", "bash"}, {"--help"}} {

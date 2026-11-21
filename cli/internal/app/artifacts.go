@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -316,16 +317,28 @@ func extractFile(root *os.Root, entry *zip.File, name string, clobber, skipExist
 	if err := root.MkdirAll(filepath.Dir(name), 0o777); err != nil {
 		return err
 	}
-	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	destination := name
+	mode := cmp.Or(entry.Mode().Perm(), 0o666)
 	if clobber {
-		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		if info, err := root.Lstat(name); err == nil && !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing to replace %q: not a regular file", name)
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		} else if err == nil {
+			mode = info.Mode().Perm()
+		}
+		// Replacing the directory entry cannot modify an existing hard link's target.
+		destination = filepath.Join(filepath.Dir(name), ".gt-artifact-"+strconv.FormatUint(rand.Uint64(), 36))
 	}
-	file, err := root.OpenFile(name, flags, cmp.Or(entry.Mode().Perm(), 0o666))
+	file, err := root.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if errors.Is(err, os.ErrExist) && skipExisting {
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+	if clobber {
+		defer root.Remove(destination)
 	}
 	content, err := entry.Open()
 	if err != nil {
@@ -333,7 +346,13 @@ func extractFile(root *os.Root, entry *zip.File, name string, clobber, skipExist
 		return err
 	}
 	_, copyErr := io.Copy(file, content)
-	return cmp.Or(copyErr, content.Close(), file.Close())
+	if err := cmp.Or(copyErr, content.Close(), file.Close()); err != nil {
+		return err
+	}
+	if clobber {
+		return root.Rename(destination, name)
+	}
+	return nil
 }
 
 // completeArtifactNames completes the names of the artifacts of the run given as the first argument.

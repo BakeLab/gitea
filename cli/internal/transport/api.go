@@ -183,7 +183,7 @@ type authTransport struct {
 }
 
 func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	signed := req.Clone(req.Context())
+	signed := req.Clone(WithSecrets(req.Context(), t.token))
 	if t.sudo != "" {
 		signed.Header.Set("Sudo", t.sudo)
 	}
@@ -201,7 +201,8 @@ func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 	}
-	return t.base.RoundTrip(signed)
+	response, err := t.base.RoundTrip(signed)
+	return response, redactError(signed.Context(), err)
 }
 
 // signingBody returns the request body to sign. A body that can be read again is hashed as it is
