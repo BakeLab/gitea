@@ -16,21 +16,17 @@ permissions:
 
 env:
   GOPRIVATE: github.com/BakeLab/breadboard
+  GOTOOLCHAIN: local
 
 jobs:
   lint-backend:
-    runs-on: ubuntu-latest
+    runs-on: [bb, linux, x64]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          check-latest: true
-      - name: Install build tools
-        run: &build-tools sudo pacman -Syu --needed --noconfirm base-devel git-lfs shadow util-linux
+      - uses: ./.gitea/actions/setup-arch
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -42,18 +38,13 @@ jobs:
       - run: TAGS="bindata" make generate-go lint-backend
 
   checks-backend:
-    runs-on: ubuntu-latest
+    runs-on: [bb, linux, x64]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          check-latest: true
-      - name: Install build tools
-        run: *build-tools
+      - uses: ./.gitea/actions/setup-arch
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -62,18 +53,13 @@ jobs:
       - run: make --always-make checks-backend
 
   backend:
-    runs-on: ubuntu-latest
+    runs-on: [bb, linux, x64]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          check-latest: true
-      - name: Install build tools
-        run: *build-tools
+      - uses: ./.gitea/actions/setup-arch
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -87,20 +73,15 @@ jobs:
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '-s -w' -o gitea-linux-amd64 .
 
   test-unit:
-    runs-on: ubuntu-latest
+    runs-on: [bb, linux, x64]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          check-latest: true
+      - uses: ./.gitea/actions/setup-arch
       - name: Start test services
         run: docker compose -f .gitea/test-services.yml up -d --wait --wait-timeout 180 elasticsearch meilisearch redis minio azurite
-      - name: Install build tools
-        run: *build-tools
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -122,7 +103,7 @@ jobs:
         run: docker compose -f .gitea/test-services.yml down --volumes
 
   test-pgsql:
-    runs-on: ubuntu-latest
+    runs-on: [bb, linux, x64]
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -132,14 +113,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          check-latest: true
+      - uses: ./.gitea/actions/setup-arch
       - name: Start test services
         run: docker compose -f .gitea/test-services.yml up -d --wait --wait-timeout 180 pgsql ldap minio
-      - name: Install build tools
-        run: *build-tools
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -165,23 +141,17 @@ jobs:
         run: docker compose -f .gitea/test-services.yml down --volumes
 
   test-e2e:
-    runs-on: ubuntu-latest
+    runs-on: [bb, linux, x64]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7
+      - uses: ./.gitea/actions/setup-arch
         with:
-          go-version-file: go.mod
-      - run: sudo pacman -S --needed --noconfirm npm
-      - uses: ./.github/actions/node-setup
-        with:
-          cache: 'false'
+          frontend: 'true'
       - name: Start test services
         run: POSTGRES_DB=testgitea docker compose -f .gitea/test-services.yml up -d --wait --wait-timeout 180 pgsql
-      - name: Install build tools
-        run: *build-tools
       - name: Use Breadboard mirror
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
