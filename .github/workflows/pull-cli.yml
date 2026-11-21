@@ -1,0 +1,43 @@
+name: pull-cli
+
+on:
+  pull_request:
+    branches: [trim]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TERM: xterm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - name: Test CLI
+        working-directory: cli
+        run: go test -race ./...
+      - name: Vet CLI
+        working-directory: cli
+        run: go vet ./...
+      - name: Build supported CLI platforms
+        working-directory: cli
+        run: |
+          for platform in linux-amd64 linux-arm64 darwin-arm64; do
+            CGO_ENABLED=0 GOOS="${platform%-*}" GOARCH="${platform#*-}" go build -trimpath \
+              -o "$RUNNER_TEMP/gt-${platform}" ./cmd/gt
+          done
+      - name: Test release publisher
+        run: python3 .gitea/scripts/test-publish-release.py
