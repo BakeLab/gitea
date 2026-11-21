@@ -213,6 +213,8 @@ jobs:
           persist-credentials: false
       - uses: ./.gitea/actions/setup-arch
       - name: Test and build integrated CLI for release platforms
+        env:
+          TERM: xterm
         run: |
           set -euo pipefail
           commit="$GITHUB_SHA"
