@@ -1,0 +1,169 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"gitea.dev/cli/internal/auth"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestGiteaGitCredentialHelperClonesPrivateRepository(t *testing.T) {
+	gitea, deps, out, diagnostics := giteaDeps(t)
+	deps.Settings = settings.New(filepath.Join(t.TempDir(), "configuration with spaces"))
+	deps.Credentials.Dir = deps.Settings.Dir
+	var repo services.Repository
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "create", fmt.Sprintf("gt-git-helper-%d", time.Now().UnixNano()), "--private", "--auto-init", "--json"}))
+	require.NoError(t, json.Unmarshal(out.Bytes(), &repo))
+	require.True(t, repo.Private)
+	t.Cleanup(func() {
+		if err := Execute(context.Background(), deps, []string{"repo", "delete", "-R", repo.FullName, "--yes"}); err != nil {
+			t.Errorf("repository cleanup: %v", err)
+		}
+	})
+	user, _, _ := strings.Cut(repo.FullName, "/")
+	require.NoError(t, testManager(t, deps).Register(gitea.url, user, "file", "token", auth.HostOptions{}, auth.Credential{AccessToken: gitea.token}))
+	binaryDir := filepath.Join(t.TempDir(), "binary with 'quote'")
+	require.NoError(t, os.MkdirAll(binaryDir, 0o700))
+	binary := filepath.Join(binaryDir, "gt")
+	if os.PathSeparator == '\\' {
+		binary += ".exe"
+	}
+	build := exec.CommandContext(context.Background(), "go", "build", "-o", binary, "./cmd/gt")
+	build.Dir = filepath.Join("..", "..")
+	output, err := build.CombinedOutput()
+	require.NoError(t, err, "build: %s", output)
+	deps.Executable = func() (string, error) { return binary, nil }
+	// The temporary global file exercises setup's default scope without touching
+	// the user's Git configuration. Git invokes the compiled helper as a child.
+	environment := []string{}
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "GIT_TRACE") || key == "GIT_CURL_VERBOSE" {
+			continue
+		}
+		environment = append(environment, entry)
+	}
+	globalConfig := filepath.Join(t.TempDir(), "gitconfig")
+	environment = append(environment, "GIT_CONFIG_GLOBAL="+globalConfig, "GIT_CONFIG_NOSYSTEM=1", "GITEA_CLI_CONFIG_DIR="+deps.Settings.Dir, "GITEA_TOKEN=", "GITEA_INSTANCE_URL=", "GITEA_CLI_HOST=", "GITEA_CLI_USER=", "GITEA_CLI_REPO=")
+	runner := git.System{Env: environment, ErrOut: diagnostics}
+	deps.Git = runner
+	_, anonymousErr := runner.Output(context.Background(), "", false, "-c", "credential.helper=", "clone", "--", repo.CloneURL, filepath.Join(t.TempDir(), "anonymous-clone"))
+	require.Error(t, anonymousErr, "private repository must reject an unauthenticated clone")
+	out.Reset()
+	diagnostics.Reset()
+	gtClone := filepath.Join(t.TempDir(), "gt-private-clone")
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "clone", repo.FullName, gtClone, "--no-input", "--json=id"}))
+	require.JSONEq(t, fmt.Sprintf(`{"id":%d}`, repo.ID), out.String())
+	_, localHelperErr := runner.Output(context.Background(), gtClone, false, "config", "--local", "--get-all", "credential."+gitea.url+".helper")
+	var missingLocalHelper *git.CommandError
+	require.ErrorAs(t, localHelperErr, &missingLocalHelper)
+	require.Equal(t, 1, missingLocalHelper.ExitCode)
+	// Build a changed PR on the private repository, then fetch it without setup.
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"branch", "create", "feature", "-R", repo.FullName}))
+	deps.Streams.In = strings.NewReader(`{"branch":"feature","content":"dGVzdAo=","message":"Disposable private PR fixture"}`)
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "repos/" + repo.FullName + "/contents/change.txt", "--input", "-"}))
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "create", "-R", repo.FullName, "--title", "Private checkout", "--head", "feature", "--base", repo.DefaultBranch, "--json"}))
+	var pull services.Pull
+	require.NoError(t, json.Unmarshal(out.Bytes(), &pull))
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", strconv.FormatInt(pull.Number, 10), "-R", repo.FullName, "--cwd", gtClone, "--no-input", "--json"}))
+	var checkout git.CheckoutResult
+	require.NoError(t, json.Unmarshal(out.Bytes(), &checkout))
+	require.Equal(t, pull.HeadSHA, checkout.Commit)
+	require.Equal(t, "feature", checkout.Branch)
+	branchesBefore, err := runner.Output(context.Background(), gtClone, false, "for-each-ref", "--format=%(refname):%(objectname)", "refs/heads/")
+	require.NoError(t, err)
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", strconv.FormatInt(pull.Number, 10), "-R", repo.FullName, "--cwd", gtClone, "--detach", "--no-input", "--json"}))
+	require.NoError(t, json.Unmarshal(out.Bytes(), &checkout))
+	require.True(t, checkout.Detached)
+	require.Empty(t, checkout.Branch)
+	require.Equal(t, pull.HeadSHA, checkout.Commit)
+	branchesAfter, err := runner.Output(context.Background(), gtClone, false, "for-each-ref", "--format=%(refname):%(objectname)", "refs/heads/")
+	require.NoError(t, err)
+	require.Equal(t, branchesBefore, branchesAfter)
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", strconv.FormatInt(pull.Number, 10), "-R", repo.FullName, "--cwd", gtClone, "--no-input", "--json"}))
+	require.NoError(t, json.Unmarshal(out.Bytes(), &checkout))
+	require.False(t, checkout.Detached)
+	require.Equal(t, "feature", checkout.Branch)
+	branchesAfter, err = runner.Output(context.Background(), gtClone, false, "for-each-ref", "--format=%(refname):%(objectname)", "refs/heads/")
+	require.NoError(t, err)
+	require.Equal(t, branchesBefore, branchesAfter)
+	_, err = runner.Output(context.Background(), gtClone, false, "switch", "--detach", pull.HeadSHA)
+	require.NoError(t, err)
+	_, headErr := runner.Output(context.Background(), gtClone, false, "symbolic-ref", "--quiet", "HEAD")
+	var detachedHead *git.CommandError
+	require.ErrorAs(t, headErr, &detachedHead)
+	require.Equal(t, 1, detachedHead.ExitCode)
+	deps.Streams.In = strings.NewReader(`{"branch":"feature","content":"bmV4dAo=","message":"Disposable fast-forward fixture"}`)
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "repos/" + repo.FullName + "/contents/next.txt", "--input", "-"}))
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "view", strconv.FormatInt(pull.Number, 10), "-R", repo.FullName, "--json"}))
+	require.NoError(t, json.Unmarshal(out.Bytes(), &pull))
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"pr", "checkout", strconv.FormatInt(pull.Number, 10), "-R", repo.FullName, "--cwd", gtClone, "--update", "--no-input", "--json"}))
+	require.NoError(t, json.Unmarshal(out.Bytes(), &checkout))
+	require.Equal(t, pull.HeadSHA, checkout.Commit)
+	localHead, err := runner.Output(context.Background(), gtClone, false, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	require.Equal(t, pull.HeadSHA, localHead)
+	deps.Streams.In = strings.NewReader(fmt.Sprintf(`{"branch":%q,"content":"c3luYwo=","message":"Disposable sync fixture"}`, repo.DefaultBranch))
+	require.NoError(t, Execute(context.Background(), deps, []string{"api", "repos/" + repo.FullName + "/contents/sync.txt", "--input", "-"}))
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"repo", "sync", "-R", repo.FullName, "--cwd", gtClone, "--no-input", "--json=branch,commit,remote"}))
+	var synced git.SyncResult
+	require.NoError(t, json.Unmarshal(out.Bytes(), &synced))
+	require.Equal(t, repo.DefaultBranch, synced.Branch)
+	// Sync updates the branch without switching to it, so read the branch rather than HEAD.
+	localHead, err = runner.Output(context.Background(), gtClone, false, "rev-parse", "refs/heads/"+synced.Branch)
+	require.NoError(t, err)
+	require.Equal(t, synced.Commit, localHead)
+	contents, err := runner.Output(context.Background(), gtClone, false, "show", synced.Branch+":sync.txt")
+	require.NoError(t, err)
+	require.Equal(t, "sync", strings.TrimSpace(contents))
+	if endpoint := os.Getenv("GITEA_CLI_TEST_SSH_ENDPOINT"); endpoint != "" {
+		verifySSHCloneAndCheckout(t, deps, repo, pull, user, environment, endpoint)
+	}
+	// The per-operation helper does not create a global Git configuration file.
+	_, err = os.Stat(globalConfig)
+	require.True(t, os.IsNotExist(err))
+	out.Reset()
+	diagnostics.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", gitea.url, "--no-input"}))
+	require.NoError(t, Execute(context.Background(), deps, []string{"auth", "setup-git", "--host", gitea.url, "--no-input"}))
+	require.Empty(t, out.String())
+	destination := filepath.Join(t.TempDir(), "private-clone")
+	_, err = runner.Output(context.Background(), "", false, "clone", "--", repo.CloneURL, destination)
+	require.NoError(t, err, "private repository clone failed")
+	inside, err := runner.Output(context.Background(), destination, false, "rev-parse", "--is-inside-work-tree")
+	require.NoError(t, err)
+	require.Equal(t, "true", inside)
+	// No credential is embedded in either the persisted remote or helper command.
+	remote, err := runner.Output(context.Background(), destination, false, "remote", "get-url", "origin")
+	require.NoError(t, err)
+	require.Equal(t, repo.CloneURL, remote)
+	require.NotContains(t, remote, gitea.token, "remote contains credentials")
+	helper, err := runner.Output(context.Background(), "", false, "config", "--global", "--get-all", "credential."+gitea.url+".helper")
+	require.NoError(t, err)
+	require.Len(t, strings.Split(helper, "\n"), 1)
+	require.NotContains(t, helper, gitea.token, "helper command contains credentials")
+}

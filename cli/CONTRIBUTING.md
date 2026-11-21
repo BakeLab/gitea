@@ -1,0 +1,258 @@
+# Contribution Guidelines
+
+## Table of Contents
+
+- [Contribution Guidelines](#contribution-guidelines)
+  - [Introduction](#introduction)
+  - [Bug reports](#bug-reports)
+  - [Discuss your design](#discuss-your-design)
+  - [Testing redux](#testing-redux)
+  - [Code review](#code-review)
+  - [Styleguide](#styleguide)
+  - [Sign-off your work](#sign-off-your-work)
+  - [Release Cycle](#release-cycle)
+  - [Maintainers](#maintainers)
+  - [Owners](#owners)
+  - [Versions](#versions)
+  - [Copyright](#copyright)
+
+## Introduction
+
+This document explains how to contribute changes to gitea-cli.
+Sensitive security-related issues should be reported to
+[security@gitea.io](mailto:security@gitea.io).
+
+For configuring IDE or code editor to develop Gitea see [IDE and code editor configuration](https://github.com/go-gitea/gitea/tree/master/contrib/ide)
+
+## Bug reports
+
+Please search the issues on the issue tracker with a variety of keywords
+to ensure your bug is not already reported.
+
+If unique, [open an issue](https://gitea.com/gitea/cli/issues/new).
+
+Please write clear, concise instructions so we can reproduce the behavior—
+even if it seems obvious. The more detailed and specific you are,
+the faster we can fix the issue. Check out [How to Report Bugs
+Effectively](http://www.chiark.greenend.org.uk/~sgtatham/bugs.html).
+
+Please be kind, remember that gitea-cli comes at no cost to you, and you're
+getting free help.
+
+## Discuss your design
+
+The project welcomes submissions. If you want to change or add something,
+please let everyone know what you're working on—[file an issue](https://gitea.com/gitea/cli/issues/new)!
+Significant changes must go through the change proposal process
+before they can be accepted. To create a proposal, file an issue with
+your proposed changes documented, and make sure to note in the title
+of the issue that it is a proposal.
+
+This process gives everyone a chance to validate the design, helps
+prevent duplication of effort, and ensures that the idea fits inside
+the goals for the project and tools. It also checks that the design is
+sound before code is written; the code review tool is not the place for
+high-level discussions.
+
+## Testing redux
+
+Before sending code out for review, run the unit tests with `make test`.
+Since gitea-cli is an cli tool it should be obvious to test your feature locally first.
+
+Tests live beside the packages they exercise. `make integration-test` runs the
+`TestGitea*` tests against a disposable Gitea instance with an administrator
+account named `integration` and a reviewer named `gt-reviewer`. Never point
+these tests at a production instance: they create and delete resources.
+
+```sh
+GITEA_CLI_TEST_URL=http://127.0.0.1:3000 \
+GITEA_CLI_TEST_TOKEN_FILE=/private/path/admin-token \
+GITEA_CLI_TEST_REVIEWER_TOKEN_FILE=/private/path/reviewer-token \
+  make integration-test
+```
+
+Token files contain scoped PATs for their accounts and should be `0600`;
+`scripts/integration-tokens.py` creates them for the CI accounts. Optional
+coverage is enabled by `GITEA_CLI_TEST_REPOSITORY_ROOT` (the server's repository
+root, with `[security] IMPORT_LOCAL_PATHS = true`, for migration) and
+`GITEA_CLI_TEST_SSH_ENDPOINT` (the server's SSH endpoint as `host:port`).
+
+`make test-windows` cross-compiles the unit test binaries, installs Windows Server 2025 Core in a
+[dockur/windows](https://github.com/dockur/windows) QEMU VM on the docker host and runs them
+there. The host must allow privileged containers. The VM uses KVM when the host has `/dev/kvm`,
+otherwise Windows is emulated and much slower. The race detector is off, as it needs cgo. CI runs
+this on every pull request.
+
+## Gitea version requirements
+
+gt requires Gitea 28 or newer, and nothing is tracked below that. A command or flag that needs
+something newer goes into `commandVersions` or `flagVersions` in `internal/app/gitea_version.go`.
+gt then asks the server for its version once and fails with a usage error before the request, and
+help text states the requirement. Remove the entry when the minimum rises past it.
+
+## Code review
+
+Changes to gitea-cli must be reviewed before they are accepted—no matter who
+makes the change, even if they are an owner or a maintainer. We use Gitea's
+pull request & review workflow to do that. Gitea ensure every PR is reviewed by at least 2 maintainers.
+
+Please try to make your pull request easy to review for us. And, please read
+the *[How to get faster PR reviews](https://github.com/kubernetes/community/blob/261cb0fd089b64002c91e8eddceebf032462ccd6/contributors/guide/pull-requests.md#best-practices-for-faster-reviews)* guide;
+it has lots of useful tips for any project you may want to contribute.
+Some of the key points:
+
+* Make small pull requests. The smaller, the faster to review and the
+  more likely it will be merged soon.
+* Don't make changes unrelated to your PR. Maybe there are typos on
+  some comments, maybe refactoring would be welcome on a function... but
+  if that is not related to your PR, please make *another* PR for that.
+* Split big pull requests into multiple small ones. An incremental change
+  will be faster to review than a huge PR.
+
+## Styleguide
+
+### Commands
+
+Use explicit singular noun/verb commands, such as `gt issue list` and
+`gt pr create`. Bare command groups show help. Commands validate input, collect
+missing fields when the shared prompting policy permits it, invoke services, and
+render results through injected streams. Destructive commands require confirmation
+or `--yes`; `--no-input` disables implicit interaction. JSON results go to stdout;
+diagnostics, prompts and the `✓`/`!` mutation messages (`done`/`warn`) go to stderr.
+Lists register `-L/--limit` and `--page` with `pageFlags` and print through
+`writeTable` with a `listSpec`: on a terminal an uppercase header row, a "Showing N of
+M …" line, relative times and links in the first column; piped, tab-separated values
+without header. Single items print through `writeView`. Every command has an
+`Example`, and every command group a `Long` text.
+
+### Internal Package Structure
+
+- `internal/app`: Cobra commands and application dependency construction. It never
+  calls the API directly: every request goes through `internal/services`.
+- `internal/services`: typed workflows over `gitea.dev/sdk`, independent of CLI flags
+  and terminal I/O, including pagination policy. Services map SDK types to gt's
+  output types; requests the SDK cannot make yet go through the raw helpers in
+  `raw.go`, each marked `TODO(sdk)` with the missing SDK piece.
+- `internal/settings`: split configuration, validation, persistence, target resolution,
+  and remote URL parsing.
+- `internal/auth`: secure credentials and OAuth lifecycle.
+- `internal/transport`: the gt HTTP client shared by the SDK and raw requests: TLS,
+  timeouts, User-Agent, `--debug`, retries, token, Sudo and SSH-signature
+  authentication, and sanitised API errors. Its raw requests serve `gt api`, signed
+  downloads and log streaming.
+- `internal/git`: repository discovery and cancellable Git subprocesses.
+- `internal/terminal`: streams, input, editor, browser, and rendering.
+- `internal/clierr`: typed errors and executable exit codes.
+- `internal/aliases`: user command alias expansion.
+- `internal/filelock`: cross-process locks for configuration writes.
+- `internal/version`: build version metadata.
+
+Unit and integration tests live beside their packages; see [Testing redux](#testing-redux).
+
+### Code Style
+Use `make fmt`, check with `make lint`.
+Group imports into the standard library, then `gitea.dev` packages, then other
+external packages, as `make fmt` sorts them:
+```go
+import (
+  "encoding/json"
+  "fmt"
+
+  "gitea.dev/cli/internal/services"
+
+  "github.com/foo/bar"
+  "gopkg.io/baz.v1"
+)
+```
+
+## Sign-off your work
+
+The sign-off is a simple line at the end of the explanation for the
+patch. Your signature certifies that you wrote the patch or otherwise
+have the right to pass it on as an open-source patch. The rules are
+pretty simple: If you can certify [DCO](DCO), then you just add a line
+to every git commit message:
+
+```
+Signed-off-by: Joe Smith <joe.smith@email.com>
+```
+
+Please use your real name; we really dislike pseudonyms or anonymous
+contributions. We are in the open-source world without secrets. If you
+set your `user.name` and `user.email` git configs, you can sign-off your
+commit automatically with `git commit -s`.
+
+## Release Cycle
+
+Before we reach v1 there is no fixed release cycle.
+
+## Maintainers
+
+To make sure every PR is checked, we have team
+maintainers. Every PR **MUST** be reviewed by at least
+two maintainers (or owners) before it can get merged. A maintainer
+should be a contributor of Gitea (or Gogs) and contributed at least
+4 accepted PRs. A contributor should apply as a maintainer in the
+[Discord](https://discord.gg/Gitea) #develop channel. The owners
+or the team maintainers may invite the contributor. A maintainer
+should spend some time on code reviews. If a maintainer has no
+time to do that, they should apply to leave the maintainers team
+and we will give them the honor of being a member of the [advisors
+team](https://github.com/orgs/go-gitea/teams/advisors). Of course, if
+an advisor has time to code review, we will gladly welcome them back
+to the maintainers team. If a maintainer is inactive for more than 3
+months and forgets to leave the maintainers team, the owners may move
+him or her from the maintainers team to the advisors team.
+For security reasons, Maintainers should use 2FA for their accounts and
+if possible provide gpg signed commits.
+https://help.github.com/articles/securing-your-account-with-two-factor-authentication-2fa/
+https://help.github.com/articles/signing-commits-with-gpg/
+
+## Owners
+
+This repo is part of the Gitea project and as such part of that project's
+governance.
+
+Since Gitea is a pure community organization without any company support,
+to keep the development healthy we will elect three owners every year. All
+contributors may vote to elect up to three candidates, one of which will
+be the main owner, and the other two the assistant owners. When the new
+owners have been elected, the old owners will give up ownership to the
+newly elected owners. If an owner is unable to do so, the other owners
+will assist in ceding ownership to the newly elected owners.
+For security reasons, Owners or any account with write access (like a bot)
+must use 2FA.
+https://help.github.com/articles/securing-your-account-with-two-factor-authentication-2fa/
+
+After the election, the new owners should proactively agree
+with our [CONTRIBUTING](CONTRIBUTING.md) requirements in the
+[Discord](https://discord.gg/Gitea) #general channel. Below are the
+words to speak:
+
+```
+I'm honored to having been elected an owner of Gitea, I agree with
+[CONTRIBUTING](CONTRIBUTING.md). I will spend part of my time on Gitea
+and lead the development of Gitea.
+```
+
+## Versions
+
+gt is developed on the `main` branch, which is published as the
+nightly build. Releases are tagged from `main` (`v0.1.0`, ...). For
+everyday use, please install the latest release rather than a nightly
+build. The `main` branch is protected: every PR must be reviewed by two
+maintainers and must pass the automatic tests.
+
+## Copyright
+
+Code that you contribute should use the standard copyright header:
+
+```
+// Copyright 2020 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+```
+
+Files in the repository contain copyright from the year they are added
+to the year they are last changed. If the copyright author is changed,
+just paste the header below the old one.

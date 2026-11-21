@@ -8,7 +8,7 @@ import unittest
 
 
 SCRIPT = Path(__file__).with_name("publish-release.sh").resolve()
-CLI_COMMIT = (SCRIPT.parent.parent / "gt-revision").read_text().strip()
+CLI_COMMIT = "a" * 40
 
 
 class PublishReleaseTest(unittest.TestCase):
@@ -52,8 +52,8 @@ print('{"id":123}')
             (self.dist / f"{name}.sha256").write_text(
                 f"{hashlib.sha256(binary).hexdigest()}  {name}\n")
         (self.dist / "cli-manifest.json").write_text(json.dumps({
-            "repository": "BakeLab/gt", "commit": CLI_COMMIT,
-            "version": f"1.2.0-dev-g{CLI_COMMIT[:12]}", "platforms": platforms}))
+            "repository": "BakeLab/gitea", "path": "cli", "commit": CLI_COMMIT,
+            "version": f"trim-{CLI_COMMIT[:12]}-42-1", "platforms": platforms}))
 
     def publish(self, *args):
         return subprocess.run(["bash", str(SCRIPT), str(self.dist), *args],
@@ -75,7 +75,7 @@ print('{"id":123}')
         manifest = json.loads((self.dist / "manifest.json").read_text())
         self.assertEqual(manifest["commit"], "a" * 40)
         self.assertEqual(manifest["cli"]["commit"], CLI_COMMIT)
-        self.assertIn(f"/BakeLab/gt/src/commit/{CLI_COMMIT}", payload["body"])
+        self.assertIn(f"/BakeLab/gitea/src/commit/{CLI_COMMIT}/cli", payload["body"])
         self.assertIn("PATCH", requests[-1])
         self.assertIn('{"draft":false}', requests[-1])
 

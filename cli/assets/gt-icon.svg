@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">gt, the Gitea CLI</title>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7cb342" />
+      <stop offset="100%" stop-color="#4c8a1f" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <!-- terminal window -->
+  <rect x="72" y="104" width="368" height="304" rx="40" fill="#11200f" />
+  <circle cx="116" cy="146" r="11" fill="#ff6b5e" />
+  <circle cx="152" cy="146" r="11" fill="#ffbd2e" />
+  <circle cx="188" cy="146" r="11" fill="#28c840" />
+  <!-- prompt chevron -->
+  <path d="M122 232 L184 280 L122 328" fill="none" stroke="#9bd35a" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- g -->
+  <path d="M262 256 a34 34 0 1 0 0.1 0 M296 256 v84 a34 34 0 0 1 -60 22" fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- t -->
+  <path d="M352 222 v100 a26 26 0 0 0 42 20 M332 256 h56" fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

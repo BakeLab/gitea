@@ -1,0 +1,297 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package app
+
+import (
+	"errors"
+	"slices"
+	"strconv"
+	"strings"
+
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/terminal"
+
+	"github.com/spf13/cobra"
+)
+
+func (a *application) prCommand() *cobra.Command {
+	group := &cobra.Command{Use: "pr", Short: "Manage pull requests", Long: `Work with Gitea pull requests: list, view, create, review, check out and merge them.
+
+Commands that act on one pull request take a number, a URL or a branch name, and without
+one select the pull request of the current branch. pr attachment takes a number or a URL.`}
+	group.Annotations = pullArgumentsAnnotation(nil)
+	group.Example = `$ gt pr list --author @me
+$ gt pr create --fill
+$ gt pr merge --squash --delete-branch`
+	group.AddCommand(a.pullChecksCommand(), a.pullCheckoutCommand(), a.pullBackportCommand(), a.pullCleanCommand(), a.statusCommand(true))
+	group.AddCommand(a.pullListCommand(), a.pullViewCommand())
+	a.addPullMutations(group)
+	group.AddCommand(a.pullEditCommand(), a.pullReadyCommand(), a.pullLockCommand(), a.pullUnlockCommand(), a.pullPinCommand(), a.pullUnpinCommand(), a.pullDeleteCommand())
+	group.AddCommand(a.issueAttachmentCommand(pullRef), a.commentCommand(pullRef), a.timelineCommand(pullRef))
+	return jsonOutput[services.Pull](group)
+}
+
+func (a *application) pullListCommand() *cobra.Command {
+	var limit, page int
+	var state, milestone string
+	var options services.PullListOptions
+	var labels []string
+	var web, local, selecting bool
+	cmd := &cobra.Command{Use: "list", Short: "List pull requests", Long: `List the pull requests of a repository, newest first.
+
+The reviewers, reviewer_teams, reviews and review_decision JSON fields come from the reviews of each
+pull request, and merged_by from reading each pull request again. gt only makes these requests when
+--json names the fields, or selects every field and a --jq expression or --template names them (see gt help
+formatting). --limit bounds how many requests it makes.
+
+review_decision is changes_requested, approved, review_required or empty. When the base branch's
+protection requires approvals, the decision counts official approvals as Gitea does for merging:
+fewer than required give review_required.
+
+--local lists the local branches of the clone instead, each with the pull request it belongs to:
+the one pr checkout recorded for it, else one whose head branch is the branch's upstream or has
+its name, preferring open pull requests. A merged or closed one tells that gt pr clean can delete
+the branch. gt reads every open pull request, and closed ones back to the oldest last commit of
+a branch without an open one.
+
+--select offers the listed pull requests in a filterable list, shows the one you pick and asks what
+to do with it: check it out, show its diff, review, merge, comment or close it.`, Args: argsExact(0), RunE: func(cmd *cobra.Command, _ []string) error {
+		if err := a.checkSelect(cmd, selecting); err != nil {
+			return err
+		}
+		if local {
+			return a.pullListLocal(cmd)
+		}
+		if id, err := strconv.ParseInt(milestone, 10, 64); err == nil && id < 1 {
+			return clierr.Wrap(clierr.Usage, errors.New("--milestone must be a milestone title or a positive ID"))
+		}
+		if options.NoAssignee && options.Assignee != "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--assignee cannot be combined with --no-assignee"))
+		}
+		if web {
+			if err := requireWebFlags(cmd, "state"); err != nil {
+				return err
+			}
+		}
+		t, err := a.resolve(cmd.Context(), true)
+		if err != nil {
+			return err
+		}
+		if web {
+			link := repositoryURL(t) + "/pulls"
+			switch state {
+			case "closed", "merged":
+				link += "?state=closed"
+			case "all":
+				link += "?state=all"
+			}
+			return a.openBrowser(cmd, link)
+		}
+		options.Author, options.Assignee = t.expandMe(options.Author), t.expandMe(options.Assignee)
+		options.State, options.Limit, options.Page = state, limit, page
+		if options.Labels, err = (services.Labels{Client: t.client, Repository: t.Repo}).ResolveIssueNames(cmd.Context(), labels); err != nil {
+			return err
+		}
+		if milestone != "" {
+			if options.Milestone, err = milestoneID(cmd, t, milestone); err != nil {
+				return err
+			}
+		}
+		service := services.Pulls{Client: t.client, Repository: t.Repo}
+		window, err := service.ListPage(cmd.Context(), options)
+		if err != nil {
+			return err
+		}
+		items := window.Items
+		view, reviews := a.jsonSelects("merged_by"), a.jsonSelects(pullReviewFields...)
+		if view || reviews {
+			if items, err = service.Detail(cmd.Context(), items, view, reviews); err != nil {
+				return err
+			}
+		}
+		if selecting && len(items) > 0 {
+			return runSelection(a, cmd, items, pullSelection(t.Repo), t.Host, servicePage(window, page))
+		}
+		noun := map[string]string{"open": "open pull requests", "closed": "closed pull requests", "merged": "merged pull requests", "all": "pull requests"}[state]
+		what := noun + " in " + t.Repo
+		empty := "no " + what
+		if localFlagsChanged(cmd, "state", "limit", "page", "sort") {
+			empty = "no " + noun + " match your filters in " + t.Repo
+		}
+		return writeTable(a, cmd, items, listSpec[services.Pull]{
+			Columns: []terminal.Column{{Header: "ID", Prefix: "#"}, {Header: "Title", Flex: true}, {Header: "Branch", Flex: true, Min: 12}, {Header: "State", PipedOnly: state == "open"}, {Header: "Author"}, {Header: "Created"}},
+			Row: func(item services.Pull) []terminal.Cell {
+				state := pullState(item)
+				return []terminal.Cell{
+					{Text: strconv.FormatInt(item.Number, 10), Link: item.URL, Color: stateColors[state]},
+					{Text: item.Title},
+					{Text: pullHead(item, t.Repo)},
+					{Text: state, Color: stateColors[state]},
+					{Text: item.Author},
+					{Time: terminal.ParseTime(item.CreatedAt)},
+				}
+			},
+			Empty: empty, Context: what,
+		}, servicePage(window, page))
+	}}
+	enumFlag(cmd, &state, "state", "s", "open", "Filter by state", "open", "closed", "merged", "all")
+	pageFlags(cmd, &limit, &page)
+	cmd.Flags().StringVarP(&options.Author, "author", "A", "", "Filter by author; @me for yourself")
+	cmd.Flags().StringVarP(&options.Assignee, "assignee", "a", "", "Filter by assignee; @me for yourself")
+	cmd.Flags().BoolVar(&options.NoAssignee, "no-assignee", false, "Only pull requests without an assignee")
+	cmd.Flags().StringVarP(&options.Base, "base", "B", "", "Filter by base branch")
+	cmd.Flags().StringVarP(&options.Head, "head", "H", "", "Filter by head branch, or OWNER:BRANCH for a fork")
+	cmd.Flags().BoolVarP(&options.Draft, "draft", "d", false, "Show only drafts")
+	cmd.Flags().StringVarP(&options.Search, "search", "S", "", "Filter by text in the title or body")
+	cmd.Flags().StringSliceVarP(&labels, "label", "l", nil, "Filter by label `names`; a pull request must have all of them; prefix repo: or org: to disambiguate")
+	cmd.Flags().StringVarP(&milestone, "milestone", "m", "", "Filter by milestone title or ID")
+	enumFlag(cmd, &options.Sort, "sort", "", "", "Order", "oldest", "recentupdate", "recentclose", "leastupdate", "mostcomment", "leastcomment", "priority")
+	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the pull request list in the browser")
+	cmd.Flags().BoolVar(&local, "local", false, "List the local branches with their pull requests")
+	selectFlag(cmd, &selecting)
+	_ = cmd.RegisterFlagCompletionFunc("author", a.completeUsers())
+	_ = cmd.RegisterFlagCompletionFunc("assignee", a.completeUsers())
+	_ = cmd.RegisterFlagCompletionFunc("base", a.completeBranches())
+	_ = cmd.RegisterFlagCompletionFunc("head", a.completeBranches())
+	_ = cmd.RegisterFlagCompletionFunc("label", a.completeLabels())
+	_ = cmd.RegisterFlagCompletionFunc("milestone", a.completeMilestones())
+	cmd.Example = `$ gt pr list
+$ gt pr list --author @me --state all
+
+# Show the pull request of each local branch, such as which are merged
+$ gt pr list --local
+
+$ gt pr list --json number,title,head --jq '.[] | select(.head == "feature/login")'`
+	localFields := strings.Join(jsonFields[localBranchPull](), ", ")
+	cmd.Annotations = map[string]string{
+		localFieldsAnnotation: strings.ReplaceAll(localFields, " ", ""),
+		"gt.jsonfields":       wrap(strings.Join(jsonFields[services.Pull](), ", "), 78) + "\n\nWith --local:\n" + wrap(localFields, 78),
+	}
+	return cmd
+}
+
+// jsonSelects reports whether the JSON output includes one of fields: --json names it, or selects
+// every field and --jq, if given, names it too, so that a filter that never reads it costs no
+// requests.
+func (a *application) jsonSelects(fields ...string) bool {
+	if a.options.json == "*" {
+		expression := a.options.jq + a.options.template
+		return expression == "" || slices.ContainsFunc(fields, func(field string) bool { return strings.Contains(expression, field) })
+	}
+	for field := range strings.SplitSeq(a.options.json, ",") {
+		if slices.Contains(fields, strings.TrimSpace(field)) {
+			return true
+		}
+	}
+	return false
+}
+
+// pullReviewFields are the JSON fields of a pull request that come from its reviews.
+var pullReviewFields = []string{"reviewers", "reviewer_teams", "reviews", "review_decision"}
+
+// pullResult writes item as JSON with --json, after reading its reviews when the output includes
+// fields that come from them.
+func (a *application) pullResult(cmd *cobra.Command, t target, item services.Pull) error {
+	if a.options.json == "" {
+		return nil
+	}
+	item, err := a.pullWithReviews(cmd, t, item)
+	if err != nil {
+		return err
+	}
+	return a.writePullJSON(cmd, t, item)
+}
+
+// pullDependenciesJSON is the JSON of pr view and pr edit: the pull request with the issues it depends on and
+// blocks, which are read only when the output includes them.
+type pullDependenciesJSON struct {
+	services.Pull
+	BlockedBy []services.IssueReference `json:"blocked_by,omitzero"`
+	Blocks    []services.IssueReference `json:"blocks,omitzero"`
+}
+
+// writePullJSON writes item as JSON, with its dependencies when the output includes them.
+func (a *application) writePullJSON(cmd *cobra.Command, t target, item services.Pull) error {
+	details := pullDependenciesJSON{Pull: item}
+	if slices.Contains(commandOutputFields(cmd), "blocked_by") && a.jsonSelects("blocked_by", "blocks") { // only pr view and pr edit declare them
+		dependencies, err := (services.Issues{Client: t.client, Repository: t.Repo, Pulls: true}).Dependencies(cmd.Context(), item.Number)
+		if err != nil {
+			return err
+		}
+		details.BlockedBy, details.Blocks = dependencies.BlockedBy, dependencies.Blocks
+	}
+	return a.writeJSON(cmd, details)
+}
+
+func (a *application) pullWithReviews(cmd *cobra.Command, t target, item services.Pull) (services.Pull, error) {
+	if !a.jsonSelects(pullReviewFields...) {
+		return item, nil
+	}
+	reviews, err := (services.Reviews{Client: t.client, Repository: t.Repo}).All(cmd.Context(), item.Number)
+	if err != nil {
+		return item, err
+	}
+	return (services.Pulls{Client: t.client, Repository: t.Repo}).WithReviews(cmd.Context(), item, reviews), nil
+}
+
+func (a *application) pullViewCommand() *cobra.Command {
+	var web, comments bool
+	cmd := &cobra.Command{Use: "view [<number> | <url> | <branch>]", Short: "View a pull request", Annotations: pullArgumentsAnnotation(nil), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+		if comments && a.options.json != "" {
+			return clierr.Wrap(clierr.Usage, errors.New("--comments cannot be combined with --json, --jq or --csv; use gt pr comment list <number> --json or gt pr review list <number> --json"))
+		}
+		t, n, err := a.pullSelectorAny(cmd, args)
+		if err != nil {
+			return err
+		}
+		service := services.Pulls{Client: t.client, Repository: t.Repo}
+		if web || a.options.json != "" {
+			item, err := service.View(cmd.Context(), n)
+			if err != nil {
+				return err
+			}
+			if web {
+				return a.openBrowser(cmd, item.URL)
+			}
+			return a.pullResult(cmd, t, item)
+		}
+		var details pullDetails
+		item, reviews, err := service.ViewWithReviews(cmd.Context(), n)
+		if err != nil {
+			return err
+		}
+		details.reviews = reviews
+		item = service.WithReviews(cmd.Context(), item, reviews)
+		if item.State == "open" && item.HeadSHA != "" {
+			if details.checks, err = service.CommitChecks(cmd.Context(), item.HeadSHA); err != nil {
+				return err
+			}
+		}
+		return a.writeDiscussion(cmd, t, pullView(item, t.Repo, details), comments)
+	}}
+	cmd.Flags().BoolVarP(&web, "web", "w", false, "Open the pull request in the browser")
+	cmd.Flags().BoolVarP(&comments, "comments", "c", false, "Show comments and reviews")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("all"))
+	cmd.Example = `# View the pull request of the current branch
+$ gt pr view
+
+# View #13 with its comments and reviews
+$ gt pr view 13 --comments
+
+$ gt pr view feature/login --json number,state,review_decision
+$ gt pr view 13 --json blocked_by,blocks`
+	return jsonOutput[pullDependenciesJSON](cmd)
+}
+
+// pullState reports merged pull requests as merged, and open drafts as draft.
+func pullState(item services.Pull) string {
+	switch {
+	case item.Merged:
+		return "merged"
+	case item.Draft && item.State == "open":
+		return "draft"
+	}
+	return item.State
+}

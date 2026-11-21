@@ -1,0 +1,97 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package app
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+
+	"gitea.dev/cli/internal/clierr"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestManWritesSelectedCommandWithoutReplacingFiles(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	path := filepath.Join(t.TempDir(), "checkout.1")
+	args := []string{"man", "pr", "checkout", "--output-file", path}
+	require.NoError(t, Execute(context.Background(), deps, args))
+	require.Empty(t, out.String())
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "gt-pr-checkout")
+	require.Contains(t, string(data), "detach")
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		require.Equal(t, umaskMode(t), info.Mode().Perm(), "a manual page is for everyone to read")
+	}
+	require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, args)))
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, data, after)
+}
+
+func TestManRejectsUnknownCommandsAndMachineOutput(t *testing.T) {
+	for _, args := range [][]string{{"man", "unknown"}, {"man", "pr", "unknown"}, {"man", "--json"}, {"man", "--jq", "."}} {
+		deps, out, _ := testDeps(t)
+		require.Equal(t, clierr.Usage, clierr.ExitCode(Execute(context.Background(), deps, args)))
+		require.Empty(t, out.String())
+	}
+}
+
+func TestManIncludesFullCommandTree(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	require.NoError(t, Execute(context.Background(), deps, []string{"man"}))
+	manual := out.String()
+	for _, command := range []string{"gt-pr-checkout", "gt-issue-comment-create", "gt-auth-login", "gt-run-artifact-list"} {
+		require.Contains(t, manual, command)
+	}
+	require.Contains(t, manual, `.TH "GT-PR-CHECKOUT" "1" "Jan 2026"`)
+	require.NotContains(t, manual, "gt-auth-git-credential")
+	require.Contains(t, manual, `\fBgt config get <key> [flags]\fP`)
+	require.Contains(t, manual, "first (git push <remote> <tag>).")
+	require.Contains(t, manual, "source <(gt completion zsh)")
+	first := manual
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"man"}))
+	require.Equal(t, first, out.String())
+	out.Reset()
+	deps.Getenv = envFunc(map[string]string{"SOURCE_DATE_EPOCH": "1780000000"})
+	require.NoError(t, Execute(context.Background(), deps, []string{"man", "pr", "checkout"}))
+	require.Contains(t, out.String(), `.TH "GT-PR-CHECKOUT" "1" "May 2026"`)
+}
+
+func TestCanceledManDoesNotPublishOutputFile(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	path := filepath.Join(t.TempDir(), "manual.1")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, Execute(ctx, deps, []string{"man", "--output-file", path}), context.Canceled)
+	_, err := os.Stat(path)
+	require.True(t, os.IsNotExist(err))
+	require.Empty(t, out.String())
+}
+
+func TestManIncludesHelpTopicsButNotHelpCommands(t *testing.T) {
+	deps, out, _ := testDeps(t)
+	require.NoError(t, Execute(context.Background(), deps, []string{"man"}))
+	manual := out.String()
+	require.Contains(t, manual, `.TH "GT-ENVIRONMENT"`)
+	require.Contains(t, manual, `.TH "GT-EXIT-CODES"`)
+	require.NotContains(t, manual, `.TH "GT-PR-HELP"`)
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"man", "exit-codes"}))
+	require.NotContains(t, out.String(), ".SH OPTIONS", "a topic takes no flags")
+	require.Contains(t, out.String(), `\fBgt exit-codes\fP`)
+	require.Contains(t, out.String(), ".EX\n  0    success", "the table renders as code")
+	require.Contains(t, out.String(), ".SH SEE ALSO")
+	out.Reset()
+	require.NoError(t, Execute(context.Background(), deps, []string{"man", "environment"}))
+	require.Contains(t, out.String(), ".EX\n      --csv fields", "the flags render as one block")
+	require.NotContains(t, out.String(), ".PP\n-q, --jq")
+}

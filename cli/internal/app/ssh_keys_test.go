@@ -1,0 +1,177 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package app
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
+)
+
+func TestSSHKeyValidationPrecedesTargetResolution(t *testing.T) {
+	for _, tc := range []struct{ content, want string }{
+		{"", "must hold exactly one valid SSH public key"},
+		{"not a public key", "must hold exactly one valid SSH public key"},
+		{"-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n", "holds a private key; add its public key instead: gt ssh-key create "},
+	} {
+		t.Run(tc.content, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "id_ed25519")
+			require.NoError(t, os.WriteFile(path, []byte(tc.content), 0o600))
+			requireUsageBeforeRequests(t, tc.want, "ssh-key", "create", path)
+		})
+	}
+}
+
+func TestDeployKeyAddPointsToThePublicHalfOfAPrivateKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deploy")
+	require.NoError(t, os.WriteFile(path, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n"), 0o600))
+	requireUsageBeforeRequests(t, "holds a private key; add its public key instead: gt repo deploy-key add "+path+".pub", "repo", "deploy-key", "add", path, "-R", "alice/x")
+}
+
+// testPublicKey returns a new public key in authorized_keys format with comment, and its fingerprint.
+func testPublicKey(t *testing.T, comment string) (string, string) {
+	t.Helper()
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	key, err := ssh.NewPublicKey(public)
+	require.NoError(t, err)
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))) + " " + comment, ssh.FingerprintSHA256(key)
+}
+
+func TestSSHKeyAddTitlesKeysByTheirComment(t *testing.T) {
+	key, fingerprint := testPublicKey(t, "alice@laptop")
+	var titles []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			title, ok := body["title"].(string)
+			require.True(t, ok)
+			titles = append(titles, title)
+			if len(titles) > 1 {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(`{"message":"Key content has been used as non-deploy key"}`))
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprintf(w, `{"id":3,"title":%q,"fingerprint":%q}`, body["title"], fingerprint)
+		case http.MethodGet:
+			writeFirstPage(w, r, fmt.Sprintf(`[{"id":3,"title":"alice@laptop","fingerprint":%q}]`, fingerprint))
+		}
+	}))
+	defer server.Close()
+	deps, _, diagnostics := serverDeps(t, server.URL)
+	deps.Streams.In = bytes.NewBufferString(key + "\n")
+	deps.Streams.OutTTY = true
+	require.NoError(t, Execute(context.Background(), deps, []string{"ssh-key", "add"}))
+	require.Equal(t, []string{"alice@laptop"}, titles)
+	require.Equal(t, fmt.Sprintf("✓ Added SSH key \"alice@laptop\" (%s)\n", fingerprint), withoutANSI(diagnostics.String()))
+
+	deps.Streams.In = bytes.NewBufferString(key)
+	err := Execute(context.Background(), deps, []string{"ssh-key", "create", "-", "--title", "again"})
+	require.EqualError(t, err, `this SSH key is already registered; it is your SSH key "alice@laptop" (ID 3)`)
+}
+
+func TestSSHKeyDeleteNamesTheKey(t *testing.T) {
+	var deleted bool
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleted = true
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Path == "/api/v1/user/keys/3" { // Gitea names the owner of others' keys only to administrators
+			_, _ = w.Write([]byte(`{"id":3,"title":"bobkey","fingerprint":"SHA256:bob"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":2,"title":"uxkey","fingerprint":"SHA256:aR5L","user":{"login":"alice"}}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Streams.InTTY, deps.Streams.ErrTTY = true, true
+	prompt := &scriptedPrompter{}
+	deps.Prompter = prompt
+	require.Error(t, Execute(context.Background(), deps, []string{"ssh-key", "delete", "2"}))
+	require.Equal(t, []string{`Delete SSH key "uxkey" (SHA256:aR5L)?`}, prompt.confirmations)
+	require.EqualError(t, Execute(context.Background(), deps, []string{"ssh-key", "delete", "3"}), "SSH key 3 belongs to another account, not to alice")
+	require.Len(t, prompt.confirmations, 1)
+	require.False(t, deleted)
+}
+
+func TestSSHKeyAddAcceptsRFC4716KeysAndExplicitStdinOnATerminal(t *testing.T) {
+	line, fingerprint := testPublicKey(t, "")
+	key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
+	require.NoError(t, err)
+	blob := base64.StdEncoding.EncodeToString(key.Marshal())
+	rfc4716 := "---- BEGIN SSH2 PUBLIC KEY ----\nComment: \"putty key\"\n" + blob[:30] + "\n" + blob[30:] + "\n---- END SSH2 PUBLIC KEY ----\n"
+	var titles []string
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		title, ok := body["title"].(string)
+		require.True(t, ok)
+		titles = append(titles, title)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprintf(w, `{"id":3,"title":%q,"fingerprint":%q}`, body["title"], fingerprint)
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Streams.InTTY = true
+	deps.Streams.In = bytes.NewBufferString(rfc4716)
+	require.NoError(t, Execute(context.Background(), deps, []string{"ssh-key", "create", "-"}))
+	require.Equal(t, []string{"putty key"}, titles)
+
+	err = Execute(context.Background(), deps, []string{"ssh-key", "create"})
+	require.ErrorContains(t, err, "supply a public key file")
+}
+
+func TestSSHKeyAddFindsTheRegisteredKeyPastTheFirstPage(t *testing.T) {
+	key, fingerprint := testPublicKey(t, "alice@laptop")
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"Key content has been used as non-deploy key"}`))
+			return
+		}
+		switch r.URL.Query().Get("page") {
+		case "1":
+			_, _ = w.Write([]byte(`[{"id":1,"title":"desktop","fingerprint":"SHA256:other"}]`))
+		case "2":
+			_, _ = fmt.Fprintf(w, `[{"id":7,"title":"laptop","fingerprint":%q}]`, fingerprint)
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Streams.In = bytes.NewBufferString(key)
+	err := Execute(context.Background(), deps, []string{"ssh-key", "add", "--title", "again"})
+	require.EqualError(t, err, `this SSH key is already registered; it is your SSH key "laptop" (ID 7)`)
+}
+
+func TestSSHKeyAddExplainsATakenTitle(t *testing.T) {
+	key, _ := testPublicKey(t, "alice@laptop")
+	server := newAuthenticatedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"message":"Key title has been used"}`))
+	}))
+	defer server.Close()
+	deps, _, _ := serverDeps(t, server.URL)
+	deps.Streams.In = bytes.NewBufferString(key)
+	err := Execute(context.Background(), deps, []string{"ssh-key", "add"})
+	require.EqualError(t, err, `SSH key already exists; another SSH key is titled "alice@laptop"; pass a different --title`)
+}

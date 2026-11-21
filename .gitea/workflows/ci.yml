@@ -5,6 +5,7 @@ name: ci
 
 on:
   push:
+    branches: ['**']
   workflow_dispatch:
 
 concurrency:
@@ -211,32 +212,22 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.gitea/actions/setup-arch
-      - name: Read pinned CLI revision
-        id: cli
-        run: |
-          revision=$(cat .gitea/gt-revision)
-          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
-          echo "revision=$revision" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v7
-        with:
-          repository: BakeLab/gt
-          ref: ${{ steps.cli.outputs.revision }}
-          token: ${{ secrets.GITEA_TOKEN }}
-          path: cli-source
-          persist-credentials: false
-      - name: Build pinned CLI for release platforms
+      - name: Test and build integrated CLI for release platforms
+        env:
+          TERM: xterm
         run: |
           set -euo pipefail
-          commit=$(cat .gitea/gt-revision)
-          test "$(git -C cli-source rev-parse HEAD)" = "$commit"
-          version="1.2.0-dev-g${commit:0:12}"
+          commit="$GITHUB_SHA"
+          version="trim-${commit:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir -p dist/cli
-          cd cli-source
+          cd cli
           required=$(awk '$1 == "toolchain" {sub(/^go/, "", $2); print $2; exit}' go.mod)
           installed=$(go env GOVERSION)
           installed=${installed#go}
           test -n "$required"
           test "$(printf '%s\n' "$required" "$installed" | sort -V | head -n1)" = "$required"
+          go test -race ./...
+          go vet ./...
           for platform in linux-amd64 linux-arm64 darwin-arm64; do
             CGO_ENABLED=0 GOOS="${platform%-*}" GOARCH="${platform#*-}" go build -trimpath -buildvcs=false \
               -ldflags "-s -w -X gitea.dev/cli/internal/version.Version=${version}" \
@@ -245,7 +236,7 @@ jobs:
           cd ../dist/cli
           ./gt-linux-amd64 --version
           for binary in gt-*; do sha256sum "$binary" > "$binary.sha256"; done
-          printf '{"repository":"BakeLab/gt","commit":"%s","version":"%s","platforms":["linux-amd64","linux-arm64","darwin-arm64"]}\n' "$commit" "$version" > cli-manifest.json
+          printf '{"repository":"BakeLab/gitea","path":"cli","commit":"%s","version":"%s","platforms":["linux-amd64","linux-arm64","darwin-arm64"]}\n' "$commit" "$version" > cli-manifest.json
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ github.sha }}
