@@ -1,0 +1,20 @@
+{
+  "name": "gitea-cli DevContainer",
+  "image": "mcr.microsoft.com/devcontainers/go:1.27-trixie",
+  "features": {
+    "ghcr.io/devcontainers/features/git-lfs:1.2.5": {}
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {},
+      "extensions": [
+        "editorconfig.editorconfig",
+        "golang.go",
+        "stylelint.vscode-stylelint",
+        "DavidAnson.vscode-markdownlint",
+        "ms-azuretools.vscode-docker",
+        "GitHub.vscode-pull-request-github"
+      ]
+    }
+  }
+}

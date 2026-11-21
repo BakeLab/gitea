@@ -1,0 +1,19 @@
+- Never assume, verify before claiming
+- Development targets are in the `Makefile`; read `CONTRIBUTING.md` for the command style and package structure
+- PR descriptions: minimal, only what and why, no task or file listings. Aim for less than 1000 characters
+- Reference issues and PRs by full URL, not by number
+- Use Conventional Commits for commit messages and PR titles (`build`, `chore`, `ci`, `docs`, `enhance`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`), with `enhance` for user-facing enhancements. PRs are squash-merged with the PR title as the commit subject
+- Add an `Assisted-by: AGENT_NAME:MODEL_VERSION` trailer to commit messages, never `Co-Authored-By`. Only the human author adds the DCO `Signed-off-by`
+- Attribute agent authorship on one trailing line in issue and PR comments, never as a PR description section
+- Never rewrite git history unless asked, update PRs with new commits and normal push
+- Comments: write almost none, short and preferably same-line, explaining why for a future reader. Never narrate code, the change or the prompt. Preserve existing ones that still apply
+- Add the current year to copyright headers of new `.go` files
+- All Gitea API access goes through `internal/services` on `gitea.dev/sdk`; `internal/app` never calls the API. Raw requests are only for SDK gaps, in `raw.go`, marked `// TODO(sdk): <missing piece>`
+- Return usage errors as `clierr.Wrap(clierr.Usage, …)` before any request, worded like "X requires Y" or "X cannot be combined with Y"; `TestUsageErrorsPrecedeRequests` checks this
+- Keep help text, examples and `JSON FIELDS` in sync with behavior. JSON goes to stdout, diagnostics and prompts to stderr; text from the server reaches a terminal only through `terminal.SafeWriter`
+- In Go, prefer to use modern language features wherever possible
+- Run `make fmt` after `.go` edits, `make tidy` after `go.mod` edits, and check with `make vet` and `make lint`
+- Fix the cause rather than disabling a linter or weakening a test. Where unavoidable, use the narrowest scope with a trailing comment giving the reason
+- Run single tests with `go test -run '^TestName$' ./internal/app/`. Tests that run Git call `gittest.Isolate(t)` so the user's Git config does not leak in
+- `make integration-test` runs the `TestGitea*` tests against a disposable Gitea 28 instance (see `CONTRIBUTING.md`); never point them at a production instance
+- Every bug fix comes with a regression test that fails without it. Write the fewest, fastest tests covering the behavior, extending an existing one where possible, with `httptest` servers for API behavior

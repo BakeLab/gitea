@@ -1,0 +1,79 @@
+name: build-publish
+
+on:
+  pull_request:
+  push:
+    branches: [trim]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-publish-${{ github.event_name }}-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && (github.event.pull_request.number || github.ref) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Verify pinned upstream base
+        run: |
+          set -euo pipefail
+          upstream=$(cat UPSTREAM_COMMIT)
+          test "$upstream" = "2fb208e88ed4c8f64478f585dec868d0b08fc90d07c3bb42e6737420f4f5d8bf"
+          upstream_git=$(cat UPSTREAM_COMMIT_SHA1)
+          test "${#upstream_git}" -eq 40
+          git cat-file -e "$upstream_git^{commit}"
+          git merge-base --is-ancestor "$upstream_git" HEAD
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          commit=$(git rev-parse HEAD)
+          revision=$((GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT))
+          version="1.2.0-dev${revision}-g${commit:0:12}"
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -X gitea.dev/cli/internal/version.Version=${version}" \
+            -o "dist/gt-${GOOS}-${GOARCH}" ./cmd/gt
+          cd dist
+          sha256sum "gt-${GOOS}-${GOARCH}" > "gt-${GOOS}-${GOARCH}.sha256"
+          printf '%s\n' "$version" > version
+      - name: Publish binaries to Gitea Generic Packages
+        if: github.ref == 'refs/heads/trim' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          PACKAGE_TOKEN: ${{ secrets.GT_PACKAGE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PACKAGE_TOKEN" ]; then
+            echo 'GT_PACKAGE_TOKEN is required to publish binaries.' >&2
+            exit 1
+          fi
+          version=$(cat dist/version)
+          for file in "dist/gt-${{ matrix.goos }}-${{ matrix.goarch }}" "dist/gt-${{ matrix.goos }}-${{ matrix.goarch }}.sha256"; do
+            curl --fail-with-body --silent --show-error --retry 3 \
+              -H "Authorization: token ${PACKAGE_TOKEN}" \
+              --upload-file "$file" \
+              "https://gitea.int.bb.pub/api/packages/BakeLab/generic/gt/${version}/$(basename "$file")"
+          done

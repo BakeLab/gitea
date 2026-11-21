@@ -1,0 +1,206 @@
+version: 2
+
+project_name: gitea-cli
+
+before:
+  hooks:
+    - go mod tidy
+    # Regenerate references/man/completions, then pack a versioned docs
+    # archive outside dist/ (goreleaser requires dist/ empty after hooks).
+    # gitea-cli-{{ .Version }}-docs.tar.xz is picked up by release/publisher/
+    # checksum ./**.xz globs alongside binary .xz artifacts.
+    - make docs-archive DOCS_ARCHIVE=gitea-cli-{{ .Version }}-docs.tar.xz
+
+builds:
+- id: gitea-cli
+  main: ./cmd/gt
+  env:
+  - CGO_ENABLED=0
+  goos:
+  - darwin
+  - linux
+  - windows
+  - freebsd
+  - openbsd
+  goarch:
+  - amd64
+  - arm
+  - arm64
+  goarm:
+  - "5"
+  - "6"
+  - "7"
+  ignore:
+    - goos: darwin
+      goarch: arm
+    - goos: windows
+      goarch: arm
+      goarm: "5"
+    - goos: windows
+      goarch: arm
+      goarm: "6"
+    - goos: windows
+      goarch: arm
+      goarm: "7"
+    - goos: freebsd
+      goarch: ppc64le
+    - goos: freebsd
+      goarch: s390x
+    - goos: freebsd
+      goarch: arm
+      goarm: "5"
+    - goos: freebsd
+      goarch: arm
+      goarm: "6"
+    - goos: freebsd
+      goarch: arm
+      goarm: "7"
+    - goos: freebsd
+      goarch: arm64
+    - goos: openbsd
+      goarch: arm
+  flags: &flags
+  - -trimpath
+  ldflags: &ldflags
+  - -s -w -X "gitea.dev/cli/internal/version.Version={{ trimprefix .Summary "v" }}" -X "gitea.dev/cli/internal/version.Tags="
+  binary: >-
+    {{ .ProjectName }}-
+    {{- .Version }}-
+    {{- .Os }}-
+    {{- if eq .Arch "amd64" }}amd64
+    {{- else if eq .Arch "amd64_v1" }}amd64
+    {{- else if eq .Arch "386" }}386
+    {{- else }}{{ .Arch }}{{ end }}
+    {{- if .Arm }}-{{ .Arm }}{{ end }}
+  no_unique_dist_dir: true
+  hooks:
+    post:
+      - cmd: xz -k -9 {{ .Path }}
+        dir: ./dist/
+      - cmd: sh .goreleaser.checksum.sh {{ .Path }}
+      - cmd: sh .goreleaser.checksum.sh {{ .Path }}.xz
+# nfpm installs a binary under its build name, so the packages get their own build named gt.
+- id: gt
+  main: ./cmd/gt
+  env:
+  - CGO_ENABLED=0
+  goos:
+  - linux
+  goarch:
+  - amd64
+  - arm
+  - arm64
+  goarm:
+  - "7"
+  flags: *flags
+  ldflags: *ldflags
+  binary: gt
+
+# Uploads the release artifacts to Cloudflare R2. A `blobs:` entry is
+# not used here since the blob pipe authenticates from the global
+# AWS_* env with no per-entry credentials; `publishers:` supports
+# per-entry `env:` instead, so it's used to invoke
+# scripts/upload-r2.sh once per artifact. Custom publishers inherit
+# almost nothing from the environment, hence the explicit R2_*
+# forwarding below.
+#
+# This publisher fires more than once per distinct key because
+# goreleaser's release pipe already registers `release.extra_files`
+# (./**.xz and ./**.xz.sha256, see the `release:` block below) as
+# UploadableFile artifacts, and `internal/exec`'s filterArtifacts
+# appends this block's own extra_files with no de-duplication. It
+# can't be globbed away, since gobwas/glob (via goreleaser/fileglob)
+# has no substring-exclusion matcher. It's harmless: PUT is
+# idempotent, and the `./**.xz` glob below is kept deliberately so
+# this publisher declares its own complete file set rather than
+# implicitly depending on the `release:` block's globs.
+#
+# checksum: true mirrors goreleaser's generated checksums.txt;
+# signature: true additionally mirrors checksums.txt.sig, which the
+# `signs:` block below produces by GPG-signing that checksum file.
+# Without signature: true, artifacts downloaded from the R2 mirror
+# would have no signature file to verify against.
+publishers:
+  - name: cloudflare-r2
+    checksum: true
+    signature: true
+    extra_files:
+      - glob: ./**.xz
+      - glob: ./**.sha256
+    cmd: sh scripts/upload-r2.sh {{ abs .ArtifactPath }} gitea-cli/{{ .Version }}/{{ .ArtifactName }}
+    env:
+      - R2_ENDPOINT={{ index .Env "R2_ENDPOINT" }}
+      - R2_BUCKET={{ index .Env "R2_BUCKET" }}
+      - R2_ACCESS_KEY_ID={{ index .Env "R2_ACCESS_KEY_ID" }}
+      - R2_SECRET_ACCESS_KEY={{ index .Env "R2_SECRET_ACCESS_KEY" }}
+
+archives:
+  - ids:
+      - gitea-cli
+    format: binary
+    name_template: "{{ .Binary }}"
+    allow_different_binary_count: true
+
+nfpms:
+  - ids:
+      - gt
+    package_name: gitea-cli
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: Gitea
+    homepage: https://gitea.com/gitea/cli
+    maintainer: The Gitea Authors
+    description: The official CLI for Gitea
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+      - archlinux
+    bindir: /usr/bin
+    contents:
+      - src: docs/generated/man/*.1
+        dst: /usr/share/man/man1/
+      - src: docs/generated/completion/gt.bash
+        dst: /usr/share/bash-completion/completions/gt
+      - src: docs/generated/completion/_gt
+        dst: /usr/share/zsh/site-functions/_gt
+      - src: docs/generated/completion/gt.fish
+        dst: /usr/share/fish/vendor_completions.d/gt.fish
+      - src: LICENSE
+        dst: /usr/share/licenses/gitea-cli/LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+  extra_files:
+      - glob: ./**.xz
+
+force_token: gitea
+
+signs:
+  -
+    signature: "${artifact}.sig"
+    artifacts: checksum
+    stdin: '{{ .Env.GPGSIGN_PASSPHRASE }}'
+    args: ["--batch", "-u", "{{ .Env.GPG_FINGERPRINT }}", "--output", "${signature}", "--detach-sign", "${artifact}"]
+
+snapshot:
+  version_template: "{{ .Branch }}-devel"
+
+nightly:
+  # dl.gitea.com caches a version directory for a year; only one named nightly is replaced quickly.
+  version_template: "{{ .Branch }}-nightly"
+
+gitea_urls:
+  api: https://gitea.com/api/v1
+  download: https://gitea.com
+
+release:
+  # Includes per-platform binary .xz artifacts and the docs archive
+  # gitea-cli-<version>-docs.tar.xz (references, man pages, bash/zsh/fish/powershell
+  # completions) produced by the before.hooks docs-archive step.
+  extra_files:
+    - glob: ./**.xz
+    - glob: ./**.xz.sha256
+
+# yaml-language-server: $schema=https://goreleaser.com/static/schema-pro.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj

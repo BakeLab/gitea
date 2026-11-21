@@ -1,0 +1,211 @@
+// Copyright 2026 The Gitea Authors. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"gitea.dev/cli/internal/clierr"
+	"gitea.dev/cli/internal/git"
+	"gitea.dev/cli/internal/services"
+	"gitea.dev/cli/internal/settings"
+	"gitea.dev/cli/internal/terminal"
+
+	"github.com/spf13/cobra"
+)
+
+func (a *application) pullCleanCommand() *cobra.Command {
+	var ignoreSHA bool
+	cmd := &cobra.Command{Use: "clean [<number> | <url> | <branch>]", Short: "Delete the branches of a merged or closed pull request", Long: `Delete the local branch of a merged or closed pull request and its head branch on Gitea,
+switching to the repository's default branch first when the local branch is checked out, and
+then fast-forwarding that branch.
+
+The local branch is the one at the pull request's head commit, or behind it, that pr checkout
+created or that has the head branch's name; --ignore-sha selects it by name alone, even with
+commits that are not in the pull request. A Git remote that pr checkout added for a fork goes
+with it once no branch tracks it.
+
+The head branch on Gitea is kept when you cannot push to it or another open pull request uses
+it, and gt refuses to clean when it moved past the pull request. gt never deletes the default
+branch, the branches of an open pull request, or, without --ignore-sha, a local branch with
+commits that are not in the pull request. Deleting asks for a confirmation; without a terminal,
+pass --yes.
+
+gt pr list --local shows which local branches belong to a merged or closed pull request.`, Annotations: pullArgumentsAnnotation(map[string]string{"gt.confirm": "true"}), Args: usageArgs(cobra.MaximumNArgs(1)), RunE: func(cmd *cobra.Command, args []string) error {
+		if !a.insideClone(cmd.Context()) {
+			return clierr.Wrap(clierr.Usage, errors.New("pr clean requires a Git clone"))
+		}
+		target, n, err := a.pullSelectorAny(cmd, args)
+		if err != nil {
+			return err
+		}
+		snapshot, err := a.settings()
+		if err != nil {
+			return err
+		}
+		repository, err := (services.Repositories{Client: target.client}).View(cmd.Context(), target.Repo)
+		if err != nil {
+			return err
+		}
+		if repository.DefaultBranch == "" {
+			return clierr.Wrap(clierr.Usage, errors.New("repository has no default branch; cannot clean while checked out on the feature branch"))
+		}
+		service := services.Pulls{Client: target.client, Repository: target.Repo}
+		pull, err := service.View(cmd.Context(), n)
+		if err != nil {
+			return err
+		}
+		if pull.State == "open" {
+			return fmt.Errorf("pull request #%d is still open; close or merge it before cleaning branches", n)
+		}
+		// AGit pull requests have no head branch; their local branch is found by its commit, or
+		// with --ignore-sha by what pr checkout or pr create --agit recorded, or as pr/NUMBER.
+		if !ignoreSHA && pull.HeadSHA == "" {
+			return errors.New("Gitea did not return the pull request head commit; retry with --ignore-sha")
+		}
+		matchingRemotes, err := a.remotesForRepositoryURLs(cmd.Context(), target.hosts(), pull.HeadCloneURL, pull.HeadSSHURL, pull.HeadRepo)
+		if err != nil {
+			return err
+		}
+		// pr checkout names a fork's branch after its head, or OWNER/BRANCH when the head name is taken.
+		preferred := []string{fmt.Sprintf("pr/%d", n)}
+		if owner, _, _ := strings.Cut(pull.HeadRepo, "/"); owner != "" && !strings.EqualFold(pull.HeadRepo, target.Repo) {
+			preferred = append(preferred, owner+"/"+pull.Head)
+		}
+		if !ignoreSHA {
+			a.fetchPullHead(cmd.Context(), target, pull)
+		}
+		localBranch, remote, err := git.FindCleanBranch(cmd.Context(), a.gitProbe(), git.FindCleanBranchOptions{
+			Directory: a.options.cwd, HeadSHA: pull.HeadSHA, HeadBranch: pull.Head, IgnoreSHA: ignoreSHA, DefaultBranch: repository.DefaultBranch,
+			PreferredNames: preferred, MatchingRemotes: matchingRemotes, PullNumber: n,
+		})
+		if _, selection := errors.AsType[*git.CleanSelectionError](err); selection {
+			return clierr.Wrap(clierr.Usage, err)
+		} else if err != nil {
+			return err
+		}
+		// Gitea reports a moved branch's tip as the head of a closed pull request, so the local
+		// branch found by it holds those commits too.
+		if pull.Head != "" && !pull.HeadRemoteDeleted {
+			if moved, err := service.HeadMoved(cmd.Context(), pull); err == nil && moved {
+				return fmt.Errorf("branch %s has commits that are not in pull request %s; delete it yourself if they are not needed", pull.Head, refLabel(target.Repo, n, pull.Title))
+			}
+		}
+		deleteRemote := pull.Head != "" && !pull.HeadRemoteDeleted && pull.HeadCanPush
+		kept := ""
+		if deleteRemote {
+			kept = a.headKeptFor(cmd.Context(), service, pull)
+			deleteRemote = kept == ""
+		}
+		if deleteRemote && remote == "" {
+			switch len(matchingRemotes) {
+			case 0:
+				return clierr.Wrap(clierr.Usage, errors.New("no Git remote matches the pull request head repository; add it before deleting the remote branch"))
+			case 1:
+				remote = matchingRemotes[0]
+			default:
+				return clierr.Wrap(clierr.Usage, errors.New("multiple Git remotes match the pull request head repository; select --remote"))
+			}
+		}
+		if a.options.remote != "" {
+			if deleteRemote && remote != "" && remote != a.options.remote {
+				return clierr.Wrap(clierr.Usage, errors.New("selected --remote does not match the pull request head remote"))
+			}
+			if remote == "" {
+				remote = a.options.remote
+			}
+		}
+		var credentialArgs []string
+		if deleteRemote {
+			if credentialArgs, err = a.remoteCredentials(cmd.Context(), target, remote); err != nil {
+				return err
+			}
+		}
+		description := fmt.Sprintf("Delete local branch %s of %s", localBranch, refLabel(target.Repo, n, pull.Title))
+		if deleteRemote {
+			description += fmt.Sprintf(" and remote branch %s/%s", remote, pull.Head)
+		}
+		prompt := description + "?"
+		if ignoreSHA {
+			prompt += " Local commits that are not in the pull request are lost."
+		}
+		if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: prompt, NonTTY: strings.ToLower(description[:1]) + description[1:]}); err != nil {
+			return err
+		}
+		current, _ := a.currentBranch(cmd.Context())
+		result, err := git.CleanPull(cmd.Context(), a.deps.Git, git.CleanOptions{
+			Directory: a.options.cwd, DefaultBranch: repository.DefaultBranch, LocalBranch: localBranch,
+			Remote: remote, RemoteBranch: pull.Head, RemoteSHA: pull.HeadSHA, CredentialArgs: credentialArgs,
+			Prompt: a.policy(snapshot).CanPrompt(a.deps.Streams), DeleteRemote: deleteRemote,
+		})
+		if err != nil {
+			return err
+		}
+		a.done(cmd, "Deleted local branch %s", result.LocalBranch)
+		switch {
+		case pull.Head == "":
+			// An AGit pull request has no remote branch.
+		case result.RemoteDeleted:
+			a.done(cmd, "Deleted remote branch %s/%s", result.Remote, result.RemoteBranch)
+		case kept != "":
+			result.RemoteSkipReason = kept
+			a.warn(cmd, "Kept remote branch %s: %s", pull.Head, kept)
+		case pull.HeadRemoteDeleted:
+			a.warn(cmd, "Remote branch %s was already deleted", pull.Head)
+		case !pull.HeadCanPush:
+			a.warn(cmd, "Kept remote branch %s: you cannot push to %s", pull.Head, pull.HeadRepo)
+		}
+		a.reportCleaned(cmd, target, result, current == localBranch)
+		return a.jsonResult(cmd, result)
+	}}
+	cmd.Flags().BoolVar(&ignoreSHA, "ignore-sha", false, "Find the local branch by name instead of commit hash")
+	cmd.ValidArgsFunction = firstArg(a.completePulls("closed"))
+	cmd.Example = `# After #13 was merged, delete its branch locally and on Gitea
+$ gt pr clean 13`
+	return jsonOutput[git.CleanResult](cmd)
+}
+
+func (a *application) remotesForRepositoryURLs(ctx context.Context, hosts map[string]settings.Host, cloneURL, sshURL, fullName string) ([]string, error) {
+	names, err := a.git(ctx, "remote")
+	if err != nil {
+		return nil, err
+	}
+	wanted := map[string]bool{}
+	addWanted := func(host, repo string) {
+		wanted[host+"\t"+strings.ToLower(repo)] = true
+	}
+	for _, raw := range []string{cloneURL, sshURL} {
+		if raw == "" {
+			continue
+		}
+		host, repo, err := settings.RepositoryURL(raw, hosts)
+		if err != nil {
+			continue
+		}
+		addWanted(host, repo)
+	}
+	if fullName != "" {
+		for host := range hosts {
+			addWanted(host, fullName)
+		}
+	}
+	matches := []string{}
+	for name := range strings.FieldsSeq(names) {
+		raw, err := a.git(ctx, "remote", "get-url", name)
+		if err != nil {
+			return nil, err
+		}
+		host, repo, err := settings.RemoteRepository(raw, hosts)
+		if err != nil {
+			continue
+		}
+		if wanted[host+"\t"+strings.ToLower(repo)] {
+			matches = append(matches, name)
+		}
+	}
+	return matches, nil
+}
