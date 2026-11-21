@@ -69,8 +69,8 @@ func GenerateGiteaContext(ctx context.Context, run *actions_model.ActionRun, att
 	}
 
 	retentionDays := "" // not "0", v3 artifact uploads would read it as a 0-day limit
-	if setting.Actions.ArtifactRetentionDays > 0 {
-		retentionDays = strconv.FormatInt(setting.Actions.ArtifactRetentionDays, 10)
+	if days := setting.ArtifactRetentionDaysForRepo(run.RepoID); days > 0 {
+		retentionDays = strconv.FormatInt(days, 10)
 	}
 
 	gitContext := GiteaContext{

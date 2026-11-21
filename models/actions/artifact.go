@@ -91,19 +91,20 @@ type ActionArtifact struct {
 
 const artifactKeepForever timeutil.TimeStamp = 0
 
-func artifactExpiry(requested optional.Option[timeutil.TimeStamp]) timeutil.TimeStamp {
+func artifactExpiry(repoID int64, requested optional.Option[timeutil.TimeStamp]) timeutil.TimeStamp {
+	retentionDays := setting.ArtifactRetentionDaysForRepo(repoID)
 	if requested.Has() {
 		now := timeutil.TimeStampNow()
 		expiry := max(requested.Value(), now.Add(timeutil.Day)) // v4 clients use the runner's clock
-		if setting.Actions.ArtifactRetentionDays > 0 {
-			expiry = min(expiry, now.Add(timeutil.Day*setting.Actions.ArtifactRetentionDays))
+		if retentionDays > 0 {
+			expiry = min(expiry, now.Add(timeutil.Day*retentionDays))
 		}
 		return expiry
 	}
-	if setting.Actions.ArtifactRetentionDays <= 0 {
+	if retentionDays <= 0 {
 		return artifactKeepForever
 	}
-	return timeutil.TimeStampNow().Add(timeutil.Day * setting.Actions.ArtifactRetentionDays)
+	return timeutil.TimeStampNow().Add(timeutil.Day * retentionDays)
 }
 
 // CreateArtifact returns the artifact for the name and path, creating it on first upload and refreshing its expiry either way.
@@ -111,7 +112,7 @@ func CreateArtifact(ctx context.Context, t *ActionTask, artifactName, artifactPa
 	if err := t.LoadJob(ctx); err != nil {
 		return nil, err
 	}
-	expiredUnix := artifactExpiry(expiry)
+	expiredUnix := artifactExpiry(t.RepoID, expiry)
 
 	artifact, exist, err := db.Get[ActionArtifact](ctx, builder.Eq{
 		"run_id": t.Job.RunID, "run_attempt_id": t.Job.RunAttemptID,

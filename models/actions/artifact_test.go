@@ -39,13 +39,13 @@ func TestArtifactExpiry(t *testing.T) {
 	requested := optional.Some[timeutil.TimeStamp]
 
 	defer test.MockVariableValue(&setting.Actions.ArtifactRetentionDays, 90)()
-	assert.Equal(t, days(90), artifactExpiry(optional.None[timeutil.TimeStamp]()))
-	assert.Equal(t, days(5), artifactExpiry(requested(days(5))))
-	assert.Equal(t, days(1), artifactExpiry(requested(days(-2))), "runner clock behind must not expire the artifact at once")
-	assert.Equal(t, days(90), artifactExpiry(requested(days(1000))), "runner must not exceed the instance retention")
+	assert.Equal(t, days(90), artifactExpiry(1, optional.None[timeutil.TimeStamp]()))
+	assert.Equal(t, days(5), artifactExpiry(1, requested(days(5))))
+	assert.Equal(t, days(1), artifactExpiry(1, requested(days(-2))), "runner clock behind must not expire the artifact at once")
+	assert.Equal(t, days(90), artifactExpiry(1, requested(days(1000))), "runner must not exceed the instance retention")
 
 	setting.Actions.ArtifactRetentionDays = 0
-	assert.Equal(t, artifactKeepForever, artifactExpiry(optional.None[timeutil.TimeStamp]()))
-	assert.Equal(t, days(1000), artifactExpiry(requested(days(1000))))
-	assert.Equal(t, days(1), artifactExpiry(requested(now)))
+	assert.Equal(t, artifactKeepForever, artifactExpiry(1, optional.None[timeutil.TimeStamp]()))
+	assert.Equal(t, days(1000), artifactExpiry(1, requested(days(1000))))
+	assert.Equal(t, days(1), artifactExpiry(1, requested(now)))
 }

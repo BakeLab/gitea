@@ -78,6 +78,17 @@ func TestCleanupOldRuns(t *testing.T) {
 		unittest.AssertNotExistsBean(t, &actions_model.ActionRun{ID: oldCanceled.ID})
 		unittest.AssertNotExistsBean(t, &actions_model.ActionRun{ID: oldSkipped.ID})
 	})
+	t.Run("retain completed run until its report expires", func(t *testing.T) {
+		run := insertCleanupRun(t, 2008, actions_model.StatusSuccess, old)
+		report := &actions_model.ActionArtifact{RunID: run.ID, RepoID: run.RepoID, ArtifactName: "report", Status: actions_model.ArtifactStatusUploadConfirmed, ExpiredUnix: now.Add(365 * timeutil.Day)}
+		require.NoError(t, db.Insert(t.Context(), report))
+		require.NoError(t, CleanupOldRuns(t.Context()))
+		unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: run.ID})
+		report.ExpiredUnix = old
+		require.NoError(t, actions_model.UpdateArtifact(t.Context(), report, "expired_unix"))
+		require.NoError(t, CleanupOldRuns(t.Context()))
+		unittest.AssertNotExistsBean(t, &actions_model.ActionRun{ID: run.ID})
+	})
 	t.Run("error during deleting", func(t *testing.T) {
 		defer test.MockVariableValue(&cleanupOldRunsBatchSize, 3)()
 		defer test.MockVariableValue(&setting.IsInTesting, false)() // skip the panic

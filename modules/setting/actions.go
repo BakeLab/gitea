@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,12 +102,35 @@ func (c logCompression) IsZstd() bool {
 	return c == "" || string(c) == "zstd"
 }
 
+var repositoryArtifactRetention = map[int64]int64{}
+
+func ArtifactRetentionDaysForRepo(id int64) int64 {
+	if days, ok := repositoryArtifactRetention[id]; ok {
+		return days
+	}
+	return Actions.ArtifactRetentionDays
+}
+
 func loadActionsFrom(rootCfg ConfigProvider) error {
 	sec := rootCfg.Section("actions")
 	err := sec.MapTo(&Actions)
 	if err != nil {
 		return fmt.Errorf("failed to map Actions settings: %v", err)
 	}
+
+	retention := make(map[int64]int64)
+	for _, key := range rootCfg.Section("actions.artifact-retention").Keys() {
+		id, err := strconv.ParseInt(key.Name(), 10, 64)
+		if err != nil || id <= 0 {
+			return fmt.Errorf("[actions.artifact-retention] invalid repository ID %q", key.Name())
+		}
+		days, err := strconv.ParseInt(key.String(), 10, 32)
+		if err != nil || days < 0 {
+			return fmt.Errorf("[actions.artifact-retention] invalid days for repository %d", id)
+		}
+		retention[id] = days
+	}
+	repositoryArtifactRetention = retention
 
 	if urls := string(Actions.DefaultActionsURL); urls != defaultActionsURLGitHub && urls != defaultActionsURLSelf {
 		url, _, _ := strings.Cut(urls, ",")
