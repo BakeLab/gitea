@@ -158,6 +158,6 @@ func TestBBAttachRunnerEnv(t *testing.T) {
 	req.Exec.Secrets = &legacySecrets
 	bbAttachRunnerEnv(&req, row, `{"token":"ephemeral"}`)
 	assert.Nil(t, req.Exec.Secrets, "bbAttachRunnerEnv must clear legacy exec.secrets")
-	require.NotNil(t, req.Exec.Env)
-	assert.Equal(t, `{"token":"ephemeral"}`, (*req.Exec.Env)[bbSecretName(row)])
+	assert.Nil(t, req.Exec.Env, "bbAttachRunnerEnv must not set exec.env (rejected by BB POST /v1/tasks)")
+	assert.Contains(t, req.Exec.Cmd[2], `printf '%s' '{"token":"ephemeral"}' > .runner`)
 }
