@@ -21,8 +21,9 @@ fi
 api="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
 tag="trim-${GITHUB_SHA:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 version=$(jq -r '.version' manifest.json)
-payload=$(jq -n --arg tag "$tag" --arg commit "$GITHUB_SHA" --arg version "$version" \
-  '{tag_name: $tag, target_commitish: $commit, name: $tag, body: ($version + "\nSource: " + $commit + "\nLinux amd64 with embedded frontend assets. SHA-256 checksum and manifest attached."), draft: true, prerelease: true}')
+source_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/src/commit/${GITHUB_SHA}"
+payload=$(jq -n --arg tag "$tag" --arg commit "$GITHUB_SHA" --arg version "$version" --arg source_url "$source_url" \
+  '{tag_name: $tag, target_commitish: $commit, name: $tag, body: ($version + "\nSource: [" + $commit + "](" + $source_url + ")\nLinux amd64 with embedded frontend assets. Download the uploaded binary, SHA-256 checksum and manifest; generated tag archives are not release deliverables."), draft: true, prerelease: true}')
 release=$(curl --fail-with-body --silent --show-error \
   -H "Authorization: token ${RELEASE_TOKEN}" -H 'Content-Type: application/json' \
   --data "$payload" "${api}/releases")

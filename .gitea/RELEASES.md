@@ -11,7 +11,8 @@ three assets upload successfully. Failed uploads leave a draft; rerun the workfl
 to publish a new uniquely named release. Running trim publications are not
 cancelled by later pushes.
 
-Find complete builds on the internal repository's Releases page. `trim-*` release
+These are assets-only trim builds. Find complete builds on the internal
+repository's Releases page. `trim-*` release
 names avoid upstream tag-release workflows. Pull-mirror synchronization may prune
 locally created Git tags: use the manifest's source commit for provenance and the
 release's uploaded assets for downloads, rather than treating the release tag as
