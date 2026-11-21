@@ -1102,12 +1102,9 @@ func bbProfileSelectsMacOS(sandbox map[string]any) bool {
 
 func bbAttachRunnerEnv(request *bbControl.TaskRequest, row *actions_model.ActionBBTask, registration string) {
 	request.Exec.Secrets = nil
-	env := make(map[string]string, 1)
-	if request.Exec.Env != nil {
-		for k, v := range *request.Exec.Env {
-			env[k] = v
-		}
+	request.Exec.Env = nil
+	placeholder := "\"$" + bbSecretName(row) + "\""
+	if len(request.Exec.Cmd) >= 3 {
+		request.Exec.Cmd[2] = strings.Replace(request.Exec.Cmd[2], placeholder, bbShellQuote(registration), 1)
 	}
-	env[bbSecretName(row)] = registration
-	request.Exec.Env = &env
 }
