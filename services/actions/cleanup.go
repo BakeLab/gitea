@@ -23,6 +23,10 @@ import (
 
 // Cleanup removes expired actions logs, data, artifacts and used ephemeral runners
 func Cleanup(ctx context.Context) error {
+	if err := CleanupCaches(ctx); err != nil {
+		return fmt.Errorf("cleanup caches: %w", err)
+	}
+
 	// clean up expired artifacts
 	if err := CleanupArtifacts(ctx); err != nil {
 		return fmt.Errorf("cleanup artifacts: %w", err)
