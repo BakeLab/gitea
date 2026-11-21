@@ -893,7 +893,7 @@ func (config bbExecutorConfig) taskRequest(ctx context.Context, row *actions_mod
 		script += "export HOME=" + bbShellQuote(workdir) + "\n"
 	}
 	script += "cd " + bbShellQuote(workdir) + "\nprintf '%s' \"$" + bbSecretName(row) + "\" > .runner\nunset " + bbSecretName(row) + "\nprintf '%s' " + bbShellQuote(string(runnerConfig)) + " > config.json\n" + bbRunnerDownloadScript(profile.RunnerURL) + "printf '%s  runner\\n' " + bbShellQuote(profile.RunnerSHA256) + " | " + checksum + "\nchmod 700 runner\nexec ./runner -c config.json daemon\n"
-	return json.Marshal(map[string]any{"sandbox": sandbox, "package_sets": profile.PackageSets, "max_duration_s": duration, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": user, "timeout_s": duration, "secrets": []string{bbSecretName(row)}}})
+	return json.Marshal(map[string]any{"sandbox": sandbox, "package_sets": profile.PackageSets, "max_duration_s": duration, "exec": map[string]any{"cmd": []string{"sh", "-c", script}, "user": user, "timeout_s": duration}})
 }
 
 func (config bbExecutorConfig) sandboxForJob(ctx context.Context, job *actions_model.ActionRunJob, profile bbExecutorProfile) (map[string]any, error) {
@@ -962,24 +962,30 @@ func (config bbExecutorConfig) sandboxForJob(ctx context.Context, job *actions_m
 	return bbMergeSandbox(sandbox, resourceSpec), nil
 }
 
+func bbAttachRunnerEnv(request *bbControl.TaskRequest, row *actions_model.ActionBBTask, registration string) {
+	request.Exec.Secrets = nil
+	env := make(map[string]string, 1)
+	if request.Exec.Env != nil {
+		for k, v := range *request.Exec.Env {
+			env[k] = v
+		}
+	}
+	env[bbSecretName(row)] = registration
+	request.Exec.Env = &env
+}
+
 func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.ActionBBTask) error {
-	registration, err := secret.DecryptSecret(setting.SecretKey, row.Registration)
-	if err != nil {
-		return err
-	}
-	secretResponse, err := config.api.PutSecretWithResponse(ctx, bbControl.PutSecretRequest{Name: bbSecretName(row), Value: registration})
-	if err != nil {
-		return err
-	}
-	if err := bbSDKStatusError(http.MethodPost, "/v1/secrets", secretResponse.StatusCode()); err != nil {
-		return err
-	}
 	var task bbTaskResult
 	if row.TaskID == "" {
+		registration, err := secret.DecryptSecret(setting.SecretKey, row.Registration)
+		if err != nil {
+			return err
+		}
 		var request bbControl.TaskRequest
 		if err := json.Unmarshal([]byte(row.RequestJSON), &request); err != nil {
 			return fmt.Errorf("decode persisted BB task request: %w", err)
 		}
+		bbAttachRunnerEnv(&request, row, registration)
 		response, err := config.api.CreateTaskWithResponse(ctx, &bbControl.CreateTaskParams{IdempotencyKey: "gitea-bb-" + row.Key}, request)
 		if err != nil {
 			return err
@@ -1085,15 +1091,6 @@ func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.A
 		}
 		if changed {
 			notifyAndEmitFinishedJobs(ctx, []*actions_model.ActionRunJob{job})
-		}
-	}
-	deleteResponse, err := config.api.DeleteSecretWithResponse(ctx, bbSecretName(row))
-	if err != nil {
-		return err
-	}
-	if status := deleteResponse.StatusCode(); status != http.StatusNotFound {
-		if err := bbSDKStatusError(http.MethodDelete, "/v1/secrets/{name}", status); err != nil {
-			return err
 		}
 	}
 	if _, err := db.DeleteByID[actions_model.ActionRunner](ctx, row.RunnerID); err != nil && !errors.Is(err, util.ErrNotExist) {
