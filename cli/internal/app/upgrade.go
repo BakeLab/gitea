@@ -29,12 +29,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// gt's releases are published on gitea.com, and their files on dl.gitea.com, where the install
-// scripts download them.
 const (
-	releaseInstance     = "https://gitea.com"
-	releaseRepository   = "gitea/cli"
-	releaseDownloadURL  = "https://dl.gitea.com/gitea-cli"
+	releaseInstance     = "https://gitea.int.bb.pub"
+	releaseRepository   = "BakeLab/gitea"
 	updateCheckInterval = 24 * time.Hour
 	updateCheckTimeout  = 10 * time.Second
 )
@@ -67,7 +64,7 @@ func detectInstallation(path, stamped, goos string) installation {
 		if version.Current() != "development" {
 			i.kind = installGo
 		}
-	case !version.IsRelease(stamped):
+	case !version.IsRelease(stamped) && !strings.HasPrefix(stamped, "trim-"):
 	case strings.Contains(slashed, "/Cellar/"):
 		i.kind = installHomebrew
 	case strings.HasPrefix(slashed, "/nix/store/"):
@@ -203,7 +200,13 @@ func (a *application) checkForUpdate(ctx context.Context, args []string, client 
 }
 
 func (a *application) latestRelease(ctx context.Context, client func(string, string, bool) *transport.Client) (updateState, error) {
-	release, err := (services.Releases{Client: client(releaseInstance, "", false).WithResponseTimeout(updateCheckTimeout), Repository: releaseRepository}).Latest(ctx)
+	scoped := &application{deps: a.deps, options: options{host: releaseInstance, noInput: true}}
+	scoped.deps.Client = client
+	target, err := scoped.connect(ctx, targetRequest{authenticate: true, noRepo: true, offline: true})
+	if err != nil {
+		return updateState{}, err
+	}
+	release, err := latestCLIRelease(ctx, services.Releases{Client: target.client.WithResponseTimeout(updateCheckTimeout), Repository: releaseRepository}, "")
 	if err != nil {
 		return updateState{}, err
 	}
@@ -230,7 +233,9 @@ func (a *application) saveUpdateState(state updateState) error {
 func (a *application) notifyUpdate(cmd *cobra.Command, i installation, state updateState) bool {
 	now := a.deps.Now()
 	switch {
-	case !version.IsRelease(state.Latest) || !extensions.Older(version.Current(), state.Latest):
+	case state.Latest == "" || state.Latest == version.Current():
+		return false
+	case !strings.HasPrefix(state.Latest, "trim-") && (!version.IsRelease(state.Latest) || !extensions.Older(version.Current(), state.Latest)):
 		return false
 	case now.Sub(state.NotifiedAt) < updateCheckInterval:
 		return false
@@ -258,15 +263,16 @@ func (a *application) upgradeCommand() *cobra.Command {
 		Use: "upgrade", Short: "Upgrade gt to its latest release",
 		Annotations: map[string]string{"gt.confirm": "true", "gt.offline": "true", "gt.text": "upgrade does not return a resource"},
 		Long: `Upgrade gt to its latest release, to the release --version names, or to the latest build of
-the main branch with --nightly. gt downloads the build for this system from dl.gitea.com, like
-the install script, verifies its SHA-256 checksum and replaces its executable with it;
-GITEA_CLI_DOWNLOAD_URL selects another download location.
+the trim branch with --nightly. gt reads published releases (including prereleases) from
+BakeLab/gitea on gitea.int.bb.pub using your existing login, downloads the gt asset for
+this system, verifies its SHA-256 checksum and replaces its executable.
+GITEA_CLI_DOWNLOAD_URL explicitly selects a legacy download-layout mirror.
 
 gt installed with Homebrew, a Linux package, Nix or go install is upgraded the way it was
 installed; gt upgrade names the command for that instead.
 
-After a command, gt tells at most once a day when a newer release is out, asking gitea.com
-for it. It does not check in CI or when stdout or stderr is not a terminal; set
+After a command, gt tells at most once a day when a newer release is out, asking the
+internal Gitea release repository for it. It does not check in CI or when stdout or stderr is not a terminal; set
 GITEA_CLI_NO_UPDATE_NOTIFIER to turn the check off.`,
 		Example: `$ gt upgrade
 # See whether a newer release is out
@@ -280,7 +286,7 @@ $ gt upgrade --nightly`,
 			if nightly && want != "" {
 				return clierr.Wrap(clierr.Usage, errors.New("--nightly cannot be combined with --version"))
 			}
-			if cmd.Flags().Changed("version") && !version.IsRelease(strings.TrimPrefix(want, "v")) {
+			if cmd.Flags().Changed("version") && !version.IsRelease(strings.TrimPrefix(want, "v")) && !strings.HasPrefix(want, "trim-") {
 				return clierr.Wrap(clierr.Usage, fmt.Errorf("--version requires a release such as 1.0.0, not %q", want))
 			}
 			if !dryRun && !a.options.yes && !a.canPrompt() {
@@ -289,11 +295,11 @@ $ gt upgrade --nightly`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.upgrade(cmd, strings.TrimPrefix(want, "v"), nightly, dryRun, force)
+			return a.upgrade(cmd, want, nightly, dryRun, force)
 		},
 	}
 	cmd.Flags().StringVar(&want, "version", "", "Install this `release` instead of the latest one")
-	cmd.Flags().BoolVar(&nightly, "nightly", false, "Install the latest build of the main branch")
+	cmd.Flags().BoolVar(&nightly, "nightly", false, "Install the latest published trim build")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show the upgrade without installing it")
 	cmd.Flags().BoolVar(&force, "force", false, "Reinstall the current version too")
 	return cmd
@@ -308,6 +314,10 @@ func (a *application) upgrade(cmd *cobra.Command, want string, nightly, dryRun, 
 	if err := i.notInstalledByScript(); err != nil {
 		return err
 	}
+	if a.deps.Getenv("GITEA_CLI_DOWNLOAD_URL") == "" {
+		return a.upgradeInternal(cmd, i, want, dryRun, force)
+	}
+	want = strings.TrimPrefix(want, "v")
 	_ = os.Remove(i.path + ".old") // left behind by an upgrade on Windows, which cannot remove a running executable
 	current := version.Current()
 	label := want
@@ -337,7 +347,7 @@ func (a *application) upgrade(cmd *cobra.Command, want string, nightly, dryRun, 
 		return err
 	}
 	file := "gitea-cli-" + want + "-" + platform
-	base := strings.TrimRight(cmp.Or(a.deps.Getenv("GITEA_CLI_DOWNLOAD_URL"), releaseDownloadURL), "/")
+	base := strings.TrimRight(a.deps.Getenv("GITEA_CLI_DOWNLOAD_URL"), "/")
 	client := a.deps.Client(base, "", false).WithResponseTimeout(a.responseTimeout())
 	digest, err := publishedChecksum(ctx, client, base+"/"+want+"/"+file+".sha256", file)
 	if err != nil {
@@ -380,7 +390,7 @@ func releasePlatform(goos, goarch string) (string, error) {
 			}
 		}
 		if arm == "" {
-			return "", errors.New("cannot tell which ARM version gt was built for; download it from " + releaseDownloadURL)
+			return "", errors.New("cannot tell which ARM version gt was built for; download it from " + releaseInstance + "/" + releaseRepository + "/releases")
 		}
 		platform += "-" + arm
 	}
@@ -412,12 +422,16 @@ func downloadRelease(ctx context.Context, client *transport.Client, url, file, d
 		return "", fmt.Errorf("download %s: %w", file, err)
 	}
 	defer response.Body.Close()
+	return stageRelease(response.Body, file, digest, executable)
+}
+
+func stageRelease(input io.Reader, file, digest, executable string) (string, error) {
 	out, err := os.CreateTemp(filepath.Dir(executable), ".gt-upgrade-*"+filepath.Ext(executable))
 	if err != nil {
 		return "", fmt.Errorf("cannot write to %s, which holds gt: %w", filepath.Dir(executable), err)
 	}
 	hash := sha256.New()
-	written, err := io.Copy(io.MultiWriter(out, hash), io.LimitReader(response.Body, extensions.MaxAssetSize+1))
+	written, err := io.Copy(io.MultiWriter(out, hash), io.LimitReader(input, extensions.MaxAssetSize+1))
 	err = cmp.Or(err, out.Chmod(0o755), out.Close())
 	switch got := hex.EncodeToString(hash.Sum(nil)); {
 	case err != nil:
@@ -448,5 +462,103 @@ func replaceExecutable(staged, executable, goos string) error {
 		return errors.Join(err, os.Rename(old, executable))
 	}
 	_ = os.Remove(old) // fails while the old executable still runs; the next upgrade replaces it
+	return nil
+}
+
+func latestCLIRelease(ctx context.Context, releases services.Releases, want string) (services.Release, error) {
+	if want != "" {
+		release, err := releases.View(ctx, want)
+		if err != nil {
+			return release, err
+		}
+		if release.Draft {
+			return services.Release{}, errors.New("cannot upgrade to a draft release")
+		}
+		return release, nil
+	}
+	page, err := releases.ListPage(ctx, 100, 1, services.ReleaseListOptions{ExcludeDrafts: true, Order: "desc"})
+	if err != nil {
+		return services.Release{}, err
+	}
+	for _, release := range page.Items {
+		if release.Draft {
+			continue
+		}
+		for _, asset := range release.Assets {
+			if strings.HasPrefix(asset.Name, "gt-") && !strings.HasSuffix(asset.Name, ".sha256") {
+				return release, nil
+			}
+		}
+	}
+	return services.Release{}, errors.New("no published release contains gt binaries")
+}
+
+func (a *application) upgradeInternal(cmd *cobra.Command, installed installation, want string, dryRun, force bool) error {
+	scoped := &application{deps: a.deps, options: options{host: releaseInstance, user: a.options.user, noInput: a.options.noInput}}
+	target, err := scoped.connect(cmd.Context(), targetRequest{authenticate: true, noRepo: true, offline: true, refresh: true})
+	if err != nil {
+		return err
+	}
+	releases := services.Releases{Client: target.client.WithResponseTimeout(a.responseTimeout()), Repository: releaseRepository}
+	release, err := latestCLIRelease(cmd.Context(), releases, want)
+	if err != nil {
+		return fmt.Errorf("find the gt release: %w", err)
+	}
+	current := version.Current()
+	if strings.TrimPrefix(release.Tag, "v") == current && !force {
+		a.done(cmd, "gt %s is already installed", current)
+		return nil
+	}
+	platform, err := releasePlatform(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return err
+	}
+	file := "gt-" + platform
+	var binary, checksum services.ReleaseAsset
+	for _, asset := range release.Assets {
+		if asset.Name == file {
+			binary = asset
+		}
+		if asset.Name == file+".sha256" {
+			checksum = asset
+		}
+	}
+	if binary.ID == 0 || checksum.ID == 0 {
+		return fmt.Errorf("release %s requires %s and its SHA-256 checksum", terminal.SafeLine(release.Tag), file)
+	}
+	body, err := releases.DownloadAsset(cmd.Context(), release.ID, checksum.ID)
+	if err != nil {
+		return err
+	}
+	digest, err := extensions.ChecksumFor(body, file)
+	_ = body.Close()
+	if err != nil {
+		return err
+	}
+	if got, err := extensions.FileSHA256(installed.path); err == nil && got == digest && !force {
+		a.done(cmd, "gt is up to date (%s)", release.Tag)
+		return nil
+	}
+	if dryRun {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "gt\t%s\t%s\n", current, release.Tag)
+		return err
+	}
+	if err := a.confirmAction(cmd, terminal.Confirmation{Prompt: fmt.Sprintf("Upgrade gt from %s to %s?", current, terminal.SafeLine(release.Tag)), DefaultYes: true, NonTTY: "upgrade gt"}); err != nil {
+		return err
+	}
+	body, err = releases.DownloadAsset(cmd.Context(), release.ID, binary.ID)
+	if err != nil {
+		return err
+	}
+	staged, err := stageRelease(body, file, digest, installed.path)
+	_ = body.Close()
+	if err != nil {
+		return err
+	}
+	defer os.Remove(staged)
+	if err := replaceExecutable(staged, installed.path, runtime.GOOS); err != nil {
+		return fmt.Errorf("replace %s: %w", installed.path, err)
+	}
+	a.done(cmd, "Upgraded gt from %s to %s", current, release.Tag)
 	return nil
 }

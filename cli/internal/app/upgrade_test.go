@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -56,9 +57,19 @@ func releaseServer(t *testing.T, build []byte, digest string, requests *atomic.I
 	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v1/repos/gitea/cli/releases/latest":
+		case "/api/v1/repos/BakeLab/gitea/releases/latest":
 			requests.Add(1)
-			_, _ = fmt.Fprintf(w, `{"tag_name":"v0.3.0","html_url":"https://gitea.com/gitea/cli/releases/tag/v0.3.0","published_at":%q}`, time.Now().Add(-48*time.Hour).Format(time.RFC3339))
+			_, _ = fmt.Fprintf(w, `{"tag_name":"v0.3.0","html_url":"https://gitea.int.bb.pub/BakeLab/gitea/releases/tag/v0.3.0","published_at":%q}`, time.Now().Add(-48*time.Hour).Format(time.RFC3339))
+		case "/api/v1/settings/api":
+			_, _ = fmt.Fprint(w, `{"max_response_items":100}`)
+		case "/api/v1/repos/BakeLab/gitea/releases":
+			w.Header().Set("X-Total-Count", "1")
+			if r.URL.Query().Get("page") != "1" {
+				_, _ = fmt.Fprint(w, "[]")
+				return
+			}
+			requests.Add(1)
+			_, _ = fmt.Fprintf(w, `[{"id":1,"tag_name":"v0.3.0","html_url":"https://gitea.int.bb.pub/BakeLab/gitea/releases/tag/v0.3.0","published_at":%q,"assets":[{"id":1,"name":"gt-linux-amd64"}]}]`, time.Now().Add(-48*time.Hour).Format(time.RFC3339))
 		case file:
 			_, _ = w.Write(build)
 		case file + ".sha256":
@@ -83,6 +94,11 @@ func releaseDeps(t *testing.T, server *httptest.Server, env map[string]string) (
 	require.NoError(t, os.WriteFile(executable, []byte("gt 0.2.0"), 0o755))
 	deps, _, _ := testDeps(t)
 	deps.Executable = func() (string, error) { return executable, nil }
+	if env == nil {
+		env = map[string]string{}
+	}
+	env["GITEA_CLI_HOST"] = releaseInstance
+	env["GITEA_TOKEN"] = "release-token"
 	deps.Getenv = envFunc(env)
 	deps.Client = func(instance, token string, insecure bool) *transport.Client {
 		if instance == releaseInstance {
@@ -185,10 +201,107 @@ func TestUpdateNotifier(t *testing.T) {
 	require.NoError(t, a.saveUpdateState(state))
 
 	require.NoError(t, Execute(context.Background(), deps, []string{"version"}))
-	require.Equal(t, "\nA new release of gt is available: 0.2.0 → 0.3.0\nTo upgrade, run: gt upgrade\nhttps://gitea.com/gitea/cli/releases/tag/v0.3.0\n", withoutANSI(diagnostics.String()))
+	require.Equal(t, "\nA new release of gt is available: 0.2.0 → 0.3.0\nTo upgrade, run: gt upgrade\nhttps://gitea.int.bb.pub/BakeLab/gitea/releases/tag/v0.3.0\n", withoutANSI(diagnostics.String()))
 
 	diagnostics.Reset()
 	require.NoError(t, Execute(context.Background(), deps, []string{"version"}))
 	require.Empty(t, diagnostics.String(), "told within a day")
 	require.Equal(t, int32(1), requests.Load(), "checked within a day")
+}
+
+func TestInternalUpgrade(t *testing.T) {
+	for _, tc := range []struct {
+		name                                                 string
+		unauthorized, missingPlatform, mismatch, sameVersion bool
+		wantError                                            string
+	}{
+		{name: "published prerelease"},
+		{name: "unauthorized", unauthorized: true, wantError: "authentication rejected"},
+		{name: "missing platform", missingPlatform: true, wantError: "requires gt-"},
+		{name: "checksum mismatch", mismatch: true, wantError: "SHA-256"},
+		{name: "same version", sameVersion: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const tag = "trim-0123456789ab-100-1"
+			platform, err := releasePlatform(runtime.GOOS, runtime.GOARCH)
+			require.NoError(t, err)
+			file := "gt-" + platform
+			build := []byte("internal gt build")
+			digest := fmt.Sprintf("%x", sha256.Sum256(build))
+			if tc.mismatch {
+				digest = strings.Repeat("0", 64)
+			}
+			var downloads atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "token release-token", r.Header.Get("Authorization"))
+				if tc.unauthorized {
+					w.WriteHeader(http.StatusUnauthorized)
+					_, _ = fmt.Fprint(w, `{"message":"unauthorized"}`)
+					return
+				}
+				switch r.URL.Path {
+				case "/api/v1/settings/api":
+					_, _ = fmt.Fprint(w, `{"max_response_items":100}`)
+				case "/api/v1/repos/BakeLab/gitea/releases":
+					w.Header().Set("X-Total-Count", "1")
+					if r.URL.Query().Get("page") != "1" {
+						_, _ = fmt.Fprint(w, "[]")
+						return
+					}
+					name := file
+					if tc.missingPlatform {
+						name = "gt-other-arch"
+					}
+					_, _ = fmt.Fprintf(w, `[{"id":11,"tag_name":%q,"prerelease":true,"published_at":"2026-11-21T10:00:00Z","assets":[{"id":1,"name":%q},{"id":2,"name":%q}]}]`, tag, name, name+".sha256")
+				case "/api/v1/repos/BakeLab/gitea/releases/11/assets/1":
+					_, _ = fmt.Fprint(w, `{"id":1,"uuid":"binary"}`)
+				case "/api/v1/repos/BakeLab/gitea/releases/11/assets/2":
+					_, _ = fmt.Fprint(w, `{"id":2,"uuid":"checksum"}`)
+				case "/attachments/checksum":
+					downloads.Add(1)
+					_, _ = fmt.Fprintf(w, "%s  %s\n", digest, file)
+				case "/attachments/binary":
+					downloads.Add(1)
+					_, _ = w.Write(build)
+				default:
+					t.Errorf("unexpected upgrade request %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			deps, executable := releaseDeps(t, server, nil)
+			version.Version = "trim-aaaaaaaaaaaa-99-1"
+			if tc.sameVersion {
+				version.Version = tag
+			}
+			err = Execute(context.Background(), deps, []string{"upgrade", "--yes"})
+			data, readErr := os.ReadFile(executable)
+			require.NoError(t, readErr)
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				require.Equal(t, "gt 0.2.0", string(data))
+			} else {
+				require.NoError(t, err)
+				if tc.sameVersion {
+					require.Zero(t, downloads.Load())
+					require.Equal(t, "gt 0.2.0", string(data))
+				} else {
+					require.Equal(t, build, data)
+				}
+			}
+		})
+	}
+}
+
+func TestReleasePlatform(t *testing.T) {
+	for _, tc := range []struct{ os, arch, asset string }{
+		{"linux", "amd64", "linux-amd64"},
+		{"linux", "arm64", "linux-arm64"},
+		{"darwin", "arm64", "darwin-arm64"},
+		{"windows", "amd64", "windows-amd64.exe"},
+	} {
+		got, err := releasePlatform(tc.os, tc.arch)
+		require.NoError(t, err)
+		require.Equal(t, tc.asset, got)
+	}
 }
