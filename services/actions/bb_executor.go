@@ -962,25 +962,13 @@ func (config bbExecutorConfig) sandboxForJob(ctx context.Context, job *actions_m
 	return bbMergeSandbox(sandbox, resourceSpec), nil
 }
 
-func bbAttachRunnerEnv(request *bbControl.TaskRequest, row *actions_model.ActionBBTask, registration string) {
-	request.Exec.Secrets = nil
-	env := make(map[string]string, 1)
-	if request.Exec.Env != nil {
-		for k, v := range *request.Exec.Env {
-			env[k] = v
-		}
-	}
-	env[bbSecretName(row)] = registration
-	request.Exec.Env = &env
-}
-
 func (config bbExecutorConfig) advance(ctx context.Context, row *actions_model.ActionBBTask) error {
+	registration, err := secret.DecryptSecret(setting.SecretKey, row.Registration)
+	if err != nil {
+		return err
+	}
 	var task bbTaskResult
 	if row.TaskID == "" {
-		registration, err := secret.DecryptSecret(setting.SecretKey, row.Registration)
-		if err != nil {
-			return err
-		}
 		var request bbControl.TaskRequest
 		if err := json.Unmarshal([]byte(row.RequestJSON), &request); err != nil {
 			return fmt.Errorf("decode persisted BB task request: %w", err)
@@ -1110,4 +1098,16 @@ func bbProfileSelectsMacOS(sandbox map[string]any) bool {
 	arch, _ := cpu["arch"].(string)
 	model, _ := cpu["model"].(string)
 	return arch == "arm64" && strings.EqualFold(strings.TrimSpace(model), "Apple Silicon")
+}
+
+func bbAttachRunnerEnv(request *bbControl.TaskRequest, row *actions_model.ActionBBTask, registration string) {
+	request.Exec.Secrets = nil
+	env := make(map[string]string, 1)
+	if request.Exec.Env != nil {
+		for k, v := range *request.Exec.Env {
+			env[k] = v
+		}
+	}
+	env[bbSecretName(row)] = registration
+	request.Exec.Env = &env
 }
