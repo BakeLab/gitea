@@ -7,7 +7,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"gitea.dev/modules/util"
@@ -26,6 +28,18 @@ const (
 	description         = "Description with multiple lines."
 	projectURL          = "https://gitea.io"
 )
+
+func TestParsePackageNegativeMemberSize(t *testing.T) {
+	for _, name := range []string{"control.tar", "control.tar.gz", "control.tar.xz", "control.tar.zst", "debian-binary"} {
+		t.Run(name, func(t *testing.T) {
+			// A signed size field must be rejected before reading or skipping the member.
+			archive := ar.GLOBAL_HEADER + fmt.Sprintf("%-16s%-12s%-6s%-6s%-8s%-10s`\n", name, "0", "0", "0", "100644", "-100")
+			p, err := ParsePackage(strings.NewReader(archive))
+			assert.Nil(t, p)
+			assert.ErrorContains(t, err, "negative member size")
+		})
+	}
+}
 
 func TestParsePackage(t *testing.T) {
 	createArchive := func(files map[string][]byte) io.Reader {

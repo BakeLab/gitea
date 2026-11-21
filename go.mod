@@ -239,3 +239,6 @@ ignore (
 	./vendor
 	./web_src
 )
+
+// The upstream reader has no released fix for GO-2026-6905.
+replace github.com/blakesmith/ar => github.com/sbomify/ar v0.0.0-20261110120314-cac91ea00b05
