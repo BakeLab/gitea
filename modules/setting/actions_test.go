@@ -277,3 +277,13 @@ func Test_ScopedWorkflowDirs(t *testing.T) {
 		})
 	}
 }
+
+func TestRepositoryArtifactRetention(t *testing.T) {
+	defer test.MockVariableValue(&Actions, Actions)()
+	defer test.MockVariableValue(&repositoryArtifactRetention, nil)()
+	cfg, err := NewConfigProviderFromData("[actions]\nARTIFACT_RETENTION_DAYS = 1\n[actions.artifact-retention]\n42 = 365\n")
+	require.NoError(t, err)
+	require.NoError(t, loadActionsFrom(cfg))
+	assert.EqualValues(t, 365, ArtifactRetentionDaysForRepo(42))
+	assert.EqualValues(t, 1, ArtifactRetentionDaysForRepo(43))
+}

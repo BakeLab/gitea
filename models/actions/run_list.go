@@ -228,6 +228,10 @@ func FindOldestRuns(ctx context.Context, statuses []Status, olderThan timeutil.T
 	return runs, db.GetEngine(ctx).
 		Where(builder.In("`action_run`.status", statuses)).
 		And(builder.Lt{"`action_run`.created": olderThan}).
+		And(builder.NotExists(builder.Select("1").From("action_artifact").
+			Where(builder.Expr("action_artifact.run_id = action_run.id").
+				And(builder.Eq{"status": ArtifactStatusUploadConfirmed}).
+				And(builder.Or(builder.Eq{"expired_unix": 0}, builder.Gt{"expired_unix": timeutil.TimeStampNow()}))))).
 		OrderBy("`action_run`.`id` ASC").
 		Limit(limit).
 		Find(&runs)
